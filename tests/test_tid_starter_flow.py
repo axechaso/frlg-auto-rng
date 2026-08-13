@@ -29,7 +29,7 @@ class TidStarterFlowTests(unittest.TestCase):
         plan = build_tid_starter_flow_plan(request)
 
         self.assertEqual(plan.starter_target.advances, 1513)
-        self.assertGreaterEqual(plan.target_sid_advance, 0)
+        self.assertGreaterEqual(plan.earliest_sid_chain_advance, 0)
         self.assertEqual(plan.sid_retry_corrections[:5], (5, 6, 4, 7, 3))
         self.assertFalse(plan.request.to_exact_tid_request().include_65535)
 
@@ -40,6 +40,13 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertNotIn("OP_当前目标", bridge)
         self.assertNotIn("总F12", bridge)
 
+    @unittest.skipUnless(
+        (
+            DEFAULT_TID_SOURCE_PATH
+            / "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7.txt"
+        ).is_file(),
+        "requires the external TID 1.3.7 package",
+    )
     def test_bundle_keeps_language_template_separate_and_adds_marker(self):
         plan = build_tid_starter_flow_plan(
             TidStarterFlowRequest(
