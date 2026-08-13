@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -148,6 +149,44 @@ def parse_sid_effort_values(values, slot: int) -> tuple[int, int, int, int, int,
     return tuple(parsed)  # type: ignore[return-value]
 
 
+def _normalize_sid_species_name(value: str) -> str:
+    return " ".join(value.strip().casefold().replace("’", "'").split())
+
+
+@lru_cache(maxsize=1)
+def sid_species_catalog() -> tuple[tuple[str, ...], dict[str, int]]:
+    """Return Gen 1-3 display choices and normalized aliases for SID input."""
+    chinese_by_english = {
+        _normalize_sid_species_name(english): chinese
+        for english, chinese in SPECIES_EN_TO_ZH.items()
+    }
+    choices = []
+    aliases: dict[str, int] = {}
+    for species_id in range(1, 387):
+        english = get_species_name(species_id)
+        chinese = chinese_by_english.get(_normalize_sid_species_name(english), "")
+        display = f"{chinese} ({english})" if chinese else english
+        choices.append(display)
+        for alias in (str(species_id), english, chinese, display):
+            if alias:
+                aliases[_normalize_sid_species_name(alias)] = species_id
+    return tuple(choices), aliases
+
+
+def parse_sid_species(value: str, slot: int) -> int:
+    normalized = _normalize_sid_species_name(value)
+    if not normalized:
+        raise ValueError(f"队伍第{slot}位必须填写宝可梦名称或全国图鉴编号")
+    _, aliases = sid_species_catalog()
+    species_id = aliases.get(normalized)
+    if species_id is None:
+        raise ValueError(
+            f"无法识别队伍第{slot}位宝可梦“{value.strip()}”，"
+            "请填写中文名、英文名或1-386的全国图鉴编号"
+        )
+    return species_id
+
+
 def preferred_detected_port(ports, current: str = "") -> str | None:
     """Keep a connected selection, otherwise choose the lowest COM number."""
     normalized = {str(port).strip().upper() for port in ports if str(port).strip()}
@@ -274,7 +313,7 @@ class AutoRngApp:
         ).grid(row=1, column=2, columnspan=6, sticky="w", padx=4, pady=4)
         ttk.Checkbutton(
             sid_identity,
-            text="已确认队伍顺序、来源、努力值准确，且背包第一页第一格是神奇糖果",
+            text="已确认队伍顺序、宝可梦、来源、努力值准确，且背包第一页第一格是神奇糖果",
             variable=self.sid_ack_var,
         ).grid(row=2, column=0, columnspan=8, sticky="w", padx=4, pady=(5, 0))
 
@@ -282,7 +321,7 @@ class AutoRngApp:
         sid_party.pack(fill="x", pady=(8, 0))
         sid_party_headers = (
             "槽位",
-            "图鉴编号（0=名称OCR）",
+            "宝可梦（名称/编号）",
             "来源",
             "Ten Lines 相遇地点（野生必填）",
             *IV_STAT_LABELS,
@@ -290,13 +329,15 @@ class AutoRngApp:
         for column, label in enumerate(sid_party_headers):
             ttk.Label(sid_party, text=label).grid(row=0, column=column, padx=4, pady=3)
         sid_party.columnconfigure(3, weight=1)
-        self.sid_dex_vars = tuple(tk.StringVar(value="0") for _ in range(6))
+        self.sid_species_vars = tuple(tk.StringVar(value="") for _ in range(6))
         self.sid_source_type_vars = tuple(tk.StringVar(value="定点") for _ in range(6))
         self.sid_location_vars = tuple(tk.StringVar(value="") for _ in range(6))
         self.sid_effort_vars = tuple(
             tuple(tk.StringVar(value="0") for _ in IV_STAT_LABELS)
             for _ in range(6)
         )
+        sid_species_choices, _ = sid_species_catalog()
+        self.sid_party_row_widgets = []
         self.sid_location_map = {}
         for locations in self.all_locations.values():
             for location in locations:
@@ -304,39 +345,50 @@ class AutoRngApp:
         location_choices = tuple(sorted(self.sid_location_map))
         for index in range(6):
             row = index + 1
-            ttk.Label(sid_party, text=str(index + 1)).grid(row=row, column=0, padx=4, pady=2)
-            ttk.Spinbox(
+            row_widgets = []
+            slot_label = ttk.Label(sid_party, text=str(index + 1))
+            slot_label.grid(row=row, column=0, padx=4, pady=2)
+            row_widgets.append((slot_label, "normal"))
+            species_combo = ttk.Combobox(
                 sid_party,
-                from_=0,
-                to=386,
-                width=12,
-                textvariable=self.sid_dex_vars[index],
-            ).grid(row=row, column=1, padx=4, pady=2)
-            ttk.Combobox(
+                textvariable=self.sid_species_vars[index],
+                values=sid_species_choices,
+                width=22,
+            )
+            species_combo.grid(row=row, column=1, padx=4, pady=2)
+            row_widgets.append((species_combo, "normal"))
+            source_combo = ttk.Combobox(
                 sid_party,
                 textvariable=self.sid_source_type_vars[index],
                 values=SID_SOURCE_LABELS,
                 width=8,
                 state="readonly",
-            ).grid(row=row, column=2, padx=4, pady=2)
-            ttk.Combobox(
+            )
+            source_combo.grid(row=row, column=2, padx=4, pady=2)
+            row_widgets.append((source_combo, "readonly"))
+            location_combo = ttk.Combobox(
                 sid_party,
                 textvariable=self.sid_location_vars[index],
                 values=location_choices,
-                width=34,
-            ).grid(row=row, column=3, sticky="we", padx=4, pady=2)
+                width=30,
+            )
+            location_combo.grid(row=row, column=3, sticky="we", padx=4, pady=2)
+            row_widgets.append((location_combo, "normal"))
             for stat_index, variable in enumerate(self.sid_effort_vars[index], 4):
-                ttk.Spinbox(
+                effort_spinbox = ttk.Spinbox(
                     sid_party,
                     from_=0,
                     to=255,
                     width=5,
                     justify="center",
                     textvariable=variable,
-                ).grid(row=row, column=stat_index, padx=3, pady=2)
+                )
+                effort_spinbox.grid(row=row, column=stat_index, padx=3, pady=2)
+                row_widgets.append((effort_spinbox, "normal"))
+            self.sid_party_row_widgets.append(tuple(row_widgets))
         ttk.Label(
             sid_party,
-            text="只处理队伍前 N 位；昵称导致名称 OCR 失败时填写全国图鉴编号。孵蛋来源与非 Method 1/2/4 个体暂不支持。",
+            text="只处理队伍前 N 位；活动槽位可输入中文名、英文名或全国图鉴编号。孵蛋来源与非 Method 1/2/4 个体暂不支持。",
         ).grid(
             row=7,
             column=0,
@@ -345,6 +397,8 @@ class AutoRngApp:
             padx=4,
             pady=(5, 0),
         )
+        self.sid_count_var.trace_add("write", self._refresh_sid_party_rows)
+        self._refresh_sid_party_rows()
 
         sid_source = ttk.LabelFrame(sid_tab, text="3. SID 采集脚本包", padding=8)
         sid_source.pack(fill="x", pady=(8, 0))
@@ -866,13 +920,23 @@ class AutoRngApp:
             self.tid_sid_retry_radius_var,
             self.sid_game_var, self.sid_tid_var, self.sid_count_var,
             self.sid_candies_var, self.sid_threshold_var, self.sid_ack_var,
-            *self.sid_dex_vars, *self.sid_source_type_vars,
+            *self.sid_species_vars, *self.sid_source_type_vars,
             *self.sid_location_vars,
             *(variable for row in self.sid_effort_vars for variable in row),
             self.sid_source_var,
         )
         for variable in self.tracked_variables:
             variable.trace_add("write", self.invalidate_plan)
+
+    def _refresh_sid_party_rows(self, *_):
+        try:
+            active_count = int(self.sid_count_var.get())
+        except ValueError:
+            active_count = 0
+        for index, row in enumerate(self.sid_party_row_widgets):
+            enabled = index < active_count
+            for widget, enabled_state in row:
+                widget.configure(state=enabled_state if enabled else "disabled")
 
     def apply_iv_preset(self, preset):
         ranges = iv_ranges_for_preset(preset)
@@ -1296,21 +1360,30 @@ class AutoRngApp:
 
     def collect_sid_request(self) -> SIDReverseRunRequest:
         if not self.sid_ack_var.get():
-            raise ValueError("请先确认队伍顺序、来源、努力值和神奇糖果位置")
+            raise ValueError("请先确认队伍顺序、宝可梦、来源、努力值和神奇糖果位置")
         party_count = int(self.sid_count_var.get())
-        dex_overrides = tuple(int(variable.get()) for variable in self.sid_dex_vars)
+        dex_overrides = tuple(
+            parse_sid_species(variable.get(), index + 1)
+            if index < party_count
+            else 0
+            for index, variable in enumerate(self.sid_species_vars)
+        )
         source_types = tuple(
-            0 if variable.get() == "定点" else 1
-            for variable in self.sid_source_type_vars
+            0 if index >= party_count or variable.get() == "定点" else 1
+            for index, variable in enumerate(self.sid_source_type_vars)
         )
         locations = tuple(
             self.sid_location_map.get(variable.get(), variable.get().strip())
-            for variable in self.sid_location_vars
+            if index < party_count
+            else ""
+            for index, variable in enumerate(self.sid_location_vars)
         )
         effort_values = tuple(
             parse_sid_effort_values(
                 tuple(variable.get() for variable in row), index + 1
             )
+            if index < party_count
+            else (0, 0, 0, 0, 0, 0)
             for index, row in enumerate(self.sid_effort_vars)
         )
         request = SIDReverseRunRequest(

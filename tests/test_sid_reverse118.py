@@ -54,8 +54,13 @@ $SID反查努力SPE = [0,0,0,0,0,0]
             SIDReverseRunRequest(
                 tid=1,
                 party_count=1,
+                dex_overrides=(25, 0, 0, 0, 0, 0),
                 source_types=(1, 0, 0, 0, 0, 0),
             ).validate()
+
+    def test_rejects_missing_species_for_active_slot(self):
+        with self.assertRaisesRegex(ValueError, "图鉴编号"):
+            SIDReverseRunRequest(tid=1, party_count=1).validate()
 
 
 if __name__ == "__main__":

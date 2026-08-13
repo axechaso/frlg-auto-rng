@@ -67,17 +67,28 @@ def _ask_int(prompt: str, minimum: int, maximum: int) -> int:
         print(f"请输入{minimum}-{maximum}。")
 
 
-def _parse_dex_overrides(value: str | None) -> tuple[int, int, int, int, int, int]:
-    if not value:
-        return (0, 0, 0, 0, 0, 0)
-    parts = [part.strip() for part in value.split(",") if part.strip()]
-    if len(parts) > 6:
-        raise ValueError("--dex最多填写6个逗号分隔的图鉴编号")
-    values = [int(part) for part in parts]
+def _parse_dex_overrides(
+    value: str | None, count: int
+) -> tuple[int, int, int, int, int, int]:
+    if value:
+        parts = [part.strip() for part in value.split(",")]
+        if len(parts) not in (count, 6):
+            raise ValueError("--dex项数必须等于队内闪光数量，或完整填写6项")
+        try:
+            values = [int(part) for part in parts]
+        except ValueError as exc:
+            raise ValueError("--dex必须填写全国图鉴编号整数") from exc
+    else:
+        values = [
+            _ask_int(f"队伍第{slot}位全国图鉴编号 (1-386): ", 1, 386)
+            for slot in range(1, count + 1)
+        ]
+    if any(not 1 <= item <= 386 for item in values[:count]):
+        raise ValueError("活动队伍槽位的--dex必须填写1-386")
+    if any(not 0 <= item <= 386 for item in values[count:]):
+        raise ValueError("未使用槽位的--dex仅支持0或1-386")
     values.extend([0] * (6 - len(values)))
     result = tuple(values)
-    if any(not 0 <= item <= 386 for item in result):
-        raise ValueError("--dex仅支持0或1-386")
     return result  # type: ignore[return-value]
 
 
@@ -243,7 +254,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--count", type=int)
     parser.add_argument("--candies", type=int, default=5)
     parser.add_argument("--threshold", type=int, default=85)
-    parser.add_argument("--dex", help="party slots 1-6 Dex overrides, comma-separated; 0=OCR")
+    parser.add_argument(
+        "--dex",
+        help="active party slots' National Dex numbers, comma-separated and required",
+    )
     parser.add_argument("--game", choices=("fr_nx", "lg_nx"))
     parser.add_argument(
         "--sources",
@@ -278,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
             count = args.count if args.count is not None else _ask_int("队内闪光宝可梦数量 (1-6): ", 1, 6)
             if game is None:
                 game = "fr_nx" if _ask_int("游戏版本 (1=火红, 2=叶绿): ", 1, 2) == 1 else "lg_nx"
-            overrides = _parse_dex_overrides(args.dex)
+            overrides = _parse_dex_overrides(args.dex, count)
             source_types, locations, effort_values = _collect_origins(
                 count,
                 game,

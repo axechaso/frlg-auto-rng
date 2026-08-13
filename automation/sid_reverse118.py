@@ -74,6 +74,8 @@ class SIDReverseRunRequest:
                 raise ValueError(f"队伍第{slot}位六项努力值总和不能超过510")
         for offset in range(self.party_count):
             index = self.start_slot - 1 + offset
+            if self.dex_overrides[index] == 0:
+                raise ValueError(f"队伍第{index + 1}位必须填写1-386的全国图鉴编号")
             if self.source_types[index] == 1 and not self.locations[index].strip():
                 raise ValueError(f"队伍第{index + 1}位是野生宝可梦，必须填写相遇地点")
 
