@@ -56,7 +56,6 @@ class StarterSearchRequest:
     seed_button: int = 0
     min_advances: int = 1500
     max_advances: int = 10_000
-    min_seed_time_ms: int = 0
     chunk_size: int = 128
 
     @property
@@ -101,8 +100,6 @@ class StarterSearchRequest:
             raise ValueError("御三家闪光搜索下限不能小于1500 ADV")
         if self.max_advances < self.min_advances:
             raise ValueError("最大ADV不能小于最小ADV")
-        if self.min_seed_time_ms < 0:
-            raise ValueError("最小Seed时间不能为负数")
         if self.chunk_size <= 0:
             raise ValueError("搜索分块必须大于0")
 
@@ -166,10 +163,6 @@ def find_earliest_shiny_starter(request: StarterSearchRequest) -> StarterTarget:
         request.game_code,
         "none",
     )
-    seeds = [seed for seed in seeds if seed["seed_time"] >= request.min_seed_time_ms]
-    if not seeds:
-        raise ValueError("当前设置下没有满足最小Seed时间的可达Seed")
-
     gender_ratio = get_personal(request.species_id, request.game_code)["gender"]
     shiny_filter = SearcherFilter(shiny=3)
     tsv = request.tid ^ request.sid

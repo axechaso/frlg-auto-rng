@@ -35,7 +35,6 @@ class TidStarterFlowRequest:
     starter: str
     starter_min_advances: int = 1500
     starter_max_advances: int = 10_000
-    starter_op_fixed_delay_ms: int = 31_200
     sid_chain_search_advances: int = 10_000
     sid_retry_radius: int = 20
 
@@ -77,7 +76,6 @@ class TidStarterFlowRequest:
             seed_button=request.seed_button,
             min_advances=self.starter_min_advances,
             max_advances=self.starter_max_advances,
-            min_seed_time_ms=self.starter_op_fixed_delay_ms,
         )
 
 

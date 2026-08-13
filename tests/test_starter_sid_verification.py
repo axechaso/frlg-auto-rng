@@ -32,6 +32,22 @@ class StarterSIDVerificationTests(unittest.TestCase):
         self.assertEqual(target.pid, 2271450586)
         self.assertEqual(target.ivs, (21, 25, 13, 18, 11, 25))
 
+    def test_search_uses_early_seed_times_from_tenlines_table(self):
+        target = find_earliest_shiny_starter(
+            StarterSearchRequest(
+                version="火红",
+                language="英文",
+                starter="妙蛙种子",
+                tid=0,
+                sid=38142,
+                min_advances=1500,
+                max_advances=1500,
+            )
+        )
+
+        self.assertEqual(target.initial_seed, 0x11C7)
+        self.assertEqual(target.seed_time_ms, 29122)
+
     def test_japanese_switch_seed_table_is_supported(self):
         request = StarterSearchRequest(
             version="叶绿",

@@ -638,7 +638,6 @@ class AutoRngApp:
         self.tid_starter_var = tk.StringVar(value="妙蛙种子")
         self.tid_starter_min_adv_var = tk.StringVar(value="1500")
         self.tid_starter_max_adv_var = tk.StringVar(value="10000")
-        self.tid_starter_op_delay_var = tk.StringVar(value="31200")
         self.tid_sid_retry_radius_var = tk.StringVar(value="20")
         ttk.Checkbutton(
             tid_starter,
@@ -662,18 +661,14 @@ class AutoRngApp:
         self.tid_starter_max_adv_entry = self._labeled_entry(
             tid_starter, "最高 ADV", self.tid_starter_max_adv_var, 1, 6, width=12
         )
-        self.tid_starter_op_delay_entry = self._labeled_entry(
-            tid_starter, "御三家 OP 固定延迟", self.tid_starter_op_delay_var, 2, 0, width=12
-        )
         self.tid_sid_retry_radius_entry = self._labeled_entry(
-            tid_starter, "SID ADV 重试半径", self.tid_sid_retry_radius_var, 2, 2, width=12
+            tid_starter, "SID ADV 重试半径", self.tid_sid_retry_radius_var, 2, 0, width=12
         )
         self.tid_starter_flow_controls = (
             self.tid_game_combo,
             self.tid_starter_combo,
             self.tid_starter_min_adv_entry,
             self.tid_starter_max_adv_entry,
-            self.tid_starter_op_delay_entry,
             self.tid_sid_retry_radius_entry,
         )
 
@@ -842,7 +837,7 @@ class AutoRngApp:
             self.tid_denoise_window_var, self.tid_threshold_var, self.tid_source_var,
             self.tid_starter_flow_var, self.tid_game_var, self.tid_starter_var,
             self.tid_starter_min_adv_var, self.tid_starter_max_adv_var,
-            self.tid_starter_op_delay_var, self.tid_sid_retry_radius_var,
+            self.tid_sid_retry_radius_var,
             self.sid_game_var, self.sid_tid_var, self.sid_count_var,
             self.sid_candies_var, self.sid_threshold_var, self.sid_ack_var,
             *self.sid_dex_vars, *self.sid_source_type_vars,
@@ -1266,7 +1261,6 @@ class AutoRngApp:
             starter=self.tid_starter_var.get(),
             starter_min_advances=int(self.tid_starter_min_adv_var.get()),
             starter_max_advances=int(self.tid_starter_max_adv_var.get()),
-            starter_op_fixed_delay_ms=int(self.tid_starter_op_delay_var.get()),
             sid_retry_radius=int(self.tid_sid_retry_radius_var.get()),
         )
         request.validate()
@@ -1613,7 +1607,7 @@ class AutoRngApp:
                         "御三家搜索：ADV "
                         f"{flow_plan.request.starter_min_advances}-"
                         f"{flow_plan.request.starter_max_advances}；"
-                        f"Seed 时间不早于 {flow_plan.request.starter_op_fixed_delay_ms} ms"
+                        "Seed 时间直接取 Ten Lines Seed 表"
                     ),
                     f"御三家目标：Seed {target.seed_hex} / {target.seed_time_ms} ms / ADV {target.advances}",
                     f"目标 PID：{target.pid_hex}；IV：{iv_text}",
