@@ -78,7 +78,7 @@ class TidStarterFlowRequest:
 @dataclass(frozen=True)
 class TidStarterFlowPlan:
     request: TidStarterFlowRequest
-    target_sid_advance: int
+    earliest_sid_chain_advance: int
     starter_target: StarterTarget
     sid_retry_corrections: tuple[int, ...]
 
@@ -93,7 +93,8 @@ class TidStarterFlowPlan:
                 **asdict(self.request),
                 "tid_request": self.request.tid_request.to_dict(),
             },
-            "target_sid_advance": self.target_sid_advance,
+            "earliest_sid_chain_advance": self.earliest_sid_chain_advance,
+            "runtime_sid_advance_source": "TIDFLOW|ID|SID_ADV= marker",
             "starter_target": self.starter_target.to_dict(),
             "sid_retry_corrections": list(self.sid_retry_corrections),
             "verification_rules": {
@@ -127,7 +128,7 @@ def build_tid_starter_flow_plan(request: TidStarterFlowRequest) -> TidStarterFlo
     )
     return TidStarterFlowPlan(
         request=request,
-        target_sid_advance=sid_hits[0].advance,
+        earliest_sid_chain_advance=sid_hits[0].advance,
         starter_target=starter_target,
         sid_retry_corrections=retry_corrections,
     )
