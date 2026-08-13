@@ -1,5 +1,6 @@
 """One-to-one Python port of ten-lines C++ searcher/initial_seed/calibration."""
 
+from itertools import product
 from typing import List, Tuple, Optional, Dict
 
 # Method enum values (matching C++ enum class Method)
@@ -200,7 +201,16 @@ class SearcherFilter:
             return True
         return nature in self.natures
 
-    def compare_state(self, ivs, nature, shiny, gender, hp_type, encounter_slot=None):
+    def compare_state(
+        self,
+        ivs,
+        nature,
+        shiny,
+        gender,
+        hp_type,
+        encounter_slot=None,
+        ability=None,
+    ):
         for i in range(6):
             if ivs[i] < self.iv_min[i] or ivs[i] > self.iv_max[i]:
                 return False
@@ -218,123 +228,147 @@ class SearcherFilter:
             return False
         if encounter_slot is not None and self.slots is not None and encounter_slot not in self.slots:
             return False
+        if ability is not None and self.ability is not None and ability != self.ability:
+            return False
         return True
 
 
 # ============================================================
 # StaticSearcher3 - 1:1 port of C++ StaticSearcher3::search
 # ============================================================
+def iter_iv_combinations(iv_min, iv_max, iv_total=None):
+    """Yield IV tuples, optionally restricted to one exact total.
+
+    The exact-total branch uses bounded composition pruning.  It lets the
+    automatic planner inspect high-IV tiers first without expanding a broad
+    six-dimensional range.
+    """
+    if iv_total is None:
+        yield from product(*(range(lo, hi + 1) for lo, hi in zip(iv_min, iv_max)))
+        return
+
+    def visit(index, remaining, prefix):
+        if index == 5:
+            value = remaining
+            if iv_min[index] <= value <= iv_max[index]:
+                yield tuple(prefix + [value])
+            return
+        rest_min = sum(iv_min[index + 1:])
+        rest_max = sum(iv_max[index + 1:])
+        lower = max(iv_min[index], remaining - rest_max)
+        upper = min(iv_max[index], remaining - rest_min)
+        for value in range(upper, lower - 1, -1):
+            yield from visit(index + 1, remaining - value, prefix + [value])
+
+    yield from visit(0, iv_total, [])
+
+
 def search_static(iv_min, iv_max, method, tsv, gender_ratio=127,
-                  bugged_roamer=False, filter_obj=None):
+                  bugged_roamer=False, filter_obj=None, iv_total=None,
+                  cancel_check=None):
     """Yields dicts: seed, pid, ivs, ability, gender, nature, shiny, hidden_type, hidden_power"""
     iv_advance = (method == METHOD_2)
-    for hp in range(iv_min[0], iv_max[0] + 1):
-        for atk in range(iv_min[1], iv_max[1] + 1):
-            for def_ in range(iv_min[2], iv_max[2] + 1):
-                for spa in range(iv_min[3], iv_max[3] + 1):
-                    for spd in range(iv_min[4], iv_max[4] + 1):
-                        for spe in range(iv_min[5], iv_max[5] + 1):
-                            if bugged_roamer:
-                                ivs = (hp, atk & 7, 0, 0, 0, 0)
-                            else:
-                                ivs = (hp, atk, def_, spa, spd, spe)
-                            seeds = recover_pokerng_iv(hp, atk, def_, spa, spd, spe, method)
-                            for seed in seeds:
-                                rng = seed
-                                if iv_advance:
-                                    rng = pokerngr_next(rng)
-                                # C++: pid = rng.nextUShort() << 16; pid |= rng.nextUShort();
-                                rng = pokerngr_next(rng); pid_high = rng >> 16
-                                rng = pokerngr_next(rng); pid_low = rng >> 16
-                                pid = (pid_high << 16) | pid_low
-                                nature = pid % 25
-                                if filter_obj and not filter_obj.compare_nature(nature):
-                                    continue
-                                state_seed = pokerngr_next(rng)
-                                ability = pid & 1
-                                gender = get_gender(pid, gender_ratio)
-                                shiny = get_shiny(pid, tsv)
-                                hp_type, hp_power = get_hidden_power(ivs)
-                                if filter_obj and not filter_obj.compare_state(
-                                        ivs, nature, shiny, gender, hp_type):
-                                    continue
-                                yield {
-                                    "seed": state_seed, "pid": pid, "ivs": ivs,
-                                    "ability": ability, "gender": gender, "nature": nature,
-                                    "shiny": shiny, "hidden_type": hp_type, "hidden_power": hp_power,
-                                }
+    for hp, atk, def_, spa, spd, spe in iter_iv_combinations(iv_min, iv_max, iv_total):
+        if cancel_check is not None and cancel_check():
+            return
+        if bugged_roamer:
+            ivs = (hp, atk & 7, 0, 0, 0, 0)
+        else:
+            ivs = (hp, atk, def_, spa, spd, spe)
+        seeds = recover_pokerng_iv(hp, atk, def_, spa, spd, spe, method)
+        for seed in seeds:
+            rng = seed
+            if iv_advance:
+                rng = pokerngr_next(rng)
+            # C++: pid = rng.nextUShort() << 16; pid |= rng.nextUShort();
+            rng = pokerngr_next(rng); pid_high = rng >> 16
+            rng = pokerngr_next(rng); pid_low = rng >> 16
+            pid = (pid_high << 16) | pid_low
+            nature = pid % 25
+            if filter_obj and not filter_obj.compare_nature(nature):
+                continue
+            state_seed = pokerngr_next(rng)
+            ability = pid & 1
+            gender = get_gender(pid, gender_ratio)
+            shiny = get_shiny(pid, tsv)
+            hp_type, hp_power = get_hidden_power(ivs)
+            if filter_obj and not filter_obj.compare_state(
+                    ivs, nature, shiny, gender, hp_type,
+                    ability=ability):
+                continue
+            yield {
+                "seed": state_seed, "pid": pid, "ivs": ivs,
+                "ability": ability, "gender": gender, "nature": nature,
+                "shiny": shiny, "hidden_type": hp_type, "hidden_power": hp_power,
+            }
 
 
 # ============================================================
 # WildSearcher3 - 1:1 port of C++ WildSearcher3::search (Lead::None only)
 # ============================================================
 def search_wild(iv_min, iv_max, method, tsv, encounter_slots,
-                encounter_type=0, filter_obj=None):
+                encounter_type=0, filter_obj=None, iv_total=None,
+                cancel_check=None):
     """Yields dicts: seed, pid, ivs, ability, gender, level, nature, shiny,
     hidden_type, hidden_power, encounter_slot, species, form"""
     if isinstance(encounter_type, str):
         encounter_type = ENCOUNTER_TYPE_ALIASES.get(encounter_type, 0)
     iv_advance = (method == METHOD_2)
-    for hp in range(iv_min[0], iv_max[0] + 1):
-        for atk in range(iv_min[1], iv_max[1] + 1):
-            for def_ in range(iv_min[2], iv_max[2] + 1):
-                for spa in range(iv_min[3], iv_max[3] + 1):
-                    for spd in range(iv_min[4], iv_max[4] + 1):
-                        for spe in range(iv_min[5], iv_max[5] + 1):
-                            ivs = (hp, atk, def_, spa, spd, spe)
-                            seeds = recover_pokerng_iv(hp, atk, def_, spa, spd, spe, method)
-                            for seed in seeds:
-                                rng = seed
-                                if iv_advance:
-                                    rng = pokerngr_next(rng)
-                                # C++ (non-tanoby): pid = rng.nextUShort() << 16; pid |= rng.nextUShort();
-                                rng = pokerngr_next(rng); pid_high = rng >> 16
-                                rng = pokerngr_next(rng); pid_low = rng >> 16
-                                pid = (pid_high << 16) | pid_low
-                                nature = pid % 25
-                                if filter_obj and not filter_obj.compare_nature(nature):
-                                    continue
-                                rng = pokerngr_next(rng); next_rng = rng >> 16
-                                rng = pokerngr_next(rng); next_rng2 = rng >> 16
-                                # do-while loop matching C++ WildSearcher3::search for Lead::None
-                                while True:
-                                    if (next_rng % 25) == nature:
-                                        # C++: test[0] = rng; levelRand[0] = nextRNG2;
-                                        # encounterSlot[0] = hSlot(test[0].nextUShort(100), encounter)
-                                        test0 = rng
-                                        enc_rand = pokerngr_next(test0) >> 16
-                                        test0 = pokerngr_next(test0)  # test0 now advanced once
-                                        enc_slot = hslot(enc_rand % 100, encounter_type)
-                                        slot_valid = filter_obj is None or filter_obj.slots is None or enc_slot in filter_obj.slots
-                                        if slot_valid and enc_slot < len(encounter_slots):
-                                            slot_info = encounter_slots[enc_slot]
-                                            species = slot_info.get("species", 0)
-                                            form = slot_info.get("form", 0)
-                                            gender_ratio = slot_info.get("gender_ratio", 127)
-                                            min_lv = slot_info.get("min_level", 1)
-                                            max_lv = slot_info.get("max_level", 1)
-                                            level = min_lv + (next_rng2 % (max_lv - min_lv + 1))
-                                            ability = pid & 1
-                                            gender = get_gender(pid, gender_ratio)
-                                            shiny = get_shiny(pid, tsv)
-                                            hp_type, hp_power = get_hidden_power(ivs)
-                                            if filter_obj is None or filter_obj.compare_state(
-                                                    ivs, nature, shiny, gender, hp_type, enc_slot):
-                                                # C++: state = WildSearcherState(test[i].next(), ...)
-                                                state_seed = pokerngr_next(test0)
-                                                yield {
-                                                    "seed": state_seed, "pid": pid, "ivs": ivs,
-                                                    "ability": ability, "gender": gender, "level": level,
-                                                    "nature": nature, "shiny": shiny,
-                                                    "hidden_type": hp_type, "hidden_power": hp_power,
-                                                    "encounter_slot": enc_slot,
-                                                    "species": species, "form": form,
-                                                }
-                                    hunt_nature = ((next_rng << 16) | next_rng2) % 25
-                                    if hunt_nature == nature:
-                                        break
-                                    rng = pokerngr_next(rng); next_rng = rng >> 16
-                                    rng = pokerngr_next(rng); next_rng2 = rng >> 16
+    for hp, atk, def_, spa, spd, spe in iter_iv_combinations(iv_min, iv_max, iv_total):
+        if cancel_check is not None and cancel_check():
+            return
+        ivs = (hp, atk, def_, spa, spd, spe)
+        seeds = recover_pokerng_iv(hp, atk, def_, spa, spd, spe, method)
+        for seed in seeds:
+            rng = seed
+            if iv_advance:
+                rng = pokerngr_next(rng)
+            # C++ (non-tanoby): pid = rng.nextUShort() << 16; pid |= rng.nextUShort();
+            rng = pokerngr_next(rng); pid_high = rng >> 16
+            rng = pokerngr_next(rng); pid_low = rng >> 16
+            pid = (pid_high << 16) | pid_low
+            nature = pid % 25
+            if filter_obj and not filter_obj.compare_nature(nature):
+                continue
+            rng = pokerngr_next(rng); next_rng = rng >> 16
+            rng = pokerngr_next(rng); next_rng2 = rng >> 16
+            # do-while loop matching C++ WildSearcher3::search for Lead::None
+            while True:
+                if (next_rng % 25) == nature:
+                    test0 = rng
+                    enc_rand = pokerngr_next(test0) >> 16
+                    test0 = pokerngr_next(test0)
+                    enc_slot = hslot(enc_rand % 100, encounter_type)
+                    slot_valid = filter_obj is None or filter_obj.slots is None or enc_slot in filter_obj.slots
+                    if slot_valid and enc_slot < len(encounter_slots):
+                        slot_info = encounter_slots[enc_slot]
+                        species = slot_info.get("species", 0)
+                        form = slot_info.get("form", 0)
+                        gender_ratio = slot_info.get("gender_ratio", 127)
+                        min_lv = slot_info.get("min_level", 1)
+                        max_lv = slot_info.get("max_level", 1)
+                        level = min_lv + (next_rng2 % (max_lv - min_lv + 1))
+                        ability = pid & 1
+                        gender = get_gender(pid, gender_ratio)
+                        shiny = get_shiny(pid, tsv)
+                        hp_type, hp_power = get_hidden_power(ivs)
+                        if filter_obj is None or filter_obj.compare_state(
+                                ivs, nature, shiny, gender, hp_type, enc_slot,
+                                ability=ability):
+                            state_seed = pokerngr_next(test0)
+                            yield {
+                                "seed": state_seed, "pid": pid, "ivs": ivs,
+                                "ability": ability, "gender": gender, "level": level,
+                                "nature": nature, "shiny": shiny,
+                                "hidden_type": hp_type, "hidden_power": hp_power,
+                                "encounter_slot": enc_slot,
+                                "species": species, "form": form,
+                            }
+                hunt_nature = ((next_rng << 16) | next_rng2) % 25
+                if hunt_nature == nature:
+                    break
+                rng = pokerngr_next(rng); next_rng = rng >> 16
+                rng = pokerngr_next(rng); next_rng2 = rng >> 16
 
 
 # ============================================================
@@ -501,6 +535,7 @@ def parse_frlg_seed_data(data: bytes, is_nx_format: bool):
 
 
 SEED_BASE_URL = "https://lincoln-lm.github.io/ten-lines/generated"
+_FRLG_SEED_CACHE = {}
 
 
 def download_seed_file(filename, local_path):
@@ -519,8 +554,12 @@ def download_seed_file(filename, local_path):
         return None
 
 
-def load_frlg_seed_data(game: str = "fr_nx"):
-    """Load FRLG seed data. Tries to download latest from ten-lines site first, falls back to local file."""
+def load_frlg_seed_data(game: str = "fr_nx", refresh: bool = False):
+    """Load bundled FRLG seed data, with networking only on explicit refresh.
+
+    The automatic planner must remain reproducible and usable offline.  Passing
+    ``refresh=True`` explicitly downloads and replaces the bundled file.
+    """
     import os
     seed_files = {
         "fr": "fr_eng.bin", "fr_eu": "fr_eng.bin", "fr_nx": "fr_eng_nx.bin",
@@ -531,17 +570,26 @@ def load_frlg_seed_data(game: str = "fr_nx"):
     }
     if game not in seed_files:
         return {}, {}
+    if not refresh and game in _FRLG_SEED_CACHE:
+        return _FRLG_SEED_CACHE[game]
     filename = seed_files[game]
     local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", filename)
-    data = download_seed_file(filename, local_path)
-    if data is None:
+    data = download_seed_file(filename, local_path) if refresh else None
+    if data is None and os.path.exists(local_path):
         with open(local_path, 'rb') as f:
             data = f.read()
-    return parse_frlg_seed_data(data, game.endswith("nx") or game.endswith("nx2"))
+    if data is None:
+        data = download_seed_file(filename, local_path)
+    if data is None:
+        raise FileNotFoundError(f"Unable to load FRLG seed data: {local_path}")
+    parsed = parse_frlg_seed_data(data, game.endswith("nx") or game.endswith("nx2"))
+    _FRLG_SEED_CACHE[game] = parsed
+    return parsed
 
 
 def frlg_seeds(target_seed, result_count=10, offset=0, game_version="fr",
-               ttv_frames_out=0, seed_data=None):
+               ttv_frames_out=0, seed_data=None, key_filter=None,
+               cancel_check=None):
     """1:1 port of C++ frlg_seeds(). Returns list of dicts."""
     target_seed = pokerng_jump(target_seed, -offset & 0xFFFFFFFF)
     if seed_data is None:
@@ -555,32 +603,48 @@ def frlg_seeds(target_seed, result_count=10, offset=0, game_version="fr",
     n = len(data)
     valid_results = 0
     i = 0
-    while valid_results < result_count:
+    seen_results = set()
+    # One complete 16-bit cycle contains every unique initial seed.  Continuing
+    # into a second cycle can only pad the response with duplicate routes.
+    while valid_results < result_count and i < n:
+        if cancel_check is not None and i % 256 == 0 and cancel_check():
+            return results
         idx = (result_index + i) % n
         offset_advances, seed = data[idx]
         advances = (offset_advances + distance_from_base) & 0xFFFFFFFF
         i += 1
-        if advances < ttv_frames_out:
-            continue
-        for button_mode, held_button, hb_offset in held_button_offsets:
-            unoffset_seed = (seed - hb_offset) & 0xFFFF
-            if unoffset_seed not in seed_map:
-                continue
-            for entry in seed_map[unoffset_seed]:
-                if entry['button_mode'] != button_mode:
+        if advances >= ttv_frames_out:
+            for button_mode, held_button, hb_offset in held_button_offsets:
+                unoffset_seed = (seed - hb_offset) & 0xFFFF
+                if unoffset_seed not in seed_map:
                     continue
-                valid_results += 1
-                key_str = f"{entry['key']}_{held_button}"
-                results.append({
-                    "advances": advances,
-                    "seed_time": entry['seed_time'],
-                    "key": key_str,
-                    "initial_seed": seed,
-                })
+                for entry in seed_map[unoffset_seed]:
+                    if entry['button_mode'] != button_mode:
+                        continue
+                    valid_results += 1
+                    key_str = f"{entry['key']}_{held_button}"
+                    if key_filter is not None and key_str not in key_filter:
+                        valid_results -= 1
+                        continue
+                    result_key = (seed, advances, entry['seed_time'], key_str)
+                    if result_key in seen_results:
+                        valid_results -= 1
+                        continue
+                    seen_results.add(result_key)
+                    results.append({
+                        "advances": advances,
+                        "seed_time": entry['seed_time'],
+                        "key": key_str,
+                        "initial_seed": seed,
+                    })
+                    if valid_results >= result_count:
+                        break
                 if valid_results >= result_count:
                     break
-            if valid_results >= result_count:
-                break
+    if not results and not (cancel_check is not None and cancel_check()):
+        raise ValueError(
+            f"No reachable initial seed for game/settings: {game_version}"
+        )
     return results
 
 
@@ -828,4 +892,3 @@ def ms_to_time_str(ms):
 
 def hex_seed(seed, bits):
     return format(seed & ((1 << bits) - 1), f'0{bits // 4}X')
-

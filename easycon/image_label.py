@@ -2,9 +2,6 @@ import base64
 from dataclasses import dataclass
 from typing import Optional
 
-import cv2
-
-
 @dataclass
 class ImgLabel:
     name: str
@@ -19,7 +16,9 @@ class ImgLabel:
     target_width: int = 100
     target_height: int = 100
     threshold: float = 80.0
-    search_method: int = cv2.TM_CCOEFF_NORMED
+    # EasyCon search-method number.  5 is CCOEFF_NORMED; 14 is masked
+    # SQDIFF_NORMED with the original alpha channel as its mask.
+    search_method: int = 5
 
     def load_image(self, path: str):
         self.image_path = path
@@ -38,6 +37,7 @@ class ImgLabel:
             "TargetY": self.target_y,
             "TargetWidth": self.target_width,
             "TargetHeight": self.target_height,
+            "searchMethod": self.search_method,
         }
 
     @staticmethod
@@ -52,4 +52,5 @@ class ImgLabel:
         label.target_y = data.get("TargetY", 0)
         label.target_width = data.get("TargetWidth", 100)
         label.target_height = data.get("TargetHeight", 100)
+        label.search_method = int(data.get("searchMethod", 5))
         return label

@@ -2,7 +2,8 @@ import json
 import math
 import os
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
+from itertools import chain
+from typing import Iterable, Iterator, List, Tuple, Optional
 
 from .tenlines import (
     SearcherFilter,
@@ -22,6 +23,10 @@ from assets.game_text import species_to_zh, species_to_en
 personal_data: Optional[List[dict]] = None
 species_names_cache: Optional[List[str]] = None
 ability_names_cache: Optional[List[str]] = None
+
+
+class SearchWorkLimitError(RuntimeError):
+    """The exhaustive IV search stopped before it could prove no result."""
 
 def get_data_dir() -> str:
     import os
@@ -343,6 +348,7 @@ TYPES = ["Fighting","Flying","Poison","Ground","Rock","Bug","Ghost","Steel",
          "Fire","Water","Grass","Electric","Psychic","Ice","Dragon","Dark"]
 
 METHOD_MAP = {
+    "Static": 1, "Wild": 11,
     "Static 1": 1, "Static 2": 3, "Static 4": 4,
     "Wild 1": 5, "Wild 2": 7, "Wild 4": 8,
     "All Wild Methods": 11,
@@ -543,7 +549,21 @@ class CalibrationResult:
 def parse_method(method_str: str):
     if method_str is None:
         return [METHOD_1], False
-    val = METHOD_MAP.get(method_str, 1)
+    val = METHOD_MAP.get(method_str)
+    if val is None:
+        normalized = method_str.strip().lower().replace("_", " ")
+        aliases = {
+            "static": 1,
+            "static 1": 1,
+            "static 2": 3,
+            "static 4": 4,
+            "wild": 11,
+            "wild 1": 5,
+            "wild 2": 7,
+            "wild 4": 8,
+            "all wild methods": 11,
+        }
+        val = aliases.get(normalized, 1)
     if val == 11:
         return [METHOD_1, METHOD_2, METHOD_4], True
     if val >= 5:
@@ -555,14 +575,22 @@ def parse_method(method_str: str):
 # Internal helpers
 # ============================================================
 def resolve_ability_idx(ability_name: str, species_id: int) -> Optional[int]:
-    """Resolve an ability name to slot index (0 or 1) for the given species."""
+    """Resolve an ability name to a slot, or no slot filter when both match.
+
+    Gen 3 personal data commonly repeats the same ability in both PID slots.
+    In that case filtering to slot 0 would incorrectly discard every valid
+    PID whose ability bit is 1, so ``None`` deliberately means both slots.
+    """
     if not ability_name or ability_name.lower() == "any":
         return None
     personal = get_personal(species_id)
-    for slot, ab_id in enumerate(personal["abilities"]):
-        if get_ability_name(ab_id).lower() == ability_name.lower():
-            return slot
-    return None
+    matching_slots = [
+        slot for slot, ab_id in enumerate(personal["abilities"])
+        if get_ability_name(ab_id).lower() == ability_name.lower()
+    ]
+    if not matching_slots:
+        raise ValueError(f"Unknown ability {ability_name!r} for species {species_id}")
+    return matching_slots[0] if len(matching_slots) == 1 else None
 
 
 def build_filter(ivs_range, shiny, nature, gender, hidden_type, ability_idx=None):
@@ -657,6 +685,174 @@ def make_calibration_result(g, seed):
 # ============================================================
 # Searcher
 # ============================================================
+def iter_search_targets(
+    game: str = "fr_nx",
+    console: str = None,
+    tid: int = 58888,
+    sid: int = 12232,
+    method: str = None,
+    category: str = None,
+    location: str = None,
+    pokemon: str = None,
+    shiny: str = None,
+    nature: str = None,
+    gender: str = None,
+    ability: str = None,
+    hidden_type: str = None,
+    ivs_range: IVsRange = None,
+    iv_total: int = None,
+    cancel_check=None,
+) -> Iterator[SearcherResult]:
+    """Stream Ten Lines outcomes without choosing an initial-seed route.
+
+    This is the outcome-search half of the automatic planner.  The caller can
+    rank the returned Pokemon first, then call :func:`initial_seed` to choose a
+    reachable initial seed with the smallest advance count.
+    """
+    if console is None:
+        console = "NX2" if game.endswith("nx2") else "NX"
+    tsv = tid ^ sid
+    is_frlg = not game.endswith("painting")
+    methods, is_wild = parse_method(method)
+
+    species_id = get_species_id(pokemon) if pokemon else None
+    ability_idx = None
+    if ability and ability.lower() != "any":
+        if species_id is None:
+            raise ValueError("pokemon is required when filtering by ability")
+        ability_idx = resolve_ability_idx(ability, species_id)
+
+    filter_iv_min, filter_iv_max, filter_shiny, filter_nature, filter_gender, filter_hidden_type, _ = \
+        build_filter(ivs_range, shiny, nature, gender, hidden_type, ability_idx)
+    encounter_data = None
+    encounter_type = 0
+    matching_slots = None
+    if is_wild:
+        encounter_data = get_encounter(location, category, game)
+        if encounter_data is None:
+            raise ValueError(f"No encounter data for location={location} category={category}")
+        enrich_slots_with_gender(encounter_data)
+        encounter_type = ENCOUNTER_TYPE_MAP.get(category, 0)
+        if species_id is not None:
+            matching_slots = [
+                idx for idx, slot in enumerate(encounter_data.get("slots", []))
+                if slot.get("species") == species_id
+            ]
+            if not matching_slots:
+                return
+
+    filter_obj = SearcherFilter(
+        natures={filter_nature} if filter_nature is not None else None,
+        shiny=filter_shiny, gender=filter_gender, hp_type=filter_hidden_type,
+        iv_min=filter_iv_min, iv_max=filter_iv_max,
+        slots=matching_slots, ability=ability_idx,
+    )
+    for m in methods:
+        if cancel_check is not None and cancel_check():
+            return
+        if is_wild:
+            gen = search_wild(filter_iv_min, filter_iv_max, m, tsv, encounter_data["slots"],
+                              encounter_type=encounter_type, filter_obj=filter_obj,
+                              iv_total=iv_total, cancel_check=cancel_check)
+        else:
+            gender_ratio = get_personal(species_id, game)["gender"] if species_id is not None else 127
+            gen = search_static(filter_iv_min, filter_iv_max, m, tsv,
+                                gender_ratio=gender_ratio, filter_obj=filter_obj,
+                                iv_total=iv_total, cancel_check=cancel_check)
+        for g in gen:
+            target_seed = g['seed']
+            if not is_wild and species_id is not None:
+                # StaticSearcher3 does not carry encounter species because the
+                # species does not affect the RNG state.  Attach it here so
+                # ability names and gender use the selected Pokemon's data.
+                g = dict(g)
+                g["species"] = species_id
+            method_name = METHOD_NAMES.get(m + (4 if is_wild else 0), f"Method {m}")
+            species_name = get_species_name(g.get('species', 0)) if g.get('species', 0) else ""
+            level = g.get('level', 0) if is_wild else 0
+            yield make_searcher_result(g, target_seed, method_name, species_name, level)
+
+
+def search_targets(
+    game: str = "fr_nx",
+    console: str = None,
+    tid: int = 58888,
+    sid: int = 12232,
+    method: str = None,
+    category: str = None,
+    location: str = None,
+    pokemon: str = None,
+    shiny: str = None,
+    nature: str = None,
+    gender: str = None,
+    ability: str = None,
+    hidden_type: str = None,
+    ivs_range: IVsRange = None,
+    iv_total: int = None,
+    cancel_check=None,
+) -> List[SearcherResult]:
+    """Compatibility list wrapper around :func:`iter_search_targets`."""
+    return list(iter_search_targets(
+        game=game, console=console, tid=tid, sid=sid, method=method,
+        category=category, location=location, pokemon=pokemon, shiny=shiny,
+        nature=nature, gender=gender, ability=ability,
+        hidden_type=hidden_type, ivs_range=ivs_range, iv_total=iv_total,
+        cancel_check=cancel_check,
+    ))
+
+
+def _count_iv_combinations(iv_min, iv_max, iv_total):
+    counts = {0: 1}
+    for lower, upper in zip(iv_min, iv_max):
+        next_counts = {}
+        for subtotal, count in counts.items():
+            for value in range(lower, upper + 1):
+                new_total = subtotal + value
+                next_counts[new_total] = next_counts.get(new_total, 0) + count
+        counts = next_counts
+    return counts.get(iv_total, 0)
+
+
+def search_target_tiers(*, max_iv_combinations=25_000_000, **kwargs):
+    """Yield non-empty result tiers from highest to lowest IV total."""
+    ivs_range = kwargs.get("ivs_range") or IVsRange(
+        ivs_lower_bound=IVs(0, 0, 0, 0, 0, 0),
+        ivs_upper_bound=IVs(31, 31, 31, 31, 31, 31),
+    )
+    lower = ivs_range.ivs_lower_bound
+    upper = ivs_range.ivs_upper_bound
+    minimum = sum((
+        lower.hp, lower.attack, lower.defense,
+        lower.sp_attack, lower.sp_defense, lower.speed,
+    ))
+    maximum = sum((
+        upper.hp, upper.attack, upper.defense,
+        upper.sp_attack, upper.sp_defense, upper.speed,
+    ))
+    iv_min = [lower.hp, lower.attack, lower.defense,
+              lower.sp_attack, lower.sp_defense, lower.speed]
+    iv_max = [upper.hp, upper.attack, upper.defense,
+              upper.sp_attack, upper.sp_defense, upper.speed]
+    method_count = len(parse_method(kwargs.get("method"))[0])
+    searched_work = 0
+    cancel_check = kwargs.get("cancel_check")
+    for iv_total in range(maximum, minimum - 1, -1):
+        if cancel_check is not None and cancel_check():
+            return
+        tier_work = _count_iv_combinations(iv_min, iv_max, iv_total) * method_count
+        if max_iv_combinations is not None and searched_work + tier_work > max_iv_combinations:
+            raise SearchWorkLimitError(
+                "搜索已达到首版安全工作量上限，搜索尚未完成，不能判定为无结果。"
+                "请收紧 IV 范围、选择单一 RNG 方法、提高最大 Advance，"
+                "或通过命令行显式提高搜索上限。"
+            )
+        searched_work += tier_work
+        results = iter(iter_search_targets(**kwargs, iv_total=iv_total))
+        first = next(results, None)
+        if first is not None:
+            yield iv_total, chain((first,), results)
+
+
 def searcher(
     game: str = "fr_nx",
     console: str = None,
@@ -669,59 +865,64 @@ def searcher(
     shiny: str = None,
     nature: str = None,
     gender: str = None,
+    ability: str = None,
     hidden_type: str = None,
     ivs_range: IVsRange = None,
-    max_time_seconds: float = 180.0,
+    max_time_seconds: Optional[float] = 180.0,
+    max_advances: Optional[int] = None,
 ) -> List[SearcherResult]:
+    """Compatibility search API with optional reachability filters.
+
+    New automatic-planner code should use :func:`search_targets`, then rank
+    outcomes and initial-seed plans explicitly.  This wrapper keeps the older
+    time-based behavior for existing callers.
+    """
     if console is None:
         console = "NX2" if game.endswith("nx2") else "NX"
-    tsv = tid ^ sid
-    max_time_ms = max_time_seconds * 1000
-    is_frlg = not game.endswith("painting")
-    seed_data = None
-    if is_frlg:
-        seed_data = load_frlg_seed_data(game)
-    methods, is_wild = parse_method(method)
-    filter_iv_min, filter_iv_max, filter_shiny, filter_nature, filter_gender, filter_hidden_type, _ = \
-        build_filter(ivs_range, shiny, nature, gender, hidden_type)
-    encounter_data = None
-    encounter_type = 0
-    if is_wild:
-        encounter_data = get_encounter(location, category, game)
-        if encounter_data is None:
-            raise ValueError(f"No encounter data for location={location} category={category}")
-        enrich_slots_with_gender(encounter_data)
-        encounter_type = ENCOUNTER_TYPE_MAP.get(category, 0)
-    filter_obj = SearcherFilter(
-        natures={filter_nature} if filter_nature is not None else None,
-        shiny=filter_shiny, gender=filter_gender, hp_type=filter_hidden_type,
-        iv_min=filter_iv_min, iv_max=filter_iv_max,
+
+    targets = search_targets(
+        game=game,
+        console=console,
+        tid=tid,
+        sid=sid,
+        method=method,
+        category=category,
+        location=location,
+        pokemon=pokemon,
+        shiny=shiny,
+        nature=nature,
+        gender=gender,
+        ability=ability,
+        hidden_type=hidden_type,
+        ivs_range=ivs_range,
     )
-    results = []
-    for m in methods:
-        if is_wild:
-            gen = search_wild(filter_iv_min, filter_iv_max, m, tsv, encounter_data["slots"],
-                              encounter_type=encounter_type, filter_obj=filter_obj)
-        else:
-            gen = search_static(filter_iv_min, filter_iv_max, m, tsv,
-                                gender_ratio=127, filter_obj=filter_obj)
-        for g in gen:
-            target_seed = g['seed']
-            init_results = initial_seed(
-                game=game, console=console,
-                target_seed=hex_seed(target_seed, 32),
-                result_count=1, offset=0)
+
+    max_time_ms = None if max_time_seconds is None else max_time_seconds * 1000
+    reachable = []
+    route_count = 10 if max_advances is not None else 1
+    for target in targets:
+        init_results = initial_seed(
+            game=game,
+            console=console,
+            target_seed=target.target_seed,
+            result_count=route_count,
+            offset=0,
+        )
+        if not init_results:
+            continue
+        if max_advances is not None:
+            init_results = [r for r in init_results if r.advances <= max_advances]
             if not init_results:
                 continue
-            ir = init_results[0]
-            total_ms = frame_to_ms(ir.total_frames, console)
-            if total_ms > max_time_ms:
+        if max_time_ms is not None:
+            init_results = [
+                r for r in init_results
+                if frame_to_ms(r.total_frames, console) <= max_time_ms
+            ]
+            if not init_results:
                 continue
-            method_name = METHOD_NAMES.get(m + (4 if is_wild else 0), f"Method {m}")
-            species_name = get_species_name(g.get('species', 0)) if is_wild else ""
-            level = g.get('level', 0) if is_wild else 0
-            results.append(make_searcher_result(g, target_seed, method_name, species_name, level))
-    return results
+        reachable.append(target)
+    return reachable
 
 
 # ============================================================
@@ -733,6 +934,8 @@ def initial_seed(
     target_seed: str = None,
     result_count: int = 10,
     offset: int = 0,
+    settings: GameSettings = None,
+    cancel_check=None,
 ) -> List[InitialSeedResult]:
     if console is None:
         console = "NX2" if game.endswith("nx2") else "NX"
@@ -744,24 +947,39 @@ def initial_seed(
     if is_frlg:
         seed_data = load_frlg_seed_data(game)
     if is_frlg:
-        raw = frlg_seeds(target, result_count, offset, game, ttv_frames_out=0, seed_data=seed_data)
+        key_filter = None
+        if settings is not None:
+            key_filter = {
+                f"{settings.sound}_{settings.button_mode}_{settings.seed_button}_"
+                f"{settings.extra_button}"
+            }
+        raw = frlg_seeds(
+            target,
+            result_count,
+            offset,
+            game,
+            ttv_frames_out=0,
+            seed_data=seed_data,
+            key_filter=key_filter,
+            cancel_check=cancel_check,
+        )
         results = []
         for r in raw:
             advances = r["advances"]
             seed_time = r["seed_time"]
             iseed = r["initial_seed"]
             key_str = r["key"]
-            # parse settings from key: "setting_key_held_button"
-            parts = key_str.rsplit("_", 1) if key_str else ("", "none")
-            if len(parts) == 2 and parts[0]:
-                setting_key = parts[0]
-                held_button = parts[1]
-                # extract button_mode from setting key: e.g. "mono_a" -> "a"
-                bm_parts = setting_key.rsplit("_", 1)
-                button_mode = bm_parts[-1] if len(bm_parts) > 1 else "a"
+            # Keys are "sound_buttonMode_seedButton_extraButton".  Extra
+            # buttons such as "blackout_r" contain an underscore, so rsplit
+            # would incorrectly turn them into just "r".  Split the fixed
+            # three-field prefix and preserve the remainder verbatim.
+            key_parts = key_str.split("_", 3) if key_str else []
+            if len(key_parts) == 4:
+                sound, button_mode, seed_button, held_button = key_parts
             else:
-                button_mode = "a"
-                held_button = "none"
+                sound, button_mode, seed_button, held_button = (
+                    "mono", "a", "a", "none"
+                )
             total_frames = (seed_time / 16) + advances if seed_time else advances
             total_ms = frame_to_ms(total_frames, console)
             results.append(InitialSeedResult(
@@ -770,7 +988,12 @@ def initial_seed(
                 total_frames=round(total_frames),
                 total_time=ms_to_time_str(total_ms),
                 seed_time=seed_time,
-                settings=GameSettings(button_mode=button_mode, extra_button=held_button),
+                settings=GameSettings(
+                    sound=sound,
+                    button_mode=button_mode,
+                    seed_button=seed_button,
+                    extra_button=held_button,
+                ),
             ))
         return results
     else:

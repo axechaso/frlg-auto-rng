@@ -197,6 +197,13 @@ class VideoModule:
             if self.raw_frame is not None:
                 return time.time() - self.last_frame_time
         return -1.0
+
+    def get_raw_frame_snapshot(self):
+        """Return one frame copy and its stable update timestamp."""
+        with self.frame_lock:
+            if self.raw_frame is not None:
+                return self.raw_frame.copy(), self.last_frame_time
+        return None, -1.0
     
     def set_focused(self, focused: bool):
         """设置焦点状态，同时控制SDL文本输入以兼容中文输入法"""

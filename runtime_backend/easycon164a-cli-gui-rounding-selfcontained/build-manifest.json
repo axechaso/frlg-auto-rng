@@ -1,0 +1,11 @@
+﻿{
+    "source_repository":  "https://github.com/EasyConNS/EasyCon.git",
+    "source_commit":  "9c86137c7e63bff842175470895727a5fa9bab52",
+    "source_version":  "1.6.4-a",
+    "patch_id":  "cli-image-label-ceiling-v1",
+    "description":  "Make ezcon run round ImgLabel confidence with Math.Ceiling, matching the EasyCon 1.6.4-a GUI.",
+    "build_target":  "net9.0/win-x64 self-contained single-file",
+    "filename":  "EasyCon2.CLI.exe",
+    "bytes":  233779037,
+    "sha256":  "5f0f83deb164aaa3328ae1f79f5fa9128999d15b4a79fd017af6fdf6d6d317c7"
+}

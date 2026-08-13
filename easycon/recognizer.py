@@ -1,175 +1,144 @@
-import base64
 import json
+import os
 import time
-from typing import Optional, List, Callable, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import cv2
 import numpy as np
 
-from .image_label import ImgLabel
-from .protocol import GamePadKey
 from .controller import EasyConController
+from .image_label import ImgLabel
+from .label_matcher import (
+    match_prepared_label,
+    matches_threshold,
+    prepare_label,
+)
+from .protocol import GamePadKey
 
 
 class ImageRecognizer:
+    """Thin capture wrapper around the shared EasyCon-compatible matcher."""
+
     def __init__(self, capture_source: Optional[int] = None, use_dshow: bool = True):
         self.capture_source = capture_source
-        cap_dev: Optional[cv2.VideoCapture] = None
-        labels_list: List[ImgLabel] = []
-        resolution = (1920, 1080)
+        self.cap_dev: Optional[cv2.VideoCapture] = None
+        self.labels_list: List[ImgLabel] = []
+        self.resolution = (1920, 1080)
         self.use_dshow = use_dshow
 
         if capture_source is not None:
             self.init_capture(capture_source)
 
     def init_capture(self, device_id: int):
-        import time
-
-        for attempt in range(3):
-            if self.use_dshow:
-                cap_dev = cv2.VideoCapture(device_id, cv2.CAP_DSHOW)
-            else:
-                cap_dev = cv2.VideoCapture(device_id)
-
+        for _ in range(3):
+            backend = cv2.CAP_DSHOW if self.use_dshow else cv2.CAP_ANY
+            cap_dev = cv2.VideoCapture(device_id, backend)
             if cap_dev.isOpened():
-                cap_dev.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
-                cap_dev.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
+                cap_dev.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+                cap_dev.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
                 cap_dev.set(cv2.CAP_PROP_FPS, 60)
-
                 ret, frame = cap_dev.read()
                 if ret and frame is not None:
+                    self.cap_dev = cap_dev
                     return
-
-            if cap_dev:
-                cap_dev.release()
+            cap_dev.release()
             time.sleep(0.5)
-
         raise RuntimeError(f"Cannot open capture device {device_id} after 3 attempts")
 
     @staticmethod
     def list_capture_devices() -> List[str]:
         try:
             from pygrabber.dshow_graph import FilterGraph
-            graph = FilterGraph()
-            return graph.get_input_devices()
+
+            return FilterGraph().get_input_devices()
         except ImportError:
             devices = []
-            for i in range(10):
-                cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+            for device_id in range(10):
+                cap = cv2.VideoCapture(device_id, cv2.CAP_DSHOW)
                 if cap.isOpened():
-                    devices.append(f"Device {i}")
+                    devices.append(f"Device {device_id}")
                     cap.release()
             return devices
 
     def set_resolution(self, width: int, height: int):
-        resolution = (width, height)
-        if cap_dev:
-            cap_dev.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            cap_dev.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        self.resolution = (width, height)
+        if self.cap_dev:
+            self.cap_dev.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            self.cap_dev.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
     def load_label(self, label: ImgLabel):
-        labels_list.append(label)
+        self.labels_list.append(label)
 
     def load_label_from_file(self, path: str) -> ImgLabel:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        with open(path, "r", encoding="utf-8") as file:
+            data = json.load(file)
         label = ImgLabel.from_dict(data)
-        label.name = path.split("/")[-1].replace(".IL", "")
-        if label.image_base64:
-            img_data = base64.b64decode(label.image_base64)
-            nparr = np.frombuffer(img_data, np.uint8)
-            label.cv_image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        labels_list.append(label)
+        # EasyCon addresses a label by the filename, not a stale JSON name.
+        label.name = os.path.splitext(os.path.basename(path))[0]
+        label._prepared = prepare_label(data)
+        self.labels_list.append(label)
         return label
 
     def get_frame(self) -> Optional[np.ndarray]:
-        if cap_dev:
-            ret, frame = cap_dev.read()
+        if self.cap_dev:
+            ret, frame = self.cap_dev.read()
             if ret:
                 return frame
         return None
 
-    def search(self, label_name: str, frame: Optional[np.ndarray] = None) -> Tuple[bool, float, Tuple[int, int]]:
-        label = None
-        for l in labels_list:
-            if l.name == label_name:
-                label = l
-                break
+    @staticmethod
+    def _prepare(label: ImgLabel) -> dict:
+        signature = (
+            label.image_base64,
+            label.range_x,
+            label.range_y,
+            label.range_width,
+            label.range_height,
+            label.search_method,
+        )
+        prepared = getattr(label, "_prepared", None)
+        if prepared is not None and getattr(label, "_prepared_signature", None) == signature:
+            return prepared
+        prepared = prepare_label(label.to_dict())
+        label._prepared = prepared
+        label._prepared_signature = signature
+        return prepared
 
+    def search(
+        self,
+        label_name: str,
+        frame: Optional[np.ndarray] = None,
+    ) -> Tuple[bool, int, Tuple[int, int]]:
+        label = next((item for item in self.labels_list if item.name == label_name), None)
         if label is None:
             raise ValueError(f"Label '{label_name}' not found")
-
         if frame is None:
             frame = self.get_frame()
-
         if frame is None:
             raise RuntimeError("No frame available")
 
-        h, w = frame.shape[:2]
-
-        scale_x = w / 1920.0
-        scale_y = h / 1080.0
-
-        rx = int(label.range_x * scale_x)
-        ry = int(label.range_y * scale_y)
-        rw = int(label.range_width * scale_x)
-        rh = int(label.range_height * scale_y)
-
-        rx = max(0, min(rx, w - 1))
-        ry = max(0, min(ry, h - 1))
-        rw = max(1, min(rw, w - rx))
-        rh = max(1, min(rh, h - ry))
-
-        search_region = frame[ry:ry + rh, rx:rx + rw]
-
-        if hasattr(label, '_cv_image') and label.cv_image is not None:
-            target = label.cv_image
-        elif label.image_base64:
-            img_data = base64.b64decode(label.image_base64)
-            nparr = np.frombuffer(img_data, np.uint8)
-            target = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        else:
-            raise ValueError(f"Label '{label_name}' has no image data")
-
-        if target is None or target.size == 0:
-            raise ValueError(f"Label '{label_name}' image is invalid")
-
-        th, tw = target.shape[:2]
-        if search_region.shape[0] < th or search_region.shape[1] < tw:
-            return False, 0.0, (0, 0)
-
-        result = cv2.matchTemplate(search_region, target, label.search_method)
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-
-        if label.search_method in (cv2.TM_SQDIFF, cv2.TM_SQDIFF_NORMED):
-            match_val = 1.0 - min_val
-            match_loc = min_loc
-        else:
-            match_val = max_val
-            match_loc = max_loc
-
-        match_degree = match_val * 100
-
-        abs_x = rx + match_loc[0] + target.shape[1] // 2
-        abs_y = ry + match_loc[1] + target.shape[0] // 2
-
-        found = match_degree >= label.threshold
-
-        return found, match_degree, (abs_x, abs_y)
+        prepared = self._prepare(label)
+        match = match_prepared_label(frame, prepared)
+        template = prepared["template"]
+        # Preserve this class's historical absolute-center return contract,
+        # expressed in the labels' 1920x1080 reference coordinates.
+        abs_x = prepared["rx"] + match.location[0] + template.shape[1] // 2
+        abs_y = prepared["ry"] + match.location[1] + template.shape[0] // 2
+        return (
+            matches_threshold(match, label.threshold),
+            match.easycon_degree,
+            (abs_x, abs_y),
+        )
 
     def search_all(self, frame: Optional[np.ndarray] = None) -> dict:
         if frame is None:
             frame = self.get_frame()
-
-        results = {}
-        for label in labels_list:
-            results[label.name] = self.search(label.name, frame)
-        return results
+        return {label.name: self.search(label.name, frame) for label in self.labels_list}
 
     def release(self):
-        if cap_dev:
-            cap_dev.release()
-            cap_dev = None
+        if self.cap_dev:
+            self.cap_dev.release()
+            self.cap_dev = None
 
 
 class EasyConScript:
@@ -180,16 +149,13 @@ class EasyConScript:
     def wait_for(self, label_name: str, timeout_ms: int = 10000, check_interval_ms: int = 100) -> bool:
         if self.recognizer is None:
             raise RuntimeError("ImageRecognizer not provided")
-
         start = time.time()
         timeout_sec = timeout_ms / 1000.0
-
         while time.time() - start < timeout_sec:
-            found, degree, pos = self.recognizer.search(label_name)
+            found, _, _ = self.recognizer.search(label_name)
             if found:
                 return True
             time.sleep(check_interval_ms / 1000.0)
-
         return False
 
     def click_when_found(self, label_name: str, key: GamePadKey, timeout_ms: int = 10000) -> bool:

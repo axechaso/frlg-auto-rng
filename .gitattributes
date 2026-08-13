@@ -6,3 +6,6 @@
 
 # Python files: LF is fine everywhere
 *.py text eol=lf
+
+# Unified-diff context lines intentionally end with one space.
+*.patch -whitespace

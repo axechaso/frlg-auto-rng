@@ -17,7 +17,6 @@ os.environ['SDL_VIDEO_CENTERED'] = '1'
 import pygame
 import cv2
 import json
-import base64
 import numpy as np
 import threading
 from typing import Optional, Tuple
@@ -31,6 +30,7 @@ current_gui = None
 
 from easycon import EasyConController, GamePadKey, ScriptContext
 from easycon.config import get, set as config_set
+from easycon.label_matcher import match_prepared_label, matches_threshold, prepare_label
 
 from .script_engine import ScriptEngine
 
@@ -152,7 +152,7 @@ class EasyConGUI:
 
         # 缩放后帧缓存（避免 OCR 反复调用时重复 cv2.resize）
         self.cached_1080p_frame: Optional[np.ndarray] = None
-        self.cached_1080p_age: float = -1.0
+        self.cached_1080p_token: float = -1.0
 
         # ============== 按钮（LabelMaker 风格：64x28, border_radius=3，放在输出面板标题行右侧） ==============
         btn_w = 64
@@ -519,49 +519,22 @@ class EasyConGUI:
             if frame is None:
                 cap = self.video_module.cap
                 if cap is None or not cap.isOpened():
-                    return False, 0
+                    return 0 if threshold == -1 else False
                 ret, frame = cap.read()
                 if not ret:
-                    return False, 0
+                    return 0 if threshold == -1 else False
 
             if not label_data.get('ImgBase64'):
-                return False, 0
+                return 0 if threshold == -1 else False
 
-            img_bytes = base64.b64decode(label_data['ImgBase64'])
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            template = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-            rx = label_data.get('RangeX', 0)
-            ry = label_data.get('RangeY', 0)
-            rw = label_data.get('RangeWidth', frame.shape[1])
-            rh = label_data.get('RangeHeight', frame.shape[0])
-            rx = max(0, rx); ry = max(0, ry)
-            rw = min(rw, frame.shape[1] - rx); rh = min(rh, frame.shape[0] - ry)
-            roi = frame[ry:ry + rh, rx:rx + rw]
-
-            search_method = label_data.get('searchMethod', 5)
-
-            if search_method == 0:
-                result = cv2.matchTemplate(roi, template, cv2.TM_SQDIFF)
-                mn, mx, _, _ = cv2.minMaxLoc(result)
-                match_degree = (1.0 - mn) * 100.0
-            elif search_method == 1:
-                result = cv2.matchTemplate(roi, template, cv2.TM_SQDIFF_NORMED)
-                mn, mx, _, _ = cv2.minMaxLoc(result)
-                match_degree = (1.0 - mn) * 100.0
-            elif search_method in (2, 3):
-                mode = cv2.TM_CCORR if search_method == 2 else cv2.TM_CCORR_NORMED
-                result = cv2.matchTemplate(roi, template, mode)
-                mn, mx, _, _ = cv2.minMaxLoc(result)
-                match_degree = mx * 100.0
-            else:
-                mode = cv2.TM_CCOEFF if search_method == 4 else cv2.TM_CCOEFF_NORMED
-                result = cv2.matchTemplate(roi, template, mode)
-                mn, mx, _, _ = cv2.minMaxLoc(result)
-                match_degree = (mx + 1.0) * 50.0
-
-            found = match_degree >= threshold
-            degree_int = int(match_degree)
+            prepared = prepare_label(label_data)
+            match = match_prepared_label(frame, prepared)
+            template = prepared['template']
+            roi = match.roi
+            frame = match.normalized_frame
+            match_degree = match.degree
+            found = matches_threshold(match, threshold)
+            degree_int = match.easycon_degree
 
             # 极低匹配度时才保存调试截图（纯 hash 文件名避免乱码）
             if debug and match_degree < 30 and label_name not in self.label_debug_saved:
@@ -594,15 +567,16 @@ class EasyConGUI:
         fresh=True 时强制重新读取。
         """
         raw_age = self.video_module.get_raw_frame_age()
+        raw_token = self.video_module.last_frame_time
 
         # 缓存在有效期内直接复用
         if not fresh and 0 <= raw_age < 0.05:
-            if self.cached_1080p_frame is not None and abs(self.cached_1080p_age - raw_age) < 0.001:
+            if self.cached_1080p_frame is not None and self.cached_1080p_token == raw_token:
                 return self.cached_1080p_frame
 
         # 需要新建帧
         if not fresh and 0 <= raw_age < 0.05:
-            frame = self.video_module.get_raw_frame()
+            frame, raw_token = self.video_module.get_raw_frame_snapshot()
         else:
             cap = self.video_module.cap
             if cap is None or not cap.isOpened():
@@ -610,12 +584,13 @@ class EasyConGUI:
             ret, frame = cap.read()
             if not ret or frame is None:
                 return None
+            raw_token = time.time()
 
         if frame.shape[1] != 1920 or frame.shape[0] != 1080:
             self.cached_1080p_frame = cv2.resize(frame, (1920, 1080), interpolation=cv2.INTER_LINEAR)
         else:
             self.cached_1080p_frame = frame
-        self.cached_1080p_age = raw_age
+        self.cached_1080p_token = raw_token
         return self.cached_1080p_frame
     
     def identify_pokemon(self, candidates=None, threshold=0.0):

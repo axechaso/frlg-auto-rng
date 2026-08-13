@@ -1,5 +1,4 @@
 import json
-import base64
 import os
 import time
 import threading
@@ -10,18 +9,19 @@ import numpy as np
 
 from .controller import EasyConController
 from .protocol import GamePadKey
+from .label_matcher import match_prepared_label, matches_threshold, prepare_label
 
 
 class HoldContext:
     def __init__(self, ctx: "ScriptContext", button: str):
-        ctx_ref = ctx
-        button_name = button
+        self.ctx_ref = ctx
+        self.button_name = button
 
     def __enter__(self):
         pass
 
     def __exit__(self, *args):
-        ctx_ref.release(button_name)
+        self.ctx_ref.release(self.button_name)
 
 
 class ScriptContext:
@@ -117,27 +117,19 @@ class ScriptContext:
     def load_label(self, label_name):
         label_path = os.path.join(self.labels_dir, f"{label_name}.IL")
         if not os.path.exists(label_path):
-            self.label_cache[label_name] = None
+            self.label_cache.pop(label_name, None)
             return None
 
         with open(label_path, 'r', encoding='utf-8') as f:
             label_data = json.load(f)
 
         if not label_data.get('ImgBase64'):
-            self.label_cache[label_name] = None
+            self.label_cache.pop(label_name, None)
             return None
 
-        img_bytes = base64.b64decode(label_data['ImgBase64'])
-        nparr = np.frombuffer(img_bytes, np.uint8)
-        cached = {
-            'template': cv2.imdecode(nparr, cv2.IMREAD_COLOR),
-            'rx': label_data.get('RangeX', 0),
-            'ry': label_data.get('RangeY', 0),
-            'rw': label_data.get('RangeWidth'),
-            'rh': label_data.get('RangeHeight'),
-            'search_method': label_data.get('searchMethod', 5),
-        }
-        self.label_cache[label_name] = cached
+        cached = prepare_label(label_data)
+        stat = os.stat(label_path)
+        self.label_cache[label_name] = (stat.st_mtime_ns, stat.st_size, cached)
         return cached
 
     def search_label(self, label_name: str, threshold: int = 80, seconds: float = None, debug: bool = False):
@@ -148,10 +140,14 @@ class ScriptContext:
             return False
 
         try:
-            cached = self.label_cache.get(label_name)
+            label_path = os.path.join(self.labels_dir, f"{label_name}.IL")
+            entry = self.label_cache.get(label_name)
+            cached = None
+            if entry is not None and os.path.exists(label_path):
+                stat = os.stat(label_path)
+                if entry[:2] == (stat.st_mtime_ns, stat.st_size):
+                    cached = entry[2]
             if cached is None:
-                if label_name in self.label_cache:
-                    return 0 if threshold == -1 else False
                 cached = self.load_label(label_name)
                 if cached is None:
                     return 0 if threshold == -1 else False
@@ -160,38 +156,10 @@ class ScriptContext:
             if frame is None:
                 return 0 if threshold == -1 else False
 
-            template = cached['template']
-            rx = max(0, cached['rx'])
-            ry = max(0, cached['ry'])
-            rw = cached['rw'] if cached['rw'] is not None else frame.shape[1]
-            rh = cached['rh'] if cached['rh'] is not None else frame.shape[0]
-            rw = min(rw, frame.shape[1] - rx)
-            rh = min(rh, frame.shape[0] - ry)
-            roi = frame[ry:ry + rh, rx:rx + rw]
-
-            search_method = cached['search_method']
-
-            if search_method == 0:
-                result = cv2.matchTemplate(roi, template, cv2.TM_SQDIFF)
-                mn, mx, _, _ = cv2.minMaxLoc(result)
-                match_degree = (1.0 - mn) * 100.0
-            elif search_method == 1:
-                result = cv2.matchTemplate(roi, template, cv2.TM_SQDIFF_NORMED)
-                mn, mx, _, _ = cv2.minMaxLoc(result)
-                match_degree = (1.0 - mn) * 100.0
-            elif search_method in (2, 3):
-                mode = cv2.TM_CCORR if search_method == 2 else cv2.TM_CCORR_NORMED
-                result = cv2.matchTemplate(roi, template, mode)
-                mn, mx, _, _ = cv2.minMaxLoc(result)
-                match_degree = mx * 100.0
-            else:
-                mode = cv2.TM_CCOEFF if search_method == 4 else cv2.TM_CCOEFF_NORMED
-                result = cv2.matchTemplate(roi, template, mode)
-                mn, mx, _, _ = cv2.minMaxLoc(result)
-                match_degree = (mx + 1.0) * 50.0
-
-            found = match_degree >= threshold
-            degree_int = int(match_degree)
+            match = match_prepared_label(frame, cached)
+            match_degree = match.degree
+            found = matches_threshold(match, threshold)
+            degree_int = match.easycon_degree
 
             if debug:
                 marker = "*" if found else " "

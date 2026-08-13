@@ -28,6 +28,12 @@ debug_ocr/
 screen_record/
 rng/dev/
 .env
+.venv/
+.build/
+local_assets/
+runtime/
+runtime_backend/**/EasyCon2.CLI.exe
+runtime_backend/**/Tessdata/
 launch.log
 
 # DeepSeek TUI local config

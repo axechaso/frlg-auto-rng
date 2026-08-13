@@ -1,0 +1,6 @@
+# Minimal environment for the automatic planner and label compatibility audit.
+# EasyCon 1.6.4a's ezcon.exe performs the real OCR locally with its Tessdata.
+numpy==2.2.6
+opencv-python==4.12.0.88
+pyserial==3.5
+PyYAML==6.0.2
