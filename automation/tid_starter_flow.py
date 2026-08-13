@@ -439,6 +439,7 @@ def validate_tid_starter_flow_runtime(
     warnings = list(base.warnings)
     ezcon_path = Path(ezcon_path).resolve()
     bridge_main = Path(bridge_main).resolve()
+    starter_main = Path(starter_main).resolve()
     if not bridge_main.is_file():
         errors.append(f"找不到研究所桥接脚本: {bridge_main}")
     elif not errors:

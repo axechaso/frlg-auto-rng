@@ -58,7 +58,12 @@ class FlowRunner:
         self.stage_lines: list[str] = []
 
     def output(self, message: str) -> None:
-        print(message, flush=True)
+        try:
+            print(message, flush=True)
+        except UnicodeEncodeError:
+            encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+            safe_message = message.encode(encoding, errors="replace").decode(encoding)
+            print(safe_message, flush=True)
         self.log.write(message + "\n")
         self.log.flush()
 

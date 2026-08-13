@@ -163,7 +163,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
-截至 2026-08-13，现有测试共 83 项，使用项目 `.venv` 全部通过。它们覆盖计划择优、IV 输入、SID 采集请求与反查、御三家最低闪光目标、完整 Ten Lines Seed 时间表和 SID 判定、TID 连续流程三阶段生成/预检/终止标记、Seed 模式、静态目标白名单、路线边界、1.1.8 参数替换、孵蛋参数、TID/SID 1.3.7 日英模板与标签、标签兼容、EasyCon 1.6.4a 预检和 GUI/CLI 识图取整兼容 runner。测试通过不等于 Switch 实机长跑已经验收。
+截至 2026-08-13，现有测试共 84 项，使用项目 `.venv` 全部通过。它们覆盖计划择优、IV 输入、SID 采集请求与反查、御三家最低闪光目标、完整 Ten Lines Seed 时间表和 SID 判定、TID 连续流程三阶段生成/预检/终止标记、Seed 模式、静态目标白名单、路线边界、1.1.8 参数替换、孵蛋参数、TID/SID 1.3.7 日英模板与标签、标签兼容、EasyCon 1.6.4a 预检和 GUI/CLI 识图取整兼容 runner。测试通过不等于 Switch 实机长跑已经验收。
 
 ## 目录结构
 

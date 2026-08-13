@@ -27,6 +27,29 @@ class _FakeProcess:
 
 
 class TidStarterRunnerTests(unittest.TestCase):
+    def test_console_output_falls_back_when_active_code_page_cannot_encode_chinese(self):
+        class Cp1252Stream:
+            encoding = "cp1252"
+
+            def __init__(self):
+                self.text = ""
+
+            def write(self, value):
+                value.encode(self.encoding)
+                self.text += value
+
+            def flush(self):
+                pass
+
+        console = Cp1252Stream()
+        log = io.StringIO()
+        runner = FlowRunner(Path("runner.exe"), port="COM4", video_device=0, log=log)
+        with patch("run_tid_starter_flow.sys.stdout", console):
+            runner.output("第一阶段")
+
+        self.assertIn("????", console.text)
+        self.assertIn("第一阶段", log.getvalue())
+
     def test_existing_118_terminal_messages_drive_sid_retry(self):
         self.assertEqual(classify_starter_output([STARTER_SHINY_MARKER]), "shiny")
         self.assertEqual(classify_starter_output([STARTER_SID_MISS_MARKER]), "sid_miss")

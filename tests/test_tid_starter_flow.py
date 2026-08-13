@@ -91,7 +91,10 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertIn("研究所桥接脚本已通过EasyCon 1.6.4-a格式检查。", result.warnings)
         self.assertIn("1.1.8预检通过", result.warnings)
         format_run.assert_called_once()
-        validate_starter.assert_called_once_with(root / "ezcon.exe", starter_main)
+        validate_starter.assert_called_once_with(
+            (root / "ezcon.exe").resolve(),
+            starter_main.resolve(),
+        )
 
     def test_runtime_validation_rejects_missing_bridge(self):
         with tempfile.TemporaryDirectory() as directory:
