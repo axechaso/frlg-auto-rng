@@ -4,6 +4,7 @@
 import json
 import signal
 import subprocess
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,8 @@ from automation import (
     EasyCon118Options,
     SEED_MODE_CHOICES,
     SearchCancelledError,
+    SID_REVERSE_TEMPLATE_NAME,
+    SIDReverseRunRequest,
     TidRngRequest,
     PLANNER_STATIC_CATEGORIES,
     build_run_command,
@@ -36,6 +39,7 @@ from automation import (
     write_configured_egg_project,
     write_configured_project,
     write_configured_tid_project,
+    write_sid_reverse_project,
 )
 from rng.tenlines_utils import (
     NATURES,
@@ -56,6 +60,8 @@ DEFAULT_SOURCE_118 = IMPORTED_SOURCE_118 if IMPORTED_SOURCE_118.is_dir() else DO
 DEFAULT_EZCON = DEFAULT_EZCON_PATH
 IV_STAT_LABELS = ("HP", "攻击", "防御", "特攻", "特防", "速度")
 IV_PRESETS = ("不限", "6V", "0A", "0S", "0A0S")
+SID_SOURCE_LABELS = ("定点", "野生")
+MODE_TAB_ORDER = ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）")
 
 
 def iv_ranges_for_preset(preset: str) -> tuple[tuple[int, int], ...]:
@@ -115,6 +121,35 @@ def parse_exact_ivs(values, label: str) -> tuple[int, int, int, int, int, int]:
     return tuple(result)  # type: ignore[return-value]
 
 
+def parse_sid_effort_values(value: str, slot: int) -> tuple[int, int, int, int, int, int]:
+    parts = [part.strip() for part in value.split(",")]
+    if len(parts) != 6:
+        raise ValueError(f"队伍第{slot}位努力值必须按 HP,攻击,防御,特攻,特防,速度 填写六项")
+    try:
+        values = tuple(int(part) for part in parts)
+    except ValueError as exc:
+        raise ValueError(f"队伍第{slot}位努力值必须是整数") from exc
+    if any(not 0 <= item <= 255 for item in values):
+        raise ValueError(f"队伍第{slot}位每项努力值必须在0-255之间")
+    if sum(values) > 510:
+        raise ValueError(f"队伍第{slot}位六项努力值总和不能超过510")
+    return values  # type: ignore[return-value]
+
+
+def preferred_detected_port(ports, current: str = "") -> str | None:
+    """Keep a connected selection, otherwise choose the lowest COM number."""
+    normalized = {str(port).strip().upper() for port in ports if str(port).strip()}
+    selected = current.strip().upper()
+    if selected in normalized:
+        return selected
+
+    def sort_key(port: str):
+        suffix = port[3:] if port.startswith("COM") else ""
+        return (0, int(suffix)) if suffix.isdigit() else (1, port)
+
+    return min(normalized, key=sort_key) if normalized else None
+
+
 class AutoRngApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -124,10 +159,14 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request: EggRunRequest | None = None
         self.tid_request: TidRngRequest | None = None
+        self.sid_request: SIDReverseRunRequest | None = None
         self.project_main: Path | None = None
         self.runtime_check = None
         self.process: subprocess.Popen | None = None
         self.search_cancel: threading.Event | None = None
+        self.running_mode: str | None = None
+        self.sid_report_path: Path | None = None
+        self.sid_log_path: Path | None = None
         self.busy = False
         self._updating = False
         self.all_locations = self._load_locations()
@@ -170,15 +209,125 @@ class AutoRngApp:
         self.page_canvas.bind("<Configure>", self._resize_page_content)
         self.root.bind("<MouseWheel>", self._on_page_mousewheel, add="+")
 
-        self.mode_var = tk.StringVar(value="normal")
+        self.mode_var = tk.StringVar(value="sid")
         self.mode_notebook = ttk.Notebook(container)
+        sid_tab = ttk.Frame(self.mode_notebook, padding=6)
+        tid_tab = ttk.Frame(self.mode_notebook, padding=6)
         normal_tab = ttk.Frame(self.mode_notebook, padding=6)
         egg_tab = ttk.Frame(self.mode_notebook, padding=6)
-        tid_tab = ttk.Frame(self.mode_notebook, padding=6)
-        self.mode_notebook.add(normal_tab, text="野生 / 静态")
-        self.mode_notebook.add(egg_tab, text="孵蛋（测试）")
-        self.mode_notebook.add(tid_tab, text="TID / SID")
+        for tab, label in zip(
+            (sid_tab, tid_tab, normal_tab, egg_tab), MODE_TAB_ORDER
+        ):
+            self.mode_notebook.add(tab, text=label)
+        self.tab_modes = {
+            str(sid_tab): "sid",
+            str(tid_tab): "tid",
+            str(normal_tab): "normal",
+            str(egg_tab): "egg",
+        }
         self.mode_notebook.pack(fill="x")
+
+        sid_identity = ttk.LabelFrame(sid_tab, text="1. SID 查找条件", padding=10)
+        sid_identity.pack(fill="x")
+        self.sid_game_var = tk.StringVar(value="火红")
+        self.sid_tid_var = tk.StringVar(value="12345")
+        self.sid_count_var = tk.StringVar(value="2")
+        self.sid_candies_var = tk.StringVar(value="5")
+        self.sid_threshold_var = tk.StringVar(value="85")
+        self.sid_ack_var = tk.BooleanVar(value=False)
+        self._labeled_combo(
+            sid_identity, "游戏", self.sid_game_var, ("火红", "叶绿"), 0, 0
+        )
+        self._labeled_entry(sid_identity, "当前 TID", self.sid_tid_var, 0, 2, width=12)
+        self._labeled_combo(
+            sid_identity,
+            "队内闪光数量",
+            self.sid_count_var,
+            tuple(str(value) for value in range(1, 7)),
+            0,
+            4,
+            width=8,
+        )
+        self._labeled_entry(
+            sid_identity, "每只最多糖果", self.sid_candies_var, 0, 6, width=8
+        )
+        self._labeled_entry(
+            sid_identity, "识图阈值", self.sid_threshold_var, 1, 0, width=8
+        )
+        ttk.Label(
+            sid_identity,
+            text="支持第三世代 Method 1/2/4；闪光公式只能确定 8 个真实 SID 候选，建档链前10000 ADV有命中时再选最早值。",
+        ).grid(row=1, column=2, columnspan=6, sticky="w", padx=4, pady=4)
+        ttk.Checkbutton(
+            sid_identity,
+            text="已确认队伍顺序、来源、努力值准确，且背包第一页第一格是神奇糖果",
+            variable=self.sid_ack_var,
+        ).grid(row=2, column=0, columnspan=8, sticky="w", padx=4, pady=(5, 0))
+
+        sid_party = ttk.LabelFrame(sid_tab, text="2. 队伍闪光宝可梦信息", padding=8)
+        sid_party.pack(fill="x", pady=(8, 0))
+        for column, label in enumerate(
+            ("槽位", "图鉴编号（0=名称OCR）", "来源", "Ten Lines 相遇地点（野生必填）", "努力值 HP,攻,防,特攻,特防,速")
+        ):
+            ttk.Label(sid_party, text=label).grid(row=0, column=column, padx=4, pady=3)
+        sid_party.columnconfigure(3, weight=1)
+        sid_party.columnconfigure(4, weight=1)
+        self.sid_dex_vars = tuple(tk.StringVar(value="0") for _ in range(6))
+        self.sid_source_type_vars = tuple(tk.StringVar(value="定点") for _ in range(6))
+        self.sid_location_vars = tuple(tk.StringVar(value="") for _ in range(6))
+        self.sid_effort_vars = tuple(tk.StringVar(value="0,0,0,0,0,0") for _ in range(6))
+        self.sid_location_map = {}
+        for locations in self.all_locations.values():
+            for location in locations:
+                self.sid_location_map[f"{location_to_zh(location)} ({location})"] = location
+        location_choices = tuple(sorted(self.sid_location_map))
+        for index in range(6):
+            row = index + 1
+            ttk.Label(sid_party, text=str(index + 1)).grid(row=row, column=0, padx=4, pady=2)
+            ttk.Spinbox(
+                sid_party,
+                from_=0,
+                to=386,
+                width=12,
+                textvariable=self.sid_dex_vars[index],
+            ).grid(row=row, column=1, padx=4, pady=2)
+            ttk.Combobox(
+                sid_party,
+                textvariable=self.sid_source_type_vars[index],
+                values=SID_SOURCE_LABELS,
+                width=8,
+                state="readonly",
+            ).grid(row=row, column=2, padx=4, pady=2)
+            ttk.Combobox(
+                sid_party,
+                textvariable=self.sid_location_vars[index],
+                values=location_choices,
+                width=34,
+            ).grid(row=row, column=3, sticky="we", padx=4, pady=2)
+            ttk.Entry(
+                sid_party,
+                textvariable=self.sid_effort_vars[index],
+                width=28,
+            ).grid(row=row, column=4, sticky="we", padx=4, pady=2)
+        ttk.Label(
+            sid_party,
+            text="只处理队伍前 N 位；昵称导致名称 OCR 失败时填写全国图鉴编号。孵蛋来源与非 Method 1/2/4 个体暂不支持。",
+        ).grid(row=7, column=0, columnspan=5, sticky="w", padx=4, pady=(5, 0))
+
+        sid_source = ttk.LabelFrame(sid_tab, text="3. SID 采集脚本包", padding=8)
+        sid_source.pack(fill="x", pady=(8, 0))
+        downloaded_sid_source = (
+            DOWNLOADED_SOURCE_118
+            if (DOWNLOADED_SOURCE_118 / SID_REVERSE_TEMPLATE_NAME).is_file()
+            else DEFAULT_SOURCE_118
+        )
+        self.sid_source_var = tk.StringVar(value=str(downloaded_sid_source))
+        self._labeled_entry(
+            sid_source, "1.1.8 包", self.sid_source_var, 0, 0, width=70, span=5
+        )
+        ttk.Button(sid_source, text="选择", command=self.choose_sid_source).grid(
+            row=0, column=6, padx=4
+        )
 
         identity = ttk.LabelFrame(normal_tab, text="1. 乱数条件", padding=10)
         identity.pack(fill="x")
@@ -540,6 +689,7 @@ class AutoRngApp:
         self.result_text.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         self.mode_notebook.bind("<<NotebookTabChanged>>", self._on_mode_tab_change)
+        self._on_mode_tab_change()
 
     def _update_page_scrollregion(self, _event=None):
         self.page_canvas.configure(scrollregion=self.page_canvas.bbox("all"))
@@ -592,7 +742,7 @@ class AutoRngApp:
             self.max_adv_var, self.shiny_var, self.nature_var,
             self.gender_var, self.ability_var, self.hidden_type_var, self.seed_mode_var,
             self.auto_capture_var, self.paralysis_var, self.false_swipe_var,
-            self.source_var, self.ezcon_var, self.port_var, self.video_var,
+            self.source_var, self.ezcon_var,
             self.egg_seed_var, self.egg_held_var, self.egg_pickup_var,
             self.egg_seed_mode_var, self.egg_pokemon_var, self.egg_compatibility_var,
             self.egg_parent_a_gender_var, self.egg_parent_b_gender_var,
@@ -615,6 +765,10 @@ class AutoRngApp:
             self.tid_single_digit_var, self.tid_f2_candidate_var,
             self.tid_f1_candidate_var, self.tid_denoise_hit_var,
             self.tid_denoise_window_var, self.tid_threshold_var, self.tid_source_var,
+            self.sid_game_var, self.sid_tid_var, self.sid_count_var,
+            self.sid_candies_var, self.sid_threshold_var, self.sid_ack_var,
+            *self.sid_dex_vars, *self.sid_source_type_vars,
+            *self.sid_location_vars, *self.sid_effort_vars, self.sid_source_var,
         )
         for variable in self.tracked_variables:
             variable.trace_add("write", self.invalidate_plan)
@@ -654,6 +808,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.sid_request = None
         self.project_main = None
         self.runtime_check = None
         self.start_button.configure(state="disabled")
@@ -739,23 +894,29 @@ class AutoRngApp:
     def _is_tid_mode(self):
         return self.mode_var.get() == "tid"
 
+    def _is_sid_mode(self):
+        return self.mode_var.get() == "sid"
+
     def _on_mode_tab_change(self, _event=None):
-        tab_index = self.mode_notebook.index("current")
-        mode = "egg" if tab_index == 1 else "tid" if tab_index == 2 else "normal"
+        mode = self.tab_modes.get(self.mode_notebook.select(), "normal")
         if self.mode_var.get() != mode:
             self.mode_var.set(mode)
         is_egg = mode == "egg"
         is_tid = mode == "tid"
+        is_sid = mode == "sid"
         self.search_button.configure(
             text=(
-                "生成孵蛋测试脚本" if is_egg
+                "准备 SID 查找" if is_sid
+                else "生成孵蛋测试脚本" if is_egg
                 else "生成 TID/SID 脚本" if is_tid
                 else "搜索并生成方案"
             )
         )
         if not self.busy:
             self.status_var.set(
-                "填写孵蛋参数后点击“生成孵蛋测试脚本”。"
+                "填写 SID 查找条件后点击“准备 SID 查找”。"
+                if is_sid
+                else "填写孵蛋参数后点击“生成孵蛋测试脚本”。"
                 if is_egg
                 else "填写 TID/SID 参数后点击“生成 TID/SID 脚本”。"
                 if is_tid
@@ -971,6 +1132,40 @@ class AutoRngApp:
         request.validate(template_path.read_text(encoding="utf-8"))
         return request
 
+    def collect_sid_request(self) -> SIDReverseRunRequest:
+        if not self.sid_ack_var.get():
+            raise ValueError("请先确认队伍顺序、来源、努力值和神奇糖果位置")
+        party_count = int(self.sid_count_var.get())
+        dex_overrides = tuple(int(variable.get()) for variable in self.sid_dex_vars)
+        source_types = tuple(
+            0 if variable.get() == "定点" else 1
+            for variable in self.sid_source_type_vars
+        )
+        locations = tuple(
+            self.sid_location_map.get(variable.get(), variable.get().strip())
+            for variable in self.sid_location_vars
+        )
+        effort_values = tuple(
+            parse_sid_effort_values(variable.get(), index + 1)
+            for index, variable in enumerate(self.sid_effort_vars)
+        )
+        request = SIDReverseRunRequest(
+            tid=int(self.sid_tid_var.get()),
+            party_count=party_count,
+            max_candies=int(self.sid_candies_var.get()),
+            recognition_threshold=int(self.sid_threshold_var.get()),
+            dex_overrides=dex_overrides,  # type: ignore[arg-type]
+            source_types=source_types,  # type: ignore[arg-type]
+            locations=locations,  # type: ignore[arg-type]
+            effort_values=effort_values,  # type: ignore[arg-type]
+        )
+        source_path = Path(self.sid_source_var.get())
+        template_path = source_path / SID_REVERSE_TEMPLATE_NAME
+        if not template_path.is_file():
+            raise FileNotFoundError(f"找不到 SID 采集模板：{template_path}")
+        request.validate()
+        return request
+
     def set_result(self, text):
         self.result_text.configure(state="normal")
         self.result_text.delete("1.0", "end")
@@ -992,7 +1187,7 @@ class AutoRngApp:
         can_start = bool(
             not self.busy
             and not process_running
-            and (normal_can_start or self.egg_request or self.tid_request)
+            and (normal_can_start or self.egg_request or self.tid_request or self.sid_request)
             and self.project_main
             and self.runtime_check
             and self.runtime_check.ok
@@ -1006,6 +1201,10 @@ class AutoRngApp:
             messagebox.showerror("正在运行", "请先停止当前 EasyCon 进程，再生成新方案。")
             return
         try:
+            if self._is_sid_mode():
+                sid_request = self.collect_sid_request()
+                self.generate_sid_project(sid_request)
+                return
             if self._is_egg_mode():
                 egg_request = self.collect_egg_request()
                 self.generate_egg_project(egg_request)
@@ -1030,6 +1229,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.sid_request = None
         self.project_main = None
         self.runtime_check = None
         self.set_busy(True, "正在从最高 IV 总和向下搜索……")
@@ -1079,6 +1279,70 @@ class AutoRngApp:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def generate_sid_project(self, request: SIDReverseRunRequest):
+        source_path = Path(self.sid_source_var.get())
+        ezcon_path = Path(self.ezcon_var.get())
+        input_fingerprint = self.input_fingerprint()
+        self.plan_result = None
+        self.egg_request = None
+        self.tid_request = None
+        self.sid_request = None
+        self.project_main = None
+        self.runtime_check = None
+        self.set_busy(True, "正在生成 SID 采集脚本并执行 1.6.4-a 预检……")
+        self.set_result("正在校验 SID 采集模板、识图标签和 EasyCon 1.6.4-a。")
+
+        def worker():
+            try:
+                output = ROOT / "runtime" / "sid_reverse"
+                project_main = write_sid_reverse_project(source_path, output, request)
+                check = validate_runtime(ezcon_path, project_main)
+                self.root.after(
+                    0,
+                    lambda: self.finish_sid_generation(
+                        request, project_main, check, input_fingerprint
+                    ),
+                )
+            except Exception as exc:
+                self.root.after(0, lambda error=exc: self.fail_search(error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_sid_generation(
+        self, request, project_main, check, input_fingerprint
+    ):
+        if input_fingerprint != self.input_fingerprint():
+            self.fail_search(ValueError("生成期间输入发生变化，请按当前 SID 条件重新准备。"))
+            return
+        self.plan_result = None
+        self.egg_request = None
+        self.tid_request = None
+        self.sid_request = request
+        self.project_main = project_main
+        self.runtime_check = check
+        active_slots = range(request.party_count)
+        lines = [
+            "SID 查找：EasyCon 逐只采集 + Python Method 1/2/4 反查",
+            f"游戏：{'火红' if self.sid_game_var.get() == '火红' else '叶绿'}",
+            f"TID：{request.tid:05d}；队内闪光数量：{request.party_count}",
+            f"每只最多糖果：{request.max_candies}；识图阈值：{request.recognition_threshold}",
+            "图鉴覆盖：" + ", ".join(str(request.dex_overrides[index]) for index in active_slots),
+            "来源：" + ", ".join(
+                "野生" if request.source_types[index] else "定点"
+                for index in active_slots
+            ),
+            f"生成脚本：{project_main}",
+        ]
+        if check.ok:
+            lines.extend(f"预检提示：{warning}" for warning in check.warnings)
+            lines.append("点击“开始运行”后会逐只采集；PSV 唯一时自动提前停止并生成报告。")
+            status = "SID 采集脚本已准备，可以开始查找。"
+        else:
+            lines.extend(f"预检失败：{error}" for error in check.errors)
+            status = "SID 采集脚本已生成，但预检不允许启动。"
+        self.set_result("\n".join(lines))
+        self.set_busy(False, status)
+
     def generate_tid_project(self, request: TidRngRequest):
         source_path = Path(self.tid_source_var.get())
         ezcon_path = Path(self.ezcon_var.get())
@@ -1086,6 +1350,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.sid_request = None
         self.project_main = None
         self.runtime_check = None
         self.set_busy(True, "正在生成 TID/SID 1.3.7 脚本并执行 1.6.4-a 预检……")
@@ -1125,6 +1390,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = request
+        self.sid_request = None
         self.project_main = project_main
         self.runtime_check = check
         mode_name = "乱数模式" if request.mode == 1 else "穷举模式"
@@ -1158,6 +1424,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.sid_request = None
         self.project_main = None
         self.runtime_check = None
         self.set_busy(True, "正在生成孵蛋测试脚本并执行 1.6.4a 预检……")
@@ -1194,6 +1461,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = request
         self.tid_request = None
+        self.sid_request = None
         self.project_main = project_main
         self.runtime_check = check
         pokemon = get_species_name(request.species_id)
@@ -1234,6 +1502,7 @@ class AutoRngApp:
         self.plan_result = result
         self.egg_request = None
         self.tid_request = None
+        self.sid_request = None
         self.project_main = project_main
         self.runtime_check = check
         plan = result.plan
@@ -1277,6 +1546,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.sid_request = None
         self.project_main = None
         self.runtime_check = None
         self.start_button.configure(state="disabled")
@@ -1303,27 +1573,41 @@ class AutoRngApp:
         if not ezcon.is_file():
             messagebox.showerror("找不到程序", f"找不到 {ezcon}")
             return
+        current_port = self.port_var.get()
         self.set_busy(True, "正在读取端口和采集设备……")
 
         def worker():
             try:
-                _, _, output = probe_easycon_devices(ezcon)
-                self.root.after(0, lambda: self.finish_device_check(output))
+                ports, _, output = probe_easycon_devices(ezcon)
+                selected_port = preferred_detected_port(ports, current_port)
+                self.root.after(
+                    0,
+                    lambda: self.finish_device_check(output, selected_port),
+                )
             except Exception as exc:
                 self.root.after(0, lambda error=exc: self.fail_device_check(error))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def finish_device_check(self, output):
+    def finish_device_check(self, output, selected_port):
+        if selected_port:
+            self.port_var.set(selected_port)
+            output = f"已自动填写串口：{selected_port}\n\n{output}"
+            status = f"设备检测完成，串口已填写为 {selected_port}。"
+        else:
+            output = "没有检测到可用串口。\n\n" + output
+            status = "设备检测完成，但没有发现可用串口。"
         self.set_result(output)
-        self.set_busy(False, "设备检测完成。")
+        self.set_busy(False, status)
 
     def fail_device_check(self, error):
         self.set_result(f"设备检测失败：{error}")
         self.set_busy(False, "设备检测失败，现有乱数方案未被清除。")
 
     def start_run(self):
-        if not (self.plan_result or self.egg_request or self.tid_request) or not self.project_main:
+        if not (
+            self.plan_result or self.egg_request or self.tid_request or self.sid_request
+        ) or not self.project_main:
             return
         try:
             video_device = int(self.video_var.get())
@@ -1363,7 +1647,14 @@ class AutoRngApp:
             messagebox.showerror("预检失败", "\n".join(check.errors))
             self.start_button.configure(state="disabled")
             return
-        if self.tid_request is not None:
+        if self.sid_request is not None:
+            confirmation = (
+                "将逐只启动 SID 采集脚本，并在每只结束后由 Python 反查 PID/PSV。\n"
+                f"TID {self.sid_request.tid:05d} / "
+                f"队伍前 {self.sid_request.party_count} 只闪光宝可梦\n"
+                "每只都会从当前存档重新开始；确认队伍顺序、来源、努力值和神奇糖果位置均正确，是否继续？"
+            )
+        elif self.tid_request is not None:
             confirmation = (
                 "将启动 TID/SID 1.3.7 脚本并控制游戏新建存档。\n"
                 f"{self.tid_request.language}版 / "
@@ -1390,29 +1681,66 @@ class AutoRngApp:
             confirmation,
         ):
             return
-        try:
-            runner_path = prepare_compat_runner(Path(self.ezcon_var.get()))
-        except (OSError, ValueError, RuntimeError) as exc:
-            messagebox.showerror("启动后端检查失败", str(exc))
-            return
-        command = build_run_command(
-            runner_path,
-            self.project_main,
-            port=selected_port,
-            video_device=video_device,
-            video_type="DSHOW",
-        )
+        if self.sid_request is not None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = self.project_main.parent
+            self.sid_log_path = output_dir / f"sid-reverse-{timestamp}.log"
+            self.sid_report_path = output_dir / f"sid-reverse-{timestamp}.txt"
+            command = [
+                sys.executable,
+                str(ROOT / "run_sid_reverse_capture.py"),
+                "--request-json",
+                str(output_dir / "plan.json"),
+                "--game",
+                "fr_nx" if self.sid_game_var.get() == "火红" else "lg_nx",
+                "--source",
+                self.sid_source_var.get(),
+                "--ezcon",
+                self.ezcon_var.get(),
+                "--output",
+                str(output_dir),
+                "--port",
+                selected_port,
+                "--video",
+                str(video_device),
+                "--log-path",
+                str(self.sid_log_path),
+                "--report-path",
+                str(self.sid_report_path),
+            ]
+            command_cwd = ROOT
+            self.running_mode = "sid"
+        else:
+            try:
+                runner_path = prepare_compat_runner(Path(self.ezcon_var.get()))
+            except (OSError, ValueError, RuntimeError) as exc:
+                messagebox.showerror("启动后端检查失败", str(exc))
+                return
+            command = build_run_command(
+                runner_path,
+                self.project_main,
+                port=selected_port,
+                video_device=video_device,
+                video_type="DSHOW",
+            )
+            command_cwd = self.project_main.parent
+            self.running_mode = "easycon"
         flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         try:
-            self.process = subprocess.Popen(command, cwd=str(self.project_main.parent), creationflags=flags)
+            self.process = subprocess.Popen(command, cwd=str(command_cwd), creationflags=flags)
         except OSError as exc:
+            self.running_mode = None
             messagebox.showerror("启动失败", str(exc))
             return
         self.start_button.configure(state="disabled")
         self.search_button.configure(state="disabled")
         self.device_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
-        self.status_var.set("EasyCon 正在运行；详细日志见新打开的终端。")
+        self.status_var.set(
+            "SID 正在逐只采集；详细日志见新打开的终端。"
+            if self.running_mode == "sid"
+            else "EasyCon 正在运行；详细日志见新打开的终端。"
+        )
         self.root.after(1000, self.poll_process)
 
     def poll_process(self):
@@ -1422,12 +1750,24 @@ class AutoRngApp:
         if code is None:
             self.root.after(1000, self.poll_process)
             return
+        completed_mode = self.running_mode
+        report_path = self.sid_report_path
+        log_path = self.sid_log_path
         self.process = None
+        self.running_mode = None
         self.stop_button.configure(state="disabled")
         self.search_button.configure(state="normal")
         self.device_button.configure(state="normal")
         self._refresh_start_button()
-        self.status_var.set(f"EasyCon 已退出，退出码 {code}。")
+        if completed_mode == "sid":
+            if code == 0 and report_path is not None and report_path.is_file():
+                self.set_result(report_path.read_text(encoding="utf-8"))
+                self.status_var.set(f"SID 查找完成，报告已保存：{report_path}")
+            else:
+                detail = f"；日志：{log_path}" if log_path is not None else ""
+                self.status_var.set(f"SID 查找已退出，退出码 {code}{detail}")
+        else:
+            self.status_var.set(f"EasyCon 已退出，退出码 {code}。")
 
     def stop_run(self):
         if self.process is None or self.process.poll() is not None:
@@ -1474,6 +1814,13 @@ class AutoRngApp:
         )
         if path:
             self.tid_source_var.set(path)
+
+    def choose_sid_source(self):
+        path = filedialog.askdirectory(
+            initialdir=self.sid_source_var.get() or str(DOWNLOADED_SOURCE_118)
+        )
+        if path:
+            self.sid_source_var.set(path)
 
     def on_close(self):
         if self.busy:

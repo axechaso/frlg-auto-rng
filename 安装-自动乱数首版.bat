@@ -37,7 +37,7 @@ if errorlevel 1 goto error
 ".venv\Scripts\python.exe" -c "import cv2,numpy; import rng.tenlines_utils; import automation"
 if errorlevel 1 goto error
 
-if exist "local_assets\easycon118\ImgLabel" goto audit_assets
+if exist "local_assets\easycon118\ImgLabel" if exist "local_assets\easycon118\NS火叶SID反查-采集测试.ecs" goto audit_assets
 ".venv\Scripts\python.exe" tools\import_easycon118.py
 if errorlevel 1 goto error
 goto assets_ready

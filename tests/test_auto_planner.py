@@ -284,11 +284,11 @@ class CompatibilityTests(unittest.TestCase):
     @unittest.skipUnless(LABEL_DIR.is_dir(), "local 1.1.8 label package is not present")
     def test_real_118_label_manifest(self):
         manifest = inspect_label_corpus(self.LABEL_DIR)
-        self.assertEqual(manifest["count"], 871)
-        self.assertEqual(manifest["methods"], {1: 15, 5: 502, 14: 354})
+        self.assertEqual(manifest["count"], 1148)
+        self.assertEqual(manifest["methods"], {1: 17, 3: 1, 5: 775, 11: 1, 14: 354})
         self.assertEqual(
             manifest["sha256"],
-            "934060b2bf40ac30b461bcf59fddcb375eeaceae75a809ec294920cc7d6fe0b8",
+            "696e758e16eff255ffc4d78c87115d445c90537636bb059de2ac796993494bad",
         )
 
     @unittest.skipUnless(LABEL_DIR.is_dir(), "local 1.1.8 package is not present")
@@ -297,7 +297,7 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(manifest["count"], 33)
         self.assertEqual(
             manifest["sha256"],
-            "bc0845d23f47805b1c6f46cd861deb69c01c7605a72d92ad7e00f538cee6f52e",
+            "1ffa4db222405231276179fa7f2be277d71759ed9455a80be8cddc5b9c118625",
         )
         self.assertEqual(
             manifest["templates"],

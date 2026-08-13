@@ -30,6 +30,7 @@ rng/dev/
 .env
 .venv/
 .build/
+.tools/
 local_assets/
 runtime/
 runtime_backend/**/EasyCon2.CLI.exe

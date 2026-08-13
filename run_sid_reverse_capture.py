@@ -1,0 +1,375 @@
+"""Run the EasyCon SID collector one party slot at a time and analyze it."""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime
+import json
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+from automation.easycon118 import (
+    DEFAULT_EZCON_PATH,
+    build_run_command,
+    prepare_compat_runner,
+    probe_easycon_devices,
+    validate_runtime,
+)
+from automation.sid_reverse118 import SIDReverseRunRequest, write_sid_reverse_project
+from rng.sid_reverse_workflow import (
+    analyze_shiny_team,
+    parse_sid_reverse_log,
+    resolve_wild_location,
+)
+from run_sid_reverse import build_report
+
+
+DEFAULT_SOURCE = Path.home() / "Downloads" / "NS火叶全自动一键乱数1.1.8"
+DEFAULT_OUTPUT = Path(__file__).resolve().parent / "runtime" / "sid_reverse"
+ZERO_EVS = (0, 0, 0, 0, 0, 0)
+
+
+def load_sid_reverse_request(path: Path) -> SIDReverseRunRequest:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    values = payload.get("request", payload)
+    try:
+        request = SIDReverseRunRequest(
+            tid=int(values["tid"]),
+            party_count=int(values["party_count"]),
+            start_slot=int(values.get("start_slot", 1)),
+            max_candies=int(values.get("max_candies", 5)),
+            recognition_threshold=int(values.get("recognition_threshold", 85)),
+            dex_overrides=tuple(int(item) for item in values.get("dex_overrides", (0,) * 6)),
+            source_types=tuple(int(item) for item in values.get("source_types", (0,) * 6)),
+            locations=tuple(str(item) for item in values.get("locations", ("",) * 6)),
+            effort_values=tuple(
+                tuple(int(item) for item in slot)
+                for slot in values.get("effort_values", (ZERO_EVS,) * 6)
+            ),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"无效的 SID 查找请求文件: {path}") from exc
+    request.validate()
+    return request
+
+
+def _ask_int(prompt: str, minimum: int, maximum: int) -> int:
+    while True:
+        try:
+            value = int(input(prompt).strip())
+        except ValueError:
+            print("请输入整数。")
+            continue
+        if minimum <= value <= maximum:
+            return value
+        print(f"请输入{minimum}-{maximum}。")
+
+
+def _parse_dex_overrides(value: str | None) -> tuple[int, int, int, int, int, int]:
+    if not value:
+        return (0, 0, 0, 0, 0, 0)
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    if len(parts) > 6:
+        raise ValueError("--dex最多填写6个逗号分隔的图鉴编号")
+    values = [int(part) for part in parts]
+    values.extend([0] * (6 - len(values)))
+    result = tuple(values)
+    if any(not 0 <= item <= 386 for item in result):
+        raise ValueError("--dex仅支持0或1-386")
+    return result  # type: ignore[return-value]
+
+
+def _parse_source(value: str) -> int:
+    normalized = value.strip().lower()
+    if normalized in ("0", "1", "static", "定点"):
+        return 0
+    if normalized in ("2", "wild", "野生"):
+        return 1
+    raise ValueError("来源只能填写1/定点/static或2/野生/wild")
+
+
+def _parse_effort_row(value: str) -> tuple[int, int, int, int, int, int]:
+    if not value.strip():
+        return ZERO_EVS
+    parts = [part for part in re.split(r"[/,\s]+", value.strip()) if part]
+    if len(parts) != 6:
+        raise ValueError("努力值必须按HP/ATK/DEF/SPA/SPD/SPE填写6项")
+    result = tuple(int(part) for part in parts)
+    if any(not 0 <= item <= 255 for item in result):
+        raise ValueError("每项努力值必须在0-255之间")
+    if sum(result) > 510:
+        raise ValueError("六项努力值总和不能超过510")
+    return result  # type: ignore[return-value]
+
+
+def _collect_origins(
+    count: int,
+    game: str,
+    *,
+    sources_arg: str | None,
+    locations_arg: str | None,
+    evs_arg: str | None,
+) -> tuple[
+    tuple[int, int, int, int, int, int],
+    tuple[str, str, str, str, str, str],
+    tuple[
+        tuple[int, int, int, int, int, int],
+        tuple[int, int, int, int, int, int],
+        tuple[int, int, int, int, int, int],
+        tuple[int, int, int, int, int, int],
+        tuple[int, int, int, int, int, int],
+        tuple[int, int, int, int, int, int],
+    ],
+]:
+    if sources_arg is not None:
+        source_parts = [part.strip() for part in sources_arg.split(",")]
+        if len(source_parts) != count:
+            raise ValueError("--sources项数必须等于队内闪光数量")
+        source_types = [_parse_source(part) for part in source_parts]
+    else:
+        source_types = []
+        for slot in range(1, count + 1):
+            while True:
+                try:
+                    source_types.append(
+                        _parse_source(input(f"队伍第{slot}位来源 (1=定点, 2=野生): "))
+                    )
+                    break
+                except ValueError as exc:
+                    print(exc)
+
+    location_parts = locations_arg.split(";") if locations_arg is not None else None
+    if location_parts is not None and len(location_parts) != count:
+        raise ValueError("--locations项数必须等于队内闪光数量，以分号分隔；定点项留空")
+    locations: list[str] = []
+    for index, source_type in enumerate(source_types):
+        raw_location = location_parts[index].strip() if location_parts is not None else ""
+        if source_type == 1:
+            while True:
+                if not raw_location:
+                    raw_location = input(
+                        f"队伍第{index + 1}位相遇地点 (TenLines中/英文地点名): "
+                    ).strip()
+                try:
+                    locations.append(resolve_wild_location(raw_location, game))
+                    break
+                except ValueError as exc:
+                    if locations_arg is not None:
+                        raise
+                    print(exc)
+                    raw_location = ""
+        else:
+            locations.append("")
+
+    effort_parts = evs_arg.split(";") if evs_arg is not None else None
+    if effort_parts is not None and len(effort_parts) != count:
+        raise ValueError("--evs项数必须等于队内闪光数量，以分号分隔")
+    efforts: list[tuple[int, int, int, int, int, int]] = []
+    for index in range(count):
+        if effort_parts is not None:
+            efforts.append(_parse_effort_row(effort_parts[index]))
+            continue
+        while True:
+            raw = input(
+                f"队伍第{index + 1}位努力值 HP/ATK/DEF/SPA/SPD/SPE "
+                "(无努力值直接回车): "
+            )
+            try:
+                efforts.append(_parse_effort_row(raw))
+                break
+            except ValueError as exc:
+                print(exc)
+
+    source_types.extend([0] * (6 - count))
+    locations.extend([""] * (6 - count))
+    efforts.extend([ZERO_EVS] * (6 - count))
+    return (
+        tuple(source_types),  # type: ignore[return-value]
+        tuple(locations),  # type: ignore[return-value]
+        tuple(efforts),  # type: ignore[return-value]
+    )
+
+
+def _select_device(
+    ports: set[str], videos: set[int], port: str | None, video: int | None
+) -> tuple[str, int]:
+    selected_port = port.upper() if port else None
+    if selected_port is None:
+        if len(ports) == 1:
+            selected_port = next(iter(ports))
+        else:
+            selected_port = input(f"串口{sorted(ports)}: ").strip().upper()
+    selected_video = video
+    if selected_video is None:
+        if len(videos) == 1:
+            selected_video = next(iter(videos))
+        else:
+            selected_video = _ask_int(f"采集卡序号{sorted(videos)}: ", 0, 99)
+    if selected_port not in ports:
+        raise ValueError(f"未检测到串口{selected_port}")
+    if selected_video not in videos:
+        raise ValueError(f"未检测到采集卡序号{selected_video}")
+    return selected_port, selected_video
+
+
+def _run_easycon(command: list[str], cwd: Path) -> tuple[int, str]:
+    process = subprocess.Popen(
+        command,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    lines: list[str] = []
+    assert process.stdout is not None
+    try:
+        for line in process.stdout:
+            print(line, end="")
+            lines.append(line)
+    except KeyboardInterrupt:
+        process.terminate()
+        raise
+    return process.wait(), "".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="EasyCon 1.6.4-a Gen 3 SID reverse")
+    parser.add_argument("--tid", type=int)
+    parser.add_argument("--count", type=int)
+    parser.add_argument("--candies", type=int, default=5)
+    parser.add_argument("--threshold", type=int, default=85)
+    parser.add_argument("--dex", help="party slots 1-6 Dex overrides, comma-separated; 0=OCR")
+    parser.add_argument("--game", choices=("fr_nx", "lg_nx"))
+    parser.add_argument(
+        "--sources",
+        help="one source per Pokemon, comma-separated: static/wild",
+    )
+    parser.add_argument(
+        "--locations",
+        help="one TenLines location per Pokemon, semicolon-separated; static entries empty",
+    )
+    parser.add_argument(
+        "--evs",
+        help="six EVs per Pokemon separated by '/', Pokemon separated by ';'",
+    )
+    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
+    parser.add_argument("--ezcon", type=Path, default=DEFAULT_EZCON_PATH)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--port")
+    parser.add_argument("--video", type=int)
+    parser.add_argument("--request-json", type=Path, help="GUI 生成的 SID plan.json")
+    parser.add_argument("--log-path", type=Path)
+    parser.add_argument("--report-path", type=Path)
+    args = parser.parse_args(argv)
+
+    try:
+        game = args.game
+        if args.request_json is not None:
+            base_request = load_sid_reverse_request(args.request_json)
+            if game is None:
+                raise ValueError("使用 --request-json 时必须同时指定 --game")
+        else:
+            tid = args.tid if args.tid is not None else _ask_int("TID (0-65535): ", 0, 65535)
+            count = args.count if args.count is not None else _ask_int("队内闪光宝可梦数量 (1-6): ", 1, 6)
+            if game is None:
+                game = "fr_nx" if _ask_int("游戏版本 (1=火红, 2=叶绿): ", 1, 2) == 1 else "lg_nx"
+            overrides = _parse_dex_overrides(args.dex)
+            source_types, locations, effort_values = _collect_origins(
+                count,
+                game,
+                sources_arg=args.sources,
+                locations_arg=args.locations,
+                evs_arg=args.evs,
+            )
+            base_request = SIDReverseRunRequest(
+                tid=tid,
+                party_count=count,
+                max_candies=args.candies,
+                recognition_threshold=args.threshold,
+                dex_overrides=overrides,
+                source_types=source_types,
+                locations=locations,
+                effort_values=effort_values,
+            )
+        base_request.validate()
+        tid = base_request.tid
+        count = base_request.party_count
+        ports, videos, device_output = probe_easycon_devices(args.ezcon)
+        print(device_output)
+        port, video = _select_device(ports, videos, args.port, args.video)
+        runner = prepare_compat_runner(args.ezcon)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"SID反查启动失败: {exc}", file=sys.stderr)
+        return 1
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_path = args.log_path or args.output / f"sid-reverse-{timestamp}.log"
+    report_path = args.report_path or args.output / f"sid-reverse-{timestamp}.txt"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    all_output: list[str] = []
+    try:
+        for slot in range(1, count + 1):
+            print(f"\n=== 采集队伍第{slot}位 ===")
+            request = SIDReverseRunRequest(
+                tid=tid,
+                party_count=1,
+                start_slot=slot,
+                max_candies=base_request.max_candies,
+                recognition_threshold=base_request.recognition_threshold,
+                dex_overrides=base_request.dex_overrides,
+                source_types=base_request.source_types,
+                locations=base_request.locations,
+                effort_values=base_request.effort_values,
+            )
+            main_path = write_sid_reverse_project(
+                args.source,
+                args.output,
+                request,
+                copy_assets=slot == 1,
+            )
+            check = validate_runtime(args.ezcon, main_path)
+            if not check.ok:
+                raise RuntimeError("\n".join(check.errors))
+            command = build_run_command(
+                runner,
+                main_path,
+                port=port,
+                video_device=video,
+                video_type="DSHOW",
+            )
+            code, output = _run_easycon(command, main_path.parent)
+            all_output.append(output)
+            log_path.write_text("".join(all_output), encoding="utf-8")
+            if code != 0 or "SIDREV|ERROR|" in output:
+                raise RuntimeError(f"队伍第{slot}位采集失败，EasyCon退出码{code}")
+
+            _, observations = parse_sid_reverse_log("".join(all_output))
+            partial = analyze_shiny_team(tid, observations, game=game)
+            if not partial.result.common_psvs:
+                raise RuntimeError("当前宝可梦之间没有共同PSV，请检查OCR、努力值和来源方法")
+            if partial.result.psv_is_unique:
+                print("PSV已经唯一，不再采集后续队伍槽位。")
+                break
+
+        report = build_report("".join(all_output), tid_override=tid, game=game)
+        report_path.write_text(report, encoding="utf-8")
+        print("\n" + report)
+        print(f"\n完整日志: {log_path}")
+        print(f"结果报告: {report_path}")
+    except (KeyboardInterrupt, OSError, RuntimeError, ValueError) as exc:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("".join(all_output), encoding="utf-8")
+        print(f"SID反查失败: {exc}", file=sys.stderr)
+        print(f"已保留日志: {log_path}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

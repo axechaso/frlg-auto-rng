@@ -485,6 +485,8 @@ HELD_BUTTON_OFFSETS = {
     "lg_mgba": [('a', "none", 0), ('h', "none", 0), ('r', "none", 0)],
     "fr_nx":   [('a', "none", 0), ('h', "none", 0), ('h', "blackout_r", -36), ('h', "blackout_l", -36), ('r', "none", 0)],
     "lg_nx":   [('a', "none", 0), ('h', "none", 0), ('h', "blackout_r", -36), ('h', "blackout_l", -36), ('r', "none", 0)],
+    "fr_jpn_nx": [('h', "none", 0)],
+    "lg_jpn_nx": [('h', "none", 0)],
     "fr_nx2":  [('a', "none", 0), ('h', "none", 0), ('h', "blackout_r", -36), ('h', "blackout_l", -36), ('r', "none", 0)],
     "lg_nx2":  [('a', "none", 0), ('h', "none", 0), ('h', "blackout_r", -36), ('h', "blackout_l", -36), ('r', "none", 0)],
 }
@@ -566,6 +568,7 @@ def load_frlg_seed_data(game: str = "fr_nx", refresh: bool = False):
         "lg": "lg_eng.bin", "lg_eu": "lg_eng.bin", "lg_nx": "lg_eng_nx.bin",
         "fr_jpn_1_0": "fr_jpn_1_0.bin", "fr_jpn_1_1": "fr_jpn_1_1.bin",
         "lg_jpn": "lg_jpn.bin", "fr_mgba": "fr_eng_mgba.bin", "lg_mgba": "lg_eng_mgba.bin",
+        "fr_jpn_nx": "fr_jpn_nx.bin", "lg_jpn_nx": "lg_jpn_nx.bin",
         "fr_nx2": "fr_eng_nx.bin", "lg_nx2": "lg_eng_nx.bin",
     }
     if game not in seed_files:

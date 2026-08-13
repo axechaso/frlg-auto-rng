@@ -63,6 +63,18 @@ from .tid_rng137 import (
     validate_tid_runtime,
     write_configured_tid_project,
 )
+from .tid_starter_flow import (
+    TidStarterFlowPlan,
+    TidStarterFlowRequest,
+    build_tid_starter_flow_plan,
+    render_lab_bridge_ecs,
+    write_tid_starter_flow_bundle,
+)
+from .sid_reverse118 import (
+    SID_REVERSE_TEMPLATE_NAME,
+    SIDReverseRunRequest,
+    write_sid_reverse_project,
+)
 
 __all__ = [
     "AutoSearchRequest",
@@ -80,7 +92,14 @@ __all__ = [
     "EXPECTED_TID_SCRIPT_SHA256",
     "STANDARD_TEMPLATE_NAME",
     "TID_SCRIPT_NAMES",
+    "TidStarterFlowPlan",
+    "TidStarterFlowRequest",
+    "build_tid_starter_flow_plan",
+    "render_lab_bridge_ecs",
+    "write_tid_starter_flow_bundle",
     "TidRngRequest",
+    "SID_REVERSE_TEMPLATE_NAME",
+    "SIDReverseRunRequest",
     "EggRunRequest",
     "EasyCon118Options",
     "EasyConRuntimeCheck",
@@ -120,4 +139,5 @@ __all__ = [
     "write_configured_egg_project",
     "write_configured_project",
     "write_configured_tid_project",
+    "write_sid_reverse_project",
 ]

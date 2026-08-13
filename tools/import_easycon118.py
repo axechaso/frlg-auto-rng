@@ -20,6 +20,7 @@ from automation.easycon118 import (  # noqa: E402
     inspect_label_corpus,
     inspect_script_corpus,
 )
+from automation.sid_reverse118 import SID_REVERSE_TEMPLATE_NAME  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,9 +48,11 @@ def import_package(source: Path, destination: Path) -> Path:
     if script_manifest["sha256"] != EXPECTED_SCRIPT_SHA256:
         raise ValueError(f"主脚本/lib 指纹不匹配: {script_manifest['sha256']}")
 
-    templates = [source / name for name in EXPECTED_TEMPLATE_NAMES]
+    templates = [
+        source / name for name in (*EXPECTED_TEMPLATE_NAMES, SID_REVERSE_TEMPLATE_NAME)
+    ]
     if any(not path.is_file() for path in templates) or not (source / "lib").is_dir():
-        raise FileNotFoundError("1.1.8 包必须包含正式/孵蛋主 ECS、lib 和 ImgLabel")
+        raise FileNotFoundError("1.1.8 包必须包含正式/孵蛋/SID采集主 ECS、lib 和 ImgLabel")
     destination.mkdir(parents=True, exist_ok=True)
     for name in ("lib", "ImgLabel", "Tessdata"):
         source_path = source / name
@@ -105,7 +108,7 @@ def main() -> int:
     except Exception as exc:
         print(f"导入失败: {exc}", file=sys.stderr)
         return 1
-    print(f"已导入 1.1.8 正式/孵蛋脚本与 {EXPECTED_LABEL_COUNT} 标签: {result}")
+    print(f"已导入 1.1.8 正式/孵蛋/SID采集脚本与 {EXPECTED_LABEL_COUNT} 标签: {result}")
     return 0
 
 

@@ -285,7 +285,12 @@ def verify_tid_package(source_dir: str | Path) -> dict[str, Any]:
     return manifest
 
 
-def configure_tid_template_text(template_text: str, request: TidRngRequest) -> str:
+def configure_tid_template_text(
+    template_text: str,
+    request: TidRngRequest,
+    *,
+    include_flow_marker: bool = False,
+) -> str:
     request.validate(template_text)
     user_section, separator, remainder = template_text.partition(_USER_SECTION_END)
     if not separator:
@@ -305,6 +310,17 @@ def configure_tid_template_text(template_text: str, request: TidRngRequest) -> s
             _JAPANESE_LOOP_164A_REPLACEMENT,
             1,
         )
+    if include_flow_marker:
+        match_call = "            CALL 匹配"
+        if configured.count(match_call) != 1:
+            raise ValueError("TID 1.3.7模板的匹配调用结构与已审计版本不一致")
+        marker = """            CALL 匹配
+            IF $is_match == 1 and $denoise_hit_count >= $denoise_need_hit
+                PRINT TIDFLOW|ID|MATCH=1
+                PRINT TIDFLOW|ID|TID= & _TARGET_TID
+                PRINT TIDFLOW|ID|SID_ADV= & $adv
+            ENDIF"""
+        configured = configured.replace(match_call, marker, 1)
     return configured
 
 
@@ -316,13 +332,19 @@ def write_configured_tid_project(
     source_dir: str | Path,
     output_dir: str | Path,
     request: TidRngRequest,
+    *,
+    include_flow_marker: bool = False,
 ) -> Path:
     source_dir = Path(source_dir).resolve()
     output_dir = Path(output_dir).resolve()
     manifest = verify_tid_package(source_dir)
     template_path = source_dir / TID_SCRIPT_NAMES[request.language]
     template_text = template_path.read_text(encoding="utf-8")
-    configured = configure_tid_template_text(template_text, request)
+    configured = configure_tid_template_text(
+        template_text,
+        request,
+        include_flow_marker=include_flow_marker,
+    )
 
     label_dir = source_dir / "ImgLabel"
     missing = [
@@ -347,6 +369,7 @@ def write_configured_tid_project(
                 "tid_request": request.to_dict(),
                 "source_manifest": manifest,
                 "japanese_164a_compatibility": request.language == "日文",
+                "tid_starter_flow_marker": include_flow_marker,
                 "backend": {
                     "name": EASYCON_BACKEND_NAME,
                     "expected_cli_version": EXPECTED_EZCON_VERSION,

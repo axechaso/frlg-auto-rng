@@ -1021,6 +1021,7 @@ def initial_seed(
 def iv_calculator(
     ivs_observations: List[IVsObservation],
     base_stats: Tuple[int, int, int, int, int, int] = None,
+    effort_values: Tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0),
 ) -> IVsRange:
     if not ivs_observations or base_stats is None:
         return IVsRange(
@@ -1028,6 +1029,13 @@ def iv_calculator(
             ivs_upper_bound=IVs(31, 31, 31, 31, 31, 31),
         )
     all_possible = [{i for i in range(32)} for _ in range(6)]
+    if len(effort_values) != 6:
+        raise ValueError("effort_values must contain six values")
+    if any(not 0 <= int(value) <= 255 for value in effort_values):
+        raise ValueError("each effort value must be in 0-255")
+    if sum(int(value) for value in effort_values) > 510:
+        raise ValueError("the six effort values must total no more than 510")
+    effort_terms = [int(value) // 4 for value in effort_values]
     nature_map = {n: i for i, n in enumerate(NATURES)}
     # stat_idx: 1=atk 2=def 3=spa 4=spd 5=spe; -1=neutral (no effect)
     # nature order: Hardy Lonely Brave Adamant Naughty Bold Docile Relaxed Impish Lax
@@ -1050,9 +1058,13 @@ def iv_calculator(
             lv = obs.level
             for iv in range(32):
                 if stat_idx == 0:
-                    stat = math.floor((2 * base + iv) * lv / 100) + lv + 10
+                    stat = math.floor(
+                        (2 * base + iv + effort_terms[stat_idx]) * lv / 100
+                    ) + lv + 10
                 else:
-                    stat = math.floor((2 * base + iv) * lv / 100) + 5
+                    stat = math.floor(
+                        (2 * base + iv + effort_terms[stat_idx]) * lv / 100
+                    ) + 5
                     if stat_idx == boost_stat:
                         stat = math.floor(stat * 1.1)
                     elif stat_idx == reduce_stat:

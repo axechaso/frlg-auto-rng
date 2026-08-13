@@ -37,8 +37,15 @@ jobs:
           python -m py_compile
           run_auto_rng_gui.py
           run_auto_planner.py
+          run_sid_reverse.py
+          run_sid_reverse_capture.py
           automation/easycon118.py
+          automation/sid_reverse118.py
           automation/tid_rng137.py
+          automation/tid_starter_flow.py
+          rng/sid_reverse.py
+          rng/sid_reverse_workflow.py
+          rng/starter_sid_verification.py
           rng/tenlines_utils.py
 
       - name: Run repository-independent unit tests
@@ -49,4 +56,10 @@ jobs:
           tests.test_easycon164a_backend
           tests.test_gui_inputs
           tests.test_label_matcher
+          tests.test_sid_reverse
+          tests.test_sid_reverse118
+          tests.test_sid_reverse_capture
+          tests.test_sid_reverse_workflow
+          tests.test_starter_sid_verification
           tests.test_tenlines_fixes
+          tests.test_tid_starter_flow

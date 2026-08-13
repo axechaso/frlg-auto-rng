@@ -4,6 +4,10 @@
 
 快照日期：2026-08-13。
 
+## 提交与 Actions 约定
+
+每完成一轮较大的功能改动，必须先完成相应本地测试，再提交并推送到私有 `origin`，触发 GitHub Actions。零散小修可以先保留，随下一轮大改一起提交。推送前只暂存本轮相关文件，不把 `.tools/`、运行日志、生成目录或未被功能引用的研究产物混入提交。
+
 ## 最重要的迁移提醒
 
 当前旧设备工作区：
@@ -15,16 +19,16 @@ C:\Users\axenx\Documents\火叶乱数\frlg-auto-rng
 当前分支和基准提交：
 
 ```text
-branch: codex/initial-auto-planner
-base commit: 22f1e856eeab6a6e2b7f689459a3657f15528086
+branch: agent/sid-tid-workflow-ui
+base commit: 819c300 (add FRLG automatic RNG planner and CI)
 ```
 
-但自动计划器、EasyCon 1.6.4a 接入、新 GUI、测试和文档主要仍是未提交的修改或新增文件。当前 `origin` 还是旧设备上的本地 `.codex-review\PyEasyCon` 路径，不是新设备可访问的网络远端。
+私有网络远端为 `https://github.com/axechaso/frlg-auto-rng.git`。自动计划器基线在 `origin/main`；本文件记录的 SID 查找页、SID 反查链、TID/御三家规划及最新资产指纹通过当前功能分支发布，并由 GitHub Actions 复核。
 
 因此：
 
 - 直接换设备时，复制整个项目工作区最稳妥；
-- 若走 Git，必须先在旧设备提交当前改动并推送到真正可访问的远端；
+- 若走 Git，克隆私有 `origin` 后检出当前功能分支；PR 合并后直接使用 `main`；
 - 新对话不得执行 `git reset --hard`、`git clean` 或用旧提交覆盖工作区；
 - `local_assets/`、`runtime/`、`rng_logs/` 和 `.venv/` 被 Git 忽略，不会随普通提交迁移；
 - 外部 1.1.8 和 EasyCon 安装包也必须单独复制或重新取得。
@@ -54,6 +58,8 @@ git log -1 --oneline
 7. 选优规则是先取六项 IV 总和最高的结果，再取 Advance 最小的可行初始 Seed。
 8. 孵蛋作为独立选项卡，不放在野生/静态类型下拉框中。
 9. TID/SID 使用独立选项卡和独立 1.3.7 模板/标签包，不混入 1.1.8 主 ECS。
+10. SID 查找使用独立采集模板：EasyCon 负责逐只 OCR/喂糖，Python 负责 Method 1/2/4 PID、PSV 交集和 SID 候选分析。
+11. 设备检测后自动回填串口；当前值仍可用时保留，否则按 COM 数字选择最小可用端口。
 
 ## 当前运行链
 
@@ -81,7 +87,15 @@ flowchart LR
 
 页面使用完整纵向滚动容器，默认窗口 1100×880，最小 900×620。右侧滚动条滚动整页；鼠标位于结果文本框时只滚动结果。
 
-GUI 有三个选项卡：
+GUI 有四个选项卡，固定顺序为“SID 查找”“TID 乱数”“野生 / 静态”“孵蛋（测试）”：
+
+### SID 查找
+
+- 当前游戏和 TID、队内闪光数量、每只最多神奇糖果、识图阈值；
+- 队伍 1–6 位分别填写图鉴编号覆盖、定点/野生来源、野生相遇地点和六项努力值；
+- “准备 SID 查找”生成并预检独立采集工程；“开始运行”逐槽采集，PSV 唯一后提前结束；
+- 报告回显到主界面，并保存到 `runtime/sid_reverse/`；
+- 只覆盖第三世代 Method 1/2/4，孵蛋来源及其他 PID 生成方式暂不支持。
 
 ### 野生 / 静态
 
@@ -112,7 +126,7 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 
 孵蛋页不负责搜索蛋目标。用户必须先从 Ten Lines Egg 页取得同一初始 Seed 下的 Held 和 Pickup。Pickup 至少比 Held 晚 1800 帧。
 
-### TID / SID
+### TID 乱数
 
 - 英文/日文 ROM、乱数/穷举、Switch 1/2、主角性别和名称；
 - 目标 TID/SID 与三种 SID 处理模式；
@@ -122,19 +136,36 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 
 适配器位于 `automation/tid_rng137.py`。它锁定英文/日文 1.3.7 脚本指纹和 328 个标签。日文原脚本 `FOR $InputLen` 在 1.6.4-a 会报三次只读 `_tmpL$0`；生成副本会按 ECS 约束改为先算有效末索引再使用显式索引 `FOR`。该修正不改 Seed/帧轴，不改用户原包。
 
+连续流程采用分阶段编排，不把英文、日文和旧御三家模块复制到一个 ECS：
+
+1. 根据 ROM 语言生成一份原版 1.3.7 ID 脚本，只增加 `TIDFLOW|ID|...` 成功标记；
+2. 使用用户提供集合样本中已经实测的研究所路线，保存到所选御三家球前；
+3. 由共享 Python 搜索器从 ADV 1500 起找最早可达闪光 Method 1 御三家，交给普通御三家乱数校准；
+4. 未命中目标 PID 时继续普通校准，不处理 SID；命中目标 PID 后，不闪为 SID 未命中，闪光为 SID 命中；
+5. SID 未命中时按当前 `$SID_ADV修正`、`+1`、`-1`、`+2`、`-2` 的顺序重建存档重试。
+
+实现位于 `automation/tid_starter_flow.py` 和 `rng/starter_sid_verification.py`。已生成并用真实 1.6.4-a `format` 检查英文/日文 ID 标记版及桥接 ECS。日版 Switch Seed 数据使用 TenLines 官方 `fr_jpn_nx.bin` / `lg_jpn_nx.bin`，当前官方日版数据只支持 `mono_h_a`。集合样本中的旧 1.2.3 御三家 OP/F12 控制器不得作为新流程依据。当前尚缺 GUI 三阶段自动启动和实机验收。
+
 ## 代码导航
 
 | 文件 | 作用 |
 |---|---|
-| `run_auto_rng_gui.py` | 两个选项卡、输入校验、后台搜索、方案展示、预检和启动/停止 |
+| `run_auto_rng_gui.py` | 四个选项卡、输入校验、后台搜索/采集、方案展示、预检和启动/停止 |
+| `run_sid_reverse_capture.py` | SID 逐槽采集编排、提前收敛和报告落盘 |
+| `run_sid_reverse.py` | SID 采集日志分析与文本报告 |
 | `run_auto_planner.py` | 普通野生/静态命令行计划器；默认只生成，`--run` 才启动 |
 | `automation/planner.py` | `AutoSearchRequest`、分层搜索、最高 IV 总和、同分最小 Advance |
 | `automation/seed_modes.py` | 1.1.8 Seed 模式 0–9 与 Ten Lines 游戏设置映射 |
 | `automation/static_targets.py` | 静态类别和版本限定白名单 |
 | `automation/support.py` | 路线启动边界；狩猎区/碎岩等保守阻止 |
 | `automation/easycon118.py` | 1.1.8 参数替换、指纹、EasyCon 预检、设备枚举和运行命令 |
+| `automation/sid_reverse118.py` | SID 采集请求校验、模板参数替换与工程生成 |
 | `automation/tid_rng137.py` | TID/SID 1.3.7 模板/标签锁定、参数替换、日版 1.6.4-a 兼容和预检 |
+| `automation/tid_starter_flow.py` | TID/SID 到御三家的分阶段计划、ID 标记和研究所桥接工程 |
 | `rng/tenlines_utils.py` | Ten Lines 搜索、IV 分层、资源读取和 C++ 接口 |
+| `rng/sid_reverse.py` | Method 1/2/4 PID、PSV 与 SID 候选恢复 |
+| `rng/sid_reverse_workflow.py` | SIDREV 日志解析、IV 区间和多只宝可梦交集 |
+| `rng/starter_sid_verification.py` | ADV 1500 起的最早闪光御三家搜索及目标命中后的 SID 判定 |
 | `easycon/label_matcher.py` | 方法 1/5/14 的统一标签匹配兼容层 |
 | `tools/import_easycon118.py` | 从外部 1.1.8 包导入已审计快照 |
 | `tools/import_tid_rng137.py` | 从外部多功能包导入已审计的 TID/SID 1.3.7 日英模板与标签 |
@@ -150,6 +181,7 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 local_assets/easycon118/   经审计的外部脚本快照
 local_assets/tid_rng137/   经审计的 TID/SID 1.3.7 快照
 runtime/easycon118/        最近一次生成的 main.ecs、lib、ImgLabel、plan.json
+runtime/sid_reverse/       SID 采集工程、日志和结果报告
 rng_logs/plans/            每次普通或孵蛋生成的 JSON 记录
 runtime/launcher.log        BAT 启动日志
 ```
@@ -172,7 +204,7 @@ default path: %USERPROFILE%\Downloads\伊机控-EasyCon-v1.6.4alpha测试版-260
 
 ```text
 主 ECS + lib 文件数: 33
-脚本语料 SHA-256: bc0845d23f47805b1c6f46cd861deb69c01c7605a72d92ad7e00f538cee6f52e
+脚本语料 SHA-256: 1ffa4db222405231276179fa7f2be277d71759ed9455a80be8cddc5b9c118625
 ```
 
 不要把曾经的旧快照指纹 `db50e6...` 或有 `$调试日志输出` 编译问题的其他快照直接替换进来。
@@ -180,11 +212,13 @@ default path: %USERPROFILE%\Downloads\伊机控-EasyCon-v1.6.4alpha测试版-260
 ### 标签
 
 ```text
-总数: 871
-方法 1: 15
-方法 5: 502
+总数: 1148
+方法 1: 17
+方法 3: 1
+方法 5: 775
+方法 11: 1
 方法 14: 354
-标签语料 SHA-256: 934060b2cf40ac30b461bcf59fddcb375eeaceae75a809ec294920cc7d6fe0b8
+标签语料 SHA-256: 696e758e16eff255ffc4d78c87115d445c90537636bb059de2ac796993494bad
 ```
 
 方法 14 必须保留原 Alpha 通道作为 `TM_SQDIFF_NORMED` 的 mask。
@@ -222,14 +256,16 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 ```
 
-2026-08-13 的代码基线：48 项单元测试全部通过；下载包 `Tools/check_*.py` 共 22 项全部通过。另做过透明 Tk 窗口冒烟检查，确认：
+2026-08-13 的代码基线：76 项单元测试中 73 项通过、3 项因本机未安装 OpenCV 跳过；下载包 `Tools/check_*.py` 最近一次基线为 22 项全部通过。此前做过透明 Tk 窗口冒烟检查；本轮又完成四页签顺序、SID 输入/运行链、御三家目标搜索和英日连续流程生成的静态验证。确认：
 
-- 三个选项卡可以切换；
+- 页签顺序固定为 SID 查找、TID 乱数、野生/静态、孵蛋；
+- 设备枚举会自动回填可用串口；
 - 普通类型下拉框不再包含孵蛋；
 - 孵蛋参数可收集成 `EggRunRequest`；
 - 900×620 窗口可滚动到页面底部；
 - “隐藏属性”文案已经改为“觉醒力量”。
 - TID/SID 日英参数可收集，日文生成副本可通过真实 1.6.4-a `format`。
+- TID 连续流程的英文/日文 ID 标记版和研究所桥接 ECS 均通过真实 1.6.4-a `format`；尚未接入 GUI 连续运行，也未实机验收。
 
 本机曾验证 1.6.4a 可以枚举串口和视频设备，并可用 `format` 解析当前 ECS。换设备后设备编号必然可能变化，必须重新检测。
 
@@ -253,7 +289,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 
 按风险从低到高：
 
-1. 在新设备重新跑安装、48 项测试、EasyCon `--check-only` 和设备枚举。
+1. 在新设备重新跑安装、66 项测试、EasyCon `--check-only` 和设备枚举。
 2. 用不会影响存档的短 ECS 验证单片机控制、停止和重新连接。
 3. 选一个普通野生基线路线做单轮命中、OCR、反查和校准日志验收。
 4. 再做重复循环、抓捕和长时间稳定性。
@@ -267,7 +303,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 ```text
 请接手这个火红/叶绿全自动乱数项目。先完整阅读 README.md、docs/HANDOFF.md 和 docs/INITIAL_AUTO_RNG.md，然后运行 git status --short，确认不要覆盖或清理现有未提交改动。
 
-当前主入口是 run_auto_rng_gui.py：GUI 有“野生 / 静态”“孵蛋（测试）”和“TID / SID”三个选项卡，整页可滚动。普通流程由 Ten Lines 搜索，按最高 IV 总和、再按最小 Advance 选择方案，生成 1.1.8 ECS 后交给固定 EasyCon 1.6.4a。本流程不部署 AI。孵蛋只接收 Ten Lines Egg 页已经得到的同 Seed、Held 和 Pickup，尚未实机验收。TID/SID 页使用锁定的英文/日文 1.3.7 脚本和独立标签包。
+当前主入口是 run_auto_rng_gui.py：GUI 依次有“SID 查找”“TID 乱数”“野生 / 静态”“孵蛋（测试）”四个选项卡，整页可滚动。SID 页逐只采集闪光宝可梦并由 Python 反查；TID 页使用锁定的英文/日文 1.3.7 脚本和独立标签包。普通流程由 Ten Lines 搜索，按最高 IV 总和、再按最小 Advance 选择方案，生成 1.1.8 ECS 后交给固定 EasyCon 1.6.4a。本流程不部署 AI。孵蛋只接收 Ten Lines Egg 页已经得到的同 Seed、Held 和 Pickup，尚未实机验收。
 
 EasyCon 必须锁定 1.6.4-a+9c86137...，预检使用 ezcon format，不要改成 1.7.0 的 ir。狩猎区、碎岩、漫游兽和孵蛋不能宣称已实机完成。IV/Seed 反查迁到 Python 是以后方案，当前不要实施。
 
@@ -277,5 +313,5 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 
-测试基线是 48 项，ECS Tools 静态检查是 22 项。完成环境核对后，请根据我接下来的要求继续，不要自行扩大到实机运行或修改外部 1.1.8/TID/EasyCon 原包。
+测试基线是 66 项，ECS Tools 静态检查是 22 项。完成环境核对后，请根据我接下来的要求继续，不要自行扩大到实机运行或修改外部 1.1.8/TID/EasyCon 原包。
 ```

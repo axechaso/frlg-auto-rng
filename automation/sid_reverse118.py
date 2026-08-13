@@ -1,0 +1,164 @@
+"""Prepare the standalone EasyCon 1.6.4-a SID observation collector."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+import json
+import re
+import shutil
+from pathlib import Path
+
+from .easycon118 import (
+    EXPECTED_SCRIPT_FILE_COUNT,
+    EXPECTED_SCRIPT_SHA256,
+    inspect_script_corpus,
+)
+
+
+SID_REVERSE_TEMPLATE_NAME = "NS火叶SID反查-采集测试.ecs"
+
+
+@dataclass(frozen=True)
+class SIDReverseRunRequest:
+    tid: int
+    party_count: int
+    start_slot: int = 1
+    max_candies: int = 5
+    recognition_threshold: int = 85
+    dex_overrides: tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0)
+    source_types: tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0)
+    locations: tuple[str, str, str, str, str, str] = ("", "", "", "", "", "")
+    effort_values: tuple[
+        tuple[int, int, int, int, int, int],
+        tuple[int, int, int, int, int, int],
+        tuple[int, int, int, int, int, int],
+        tuple[int, int, int, int, int, int],
+        tuple[int, int, int, int, int, int],
+        tuple[int, int, int, int, int, int],
+    ] = (
+        (0, 0, 0, 0, 0, 0),
+        (0, 0, 0, 0, 0, 0),
+        (0, 0, 0, 0, 0, 0),
+        (0, 0, 0, 0, 0, 0),
+        (0, 0, 0, 0, 0, 0),
+        (0, 0, 0, 0, 0, 0),
+    )
+
+    def validate(self) -> None:
+        if not 0 <= self.tid <= 0xFFFF:
+            raise ValueError("TID必须在0-65535之间")
+        if not 1 <= self.party_count <= 6:
+            raise ValueError("队内闪光数量必须在1-6之间")
+        if not 1 <= self.start_slot <= 6:
+            raise ValueError("队伍起始位置必须在1-6之间")
+        if self.start_slot + self.party_count - 1 > 6:
+            raise ValueError("起始位置与数量超出第六个队伍槽位")
+        if not 0 <= self.max_candies <= 20:
+            raise ValueError("每只最多糖果必须在0-20之间")
+        if not 1 <= self.recognition_threshold <= 100:
+            raise ValueError("识图阈值必须在1-100之间")
+        if len(self.dex_overrides) != 6:
+            raise ValueError("图鉴编号覆盖必须恰好包含6项")
+        if any(not 0 <= value <= 386 for value in self.dex_overrides):
+            raise ValueError("图鉴编号覆盖仅支持0或1-386")
+        if len(self.source_types) != 6 or any(value not in (0, 1) for value in self.source_types):
+            raise ValueError("来源类型必须恰好包含6项，且0=定点、1=野生")
+        if len(self.locations) != 6:
+            raise ValueError("相遇地点必须恰好包含6项")
+        if len(self.effort_values) != 6 or any(len(values) != 6 for values in self.effort_values):
+            raise ValueError("努力值必须为6只宝可梦各6项")
+        for slot, values in enumerate(self.effort_values, start=1):
+            if any(not 0 <= value <= 255 for value in values):
+                raise ValueError(f"队伍第{slot}位每项努力值必须在0-255之间")
+            if sum(values) > 510:
+                raise ValueError(f"队伍第{slot}位六项努力值总和不能超过510")
+        for offset in range(self.party_count):
+            index = self.start_slot - 1 + offset
+            if self.source_types[index] == 1 and not self.locations[index].strip():
+                raise ValueError(f"队伍第{index + 1}位是野生宝可梦，必须填写相遇地点")
+
+
+def _ecs_literal(value) -> str:
+    if isinstance(value, (tuple, list)):
+        return "[" + ",".join(_ecs_literal(item) for item in value) + "]"
+    if isinstance(value, str):
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return str(value)
+
+
+def configure_sid_reverse_template(template_text: str, request: SIDReverseRunRequest) -> str:
+    request.validate()
+    values = {
+        "SID反查TID": request.tid,
+        "SID反查队内闪光数量": request.party_count,
+        "SID反查每只最多糖果": request.max_candies,
+        "SID反查识图阈值": request.recognition_threshold,
+        "SID反查队伍起始位置": request.start_slot,
+        "SID反查图鉴编号覆盖": request.dex_overrides,
+        "SID反查来源类型": request.source_types,
+        "SID反查相遇地点": request.locations,
+        "SID反查努力HP": tuple(values[0] for values in request.effort_values),
+        "SID反查努力ATK": tuple(values[1] for values in request.effort_values),
+        "SID反查努力DEF": tuple(values[2] for values in request.effort_values),
+        "SID反查努力SPA": tuple(values[3] for values in request.effort_values),
+        "SID反查努力SPD": tuple(values[4] for values in request.effort_values),
+        "SID反查努力SPE": tuple(values[5] for values in request.effort_values),
+    }
+    configured = template_text
+    for name, value in values.items():
+        pattern = re.compile(rf"(?m)^\${re.escape(name)}\s*=\s*[^\r\n]*$")
+        configured, count = pattern.subn(f"${name} = {_ecs_literal(value)}", configured)
+        if count != 1:
+            raise ValueError(f"SID采集模板字段${name}应出现1次，实际为{count}次")
+    return configured
+
+
+def write_sid_reverse_project(
+    source_dir: str | Path,
+    output_dir: str | Path,
+    request: SIDReverseRunRequest,
+    *,
+    copy_assets: bool = True,
+) -> Path:
+    request.validate()
+    source_dir = Path(source_dir).resolve()
+    output_dir = Path(output_dir).resolve()
+    corpus = inspect_script_corpus(source_dir)
+    if corpus["count"] != EXPECTED_SCRIPT_FILE_COUNT:
+        raise ValueError(
+            f"1.1.8正式/时间轴主脚本及lib文件数应为{EXPECTED_SCRIPT_FILE_COUNT}，"
+            f"当前为{corpus['count']}"
+        )
+    if corpus["sha256"] != EXPECTED_SCRIPT_SHA256:
+        raise ValueError("1.1.8脚本指纹不一致，拒绝混用未经审计的版本: " + corpus["sha256"])
+    template = source_dir / SID_REVERSE_TEMPLATE_NAME
+    if not template.is_file():
+        raise FileNotFoundError(f"缺少SID采集模板: {template}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    main_path = output_dir / "main.ecs"
+    main_path.write_text(
+        configure_sid_reverse_template(template.read_text(encoding="utf-8"), request),
+        encoding="utf-8",
+    )
+    if copy_assets:
+        for directory in ("lib", "ImgLabel"):
+            source = source_dir / directory
+            target = output_dir / directory
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(source, target)
+    manifest = {
+        "mode": "sid_reverse_observation",
+        "source": str(source_dir),
+        "template": template.name,
+        "request": asdict(request),
+        "scripts": {
+            "expected_count": EXPECTED_SCRIPT_FILE_COUNT,
+            "expected_sha256": EXPECTED_SCRIPT_SHA256,
+        },
+    }
+    (output_dir / "plan.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return main_path
