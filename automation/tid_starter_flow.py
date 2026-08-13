@@ -10,17 +10,41 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
+import re
 import subprocess
 
 from rng.sid_reverse import first_sid_advances
+from rng.tenlines import get_hidden_power, pokerng_jump
 from rng.starter_sid_verification import (
     StarterSearchRequest,
     StarterTarget,
     find_earliest_shiny_starter,
     sid_advance_scan_offsets,
 )
+from rng.tenlines_utils import (
+    GENDERS,
+    NATURES,
+    SHININESS,
+    TYPES,
+    GameSettings,
+    IVs,
+    InitialSeedResult,
+    SearcherResult,
+    frame_to_ms,
+    get_ability_name,
+    get_personal,
+    ms_to_time_str,
+)
 
-from .easycon118 import EasyConRuntimeCheck
+from .easycon118 import (
+    EasyCon118Options,
+    EasyConRuntimeCheck,
+    validate_runtime,
+    write_configured_project,
+)
+from .planner import AutoSearchRequest, RunPlan
+from .seed_modes import settings_to_seed_mode
+from .support import get_route_support
 from .tid_rng137 import (
     TidRngRequest,
     validate_tid_runtime,
@@ -46,6 +70,11 @@ class TidStarterFlowRequest:
             raise ValueError("连续流程不能同时启用TID固定延迟检查")
         if self.tid_request.sid_random:
             raise ValueError("连续流程必须填写目标SID，不能使用随机SID")
+        if self.tid_request.language != "英文":
+            raise ValueError(
+                "连续御三家流程的第三阶段使用现有1.1.8；当前1.1.8只审计了英文版游戏，"
+                "日文版暂时只能单独运行TID/SID脚本"
+            )
         if self.sid_chain_search_advances <= 0:
             raise ValueError("SID生成链搜索上限必须大于0")
         if self.sid_retry_radius < 0:
@@ -84,6 +113,7 @@ class TidStarterFlowPlan:
     request: TidStarterFlowRequest
     earliest_sid_chain_advance: int
     starter_target: StarterTarget
+    starter_run_plan: RunPlan
     sid_retry_corrections: tuple[int, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -91,7 +121,7 @@ class TidStarterFlowPlan:
             "mode": "tid_sid_starter_verification",
             "architecture": (
                 "language-specific audited ID template -> shared lab route -> "
-                "shared starter target verification"
+                "configured EasyCon 1.1.8 Starter flow"
             ),
             "request": {
                 **asdict(self.request),
@@ -100,6 +130,7 @@ class TidStarterFlowPlan:
             "earliest_sid_chain_advance": self.earliest_sid_chain_advance,
             "runtime_sid_advance_source": "TIDFLOW|ID|SID_ADV= marker",
             "starter_target": self.starter_target.to_dict(),
+            "starter_118_plan": self.starter_run_plan.to_dict(),
             "sid_retry_corrections": list(self.sid_retry_corrections),
             "verification_rules": {
                 "wrong_pid": "continue the normal starter RNG calibration",
@@ -111,6 +142,89 @@ class TidStarterFlowPlan:
                 ),
             },
         }
+
+
+def build_starter_run_plan(
+    request: TidStarterFlowRequest,
+    target: StarterTarget,
+) -> RunPlan:
+    """Adapt the searched starter result to the existing 1.1.8 plan format."""
+    tid_request = request.tid_request
+    settings = GameSettings(
+        sound={0: "mono", 1: "stereo"}[tid_request.sound],
+        button_mode={0: "h", 1: "r", 2: "a"}[tid_request.button_mode],
+        seed_button={0: "a", 1: "start", 2: "l"}[tid_request.seed_button],
+        extra_button="none",
+    )
+    seed_mode = settings_to_seed_mode(settings)
+    if seed_mode is None:
+        raise ValueError(
+            "当前TID游戏设置无法映射到1.1.8的Seed模式；"
+            "请改用1.1.8支持的Sound/Button Mode/Seed Button组合"
+        )
+
+    game_family = "fr" if request.version == "火红" else "lg"
+    game = f"{game_family}_{'nx2' if tid_request.nx_model == 2 else 'nx'}"
+    species_en = target.species_en
+    search_request = AutoSearchRequest(
+        game=game,
+        tid=tid_request.target_tid,
+        sid=tid_request.target_sid,
+        method="Static 1",
+        category="Starter",
+        location="",
+        pokemon=species_en,
+        max_advances=request.starter_max_advances,
+        shiny="Star/Square",
+        seed_mode=seed_mode,
+    )
+    search_request.validate()
+
+    hp_type, hp_power = get_hidden_power(target.ivs)
+    personal = get_personal(target.species_id, game)
+    ability_id = personal["abilities"][target.ability]
+    target_seed = pokerng_jump(target.initial_seed, target.advances)
+    search_result = SearcherResult(
+        target_seed=f"{target_seed:08X}",
+        method="Static 1",
+        pokemon=species_en,
+        level=5,
+        pid=target.pid_hex,
+        shiny=SHININESS[target.shiny],
+        nature=NATURES[target.nature],
+        ability=get_ability_name(ability_id),
+        ivs=IVs(*target.ivs),
+        hidden_type=TYPES[hp_type],
+        hidden_power=hp_power,
+        gender=GENDERS[target.gender],
+    )
+    console = "NX2" if tid_request.nx_model == 2 else "NX"
+    total_frames = round(target.seed_time_ms / 16 + target.advances)
+    initial = InitialSeedResult(
+        seed=target.seed_hex,
+        advances=target.advances,
+        total_frames=total_frames,
+        total_time=ms_to_time_str(frame_to_ms(total_frames, console)),
+        seed_time=target.seed_time_ms,
+        settings=settings,
+    )
+    support = get_route_support(
+        "Static 1",
+        "Starter",
+        "",
+        game=game,
+        pokemon=species_en,
+    )
+    return RunPlan(
+        request=search_request,
+        target=search_result,
+        initial_seed=initial,
+        iv_total=sum(target.ivs),
+        route_support=support,
+        warnings=(
+            "御三家执行阶段复用1.1.8现有Starter流程；进入第三阶段后由1.1.8负责领取、识别和校准。",
+        ),
+    )
 
 
 def build_tid_starter_flow_plan(request: TidStarterFlowRequest) -> TidStarterFlowPlan:
@@ -125,6 +239,7 @@ def build_tid_starter_flow_plan(request: TidStarterFlowRequest) -> TidStarterFlo
             f"目标SID未出现在TID生成链前{request.sid_chain_search_advances} ADV"
         )
     starter_target = find_earliest_shiny_starter(request.to_starter_search_request())
+    starter_run_plan = build_starter_run_plan(request, starter_target)
     base_correction = request.tid_request.sid_advance_correction
     retry_corrections = tuple(
         base_correction + offset
@@ -134,6 +249,7 @@ def build_tid_starter_flow_plan(request: TidStarterFlowRequest) -> TidStarterFlo
         request=request,
         earliest_sid_chain_advance=sid_hits[0].advance,
         starter_target=starter_target,
+        starter_run_plan=starter_run_plan,
         sid_retry_corrections=retry_corrections,
     )
 
@@ -255,23 +371,53 @@ def write_tid_starter_flow_bundle(
     source_dir: str | Path,
     output_dir: str | Path,
     plan: TidStarterFlowPlan,
+    *,
+    starter_source_dir: str | Path,
 ) -> Path:
-    """Write the audited ID stage, route stage, and shared target plan."""
+    """Write the ID, lab bridge, and configured existing 1.1.8 starter stage."""
     source_dir = Path(source_dir).resolve()
+    starter_source_dir = Path(starter_source_dir).resolve()
     output_dir = Path(output_dir).resolve()
     id_dir = output_dir / "01_id"
     bridge_dir = output_dir / "02_lab_bridge"
+    starter_dir = output_dir / "03_starter_118"
     write_configured_tid_project(
         source_dir,
         id_dir,
         plan.request.to_exact_tid_request(),
         include_flow_marker=True,
     )
+    id_template = (id_dir / "main.ecs").read_text(encoding="utf-8")
+    correction_pattern = re.compile(r"(?m)^\$SID_ADV修正\s*=\s*[^\r\n]*$")
+    for stale_attempt in id_dir.glob("main_attempt_*.ecs"):
+        stale_attempt.unlink()
+    for attempt_index, correction in enumerate(plan.sid_retry_corrections):
+        attempt_text, replacement_count = correction_pattern.subn(
+            f"$SID_ADV修正 = {correction}",
+            id_template,
+        )
+        if replacement_count != 1:
+            raise ValueError(
+                "生成的TID/SID脚本中$SID_ADV修正字段数量异常，无法创建连续流程重试脚本"
+            )
+        (id_dir / f"main_attempt_{attempt_index:03d}.ecs").write_text(
+            attempt_text,
+            encoding="utf-8",
+        )
     bridge_dir.mkdir(parents=True, exist_ok=True)
     bridge_path = bridge_dir / "main.ecs"
     bridge_path.write_text(
         render_lab_bridge_ecs(plan.request.starter),
         encoding="utf-8",
+    )
+    write_configured_project(
+        starter_source_dir,
+        starter_dir,
+        plan.starter_run_plan,
+        EasyCon118Options(
+            nx_model=plan.request.tid_request.nx_model,
+            continue_capture_after_shiny=False,
+        ),
     )
     plan_path = output_dir / "flow_plan.json"
     plan_path.write_text(
@@ -285,8 +431,9 @@ def validate_tid_starter_flow_runtime(
     ezcon_path: str | Path,
     id_main: str | Path,
     bridge_main: str | Path,
+    starter_main: str | Path,
 ) -> EasyConRuntimeCheck:
-    """Validate the ID project and the label-free bridge with EasyCon 1.6.4-a."""
+    """Validate all three flow stages with pinned EasyCon 1.6.4-a."""
     base = validate_tid_runtime(ezcon_path, id_main)
     errors = list(base.errors)
     warnings = list(base.warnings)
@@ -315,4 +462,7 @@ def validate_tid_starter_flow_runtime(
                 )
     if not errors:
         warnings.append("研究所桥接脚本已通过EasyCon 1.6.4-a格式检查。")
+    starter = validate_runtime(ezcon_path, starter_main)
+    errors.extend(starter.errors)
+    warnings.extend(starter.warnings)
     return EasyConRuntimeCheck(not errors, tuple(errors), tuple(warnings))

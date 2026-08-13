@@ -39,6 +39,7 @@ jobs:
           run_auto_planner.py
           run_sid_reverse.py
           run_sid_reverse_capture.py
+          run_tid_starter_flow.py
           automation/easycon118.py
           automation/sid_reverse118.py
           automation/tid_rng137.py
@@ -63,3 +64,4 @@ jobs:
           tests.test_starter_sid_verification
           tests.test_tenlines_fixes
           tests.test_tid_starter_flow
+          tests.test_tid_starter_runner

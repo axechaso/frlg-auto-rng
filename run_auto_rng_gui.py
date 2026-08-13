@@ -173,6 +173,7 @@ class AutoRngApp:
         self.running_mode: str | None = None
         self.sid_report_path: Path | None = None
         self.sid_log_path: Path | None = None
+        self.tid_flow_log_path: Path | None = None
         self.busy = False
         self._updating = False
         self.all_locations = self._load_locations()
@@ -1318,7 +1319,7 @@ class AutoRngApp:
         normal_can_start = bool(
             self.plan_result and self.plan_result.plan.route_support.can_start
         )
-        tid_can_start = self.tid_request is not None and self.tid_flow_plan is None
+        tid_can_start = self.tid_request is not None
         can_start = bool(
             not self.busy
             and not process_running
@@ -1508,7 +1509,7 @@ class AutoRngApp:
                 "正在搜索 ADV "
                 f"{flow_request.starter_min_advances}-"
                 f"{flow_request.starter_max_advances} 内最早可达闪光御三家，"
-                "并校验日英模板。"
+                "并生成英文TID、研究所桥接和1.1.8御三家三个阶段。"
             )
             if flow_request is not None
             else "正在校验英文/日文模板、328 个标签和 EasyCon 1.6.4-a。"
@@ -1520,7 +1521,12 @@ class AutoRngApp:
                 if flow_request is not None:
                     output = ROOT / "runtime" / "tid_starter_flow"
                     flow_plan = build_tid_starter_flow_plan(flow_request)
-                    write_tid_starter_flow_bundle(source_path, output, flow_plan)
+                    write_tid_starter_flow_bundle(
+                        source_path,
+                        output,
+                        flow_plan,
+                        starter_source_dir=Path(self.source_var.get()),
+                    )
                     project_main = output / "01_id" / "main.ecs"
                 else:
                     output = ROOT / "runtime" / "tid_rng137"
@@ -1531,6 +1537,7 @@ class AutoRngApp:
                         ezcon_path,
                         project_main,
                         bridge_main,
+                        output / "03_starter_118" / "main.ecs",
                     )
                 else:
                     check = validate_tid_runtime(ezcon_path, project_main)
@@ -1615,6 +1622,7 @@ class AutoRngApp:
                     f"SID ADV 重试顺序：{retry_preview} ...",
                     f"ID 阶段：{project_main}",
                     f"研究所桥接：{project_main.parents[1] / '02_lab_bridge' / 'main.ecs'}",
+                    f"1.1.8 御三家：{project_main.parents[1] / '03_starter_118' / 'main.ecs'}",
                 )
             )
         if check.ok and flow_plan is None:
@@ -1622,7 +1630,7 @@ class AutoRngApp:
             status = "TID/SID 脚本已生成，可以在确认会新建存档后开始。"
         elif check.ok:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
-            status = "连续流程阶段包已生成；三阶段自动启动尚未接通。"
+            status = "连续流程三阶段均已生成并通过预检，可以开始运行。"
         else:
             lines.extend(f"预检失败：{error}" for error in check.errors)
             status = "TID/SID 脚本已生成，但预检不允许启动。"
@@ -1825,12 +1833,6 @@ class AutoRngApp:
             self.plan_result or self.egg_request or self.tid_request or self.sid_request
         ) or not self.project_main:
             return
-        if self.tid_flow_plan is not None:
-            messagebox.showerror(
-                "连续流程尚未接通",
-                "当前只完成了ID阶段、研究所桥接和御三家目标计划；第三阶段执行器接通前不能启动。",
-            )
-            return
         try:
             video_device = int(self.video_var.get())
             if video_device < 0:
@@ -1859,11 +1861,18 @@ class AutoRngApp:
                 f"EasyCon 当前没有列出采集卡序号 {video_device}。请重新检测并选择正确序号。",
             )
             return
-        check = (
-            validate_tid_runtime(Path(self.ezcon_var.get()), self.project_main)
-            if self.tid_request is not None
-            else validate_runtime(Path(self.ezcon_var.get()), self.project_main)
-        )
+        if self.tid_flow_plan is not None:
+            flow_dir = self.project_main.parents[1]
+            check = validate_tid_starter_flow_runtime(
+                Path(self.ezcon_var.get()),
+                self.project_main,
+                flow_dir / "02_lab_bridge" / "main.ecs",
+                flow_dir / "03_starter_118" / "main.ecs",
+            )
+        elif self.tid_request is not None:
+            check = validate_tid_runtime(Path(self.ezcon_var.get()), self.project_main)
+        else:
+            check = validate_runtime(Path(self.ezcon_var.get()), self.project_main)
         self.runtime_check = check
         if not check.ok:
             messagebox.showerror("预检失败", "\n".join(check.errors))
@@ -1875,6 +1884,17 @@ class AutoRngApp:
                 f"TID {self.sid_request.tid:05d} / "
                 f"队伍前 {self.sid_request.party_count} 只闪光宝可梦\n"
                 "每只都会从当前存档重新开始；确认队伍顺序、来源、努力值和神奇糖果位置均正确，是否继续？"
+            )
+        elif self.tid_flow_plan is not None:
+            target = self.tid_flow_plan.starter_target
+            confirmation = (
+                "将依次运行三个阶段：TID/SID 1.3.7 → 研究所桥接存档 → 现有1.1.8御三家流程。\n"
+                f"目标 TID/SID {self.tid_request.target_tid:05d} / {self.tid_request.target_sid:05d}\n"
+                f"{self.tid_flow_plan.request.version} / {target.species_zh} / "
+                f"Seed {target.seed_hex} / ADV {target.advances}\n"
+                "第一阶段会新建存档；第二阶段会自动走到御三家前并存档；"
+                "第三阶段由1.1.8负责领取、识别和校准。若精确命中但不闪，"
+                "程序会按SID ADV重试范围重新执行三段。是否继续？"
             )
         elif self.tid_request is not None:
             confirmation = (
@@ -1932,6 +1952,26 @@ class AutoRngApp:
             ]
             command_cwd = ROOT
             self.running_mode = "sid"
+        elif self.tid_flow_plan is not None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            flow_dir = self.project_main.parents[1]
+            self.tid_flow_log_path = flow_dir / f"tid-starter-{timestamp}.log"
+            command = [
+                sys.executable,
+                str(ROOT / "run_tid_starter_flow.py"),
+                "--flow-dir",
+                str(flow_dir),
+                "--ezcon",
+                self.ezcon_var.get(),
+                "--port",
+                selected_port,
+                "--video",
+                str(video_device),
+                "--log-path",
+                str(self.tid_flow_log_path),
+            ]
+            command_cwd = ROOT
+            self.running_mode = "tid_flow"
         else:
             try:
                 runner_path = prepare_compat_runner(Path(self.ezcon_var.get()))
@@ -1961,7 +2001,11 @@ class AutoRngApp:
         self.status_var.set(
             "SID 正在逐只采集；详细日志见新打开的终端。"
             if self.running_mode == "sid"
-            else "EasyCon 正在运行；详细日志见新打开的终端。"
+            else (
+                "TID/SID → 研究所 → 1.1.8 御三家流程正在运行；详细日志见新打开的终端。"
+                if self.running_mode == "tid_flow"
+                else "EasyCon 正在运行；详细日志见新打开的终端。"
+            )
         )
         self.root.after(1000, self.poll_process)
 
@@ -1975,6 +2019,7 @@ class AutoRngApp:
         completed_mode = self.running_mode
         report_path = self.sid_report_path
         log_path = self.sid_log_path
+        tid_flow_log_path = self.tid_flow_log_path
         self.process = None
         self.running_mode = None
         self.stop_button.configure(state="disabled")
@@ -1988,6 +2033,12 @@ class AutoRngApp:
             else:
                 detail = f"；日志：{log_path}" if log_path is not None else ""
                 self.status_var.set(f"SID 查找已退出，退出码 {code}{detail}")
+        elif completed_mode == "tid_flow":
+            detail = f"；日志：{tid_flow_log_path}" if tid_flow_log_path is not None else ""
+            if code == 0:
+                self.status_var.set(f"TID/SID 到御三家连续流程已完成{detail}")
+            else:
+                self.status_var.set(f"连续流程已退出，退出码 {code}{detail}")
         else:
             self.status_var.set(f"EasyCon 已退出，退出码 {code}。")
 

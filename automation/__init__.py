@@ -66,6 +66,7 @@ from .tid_rng137 import (
 from .tid_starter_flow import (
     TidStarterFlowPlan,
     TidStarterFlowRequest,
+    build_starter_run_plan,
     build_tid_starter_flow_plan,
     render_lab_bridge_ecs,
     validate_tid_starter_flow_runtime,
@@ -95,6 +96,7 @@ __all__ = [
     "TID_SCRIPT_NAMES",
     "TidStarterFlowPlan",
     "TidStarterFlowRequest",
+    "build_starter_run_plan",
     "build_tid_starter_flow_plan",
     "render_lab_bridge_ecs",
     "validate_tid_starter_flow_runtime",
