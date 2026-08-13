@@ -26,6 +26,12 @@ from automation.sid_reverse118 import SID_REVERSE_TEMPLATE_NAME  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOURCE = Path.home() / "Downloads" / "NS火叶全自动一键乱数1.1.8"
 DEFAULT_DESTINATION = ROOT / "local_assets" / "easycon118"
+EXTENSION_DIR = ROOT / "assets" / "easycon118_extensions"
+
+
+def _copy_shiny_male_label(source: Path, target: Path) -> None:
+    """Copy the one-line IL asset in its canonical no-trailing-newline form."""
+    target.write_bytes(source.read_bytes().rstrip(b"\r\n"))
 
 
 def import_package(source: Path, destination: Path) -> Path:
@@ -34,7 +40,21 @@ def import_package(source: Path, destination: Path) -> Path:
     if ROOT.resolve() not in destination.parents:
         raise ValueError("导入目标必须位于当前项目目录内")
     label_dir = source / "ImgLabel"
-    manifest = inspect_label_corpus(label_dir)
+    shiny_male_label = label_dir / "闪公图标.IL"
+    bundled_shiny_male_label = EXTENSION_DIR / "闪公图标.IL"
+    # Older 1.1.8 packages predate the shiny-summary male label.  The
+    # repository bundles this audited extension so a fresh device can import
+    # the original package and still obtain the current SID collector assets.
+    inspect_dir = label_dir
+    if not shiny_male_label.is_file():
+        if not bundled_shiny_male_label.is_file():
+            raise FileNotFoundError("缺少SID闪光摘要页雄性标签: 闪公图标.IL")
+        inspect_dir = destination.parent / ".easycon118-label-audit"
+        if inspect_dir.exists():
+            shutil.rmtree(inspect_dir)
+        shutil.copytree(label_dir, inspect_dir)
+        _copy_shiny_male_label(bundled_shiny_male_label, inspect_dir / "闪公图标.IL")
+    manifest = inspect_label_corpus(inspect_dir)
     if manifest["count"] != EXPECTED_LABEL_COUNT:
         raise ValueError(f"标签数量不是 {EXPECTED_LABEL_COUNT}: {manifest['count']}")
     if manifest["methods"] != EXPECTED_LABEL_METHODS:
@@ -48,9 +68,11 @@ def import_package(source: Path, destination: Path) -> Path:
     if script_manifest["sha256"] != EXPECTED_SCRIPT_SHA256:
         raise ValueError(f"主脚本/lib 指纹不匹配: {script_manifest['sha256']}")
 
-    templates = [
-        source / name for name in (*EXPECTED_TEMPLATE_NAMES, SID_REVERSE_TEMPLATE_NAME)
-    ]
+    templates = [source / name for name in EXPECTED_TEMPLATE_NAMES]
+    sid_template = EXTENSION_DIR / SID_REVERSE_TEMPLATE_NAME
+    if not sid_template.is_file():
+        sid_template = source / SID_REVERSE_TEMPLATE_NAME
+    templates.append(sid_template)
     if any(not path.is_file() for path in templates) or not (source / "lib").is_dir():
         raise FileNotFoundError("1.1.8 包必须包含正式/孵蛋/SID采集主 ECS、lib 和 ImgLabel")
     destination.mkdir(parents=True, exist_ok=True)
@@ -78,6 +100,8 @@ def import_package(source: Path, destination: Path) -> Path:
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(source_path, target)
+        if name == "ImgLabel" and not (target / "闪公图标.IL").is_file():
+            _copy_shiny_male_label(bundled_shiny_male_label, target / "闪公图标.IL")
     for old_template in destination.glob("*.ecs"):
         old_template.unlink()
     for template in templates:
@@ -95,6 +119,8 @@ def import_package(source: Path, destination: Path) -> Path:
         ),
         encoding="utf-8",
     )
+    if inspect_dir != label_dir and inspect_dir.exists():
+        shutil.rmtree(inspect_dir)
     return destination
 
 

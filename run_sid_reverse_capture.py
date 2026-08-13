@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from datetime import datetime
 import json
 from pathlib import Path
@@ -38,10 +39,12 @@ def load_sid_reverse_request(path: Path) -> SIDReverseRunRequest:
         request = SIDReverseRunRequest(
             tid=int(values["tid"]),
             party_count=int(values["party_count"]),
+            game=str(values.get("game", "fr_nx")),
             start_slot=int(values.get("start_slot", 1)),
             max_candies=int(values.get("max_candies", 5)),
             recognition_threshold=int(values.get("recognition_threshold", 85)),
             dex_overrides=tuple(int(item) for item in values.get("dex_overrides", (0,) * 6)),
+            initial_levels=tuple(int(item) for item in values["initial_levels"]),
             source_types=tuple(int(item) for item in values.get("source_types", (0,) * 6)),
             locations=tuple(str(item) for item in values.get("locations", ("",) * 6)),
             effort_values=tuple(
@@ -89,6 +92,26 @@ def _parse_dex_overrides(
         raise ValueError("未使用槽位的--dex仅支持0或1-386")
     values.extend([0] * (6 - len(values)))
     result = tuple(values)
+    return result  # type: ignore[return-value]
+
+
+def _parse_initial_levels(
+    value: str | None, count: int
+) -> tuple[int, int, int, int, int, int]:
+    if value:
+        parts = [part.strip() for part in value.split(",")]
+        if len(parts) != count:
+            raise ValueError("--levels项数必须等于队内闪光数量")
+        levels = [int(part) for part in parts]
+    else:
+        levels = [
+            _ask_int(f"队伍第{slot}位初始等级 (1-100): ", 1, 100)
+            for slot in range(1, count + 1)
+        ]
+    if any(not 1 <= level <= 100 for level in levels):
+        raise ValueError("活动队伍槽位的--levels必须填写1-100")
+    levels.extend([1] * (6 - len(levels)))
+    result = tuple(levels)
     return result  # type: ignore[return-value]
 
 
@@ -258,6 +281,10 @@ def main(argv: list[str] | None = None) -> int:
         "--dex",
         help="active party slots' National Dex numbers, comma-separated and required",
     )
+    parser.add_argument(
+        "--levels",
+        help="active party slots' initial levels, comma-separated and required",
+    )
     parser.add_argument("--game", choices=("fr_nx", "lg_nx"))
     parser.add_argument(
         "--sources",
@@ -287,12 +314,14 @@ def main(argv: list[str] | None = None) -> int:
             base_request = load_sid_reverse_request(args.request_json)
             if game is None:
                 raise ValueError("使用 --request-json 时必须同时指定 --game")
+            base_request = replace(base_request, game=game)
         else:
             tid = args.tid if args.tid is not None else _ask_int("TID (0-65535): ", 0, 65535)
             count = args.count if args.count is not None else _ask_int("队内闪光宝可梦数量 (1-6): ", 1, 6)
             if game is None:
                 game = "fr_nx" if _ask_int("游戏版本 (1=火红, 2=叶绿): ", 1, 2) == 1 else "lg_nx"
             overrides = _parse_dex_overrides(args.dex, count)
+            initial_levels = _parse_initial_levels(args.levels, count)
             source_types, locations, effort_values = _collect_origins(
                 count,
                 game,
@@ -303,9 +332,11 @@ def main(argv: list[str] | None = None) -> int:
             base_request = SIDReverseRunRequest(
                 tid=tid,
                 party_count=count,
+                game=game,
                 max_candies=args.candies,
                 recognition_threshold=args.threshold,
                 dex_overrides=overrides,
+                initial_levels=initial_levels,
                 source_types=source_types,
                 locations=locations,
                 effort_values=effort_values,
@@ -333,10 +364,12 @@ def main(argv: list[str] | None = None) -> int:
             request = SIDReverseRunRequest(
                 tid=tid,
                 party_count=1,
+                game=base_request.game,
                 start_slot=slot,
                 max_candies=base_request.max_candies,
                 recognition_threshold=base_request.recognition_threshold,
                 dex_overrides=base_request.dex_overrides,
+                initial_levels=base_request.initial_levels,
                 source_types=base_request.source_types,
                 locations=base_request.locations,
                 effort_values=base_request.effort_values,

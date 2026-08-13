@@ -1,0 +1,526 @@
+# EasyCon 1.6.4-a SID反查观测采集测试版
+#
+# 运行前：
+# 1. 在游戏内保存，待反查的闪光宝可梦依次放在队伍前N位。
+# 2. 背包第一页第一格放神奇糖果。每只宝可梦都会从存档重新开始，糖果不会保存消耗。
+# 3. 在图鉴编号数组中填写每只宝可梦的全国图鉴编号；摘要页名称OCR不用于物种判定。
+# 4. 每只宝可梦填写来源类型和六项努力值；野生宝可梦还要填写TenLines地点名。
+
+# ========================
+# 用户输入
+# ========================
+$SID反查TID = 12345
+$SID反查队内闪光数量 = 2
+$SID反查每只最多糖果 = 5
+$SID反查识图阈值 = 85
+
+# 直接在EasyCon运行时保持1；frlg-auto-rng逐只调用时会自动改为当前槽位。
+$SID反查队伍起始位置 = 1
+
+# 依次对应队伍1-6位；本次使用的队伍槽位必须填写1-386，未使用槽位可保留0。
+$SID反查图鉴编号覆盖 = [0,0,0,0,0,0]
+
+# 每只宝可梦当前存档内的初始等级。Python 会把种族值和性别阈值一并写入，
+# 避免依赖1.1.8只覆盖原乱数目标的不完整数据表。
+$SID反查初始等级 = [1,1,1,1,1,1]
+$SID反查种族HP覆盖 = [0,0,0,0,0,0]
+$SID反查种族ATK覆盖 = [0,0,0,0,0,0]
+$SID反查种族DEF覆盖 = [0,0,0,0,0,0]
+$SID反查种族SPA覆盖 = [0,0,0,0,0,0]
+$SID反查种族SPD覆盖 = [0,0,0,0,0,0]
+$SID反查种族SPE覆盖 = [0,0,0,0,0,0]
+$SID反查性别阈值覆盖 = [127,127,127,127,127,127]
+
+# 依次对应队伍1-6位；0=定点，1=野生。野生项必须在相遇地点数组填写TenLines地点名。
+$SID反查来源类型 = [0,0,0,0,0,0]
+$SID反查相遇地点 = ["","","","","",""]
+
+# 第三世代六项努力值，每项0-255、每只总和不超过510。
+$SID反查努力HP = [0,0,0,0,0,0]
+$SID反查努力ATK = [0,0,0,0,0,0]
+$SID反查努力DEF = [0,0,0,0,0,0]
+$SID反查努力SPA = [0,0,0,0,0,0]
+$SID反查努力SPD = [0,0,0,0,0,0]
+$SID反查努力SPE = [0,0,0,0,0,0]
+
+# ========================
+# 共享状态（1.6.4-a要求跨分支变量全局声明）
+# ========================
+$SID反查当前队伍位置 = 0
+$SID反查当前观测序号 = 0
+$SID反查当前图鉴编号 = 0
+$SID反查当前名称 = ""
+$SID反查当前性格 = -1
+$SID反查当前性别 = -1
+$SID反查当前等级 = -1
+$SID反查当前初始等级 = -1
+$SID反查当前HP = -1
+$SID反查当前ATK = -1
+$SID反查当前DEF = -1
+$SID反查当前SPA = -1
+$SID反查当前SPD = -1
+$SID反查当前SPE = -1
+$SID反查读取结果 = 0
+$SID反查糖果结果 = 0
+$SID反查覆盖索引 = 0
+$SID反查循环末位置 = 0
+$SID反查糖果序号 = 0
+$SID反查关闭调试 = 0
+$SID反查动作结果 = 0
+$SID反查输出观测数量 = 0
+$SID反查当前性别阈值 = -1
+$SID反查当前来源类型 = 0
+$SID反查当前相遇地点 = ""
+$SID反查当前努力HP = 0
+$SID反查当前努力ATK = 0
+$SID反查当前努力DEF = 0
+$SID反查当前努力SPA = 0
+$SID反查当前努力SPD = 0
+$SID反查当前努力SPE = 0
+$SID反查当前努力总和 = 0
+$SID反查闪公匹配 = -1
+$SID反查普通母匹配 = -1
+$SID反查辅助识图阈值 = 0
+$SID反查种族HP = -1
+$SID反查种族ATK = -1
+$SID反查种族DEF = -1
+$SID反查种族SPA = -1
+$SID反查种族SPD = -1
+$SID反查种族SPE = -1
+$SID反查HP最小 = -1
+$SID反查HP最大 = -1
+$SID反查ATK最小 = -1
+$SID反查ATK最大 = -1
+$SID反查DEF最小 = -1
+$SID反查DEF最大 = -1
+$SID反查SPA最小 = -1
+$SID反查SPA最大 = -1
+$SID反查SPD最小 = -1
+$SID反查SPD最大 = -1
+$SID反查SPE最小 = -1
+$SID反查SPE最大 = -1
+$SID反查候选能力值 = -1
+$SID反查完整能力值 = -1
+
+PRINT ""
+PRINT ========================
+PRINT SID反查观测采集
+PRINT ========================
+
+IF $SID反查TID < 0 or $SID反查TID > 65535
+    PRINT TID必须在0-65535之间
+    RETURN
+ENDIF
+IF $SID反查队内闪光数量 < 1 or $SID反查队内闪光数量 > 6
+    PRINT 队内闪光数量必须在1-6之间
+    RETURN
+ENDIF
+IF $SID反查队伍起始位置 < 1 or $SID反查队伍起始位置 > 6
+    PRINT 队伍起始位置必须在1-6之间
+    RETURN
+ENDIF
+IF $SID反查每只最多糖果 < 0 or $SID反查每只最多糖果 > 20
+    PRINT 每只最多糖果必须在0-20之间
+    RETURN
+ENDIF
+IF $SID反查识图阈值 <= 0 or $SID反查识图阈值 > 100
+    PRINT 识图阈值必须在1-100之间
+    RETURN
+ENDIF
+
+PRINT "SIDREV|META|TID=" & $SID反查TID & "|COUNT=" & $SID反查队内闪光数量
+PRINT 提示: 本测试版只采集观测；PID、PSV交集和SID候选由frlg-auto-rng计算
+
+$SID反查循环末位置 = $SID反查队伍起始位置 + $SID反查队内闪光数量 - 1
+IF $SID反查循环末位置 > 6
+    PRINT 队伍起始位置与闪光数量超出第六个槽位
+    RETURN
+ENDIF
+FOR $SID反查当前队伍位置 = $SID反查队伍起始位置 TO $SID反查循环末位置
+    PRINT ""
+    PRINT 【SID反查】正在处理队伍第 & $SID反查当前队伍位置 & " 位"
+    $SID反查覆盖索引 = $SID反查当前队伍位置 - 1
+    $SID反查当前图鉴编号 = $SID反查图鉴编号覆盖[$SID反查覆盖索引]
+    $SID反查当前初始等级 = $SID反查初始等级[$SID反查覆盖索引]
+    $SID反查种族HP = $SID反查种族HP覆盖[$SID反查覆盖索引]
+    $SID反查种族ATK = $SID反查种族ATK覆盖[$SID反查覆盖索引]
+    $SID反查种族DEF = $SID反查种族DEF覆盖[$SID反查覆盖索引]
+    $SID反查种族SPA = $SID反查种族SPA覆盖[$SID反查覆盖索引]
+    $SID反查种族SPD = $SID反查种族SPD覆盖[$SID反查覆盖索引]
+    $SID反查种族SPE = $SID反查种族SPE覆盖[$SID反查覆盖索引]
+    $SID反查当前性别阈值 = $SID反查性别阈值覆盖[$SID反查覆盖索引]
+    $SID反查当前来源类型 = $SID反查来源类型[$SID反查覆盖索引]
+    $SID反查当前相遇地点 = $SID反查相遇地点[$SID反查覆盖索引]
+    $SID反查当前努力HP = $SID反查努力HP[$SID反查覆盖索引]
+    $SID反查当前努力ATK = $SID反查努力ATK[$SID反查覆盖索引]
+    $SID反查当前努力DEF = $SID反查努力DEF[$SID反查覆盖索引]
+    $SID反查当前努力SPA = $SID反查努力SPA[$SID反查覆盖索引]
+    $SID反查当前努力SPD = $SID反查努力SPD[$SID反查覆盖索引]
+    $SID反查当前努力SPE = $SID反查努力SPE[$SID反查覆盖索引]
+    $SID反查当前努力总和 = $SID反查当前努力HP + $SID反查当前努力ATK + $SID反查当前努力DEF + $SID反查当前努力SPA + $SID反查当前努力SPD + $SID反查当前努力SPE
+    IF $SID反查当前图鉴编号 < 1 or $SID反查当前图鉴编号 > 386
+        PRINT 当前队伍位置必须填写1-386的全国图鉴编号
+        PRINT "SIDREV|ERROR|MON=" & $SID反查当前队伍位置 & "|STAGE=INPUT_DEX"
+        RETURN
+    ENDIF
+    IF $SID反查当前初始等级 < 1 or $SID反查当前初始等级 > 100
+        PRINT 当前队伍位置必须填写1-100的初始等级
+        RETURN
+    ENDIF
+    IF $SID反查种族HP < 1 or $SID反查种族ATK < 1 or $SID反查种族DEF < 1 or $SID反查种族SPA < 1 or $SID反查种族SPD < 1 or $SID反查种族SPE < 1
+        PRINT 当前队伍位置缺少Python生成的六项种族值
+        RETURN
+    ENDIF
+    IF $SID反查当前来源类型 < 0 or $SID反查当前来源类型 > 1
+        PRINT 来源类型必须是0定点或1野生
+        RETURN
+    ENDIF
+    IF $SID反查当前来源类型 == 1 and $SID反查当前相遇地点 == ""
+        PRINT 野生宝可梦必须填写TenLines相遇地点
+        RETURN
+    ENDIF
+    IF $SID反查当前努力HP < 0 or $SID反查当前努力HP > 255 or $SID反查当前努力ATK < 0 or $SID反查当前努力ATK > 255 or $SID反查当前努力DEF < 0 or $SID反查当前努力DEF > 255 or $SID反查当前努力SPA < 0 or $SID反查当前努力SPA > 255 or $SID反查当前努力SPD < 0 or $SID反查当前努力SPD > 255 or $SID反查当前努力SPE < 0 or $SID反查当前努力SPE > 255
+        PRINT 每项努力值必须在0-255之间
+        RETURN
+    ENDIF
+    IF $SID反查当前努力总和 > 510
+        PRINT 六项努力值总和不能超过510
+        RETURN
+    ENDIF
+    CALL SID反查关闭游戏
+    # 关闭动画标签消失后，Switch 主界面仍可能短暂不接收启动键。
+    # 1.1.8 正式乱数流程由 HOME_BUFFER 自带这段空档；SID 普通启动需显式等待。
+    WAIT 1500
+    CALL SID反查普通启动并进入存档
+    $SID反查动作结果 = SID反查打开队伍摘要($SID反查当前队伍位置)
+
+    $SID反查当前观测序号 = 0
+    $SID反查读取结果 = SID反查读取并输出观测($SID反查当前队伍位置, $SID反查当前观测序号, $SID反查识图阈值)
+    IF $SID反查读取结果 != 1
+        PRINT "SIDREV|ERROR|MON=" & $SID反查当前队伍位置 & "|STAGE=INITIAL_RECOGNITION"
+        CALL SID反查关闭游戏
+        RETURN
+    ENDIF
+
+    IF $SID反查当前等级 < 100 and $SID反查每只最多糖果 > 0
+        FOR $SID反查糖果序号 = 1 TO $SID反查每只最多糖果
+            # 当前等级标签支持到99；避免升到100后把已有有效观测判成失败。
+            IF $SID反查当前等级 >= 99
+                BREAK
+            ENDIF
+            $SID反查糖果结果 = SID反查使用神奇糖果($SID反查当前队伍位置)
+            IF $SID反查糖果结果 != 1
+                BREAK
+            ENDIF
+            $SID反查动作结果 = SID反查从糖果后打开摘要($SID反查当前队伍位置)
+            $SID反查当前观测序号 = $SID反查糖果序号
+            $SID反查读取结果 = SID反查读取并输出观测($SID反查当前队伍位置, $SID反查当前观测序号, $SID反查识图阈值)
+            IF $SID反查读取结果 != 1
+                PRINT "SIDREV|ERROR|MON=" & $SID反查当前队伍位置 & "|STAGE=CANDY_RECOGNITION|OBS=" & $SID反查当前观测序号
+                BREAK
+            ENDIF
+            IF $SID反查当前等级 >= 100
+                BREAK
+            ENDIF
+        NEXT
+    ENDIF
+
+    $SID反查输出观测数量 = $SID反查当前观测序号 + 1
+    PRINT "SIDREV|MON_DONE|MON=" & $SID反查当前队伍位置 & "|OBS=" & $SID反查输出观测数量
+NEXT
+
+CALL SID反查关闭游戏
+PRINT "SIDREV|DONE|COUNT=" & $SID反查队内闪光数量
+PRINT SID反查观测采集完成；请把本次日志交给frlg-auto-rng的run_sid_reverse.py
+
+FUNC SID反查关闭游戏
+    FOR
+        IF @主页 < 95 and @主页_NS2 < 95
+            HOME 100
+            WAIT 1500
+        ENDIF
+        IF (@正确退出 >= 95 or @HOME_BUFFER正确退出 >= 95) or (@正确退出_NS2 >= 95 or @HOME_BUFFER正确退出 >= 95)
+            X
+            WAIT 1500
+            A
+            WAIT 1500
+            FOR
+                IF @正在关闭 >= 95
+                    WAIT 100
+                ELSE
+                    BREAK
+                ENDIF
+            NEXT
+            RETURN
+        ELIF @错误退出 >= 95 or @错误退出_NS2 >= 95
+            B
+            WAIT 1500
+        ELSE
+            RETURN
+        ENDIF
+    NEXT
+ENDFUNC
+
+FUNC SID反查普通启动并进入存档
+    A
+    WAIT 1200
+    A
+    WAIT 8000
+    A
+    WAIT 500
+    A
+    WAIT 500
+    A DOWN
+    WAIT 3000
+    A UP
+    WAIT 500
+    A DOWN
+    WAIT 1000
+    A UP
+    WAIT 500
+    B
+    WAIT 2500
+ENDFUNC
+
+FUNC SID反查选择队伍位置($队伍位置: INT): INT
+    IF $队伍位置 == 2
+        DOWN
+        WAIT 500
+    ELIF $队伍位置 == 3
+        DOWN
+        WAIT 500
+        DOWN
+        WAIT 500
+    ELIF $队伍位置 == 4
+        DOWN
+        WAIT 500
+        DOWN
+        WAIT 500
+        DOWN
+        WAIT 500
+    ELIF $队伍位置 == 5
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+    ELIF $队伍位置 == 6
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+    ENDIF
+    RETURN 1
+ENDFUNC
+
+FUNC SID反查打开队伍摘要($队伍位置: INT): INT
+    X
+    WAIT 500
+    # 正常冷启动进档后主菜单光标在图鉴，向下一项是宝可梦。
+    DOWN
+    WAIT 500
+    A
+    WAIT 1500
+    $SID反查动作结果 = SID反查选择队伍位置($队伍位置)
+    A
+    WAIT 500
+    A
+    WAIT 1500
+    RETURN 1
+ENDFUNC
+
+FUNC SID反查从糖果后打开摘要($队伍位置: INT): INT
+    # 与1.1.8已验证的糖果后返回路径一致；仅把固定第六位改为参数化槽位。
+    UP
+    WAIT 500
+    A
+    WAIT 1500
+    $SID反查动作结果 = SID反查选择队伍位置($队伍位置)
+    A
+    WAIT 500
+    A
+    WAIT 1500
+    RETURN 1
+ENDFUNC
+
+FUNC SID反查读取并输出观测($队伍位置: INT, $观测序号: INT, $识图阈值: INT): INT
+    $SID反查覆盖索引 = $队伍位置 - 1
+    $SID反查当前图鉴编号 = $SID反查图鉴编号覆盖[$SID反查覆盖索引]
+    $SID反查当前名称 = 目标英文名称($SID反查当前图鉴编号)
+    $SID反查当前性格 = 识别性格($识图阈值)
+    # 初始等级由用户输入；每成功使用一次神奇糖果，观测序号自然增加1。
+    # 不再让闪光摘要页底色导致等级数字误识别。
+    $SID反查当前等级 = $SID反查当前初始等级 + $观测序号
+    $SID反查当前性别 = -1
+
+    IF $SID反查当前图鉴编号 > 0
+        $SID反查当前性别 = SID反查识别闪光性别($SID反查当前性别阈值, $识图阈值)
+    ENDIF
+
+    IF $SID反查当前性格 < 0 or $SID反查当前等级 < 1 or $SID反查当前性别 < 0
+        RETURN 0
+    ENDIF
+
+    RIGHT
+    WAIT 1000
+
+    IF $SID反查当前图鉴编号 == 292
+        # 脱壳忍者HP恒为1，不使用普通HP公式。
+        $SID反查HP最小 = 1
+        $SID反查HP最大 = 1
+    ELSE
+        $SID反查HP最小 = 计算HP能力值($SID反查种族HP, $SID反查当前努力HP, $SID反查当前等级, 0)
+        $SID反查HP最大 = 计算HP能力值($SID反查种族HP, $SID反查当前努力HP, $SID反查当前等级, 31)
+    ENDIF
+    $SID反查ATK最小 = 计算非HP能力值($SID反查种族ATK, $SID反查当前努力ATK, $SID反查当前等级, 0, $SID反查当前性格, 0)
+    $SID反查ATK最大 = 计算非HP能力值($SID反查种族ATK, $SID反查当前努力ATK, $SID反查当前等级, 31, $SID反查当前性格, 0)
+    $SID反查DEF最小 = 计算非HP能力值($SID反查种族DEF, $SID反查当前努力DEF, $SID反查当前等级, 0, $SID反查当前性格, 1)
+    $SID反查DEF最大 = 计算非HP能力值($SID反查种族DEF, $SID反查当前努力DEF, $SID反查当前等级, 31, $SID反查当前性格, 1)
+    $SID反查SPA最小 = 计算非HP能力值($SID反查种族SPA, $SID反查当前努力SPA, $SID反查当前等级, 0, $SID反查当前性格, 3)
+    $SID反查SPA最大 = 计算非HP能力值($SID反查种族SPA, $SID反查当前努力SPA, $SID反查当前等级, 31, $SID反查当前性格, 3)
+    $SID反查SPD最小 = 计算非HP能力值($SID反查种族SPD, $SID反查当前努力SPD, $SID反查当前等级, 0, $SID反查当前性格, 4)
+    $SID反查SPD最大 = 计算非HP能力值($SID反查种族SPD, $SID反查当前努力SPD, $SID反查当前等级, 31, $SID反查当前性格, 4)
+    $SID反查SPE最小 = 计算非HP能力值($SID反查种族SPE, $SID反查当前努力SPE, $SID反查当前等级, 0, $SID反查当前性格, 2)
+    $SID反查SPE最大 = 计算非HP能力值($SID反查种族SPE, $SID反查当前努力SPE, $SID反查当前等级, 31, $SID反查当前性格, 2)
+
+    PRINT "SIDREV|LEGAL|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|HP=" & $SID反查HP最小 & "-" & $SID反查HP最大 & "|ATK=" & $SID反查ATK最小 & "-" & $SID反查ATK最大 & "|DEF=" & $SID反查DEF最小 & "-" & $SID反查DEF最大 & "|SPA=" & $SID反查SPA最小 & "-" & $SID反查SPA最大 & "|SPD=" & $SID反查SPD最小 & "-" & $SID反查SPD最大 & "|SPE=" & $SID反查SPE最小 & "-" & $SID反查SPE最大
+
+    $SID反查当前HP = SID反查识别合法范围能力值(0, $SID反查HP最小, $SID反查HP最大, $识图阈值)
+    $SID反查当前ATK = SID反查识别合法范围能力值(1, $SID反查ATK最小, $SID反查ATK最大, $识图阈值)
+    $SID反查当前DEF = SID反查识别合法范围能力值(2, $SID反查DEF最小, $SID反查DEF最大, $识图阈值)
+    $SID反查当前SPA = SID反查识别合法范围能力值(3, $SID反查SPA最小, $SID反查SPA最大, $识图阈值)
+    $SID反查当前SPD = SID反查识别合法范围能力值(4, $SID反查SPD最小, $SID反查SPD最大, $识图阈值)
+    $SID反查当前SPE = SID反查识别合法范围能力值(5, $SID反查SPE最小, $SID反查SPE最大, $识图阈值)
+
+    IF $SID反查当前HP < 1 or $SID反查当前ATK < 1 or $SID反查当前DEF < 1 or $SID反查当前SPA < 1 or $SID反查当前SPD < 1 or $SID反查当前SPE < 1
+        RETURN 0
+    ENDIF
+
+    IF $SID反查当前来源类型 == 0
+        PRINT "SIDREV|OBS|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|SOURCE=STATIC|LOCATION=" & $SID反查当前相遇地点 & "|EVHP=" & $SID反查当前努力HP & "|EVATK=" & $SID反查当前努力ATK & "|EVDEF=" & $SID反查当前努力DEF & "|EVSPA=" & $SID反查当前努力SPA & "|EVSPD=" & $SID反查当前努力SPD & "|EVSPE=" & $SID反查当前努力SPE & "|DEX=" & $SID反查当前图鉴编号 & "|NAME=" & $SID反查当前名称 & "|NATURE=" & $SID反查当前性格 & "|GENDER=" & $SID反查当前性别 & "|LEVEL=" & $SID反查当前等级 & "|HP=" & $SID反查当前HP & "|ATK=" & $SID反查当前ATK & "|DEF=" & $SID反查当前DEF & "|SPA=" & $SID反查当前SPA & "|SPD=" & $SID反查当前SPD & "|SPE=" & $SID反查当前SPE
+    ELSE
+        PRINT "SIDREV|OBS|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|SOURCE=WILD|LOCATION=" & $SID反查当前相遇地点 & "|EVHP=" & $SID反查当前努力HP & "|EVATK=" & $SID反查当前努力ATK & "|EVDEF=" & $SID反查当前努力DEF & "|EVSPA=" & $SID反查当前努力SPA & "|EVSPD=" & $SID反查当前努力SPD & "|EVSPE=" & $SID反查当前努力SPE & "|DEX=" & $SID反查当前图鉴编号 & "|NAME=" & $SID反查当前名称 & "|NATURE=" & $SID反查当前性格 & "|GENDER=" & $SID反查当前性别 & "|LEVEL=" & $SID反查当前等级 & "|HP=" & $SID反查当前HP & "|ATK=" & $SID反查当前ATK & "|DEF=" & $SID反查当前DEF & "|SPA=" & $SID反查当前SPA & "|SPD=" & $SID反查当前SPD & "|SPE=" & $SID反查当前SPE
+    ENDIF
+    RETURN 1
+ENDFUNC
+
+FUNC SID反查识别闪光性别($性别阈值: INT, $识图阈值: INT): INT
+    IF $性别阈值 == 255
+        RETURN 2
+    ENDIF
+    IF $性别阈值 == 0
+        RETURN 0
+    ENDIF
+    IF $性别阈值 == 254
+        RETURN 1
+    ENDIF
+
+    # SID反查对象必定为闪光个体；雄性使用闪光摘要页底色制作的新标签。
+    $SID反查闪公匹配 = @闪公图标
+    $SID反查普通母匹配 = @母图标
+    IF $SID反查闪公匹配 >= $识图阈值
+        RETURN 0
+    ENDIF
+    IF $SID反查普通母匹配 >= $识图阈值
+        RETURN 1
+    ENDIF
+    PRINT 闪光性别识别失败，闪公匹配: & $SID反查闪公匹配 & "，母匹配: " & $SID反查普通母匹配
+    RETURN -1
+ENDFUNC
+
+FUNC SID反查识别合法范围能力值($能力项: INT, $最小值: INT, $最大值: INT, $识图阈值: INT): INT
+    $SID反查候选能力值 = 识别候选范围能力值($能力项, $最小值, $最大值, $识图阈值)
+    IF $SID反查候选能力值 >= $最小值 and $SID反查候选能力值 <= $最大值
+        RETURN $SID反查候选能力值
+    ENDIF
+
+    $SID反查完整能力值 = -1
+    IF $能力项 == 0
+        $SID反查完整能力值 = 识别HP($识图阈值)
+    ELIF $能力项 == 1
+        $SID反查完整能力值 = 识别ATK($识图阈值)
+    ELIF $能力项 == 2
+        $SID反查完整能力值 = 识别DEF($识图阈值)
+    ELIF $能力项 == 3
+        $SID反查完整能力值 = 识别SPA($识图阈值)
+    ELIF $能力项 == 4
+        $SID反查完整能力值 = 识别SPD($识图阈值)
+    ELIF $能力项 == 5
+        $SID反查完整能力值 = 识别SPE($识图阈值)
+    ENDIF
+
+    IF $SID反查完整能力值 >= $最小值 and $SID反查完整能力值 <= $最大值
+        RETURN $SID反查完整能力值
+    ENDIF
+    PRINT 能力识别值不在合法范围，能力项: & $能力项 & "，识别值: " & $SID反查完整能力值 & "，范围: " & $最小值 & "-" & $最大值
+    RETURN -1
+ENDFUNC
+
+FUNC SID反查使用神奇糖果($队伍位置: INT): INT
+    B
+    WAIT 1500
+    B
+    WAIT 500
+    B
+    WAIT 1500
+    DOWN
+    WAIT 500
+    A
+    WAIT 1500
+    LEFT
+    WAIT 500
+    LEFT
+    WAIT 500
+    UP
+    WAIT 500
+    UP
+    WAIT 500
+
+    IF @神奇糖果 <= 95
+        PRINT 没有可用的神奇糖果，停止增加观测
+        RETURN 0
+    ENDIF
+
+    A
+    WAIT 500
+    A
+    WAIT 1500
+    $SID反查动作结果 = SID反查选择队伍位置($队伍位置)
+    A
+    WAIT 500
+    B
+    WAIT 2500
+    B
+    WAIT 500
+    B
+    WAIT 500
+    B
+    WAIT 2000
+    IF @学习招式 > 95
+        B
+        WAIT 1500
+    ELIF @想要学习招式 > 95
+        B
+        WAIT 1500
+        B
+        WAIT 1500
+        B
+        WAIT 1500
+        A
+        WAIT 2000
+        B
+        WAIT 1500
+    ENDIF
+    WAIT 500
+    IF @正在进化 > 95
+        WAIT 7500
+        B
+        WAIT 3000
+        B
+        WAIT 2000
+    ENDIF
+    B
+    WAIT 1500
+    RETURN 1
+ENDFUNC

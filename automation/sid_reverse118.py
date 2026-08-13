@@ -8,6 +8,8 @@ import re
 import shutil
 from pathlib import Path
 
+from rng.tenlines_utils import get_personal
+
 from .easycon118 import (
     EXPECTED_SCRIPT_FILE_COUNT,
     EXPECTED_SCRIPT_SHA256,
@@ -22,10 +24,12 @@ SID_REVERSE_TEMPLATE_NAME = "NS火叶SID反查-采集测试.ecs"
 class SIDReverseRunRequest:
     tid: int
     party_count: int
+    game: str = "fr_nx"
     start_slot: int = 1
     max_candies: int = 5
     recognition_threshold: int = 85
     dex_overrides: tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0)
+    initial_levels: tuple[int, int, int, int, int, int] = (1, 1, 1, 1, 1, 1)
     source_types: tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0)
     locations: tuple[str, str, str, str, str, str] = ("", "", "", "", "", "")
     effort_values: tuple[
@@ -47,6 +51,8 @@ class SIDReverseRunRequest:
     def validate(self) -> None:
         if not 0 <= self.tid <= 0xFFFF:
             raise ValueError("TID必须在0-65535之间")
+        if self.game not in ("fr_nx", "lg_nx"):
+            raise ValueError("游戏版本必须是fr_nx或lg_nx")
         if not 1 <= self.party_count <= 6:
             raise ValueError("队内闪光数量必须在1-6之间")
         if not 1 <= self.start_slot <= 6:
@@ -61,6 +67,8 @@ class SIDReverseRunRequest:
             raise ValueError("图鉴编号覆盖必须恰好包含6项")
         if any(not 0 <= value <= 386 for value in self.dex_overrides):
             raise ValueError("图鉴编号覆盖仅支持0或1-386")
+        if len(self.initial_levels) != 6:
+            raise ValueError("初始等级必须恰好包含6项")
         if len(self.source_types) != 6 or any(value not in (0, 1) for value in self.source_types):
             raise ValueError("来源类型必须恰好包含6项，且0=定点、1=野生")
         if len(self.locations) != 6:
@@ -76,6 +84,8 @@ class SIDReverseRunRequest:
             index = self.start_slot - 1 + offset
             if self.dex_overrides[index] == 0:
                 raise ValueError(f"队伍第{index + 1}位必须填写1-386的全国图鉴编号")
+            if not 1 <= self.initial_levels[index] <= 100:
+                raise ValueError(f"队伍第{index + 1}位初始等级必须在1-100之间")
             if self.source_types[index] == 1 and not self.locations[index].strip():
                 raise ValueError(f"队伍第{index + 1}位是野生宝可梦，必须填写相遇地点")
 
@@ -90,6 +100,12 @@ def _ecs_literal(value) -> str:
 
 def configure_sid_reverse_template(template_text: str, request: SIDReverseRunRequest) -> str:
     request.validate()
+    personal = tuple(
+        get_personal(species_id, request.game)
+        if species_id > 0
+        else {"stats": (0, 0, 0, 0, 0, 0), "gender": 127}
+        for species_id in request.dex_overrides
+    )
     values = {
         "SID反查TID": request.tid,
         "SID反查队内闪光数量": request.party_count,
@@ -97,6 +113,14 @@ def configure_sid_reverse_template(template_text: str, request: SIDReverseRunReq
         "SID反查识图阈值": request.recognition_threshold,
         "SID反查队伍起始位置": request.start_slot,
         "SID反查图鉴编号覆盖": request.dex_overrides,
+        "SID反查初始等级": request.initial_levels,
+        "SID反查种族HP覆盖": tuple(item["stats"][0] for item in personal),
+        "SID反查种族ATK覆盖": tuple(item["stats"][1] for item in personal),
+        "SID反查种族DEF覆盖": tuple(item["stats"][2] for item in personal),
+        "SID反查种族SPA覆盖": tuple(item["stats"][3] for item in personal),
+        "SID反查种族SPD覆盖": tuple(item["stats"][4] for item in personal),
+        "SID反查种族SPE覆盖": tuple(item["stats"][5] for item in personal),
+        "SID反查性别阈值覆盖": tuple(item["gender"] for item in personal),
         "SID反查来源类型": request.source_types,
         "SID反查相遇地点": request.locations,
         "SID反查努力HP": tuple(values[0] for values in request.effort_values),

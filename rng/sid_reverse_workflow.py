@@ -26,6 +26,7 @@ from .tenlines_utils import (
 
 
 SIDREV_PREFIX = "SIDREV|"
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _STAT_KEYS = ("HP", "ATK", "DEF", "SPA", "SPD", "SPE")
 _EV_KEYS = ("EVHP", "EVATK", "EVDEF", "EVSPA", "EVSPD", "EVSPE")
 SOURCE_STATIC = "STATIC"
@@ -81,7 +82,9 @@ def parse_sid_reverse_log(lines: str | Iterable[str]) -> tuple[int | None, list[
         marker = raw_line.find(SIDREV_PREFIX)
         if marker < 0:
             continue
-        payload = raw_line[marker:].strip()
+        # EasyCon CLI wraps printed lines in ANSI colour resets.  Remove them
+        # before parsing the final numeric field (usually SPE).
+        payload = _ANSI_ESCAPE_RE.sub("", raw_line[marker:]).strip()
         parts = payload.split("|")
         record_type = parts[1] if len(parts) > 1 else ""
         values: dict[str, str] = {}
@@ -103,13 +106,16 @@ def parse_sid_reverse_log(lines: str | Iterable[str]) -> tuple[int | None, list[
             nature = int(values["NATURE"])
             level = int(values["LEVEL"])
             stats = tuple(int(values[key]) for key in _STAT_KEYS)
-            gender_value = int(values.get("GENDER", "-1"))
+            gender_text = values.get("GENDER")
+            gender_value = int(gender_text) if gender_text is not None else None
             source_type = _normalize_source_type(values.get("SOURCE", SOURCE_STATIC))
             location = values.get("LOCATION", "").strip()
             effort_values = tuple(int(values.get(key, "0")) for key in _EV_KEYS)
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"invalid SIDREV observation: {payload}") from exc
-        gender = gender_value if gender_value in (0, 1, 2) else None
+        if gender_value is not None and gender_value not in (0, 1, 2):
+            raise ValueError(f"invalid SIDREV gender observation: {gender_value}")
+        gender = gender_value
         observations.append(
             SIDObservation(
                 pokemon_index=pokemon_index,

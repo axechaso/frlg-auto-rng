@@ -3,7 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from run_sid_reverse_capture import _parse_dex_overrides, load_sid_reverse_request
+from run_sid_reverse_capture import (
+    _parse_dex_overrides,
+    _parse_initial_levels,
+    load_sid_reverse_request,
+)
 
 
 class SIDReverseCaptureTests(unittest.TestCase):
@@ -17,16 +21,24 @@ class SIDReverseCaptureTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "活动队伍槽位"):
             _parse_dex_overrides("25,0", 2)
 
+    def test_parses_initial_levels_and_pads_unused_slots(self):
+        self.assertEqual(
+            _parse_initial_levels("46,55", 2),
+            (46, 55, 1, 1, 1, 1),
+        )
+
     def test_loads_gui_plan_request_and_preserves_slot_metadata(self):
         payload = {
             "mode": "sid_reverse_observation",
             "request": {
                 "tid": 54321,
                 "party_count": 2,
+                "game": "lg_nx",
                 "start_slot": 1,
                 "max_candies": 7,
                 "recognition_threshold": 88,
                 "dex_overrides": [25, 148, 0, 0, 0, 0],
+                "initial_levels": [46, 55, 1, 1, 1, 1],
                 "source_types": [0, 1, 0, 0, 0, 0],
                 "locations": ["", "Safari Zone Center", "", "", "", ""],
                 "effort_values": [[0, 0, 0, 0, 0, 0]] * 6,
@@ -38,6 +50,8 @@ class SIDReverseCaptureTests(unittest.TestCase):
             request = load_sid_reverse_request(path)
         self.assertEqual(request.tid, 54321)
         self.assertEqual(request.dex_overrides[:2], (25, 148))
+        self.assertEqual(request.game, "lg_nx")
+        self.assertEqual(request.initial_levels[:2], (46, 55))
         self.assertEqual(request.source_types[:2], (0, 1))
         self.assertEqual(request.locations[1], "Safari Zone Center")
 

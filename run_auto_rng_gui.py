@@ -313,7 +313,7 @@ class AutoRngApp:
         ).grid(row=1, column=2, columnspan=6, sticky="w", padx=4, pady=4)
         ttk.Checkbutton(
             sid_identity,
-            text="已确认队伍顺序、宝可梦、来源、努力值准确，且背包第一页第一格是神奇糖果",
+            text="已确认队伍顺序、宝可梦、初始等级、来源、努力值准确，且背包第一页第一格是神奇糖果",
             variable=self.sid_ack_var,
         ).grid(row=2, column=0, columnspan=8, sticky="w", padx=4, pady=(5, 0))
 
@@ -322,14 +322,16 @@ class AutoRngApp:
         sid_party_headers = (
             "槽位",
             "宝可梦（名称/编号）",
+            "初始等级",
             "来源",
             "Ten Lines 相遇地点（野生必填）",
             *IV_STAT_LABELS,
         )
         for column, label in enumerate(sid_party_headers):
             ttk.Label(sid_party, text=label).grid(row=0, column=column, padx=4, pady=3)
-        sid_party.columnconfigure(3, weight=1)
+        sid_party.columnconfigure(4, weight=1)
         self.sid_species_vars = tuple(tk.StringVar(value="") for _ in range(6))
+        self.sid_initial_level_vars = tuple(tk.StringVar(value="") for _ in range(6))
         self.sid_source_type_vars = tuple(tk.StringVar(value="定点") for _ in range(6))
         self.sid_location_vars = tuple(tk.StringVar(value="") for _ in range(6))
         self.sid_effort_vars = tuple(
@@ -357,6 +359,16 @@ class AutoRngApp:
             )
             species_combo.grid(row=row, column=1, padx=4, pady=2)
             row_widgets.append((species_combo, "normal"))
+            level_spinbox = ttk.Spinbox(
+                sid_party,
+                from_=1,
+                to=100,
+                width=6,
+                justify="center",
+                textvariable=self.sid_initial_level_vars[index],
+            )
+            level_spinbox.grid(row=row, column=2, padx=3, pady=2)
+            row_widgets.append((level_spinbox, "normal"))
             source_combo = ttk.Combobox(
                 sid_party,
                 textvariable=self.sid_source_type_vars[index],
@@ -364,7 +376,7 @@ class AutoRngApp:
                 width=8,
                 state="readonly",
             )
-            source_combo.grid(row=row, column=2, padx=4, pady=2)
+            source_combo.grid(row=row, column=3, padx=4, pady=2)
             row_widgets.append((source_combo, "readonly"))
             location_combo = ttk.Combobox(
                 sid_party,
@@ -372,9 +384,9 @@ class AutoRngApp:
                 values=location_choices,
                 width=30,
             )
-            location_combo.grid(row=row, column=3, sticky="we", padx=4, pady=2)
+            location_combo.grid(row=row, column=4, sticky="we", padx=4, pady=2)
             row_widgets.append((location_combo, "normal"))
-            for stat_index, variable in enumerate(self.sid_effort_vars[index], 4):
+            for stat_index, variable in enumerate(self.sid_effort_vars[index], 5):
                 effort_spinbox = ttk.Spinbox(
                     sid_party,
                     from_=0,
@@ -402,12 +414,9 @@ class AutoRngApp:
 
         sid_source = ttk.LabelFrame(sid_tab, text="3. SID 采集脚本包", padding=8)
         sid_source.pack(fill="x", pady=(8, 0))
-        downloaded_sid_source = (
-            DOWNLOADED_SOURCE_118
-            if (DOWNLOADED_SOURCE_118 / SID_REVERSE_TEMPLATE_NAME).is_file()
-            else DEFAULT_SOURCE_118
-        )
-        self.sid_source_var = tk.StringVar(value=str(downloaded_sid_source))
+        # 优先使用安装器生成的已审计本地快照。下载目录可能仍是旧版
+        # SID 模板或缺少闪光雄性标签，不能因为文件“存在”就绕过导入结果。
+        self.sid_source_var = tk.StringVar(value=str(DEFAULT_SOURCE_118))
         self._labeled_entry(
             sid_source, "1.1.8 包", self.sid_source_var, 0, 0, width=70, span=5
         )
@@ -920,7 +929,8 @@ class AutoRngApp:
             self.tid_sid_retry_radius_var,
             self.sid_game_var, self.sid_tid_var, self.sid_count_var,
             self.sid_candies_var, self.sid_threshold_var, self.sid_ack_var,
-            *self.sid_species_vars, *self.sid_source_type_vars,
+            *self.sid_species_vars, *self.sid_initial_level_vars,
+            *self.sid_source_type_vars,
             *self.sid_location_vars,
             *(variable for row in self.sid_effort_vars for variable in row),
             self.sid_source_var,
@@ -1368,6 +1378,13 @@ class AutoRngApp:
             else 0
             for index, variable in enumerate(self.sid_species_vars)
         )
+        try:
+            initial_levels = tuple(
+                int(variable.get()) if index < party_count else 1
+                for index, variable in enumerate(self.sid_initial_level_vars)
+            )
+        except ValueError as exc:
+            raise ValueError("活动队伍槽位必须填写1-100的初始等级") from exc
         source_types = tuple(
             0 if index >= party_count or variable.get() == "定点" else 1
             for index, variable in enumerate(self.sid_source_type_vars)
@@ -1389,9 +1406,11 @@ class AutoRngApp:
         request = SIDReverseRunRequest(
             tid=int(self.sid_tid_var.get()),
             party_count=party_count,
+            game="fr_nx" if self.sid_game_var.get() == "火红" else "lg_nx",
             max_candies=int(self.sid_candies_var.get()),
             recognition_threshold=int(self.sid_threshold_var.get()),
             dex_overrides=dex_overrides,  # type: ignore[arg-type]
+            initial_levels=initial_levels,  # type: ignore[arg-type]
             source_types=source_types,  # type: ignore[arg-type]
             locations=locations,  # type: ignore[arg-type]
             effort_values=effort_values,  # type: ignore[arg-type]
