@@ -126,19 +126,26 @@ def parse_exact_ivs(values, label: str) -> tuple[int, int, int, int, int, int]:
     return tuple(result)  # type: ignore[return-value]
 
 
-def parse_sid_effort_values(value: str, slot: int) -> tuple[int, int, int, int, int, int]:
-    parts = [part.strip() for part in value.split(",")]
+def parse_sid_effort_values(values, slot: int) -> tuple[int, int, int, int, int, int]:
+    parts = (
+        [part.strip() for part in values.split(",")]
+        if isinstance(values, str)
+        else [str(part).strip() for part in values]
+    )
     if len(parts) != 6:
-        raise ValueError(f"队伍第{slot}位努力值必须按 HP,攻击,防御,特攻,特防,速度 填写六项")
-    try:
-        values = tuple(int(part) for part in parts)
-    except ValueError as exc:
-        raise ValueError(f"队伍第{slot}位努力值必须是整数") from exc
-    if any(not 0 <= item <= 255 for item in values):
-        raise ValueError(f"队伍第{slot}位每项努力值必须在0-255之间")
-    if sum(values) > 510:
+        raise ValueError(f"队伍第{slot}位努力值必须包含六项能力")
+    parsed = []
+    for stat, part in zip(IV_STAT_LABELS, parts):
+        try:
+            value = int(part)
+        except ValueError as exc:
+            raise ValueError(f"队伍第{slot}位{stat}努力值必须是整数") from exc
+        if not 0 <= value <= 255:
+            raise ValueError(f"队伍第{slot}位{stat}努力值必须在0-255之间")
+        parsed.append(value)
+    if sum(parsed) > 510:
         raise ValueError(f"队伍第{slot}位六项努力值总和不能超过510")
-    return values  # type: ignore[return-value]
+    return tuple(parsed)  # type: ignore[return-value]
 
 
 def preferred_detected_port(ports, current: str = "") -> str | None:
@@ -273,16 +280,23 @@ class AutoRngApp:
 
         sid_party = ttk.LabelFrame(sid_tab, text="2. 队伍闪光宝可梦信息", padding=8)
         sid_party.pack(fill="x", pady=(8, 0))
-        for column, label in enumerate(
-            ("槽位", "图鉴编号（0=名称OCR）", "来源", "Ten Lines 相遇地点（野生必填）", "努力值 HP,攻,防,特攻,特防,速")
-        ):
+        sid_party_headers = (
+            "槽位",
+            "图鉴编号（0=名称OCR）",
+            "来源",
+            "Ten Lines 相遇地点（野生必填）",
+            *IV_STAT_LABELS,
+        )
+        for column, label in enumerate(sid_party_headers):
             ttk.Label(sid_party, text=label).grid(row=0, column=column, padx=4, pady=3)
         sid_party.columnconfigure(3, weight=1)
-        sid_party.columnconfigure(4, weight=1)
         self.sid_dex_vars = tuple(tk.StringVar(value="0") for _ in range(6))
         self.sid_source_type_vars = tuple(tk.StringVar(value="定点") for _ in range(6))
         self.sid_location_vars = tuple(tk.StringVar(value="") for _ in range(6))
-        self.sid_effort_vars = tuple(tk.StringVar(value="0,0,0,0,0,0") for _ in range(6))
+        self.sid_effort_vars = tuple(
+            tuple(tk.StringVar(value="0") for _ in IV_STAT_LABELS)
+            for _ in range(6)
+        )
         self.sid_location_map = {}
         for locations in self.all_locations.values():
             for location in locations:
@@ -311,15 +325,26 @@ class AutoRngApp:
                 values=location_choices,
                 width=34,
             ).grid(row=row, column=3, sticky="we", padx=4, pady=2)
-            ttk.Entry(
-                sid_party,
-                textvariable=self.sid_effort_vars[index],
-                width=28,
-            ).grid(row=row, column=4, sticky="we", padx=4, pady=2)
+            for stat_index, variable in enumerate(self.sid_effort_vars[index], 4):
+                ttk.Spinbox(
+                    sid_party,
+                    from_=0,
+                    to=255,
+                    width=5,
+                    justify="center",
+                    textvariable=variable,
+                ).grid(row=row, column=stat_index, padx=3, pady=2)
         ttk.Label(
             sid_party,
             text="只处理队伍前 N 位；昵称导致名称 OCR 失败时填写全国图鉴编号。孵蛋来源与非 Method 1/2/4 个体暂不支持。",
-        ).grid(row=7, column=0, columnspan=5, sticky="w", padx=4, pady=(5, 0))
+        ).grid(
+            row=7,
+            column=0,
+            columnspan=len(sid_party_headers),
+            sticky="w",
+            padx=4,
+            pady=(5, 0),
+        )
 
         sid_source = ttk.LabelFrame(sid_tab, text="3. SID 采集脚本包", padding=8)
         sid_source.pack(fill="x", pady=(8, 0))
@@ -842,7 +867,9 @@ class AutoRngApp:
             self.sid_game_var, self.sid_tid_var, self.sid_count_var,
             self.sid_candies_var, self.sid_threshold_var, self.sid_ack_var,
             *self.sid_dex_vars, *self.sid_source_type_vars,
-            *self.sid_location_vars, *self.sid_effort_vars, self.sid_source_var,
+            *self.sid_location_vars,
+            *(variable for row in self.sid_effort_vars for variable in row),
+            self.sid_source_var,
         )
         for variable in self.tracked_variables:
             variable.trace_add("write", self.invalidate_plan)
@@ -1281,8 +1308,10 @@ class AutoRngApp:
             for variable in self.sid_location_vars
         )
         effort_values = tuple(
-            parse_sid_effort_values(variable.get(), index + 1)
-            for index, variable in enumerate(self.sid_effort_vars)
+            parse_sid_effort_values(
+                tuple(variable.get() for variable in row), index + 1
+            )
+            for index, row in enumerate(self.sid_effort_vars)
         )
         request = SIDReverseRunRequest(
             tid=int(self.sid_tid_var.get()),

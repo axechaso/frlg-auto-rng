@@ -69,13 +69,15 @@ class GuiIvInputTests(unittest.TestCase):
 
     def test_sid_effort_values_require_six_valid_stats(self):
         self.assertEqual(
-            parse_sid_effort_values("0,4,8,12,16,20", 1),
+            parse_sid_effort_values(("0", "4", "8", "12", "16", "20"), 1),
             (0, 4, 8, 12, 16, 20),
         )
         with self.assertRaisesRegex(ValueError, "第2位.*六项"):
-            parse_sid_effort_values("0,0", 2)
+            parse_sid_effort_values(("0", "0"), 2)
         with self.assertRaisesRegex(ValueError, "总和"):
-            parse_sid_effort_values("255,255,255,0,0,0", 3)
+            parse_sid_effort_values(("255", "255", "255", "0", "0", "0"), 3)
+        with self.assertRaisesRegex(ValueError, "第4位攻击"):
+            parse_sid_effort_values(("0", "x", "0", "0", "0", "0"), 4)
 
 
 if __name__ == "__main__":
