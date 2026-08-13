@@ -68,6 +68,7 @@ from .tid_starter_flow import (
     TidStarterFlowRequest,
     build_tid_starter_flow_plan,
     render_lab_bridge_ecs,
+    validate_tid_starter_flow_runtime,
     write_tid_starter_flow_bundle,
 )
 from .sid_reverse118 import (
@@ -96,6 +97,7 @@ __all__ = [
     "TidStarterFlowRequest",
     "build_tid_starter_flow_plan",
     "render_lab_bridge_ecs",
+    "validate_tid_starter_flow_runtime",
     "write_tid_starter_flow_bundle",
     "TidRngRequest",
     "SID_REVERSE_TEMPLATE_NAME",

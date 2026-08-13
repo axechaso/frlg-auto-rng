@@ -2,12 +2,16 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from automation.easycon118 import EasyConRuntimeCheck
 from automation.tid_rng137 import DEFAULT_TID_SOURCE_PATH, TidRngRequest
 from automation.tid_starter_flow import (
     TidStarterFlowRequest,
     build_tid_starter_flow_plan,
     render_lab_bridge_ecs,
+    validate_tid_starter_flow_runtime,
     write_tid_starter_flow_bundle,
 )
 
@@ -39,6 +43,56 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertIn("TIDFLOW|BRIDGE|DONE=1", bridge)
         self.assertNotIn("OP_当前目标", bridge)
         self.assertNotIn("总F12", bridge)
+
+    def test_runtime_validation_combines_id_and_bridge_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            id_main = root / "01_id" / "main.ecs"
+            bridge_main = root / "02_lab_bridge" / "main.ecs"
+            id_main.parent.mkdir(parents=True)
+            bridge_main.parent.mkdir(parents=True)
+            id_main.write_text("RETURN 0\n", encoding="utf-8")
+            bridge_main.write_text("RETURN 0\n", encoding="utf-8")
+            with (
+                patch(
+                    "automation.tid_starter_flow.validate_tid_runtime",
+                    return_value=EasyConRuntimeCheck(True, (), ("ID预检通过",)),
+                ),
+                patch(
+                    "automation.tid_starter_flow.subprocess.run",
+                    return_value=SimpleNamespace(
+                        returncode=0,
+                        stdout="",
+                        stderr="",
+                    ),
+                ) as format_run,
+            ):
+                result = validate_tid_starter_flow_runtime(
+                    root / "ezcon.exe",
+                    id_main,
+                    bridge_main,
+                )
+
+        self.assertTrue(result.ok)
+        self.assertIn("ID预检通过", result.warnings)
+        self.assertIn("研究所桥接脚本已通过EasyCon 1.6.4-a格式检查。", result.warnings)
+        format_run.assert_called_once()
+
+    def test_runtime_validation_rejects_missing_bridge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch(
+                "automation.tid_starter_flow.validate_tid_runtime",
+                return_value=EasyConRuntimeCheck(True, (), ()),
+            ):
+                result = validate_tid_starter_flow_runtime(
+                    root / "ezcon.exe",
+                    root / "01_id" / "main.ecs",
+                    root / "02_lab_bridge" / "main.ecs",
+                )
+
+        self.assertFalse(result.ok)
+        self.assertIn("找不到研究所桥接脚本", result.errors[0])
 
     @unittest.skipUnless(
         (

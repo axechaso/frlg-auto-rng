@@ -28,18 +28,23 @@ from automation import (
     SID_REVERSE_TEMPLATE_NAME,
     SIDReverseRunRequest,
     TidRngRequest,
+    TidStarterFlowPlan,
+    TidStarterFlowRequest,
     PLANNER_STATIC_CATEGORIES,
+    build_tid_starter_flow_plan,
     build_run_command,
     prepare_compat_runner,
     probe_easycon_devices,
     search_best_plan,
     get_static_targets,
     validate_runtime,
+    validate_tid_starter_flow_runtime,
     validate_tid_runtime,
     write_configured_egg_project,
     write_configured_project,
     write_configured_tid_project,
     write_sid_reverse_project,
+    write_tid_starter_flow_bundle,
 )
 from rng.tenlines_utils import (
     NATURES,
@@ -159,6 +164,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request: EggRunRequest | None = None
         self.tid_request: TidRngRequest | None = None
+        self.tid_flow_plan: TidStarterFlowPlan | None = None
         self.sid_request: SIDReverseRunRequest | None = None
         self.project_main: Path | None = None
         self.runtime_check = None
@@ -517,7 +523,7 @@ class AutoRngApp:
         self.tid_language_combo = self._labeled_combo(
             tid_identity, "ROM 语言", self.tid_language_var, ("英文", "日文"), 0, 0
         )
-        self._labeled_combo(
+        self.tid_mode_combo = self._labeled_combo(
             tid_identity, "运行模式", self.tid_mode_var,
             ("乱数模式", "穷举模式"), 0, 2,
         )
@@ -532,18 +538,21 @@ class AutoRngApp:
         self._labeled_entry(tid_identity, "目标 TID", self.tid_target_var, 1, 0, width=12)
         self._labeled_entry(tid_identity, "目标 SID", self.tid_sid_var, 1, 2, width=12)
         self._labeled_entry(tid_identity, "主角名称", self.tid_name_var, 1, 4, width=18)
-        self._labeled_combo(
+        self.tid_sid_mode_combo = self._labeled_combo(
             tid_identity, "SID 处理", self.tid_sid_mode_var,
             ("目标 SID", "不做 SID 乱数", "随机 SID"), 1, 6,
         )
         self._labeled_entry(
             tid_identity, "F3 随机范围", self.tid_f3_random_range_var, 2, 0, width=12
         )
-        ttk.Checkbutton(
+        self.tid_calibration_check = ttk.Checkbutton(
             tid_identity,
             text="固定延迟检查（名称或性别变化后先运行一次）",
             variable=self.tid_calibration_var,
-        ).grid(row=2, column=2, columnspan=4, sticky="w", padx=4, pady=4)
+        )
+        self.tid_calibration_check.grid(
+            row=2, column=2, columnspan=4, sticky="w", padx=4, pady=4
+        )
         ttk.Label(
             tid_identity,
             text="脚本会新建存档并自动退出游戏两次；请先确认当前存档与主页状态。",
@@ -622,7 +631,53 @@ class AutoRngApp:
         self._labeled_entry(tid_settings, "SID ADV 修正", self.tid_sid_adv_correction_var, 2, 6, width=12)
         self._labeled_entry(tid_settings, "select 补偿", self.tid_select_correction_var, 3, 0, width=12)
 
-        tid_filters = ttk.LabelFrame(tid_tab, text="4. 穷举判定与高级范围", padding=8)
+        tid_starter = ttk.LabelFrame(tid_tab, text="4. 御三家 SID 命中验证", padding=8)
+        tid_starter.pack(fill="x", pady=(8, 0))
+        self.tid_starter_flow_var = tk.BooleanVar(value=True)
+        self.tid_game_var = tk.StringVar(value="火红")
+        self.tid_starter_var = tk.StringVar(value="妙蛙种子")
+        self.tid_starter_min_adv_var = tk.StringVar(value="1500")
+        self.tid_starter_max_adv_var = tk.StringVar(value="10000")
+        self.tid_starter_op_delay_var = tk.StringVar(value="31200")
+        self.tid_sid_retry_radius_var = tk.StringVar(value="20")
+        ttk.Checkbutton(
+            tid_starter,
+            text="命中 TID/SID 后继续御三家普通乱数并验证闪光",
+            variable=self.tid_starter_flow_var,
+        ).grid(row=0, column=0, columnspan=8, sticky="w", padx=4, pady=4)
+        self.tid_game_combo = self._labeled_combo(
+            tid_starter, "游戏版本", self.tid_game_var, ("火红", "叶绿"), 1, 0
+        )
+        self.tid_starter_combo = self._labeled_combo(
+            tid_starter,
+            "御三家",
+            self.tid_starter_var,
+            ("妙蛙种子", "小火龙", "杰尼龟"),
+            1,
+            2,
+        )
+        self.tid_starter_min_adv_entry = self._labeled_entry(
+            tid_starter, "最低 ADV", self.tid_starter_min_adv_var, 1, 4, width=12
+        )
+        self.tid_starter_max_adv_entry = self._labeled_entry(
+            tid_starter, "最高 ADV", self.tid_starter_max_adv_var, 1, 6, width=12
+        )
+        self.tid_starter_op_delay_entry = self._labeled_entry(
+            tid_starter, "御三家 OP 固定延迟", self.tid_starter_op_delay_var, 2, 0, width=12
+        )
+        self.tid_sid_retry_radius_entry = self._labeled_entry(
+            tid_starter, "SID ADV 重试半径", self.tid_sid_retry_radius_var, 2, 2, width=12
+        )
+        self.tid_starter_flow_controls = (
+            self.tid_game_combo,
+            self.tid_starter_combo,
+            self.tid_starter_min_adv_entry,
+            self.tid_starter_max_adv_entry,
+            self.tid_starter_op_delay_entry,
+            self.tid_sid_retry_radius_entry,
+        )
+
+        tid_filters = ttk.LabelFrame(tid_tab, text="5. 穷举判定与高级范围", padding=8)
         tid_filters.pack(fill="x", pady=(8, 0))
         self.tid_same_id_var = tk.BooleanVar(value=False)
         self.tid_sequential_id_var = tk.BooleanVar(value=False)
@@ -630,10 +685,28 @@ class AutoRngApp:
         self.tid_single_digit_var = tk.BooleanVar(value=False)
         special = ttk.Frame(tid_filters)
         special.grid(row=0, column=0, columnspan=8, sticky="w", padx=4, pady=2)
-        ttk.Checkbutton(special, text="豹子号", variable=self.tid_same_id_var).pack(side="left")
-        ttk.Checkbutton(special, text="升/降连号", variable=self.tid_sequential_id_var).pack(side="left", padx=10)
-        ttk.Checkbutton(special, text="65535", variable=self.tid_65535_var).pack(side="left")
-        ttk.Checkbutton(special, text="个位数 TID", variable=self.tid_single_digit_var).pack(side="left", padx=10)
+        self.tid_same_id_check = ttk.Checkbutton(
+            special, text="豹子号", variable=self.tid_same_id_var
+        )
+        self.tid_same_id_check.pack(side="left")
+        self.tid_sequential_id_check = ttk.Checkbutton(
+            special, text="升/降连号", variable=self.tid_sequential_id_var
+        )
+        self.tid_sequential_id_check.pack(side="left", padx=10)
+        self.tid_65535_check = ttk.Checkbutton(
+            special, text="65535", variable=self.tid_65535_var
+        )
+        self.tid_65535_check.pack(side="left")
+        self.tid_single_digit_check = ttk.Checkbutton(
+            special, text="个位数 TID", variable=self.tid_single_digit_var
+        )
+        self.tid_single_digit_check.pack(side="left", padx=10)
+        self.tid_special_checks = (
+            self.tid_same_id_check,
+            self.tid_sequential_id_check,
+            self.tid_65535_check,
+            self.tid_single_digit_check,
+        )
         self.tid_f2_candidate_var = tk.StringVar(value="2000")
         self.tid_f1_candidate_var = tk.StringVar(value="100")
         self.tid_denoise_hit_var = tk.StringVar(value="2")
@@ -645,7 +718,7 @@ class AutoRngApp:
         self._labeled_entry(tid_filters, "去噪窗口", self.tid_denoise_window_var, 1, 6, width=12)
         self._labeled_entry(tid_filters, "识图阈值", self.tid_threshold_var, 2, 0, width=12)
 
-        tid_source = ttk.LabelFrame(tid_tab, text="5. TID 1.3.7 脚本包", padding=8)
+        tid_source = ttk.LabelFrame(tid_tab, text="6. TID 1.3.7 脚本包", padding=8)
         tid_source.pack(fill="x", pady=(8, 0))
         self.tid_source_var = tk.StringVar(value=str(DEFAULT_TID_SOURCE_PATH))
         self._labeled_entry(tid_source, "脚本包", self.tid_source_var, 0, 0, width=70, span=5)
@@ -689,6 +762,8 @@ class AutoRngApp:
         self.result_text.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         self.mode_notebook.bind("<<NotebookTabChanged>>", self._on_mode_tab_change)
+        self.tid_starter_flow_var.trace_add("write", self._on_tid_flow_toggle)
+        self._update_tid_flow_controls()
         self._on_mode_tab_change()
 
     def _update_page_scrollregion(self, _event=None):
@@ -765,6 +840,9 @@ class AutoRngApp:
             self.tid_single_digit_var, self.tid_f2_candidate_var,
             self.tid_f1_candidate_var, self.tid_denoise_hit_var,
             self.tid_denoise_window_var, self.tid_threshold_var, self.tid_source_var,
+            self.tid_starter_flow_var, self.tid_game_var, self.tid_starter_var,
+            self.tid_starter_min_adv_var, self.tid_starter_max_adv_var,
+            self.tid_starter_op_delay_var, self.tid_sid_retry_radius_var,
             self.sid_game_var, self.sid_tid_var, self.sid_count_var,
             self.sid_candies_var, self.sid_threshold_var, self.sid_ack_var,
             *self.sid_dex_vars, *self.sid_source_type_vars,
@@ -808,6 +886,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.tid_flow_plan = None
         self.sid_request = None
         self.project_main = None
         self.runtime_check = None
@@ -908,7 +987,11 @@ class AutoRngApp:
             text=(
                 "准备 SID 查找" if is_sid
                 else "生成孵蛋测试脚本" if is_egg
-                else "生成 TID/SID 脚本" if is_tid
+                else (
+                    "生成 TID/SID + 御三家计划"
+                    if self.tid_starter_flow_var.get()
+                    else "生成 TID/SID 脚本"
+                ) if is_tid
                 else "搜索并生成方案"
             )
         )
@@ -918,11 +1001,45 @@ class AutoRngApp:
                 if is_sid
                 else "填写孵蛋参数后点击“生成孵蛋测试脚本”。"
                 if is_egg
-                else "填写 TID/SID 参数后点击“生成 TID/SID 脚本”。"
+                else (
+                    "填写 TID/SID 与御三家参数后生成连续流程计划。"
+                    if self.tid_starter_flow_var.get()
+                    else "填写 TID/SID 参数后点击“生成 TID/SID 脚本”。"
+                )
                 if is_tid
                 else "填写条件后点击“搜索并生成方案”。"
             )
         self.root.after_idle(self._update_page_scrollregion)
+
+    def _on_tid_flow_toggle(self, *_):
+        self._update_tid_flow_controls()
+        if self._is_tid_mode():
+            self._on_mode_tab_change()
+
+    def _update_tid_flow_controls(self):
+        enabled = self.tid_starter_flow_var.get()
+        if enabled:
+            self._updating = True
+            try:
+                self.tid_mode_var.set("乱数模式")
+                self.tid_sid_mode_var.set("目标 SID")
+                self.tid_calibration_var.set(False)
+                self.tid_same_id_var.set(False)
+                self.tid_sequential_id_var.set(False)
+                self.tid_65535_var.set(False)
+                self.tid_single_digit_var.set(False)
+            finally:
+                self._updating = False
+        self.tid_mode_combo.configure(state="disabled" if enabled else "readonly")
+        self.tid_sid_mode_combo.configure(state="disabled" if enabled else "readonly")
+        self.tid_calibration_check.configure(state="disabled" if enabled else "normal")
+        for widget in self.tid_special_checks:
+            widget.configure(state="disabled" if enabled else "normal")
+        for widget in self.tid_starter_flow_controls:
+            state = "readonly" if enabled and isinstance(widget, ttk.Combobox) else (
+                "normal" if enabled else "disabled"
+            )
+            widget.configure(state=state)
 
     def _apply_tid_language_defaults(self):
         japanese = self.tid_language_var.get() == "日文"
@@ -956,6 +1073,11 @@ class AutoRngApp:
             self.tid_sequential_id_var.set(japanese)
             self.tid_65535_var.set(True)
             self.tid_single_digit_var.set(japanese)
+            if self.tid_starter_flow_var.get():
+                self.tid_same_id_var.set(False)
+                self.tid_sequential_id_var.set(False)
+                self.tid_65535_var.set(False)
+                self.tid_single_digit_var.set(False)
         finally:
             self._updating = False
         self.invalidate_plan()
@@ -1132,6 +1254,24 @@ class AutoRngApp:
         request.validate(template_path.read_text(encoding="utf-8"))
         return request
 
+    def collect_tid_starter_flow_request(
+        self,
+        tid_request: TidRngRequest,
+    ) -> TidStarterFlowRequest | None:
+        if not self.tid_starter_flow_var.get():
+            return None
+        request = TidStarterFlowRequest(
+            tid_request=tid_request,
+            version=self.tid_game_var.get(),
+            starter=self.tid_starter_var.get(),
+            starter_min_advances=int(self.tid_starter_min_adv_var.get()),
+            starter_max_advances=int(self.tid_starter_max_adv_var.get()),
+            starter_op_fixed_delay_ms=int(self.tid_starter_op_delay_var.get()),
+            sid_retry_radius=int(self.tid_sid_retry_radius_var.get()),
+        )
+        request.validate()
+        return request
+
     def collect_sid_request(self) -> SIDReverseRunRequest:
         if not self.sid_ack_var.get():
             raise ValueError("请先确认队伍顺序、来源、努力值和神奇糖果位置")
@@ -1184,10 +1324,11 @@ class AutoRngApp:
         normal_can_start = bool(
             self.plan_result and self.plan_result.plan.route_support.can_start
         )
+        tid_can_start = self.tid_request is not None and self.tid_flow_plan is None
         can_start = bool(
             not self.busy
             and not process_running
-            and (normal_can_start or self.egg_request or self.tid_request or self.sid_request)
+            and (normal_can_start or self.egg_request or tid_can_start or self.sid_request)
             and self.project_main
             and self.runtime_check
             and self.runtime_check.ok
@@ -1211,7 +1352,8 @@ class AutoRngApp:
                 return
             if self._is_tid_mode():
                 tid_request = self.collect_tid_request()
-                self.generate_tid_project(tid_request)
+                flow_request = self.collect_tid_starter_flow_request(tid_request)
+                self.generate_tid_project(tid_request, flow_request)
                 return
             request = self.collect_request()
         except Exception as exc:
@@ -1229,6 +1371,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.tid_flow_plan = None
         self.sid_request = None
         self.project_main = None
         self.runtime_check = None
@@ -1286,6 +1429,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.tid_flow_plan = None
         self.sid_request = None
         self.project_main = None
         self.runtime_check = None
@@ -1317,6 +1461,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.tid_flow_plan = None
         self.sid_request = request
         self.project_main = project_main
         self.runtime_check = check
@@ -1343,37 +1488,77 @@ class AutoRngApp:
         self.set_result("\n".join(lines))
         self.set_busy(False, status)
 
-    def generate_tid_project(self, request: TidRngRequest):
+    def generate_tid_project(
+        self,
+        request: TidRngRequest,
+        flow_request: TidStarterFlowRequest | None = None,
+    ):
         source_path = Path(self.tid_source_var.get())
         ezcon_path = Path(self.ezcon_var.get())
         input_fingerprint = self.input_fingerprint()
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.tid_flow_plan = None
         self.sid_request = None
         self.project_main = None
         self.runtime_check = None
-        self.set_busy(True, "正在生成 TID/SID 1.3.7 脚本并执行 1.6.4-a 预检……")
-        self.set_result("正在校验英文/日文模板、328 个标签和 EasyCon 1.6.4-a。")
+        status = (
+            "正在搜索御三家目标并生成 TID/SID 连续流程计划……"
+            if flow_request is not None
+            else "正在生成 TID/SID 1.3.7 脚本并执行 1.6.4-a 预检……"
+        )
+        self.set_busy(True, status)
+        self.set_result(
+            (
+                "正在搜索 ADV "
+                f"{flow_request.starter_min_advances}-"
+                f"{flow_request.starter_max_advances} 内最早可达闪光御三家，"
+                "并校验日英模板。"
+            )
+            if flow_request is not None
+            else "正在校验英文/日文模板、328 个标签和 EasyCon 1.6.4-a。"
+        )
 
         def worker():
             try:
-                output = ROOT / "runtime" / "tid_rng137"
-                project_main = write_configured_tid_project(source_path, output, request)
-                check = validate_tid_runtime(ezcon_path, project_main)
+                flow_plan = None
+                if flow_request is not None:
+                    output = ROOT / "runtime" / "tid_starter_flow"
+                    flow_plan = build_tid_starter_flow_plan(flow_request)
+                    write_tid_starter_flow_bundle(source_path, output, flow_plan)
+                    project_main = output / "01_id" / "main.ecs"
+                else:
+                    output = ROOT / "runtime" / "tid_rng137"
+                    project_main = write_configured_tid_project(source_path, output, request)
+                if flow_plan is not None:
+                    bridge_main = output / "02_lab_bridge" / "main.ecs"
+                    check = validate_tid_starter_flow_runtime(
+                        ezcon_path,
+                        project_main,
+                        bridge_main,
+                    )
+                else:
+                    check = validate_tid_runtime(ezcon_path, project_main)
                 plan_dir = ROOT / "rng_logs" / "plans"
                 plan_dir.mkdir(parents=True, exist_ok=True)
                 plan_path = plan_dir / (
                     datetime.now().strftime("%Y%m%d_%H%M%S") + "_tid.json"
                 )
+                plan_payload = flow_plan.to_dict() if flow_plan is not None else request.to_dict()
                 plan_path.write_text(
-                    json.dumps(request.to_dict(), ensure_ascii=False, indent=2),
+                    json.dumps(plan_payload, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
                 self.root.after(
                     0,
                     lambda: self.finish_tid_generation(
-                        request, project_main, check, plan_path, input_fingerprint
+                        request,
+                        flow_plan,
+                        project_main,
+                        check,
+                        plan_path,
+                        input_fingerprint,
                     ),
                 )
             except Exception as exc:
@@ -1382,7 +1567,13 @@ class AutoRngApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def finish_tid_generation(
-        self, request, project_main, check, plan_path, input_fingerprint
+        self,
+        request,
+        flow_plan,
+        project_main,
+        check,
+        plan_path,
+        input_fingerprint,
     ):
         if input_fingerprint != self.input_fingerprint():
             self.fail_search(ValueError("生成期间输入发生变化，请按当前 TID/SID 参数重新生成。"))
@@ -1390,6 +1581,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = request
+        self.tid_flow_plan = flow_plan
         self.sid_request = None
         self.project_main = project_main
         self.runtime_check = check
@@ -1408,9 +1600,35 @@ class AutoRngApp:
         ]
         if request.language == "日文":
             lines.append("兼容修正：已把日版 FOR $InputLen 改为 1.6.4-a 可编译的显式索引循环。")
-        if check.ok:
+        if flow_plan is not None:
+            target = flow_plan.starter_target
+            iv_text = "/".join(str(value) for value in target.ivs)
+            retry_preview = ", ".join(
+                f"{value:+d}" for value in flow_plan.sid_retry_corrections[:9]
+            )
+            lines.extend(
+                (
+                    f"连续流程：{flow_plan.request.version} / {target.species_zh} ({target.species_en})",
+                    (
+                        "御三家搜索：ADV "
+                        f"{flow_plan.request.starter_min_advances}-"
+                        f"{flow_plan.request.starter_max_advances}；"
+                        f"Seed 时间不早于 {flow_plan.request.starter_op_fixed_delay_ms} ms"
+                    ),
+                    f"御三家目标：Seed {target.seed_hex} / {target.seed_time_ms} ms / ADV {target.advances}",
+                    f"目标 PID：{target.pid_hex}；IV：{iv_text}",
+                    f"TID 链首个目标 SID ADV：{flow_plan.earliest_sid_chain_advance}",
+                    f"SID ADV 重试顺序：{retry_preview} ...",
+                    f"ID 阶段：{project_main}",
+                    f"研究所桥接：{project_main.parents[1] / '02_lab_bridge' / 'main.ecs'}",
+                )
+            )
+        if check.ok and flow_plan is None:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
             status = "TID/SID 脚本已生成，可以在确认会新建存档后开始。"
+        elif check.ok:
+            lines.extend(f"预检提示：{warning}" for warning in check.warnings)
+            status = "连续流程阶段包已生成；三阶段自动启动尚未接通。"
         else:
             lines.extend(f"预检失败：{error}" for error in check.errors)
             status = "TID/SID 脚本已生成，但预检不允许启动。"
@@ -1424,6 +1642,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.tid_flow_plan = None
         self.sid_request = None
         self.project_main = None
         self.runtime_check = None
@@ -1461,6 +1680,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = request
         self.tid_request = None
+        self.tid_flow_plan = None
         self.sid_request = None
         self.project_main = project_main
         self.runtime_check = check
@@ -1502,6 +1722,7 @@ class AutoRngApp:
         self.plan_result = result
         self.egg_request = None
         self.tid_request = None
+        self.tid_flow_plan = None
         self.sid_request = None
         self.project_main = project_main
         self.runtime_check = check
@@ -1546,6 +1767,7 @@ class AutoRngApp:
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
+        self.tid_flow_plan = None
         self.sid_request = None
         self.project_main = None
         self.runtime_check = None
@@ -1608,6 +1830,12 @@ class AutoRngApp:
         if not (
             self.plan_result or self.egg_request or self.tid_request or self.sid_request
         ) or not self.project_main:
+            return
+        if self.tid_flow_plan is not None:
+            messagebox.showerror(
+                "连续流程尚未接通",
+                "当前只完成了ID阶段、研究所桥接和御三家目标计划；第三阶段执行器接通前不能启动。",
+            )
             return
         try:
             video_device = int(self.video_var.get())

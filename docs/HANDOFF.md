@@ -132,6 +132,7 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 - 目标 TID/SID 与三种 SID 处理模式；
 - OP/F1/F2 中心帧、搜索半径、穷举起点和范围；
 - 固定延迟、游戏设置、去噪与特殊号码判定；
+- 连续流程开关，以及游戏版本、御三家、ADV 上下限、御三家 OP 最早时间和 SID ADV 重试半径；
 - 独立脚本包路径，默认是 `%USERPROFILE%\Downloads\自定义TID SID 御三家乱数多功能包1.3`。
 
 适配器位于 `automation/tid_rng137.py`。它锁定英文/日文 1.3.7 脚本指纹和 328 个标签。日文原脚本 `FOR $InputLen` 在 1.6.4-a 会报三次只读 `_tmpL$0`；生成副本会按 ECS 约束改为先算有效末索引再使用显式索引 `FOR`。该修正不改 Seed/帧轴，不改用户原包。
@@ -144,7 +145,7 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 4. 未命中目标 PID 时继续普通校准，不处理 SID；命中目标 PID 后，不闪为 SID 未命中，闪光为 SID 命中；
 5. SID 未命中时按当前 `$SID_ADV修正`、`+1`、`-1`、`+2`、`-2` 的顺序重建存档重试。
 
-实现位于 `automation/tid_starter_flow.py` 和 `rng/starter_sid_verification.py`。已生成并用真实 1.6.4-a `format` 检查英文/日文 ID 标记版及桥接 ECS。日版 Switch Seed 数据使用 TenLines 官方 `fr_jpn_nx.bin` / `lg_jpn_nx.bin`，当前官方日版数据只支持 `mono_h_a`。集合样本中的旧 1.2.3 御三家 OP/F12 控制器不得作为新流程依据。当前尚缺 GUI 三阶段自动启动和实机验收。
+实现位于 `automation/tid_starter_flow.py` 和 `rng/starter_sid_verification.py`。GUI 的 TID 页已经接入阶段包生成，输出 `01_id`、`02_lab_bridge` 和 `flow_plan.json`，并对 ID 与桥接 ECS 做 1.6.4-a 预检；因为第三阶段执行器尚未接通，连续流程的“开始运行”保持禁用。日版 Switch Seed 数据使用 TenLines 官方 `fr_jpn_nx.bin` / `lg_jpn_nx.bin`，当前官方日版数据只支持 `mono_h_a`。集合样本中的旧 1.2.3 御三家 OP/F12 控制器不得作为新流程依据。当前尚缺 GUI 三阶段自动启动和实机验收。
 
 ## 代码导航
 
@@ -256,7 +257,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 ```
 
-2026-08-13 的代码基线：使用项目 `.venv` 运行 76 项单元测试全部通过；下载包 `Tools/check_*.py` 最近一次基线为 22 项全部通过。此前做过透明 Tk 窗口冒烟检查；本轮又完成四页签顺序、SID 输入/运行链、御三家目标搜索和英日连续流程生成的静态验证。确认：
+2026-08-13 的代码基线：使用项目 `.venv` 运行 78 项单元测试全部通过；下载包 `Tools/check_*.py` 最近一次基线为 22 项全部通过。此前做过透明 Tk 窗口冒烟检查；本轮又完成四页签顺序、SID 输入/运行链、御三家目标搜索和英日连续流程生成的静态验证。确认：
 
 - 页签顺序固定为 SID 查找、TID 乱数、野生/静态、孵蛋；
 - 设备枚举会自动回填可用串口；
@@ -265,7 +266,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 - 900×620 窗口可滚动到页面底部；
 - “隐藏属性”文案已经改为“觉醒力量”。
 - TID/SID 日英参数可收集，日文生成副本可通过真实 1.6.4-a `format`。
-- TID 连续流程的英文/日文 ID 标记版和研究所桥接 ECS 均通过真实 1.6.4-a `format`；尚未接入 GUI 连续运行，也未实机验收。
+- TID 连续流程已接入 GUI 阶段包生成；英文/日文 ID 标记版和研究所桥接 ECS 均通过真实 1.6.4-a `format`。第三阶段执行器尚未接入，因此 GUI 不允许误启动半流程，也尚未实机验收。
 
 本机曾验证 1.6.4a 可以枚举串口和视频设备，并可用 `format` 解析当前 ECS。换设备后设备编号必然可能变化，必须重新检测。
 
@@ -289,7 +290,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 
 按风险从低到高：
 
-1. 在新设备重新跑安装、76 项测试、EasyCon `--check-only` 和设备枚举。
+1. 在新设备重新跑安装、78 项测试、EasyCon `--check-only` 和设备枚举。
 2. 用不会影响存档的短 ECS 验证单片机控制、停止和重新连接。
 3. 选一个普通野生基线路线做单轮命中、OCR、反查和校准日志验收。
 4. 再做重复循环、抓捕和长时间稳定性。
@@ -313,5 +314,5 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 
-测试基线是 76 项，ECS Tools 静态检查是 22 项。完成环境核对后，请根据我接下来的要求继续，不要自行扩大到实机运行或修改外部 1.1.8/TID/EasyCon 原包。
+测试基线是 78 项，ECS Tools 静态检查是 22 项。完成环境核对后，请根据我接下来的要求继续，不要自行扩大到实机运行或修改外部 1.1.8/TID/EasyCon 原包。
 ```

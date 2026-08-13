@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
+import subprocess
 
 from rng.sid_reverse import first_sid_advances
 from rng.starter_sid_verification import (
@@ -19,7 +20,12 @@ from rng.starter_sid_verification import (
     sid_advance_scan_offsets,
 )
 
-from .tid_rng137 import TidRngRequest, write_configured_tid_project
+from .easycon118 import EasyConRuntimeCheck
+from .tid_rng137 import (
+    TidRngRequest,
+    validate_tid_runtime,
+    write_configured_tid_project,
+)
 
 
 @dataclass(frozen=True)
@@ -275,3 +281,40 @@ def write_tid_starter_flow_bundle(
         encoding="utf-8",
     )
     return plan_path
+
+
+def validate_tid_starter_flow_runtime(
+    ezcon_path: str | Path,
+    id_main: str | Path,
+    bridge_main: str | Path,
+) -> EasyConRuntimeCheck:
+    """Validate the ID project and the label-free bridge with EasyCon 1.6.4-a."""
+    base = validate_tid_runtime(ezcon_path, id_main)
+    errors = list(base.errors)
+    warnings = list(base.warnings)
+    ezcon_path = Path(ezcon_path).resolve()
+    bridge_main = Path(bridge_main).resolve()
+    if not bridge_main.is_file():
+        errors.append(f"找不到研究所桥接脚本: {bridge_main}")
+    elif not errors:
+        try:
+            formatted = subprocess.run(
+                [str(ezcon_path), "format", str(bridge_main)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            errors.append(f"研究所桥接脚本无法执行1.6.4-a语法预检: {exc}")
+        else:
+            if formatted.returncode != 0:
+                details = (formatted.stdout + "\n" + formatted.stderr).strip()
+                errors.append(
+                    "研究所桥接脚本未通过EasyCon 1.6.4-a格式检查: "
+                    + details[-1000:]
+                )
+    if not errors:
+        warnings.append("研究所桥接脚本已通过EasyCon 1.6.4-a格式检查。")
+    return EasyConRuntimeCheck(not errors, tuple(errors), tuple(warnings))
