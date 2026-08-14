@@ -285,6 +285,15 @@ def parse_sid_reverse_log(lines: str | Iterable[str]) -> tuple[int | None, list[
             if "TID" in values:
                 tid = int(values["TID"])
             continue
+        if record_type == "ATTEMPT_BEGIN":
+            try:
+                pokemon_index = int(values["MON"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"invalid SIDREV attempt marker: {payload}") from exc
+            observations = [
+                item for item in observations if item.pokemon_index != pokemon_index
+            ]
+            continue
         if record_type != "OBS":
             continue
         try:

@@ -26,9 +26,17 @@ class SIDReverse118Tests(unittest.TestCase):
         self.assertIn("SIDREV|CANDY_LABEL|MON=", template)
         self.assertRegex(
             template,
-            r"# 等待背包物品页与标签区域稳定。\n\s*WAIT 1000\n"
+            r"# 等待背包物品页与标签区域稳定。\n\s*WAIT 1500\n"
             r"\s*\$SID反查糖果匹配度 = @神奇糖果\n"
             r"\s*PRINT \"SIDREV\|CANDY_LABEL\|MON=",
+        )
+        self.assertIn('"|SAMPLE=1|SCORE="', template)
+        self.assertIn('"|SAMPLE=2|SCORE="', template)
+        self.assertRegex(
+            template,
+            r"IF \$SID反查糖果匹配度 <= \$糖果识图阈值\n"
+            r"\s*# CLI 首次读取偶尔仍是旧帧；第一格顶部的UP不会改变选择，同时触发画面刷新。\n"
+            r"\s*UP\n\s*WAIT 150\n\s*\$SID反查糖果匹配度 = @神奇糖果",
         )
         self.assertNotIn("IF @神奇糖果 <= 95", template)
         self.assertNotIn("$SID反查当前等级 = 识别LV", template)
@@ -46,6 +54,13 @@ class SIDReverse118Tests(unittest.TestCase):
             template,
         )
         self.assertIn("SIDREV|LEGAL|MON=", template)
+        self.assertIn("SIDREV|ATTEMPT_BEGIN|MON=", template)
+        self.assertIn("SIDREV|ATTEMPT_RETRY|MON=", template)
+        self.assertIn("SIDREV|IV_CONFLICT|MON=", template)
+        self.assertIn("SIDREV|STAT_REREAD|MON=", template)
+        self.assertIn("SID反查校验并合并当前IV范围", template)
+        self.assertIn("计算HP_IV最小($SID反查种族HP", template)
+        self.assertIn("$SID反查累计IV有效 = 0", template)
 
     def test_configures_only_declared_inputs(self):
         template = """$SID反查TID = 1

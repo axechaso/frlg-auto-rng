@@ -34,6 +34,21 @@ class SIDReverseWorkflowTests(unittest.TestCase):
         self.assertEqual(observations[0].stats, (136, 123, 85, 74, 74, 146))
         self.assertEqual(observations[0].gender, 0)
 
+    def test_new_attempt_discards_partial_observations_for_that_pokemon(self):
+        text = """
+        SIDREV|ATTEMPT_BEGIN|MON=2|ATTEMPT=1
+        SIDREV|OBS|MON=2|DEX=143|NATURE=3|GENDER=1|LEVEL=30|HP=164|ATK=108|DEF=50|SPA=39|SPD=72|SPE=32
+        SIDREV|ATTEMPT_RETRY|MON=2|ATTEMPT=1|STAGE=CANDY_RECOGNITION|OBS=1
+        SIDREV|ATTEMPT_BEGIN|MON=2|ATTEMPT=2
+        SIDREV|OBS|MON=2|DEX=143|NATURE=3|GENDER=1|LEVEL=30|HP=163|ATK=108|DEF=50|SPA=39|SPD=72|SPE=32
+        SIDREV|OBS|MON=2|DEX=143|NATURE=3|GENDER=1|LEVEL=31|HP=168|ATK=112|DEF=51|SPA=40|SPD=75|SPE=32
+        SIDREV|ATTEMPT_DONE|MON=2|ATTEMPT=2|OBS=2
+        """
+        _, observations = parse_sid_reverse_log(text)
+        self.assertEqual(len(observations), 2)
+        self.assertEqual([item.level for item in observations], [30, 31])
+        self.assertEqual(observations[0].stats[0], 163)
+
     def test_rejects_explicit_failed_gender_marker(self):
         text = (
             "SIDREV|OBS|MON=1|DEX=18|NATURE=13|GENDER=-1|LEVEL=47|"

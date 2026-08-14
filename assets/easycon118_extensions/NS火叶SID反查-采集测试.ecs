@@ -103,6 +103,40 @@ $SID反查SPE最小 = -1
 $SID反查SPE最大 = -1
 $SID反查候选能力值 = -1
 $SID反查完整能力值 = -1
+$SID反查能力重读上限 = 2
+$SID反查能力重读序号 = 0
+$SID反查能力样本总数 = 0
+$SID反查能力读取成功 = 0
+$SID反查IV合并结果 = 0
+$SID反查整轮最大尝试 = 3
+$SID反查整轮尝试 = 0
+$SID反查整轮完成 = 0
+$SID反查整轮需要重试 = 0
+$SID反查累计IV有效 = 0
+$SID反查HPIV最小 = -1
+$SID反查HPIV最大 = -1
+$SID反查ATKIV最小 = -1
+$SID反查ATKIV最大 = -1
+$SID反查DEFIV最小 = -1
+$SID反查DEFIV最大 = -1
+$SID反查SPAIV最小 = -1
+$SID反查SPAIV最大 = -1
+$SID反查SPDIV最小 = -1
+$SID反查SPDIV最大 = -1
+$SID反查SPEIV最小 = -1
+$SID反查SPEIV最大 = -1
+$SID反查累计HPIV最小 = -1
+$SID反查累计HPIV最大 = -1
+$SID反查累计ATKIV最小 = -1
+$SID反查累计ATKIV最大 = -1
+$SID反查累计DEFIV最小 = -1
+$SID反查累计DEFIV最大 = -1
+$SID反查累计SPAIV最小 = -1
+$SID反查累计SPAIV最大 = -1
+$SID反查累计SPDIV最小 = -1
+$SID反查累计SPDIV最大 = -1
+$SID反查累计SPEIV最小 = -1
+$SID反查累计SPEIV最大 = -1
 
 PRINT ""
 PRINT ========================
@@ -193,46 +227,74 @@ FOR $SID反查当前队伍位置 = $SID反查队伍起始位置 TO $SID反查循
         PRINT 六项努力值总和不能超过510
         RETURN
     ENDIF
-    CALL SID反查关闭游戏
-    # 关闭动画标签消失后，Switch 主界面仍可能短暂不接收启动键。
-    # 1.1.8 正式乱数流程由 HOME_BUFFER 自带这段空档；SID 普通启动需显式等待。
-    WAIT 1500
-    CALL SID反查普通启动并进入存档
-    $SID反查动作结果 = SID反查打开队伍摘要($SID反查当前队伍位置)
+    $SID反查整轮完成 = 0
+    FOR $SID反查整轮尝试 = 1 TO $SID反查整轮最大尝试
+        PRINT "SIDREV|ATTEMPT_BEGIN|MON=" & $SID反查当前队伍位置 & "|ATTEMPT=" & $SID反查整轮尝试
+        $SID反查累计IV有效 = 0
+        $SID反查整轮需要重试 = 0
+        CALL SID反查关闭游戏
+        # 关闭动画标签消失后，Switch 主界面仍可能短暂不接收启动键。
+        # 1.1.8 正式乱数流程由 HOME_BUFFER 自带这段空档；SID 普通启动需显式等待。
+        WAIT 1500
+        CALL SID反查普通启动并进入存档
+        $SID反查动作结果 = SID反查打开队伍摘要($SID反查当前队伍位置)
 
-    $SID反查当前观测序号 = 0
-    $SID反查读取结果 = SID反查读取并输出观测($SID反查当前队伍位置, $SID反查当前观测序号, $SID反查识图阈值)
-    IF $SID反查读取结果 != 1
-        PRINT "SIDREV|ERROR|MON=" & $SID反查当前队伍位置 & "|STAGE=INITIAL_RECOGNITION"
+        $SID反查当前观测序号 = 0
+        $SID反查读取结果 = SID反查读取并输出观测($SID反查当前队伍位置, $SID反查当前观测序号, $SID反查识图阈值)
+        IF $SID反查读取结果 != 1
+            IF $SID反查整轮尝试 < $SID反查整轮最大尝试
+                PRINT "SIDREV|ATTEMPT_RETRY|MON=" & $SID反查当前队伍位置 & "|ATTEMPT=" & $SID反查整轮尝试 & "|STAGE=INITIAL_RECOGNITION"
+                CONTINUE
+            ENDIF
+            PRINT "SIDREV|ERROR|MON=" & $SID反查当前队伍位置 & "|STAGE=INITIAL_RECOGNITION"
+            CALL SID反查关闭游戏
+            RETURN
+        ENDIF
+
+        IF $SID反查当前等级 < 100 and $SID反查每只最多糖果 > 0
+            FOR $SID反查糖果序号 = 1 TO $SID反查每只最多糖果
+                # 当前等级标签支持到99；避免升到100后把已有有效观测判成失败。
+                IF $SID反查当前等级 >= 99
+                    BREAK
+                ENDIF
+                $SID反查糖果结果 = SID反查使用神奇糖果($SID反查当前队伍位置, $SID反查糖果识图阈值)
+                IF $SID反查糖果结果 != 1
+                    BREAK
+                ENDIF
+                $SID反查动作结果 = SID反查从糖果后打开摘要($SID反查当前队伍位置)
+                $SID反查当前观测序号 = $SID反查糖果序号
+                $SID反查读取结果 = SID反查读取并输出观测($SID反查当前队伍位置, $SID反查当前观测序号, $SID反查识图阈值)
+                IF $SID反查读取结果 != 1
+                    $SID反查整轮需要重试 = 1
+                    BREAK
+                ENDIF
+                IF $SID反查当前等级 >= 100
+                    BREAK
+                ENDIF
+            NEXT
+        ENDIF
+
+        IF $SID反查整轮需要重试 == 1
+            IF $SID反查整轮尝试 < $SID反查整轮最大尝试
+                PRINT "SIDREV|ATTEMPT_RETRY|MON=" & $SID反查当前队伍位置 & "|ATTEMPT=" & $SID反查整轮尝试 & "|STAGE=CANDY_RECOGNITION|OBS=" & $SID反查当前观测序号
+                CONTINUE
+            ENDIF
+            PRINT "SIDREV|ERROR|MON=" & $SID反查当前队伍位置 & "|STAGE=CANDY_RECOGNITION|OBS=" & $SID反查当前观测序号
+            CALL SID反查关闭游戏
+            RETURN
+        ENDIF
+
+        $SID反查输出观测数量 = $SID反查当前观测序号 + 1
+        PRINT "SIDREV|ATTEMPT_DONE|MON=" & $SID反查当前队伍位置 & "|ATTEMPT=" & $SID反查整轮尝试 & "|OBS=" & $SID反查输出观测数量
+        PRINT "SIDREV|MON_DONE|MON=" & $SID反查当前队伍位置 & "|OBS=" & $SID反查输出观测数量
+        $SID反查整轮完成 = 1
+        BREAK
+    NEXT
+    IF $SID反查整轮完成 == 0
+        PRINT "SIDREV|ERROR|MON=" & $SID反查当前队伍位置 & "|STAGE=ATTEMPT_EXHAUSTED"
         CALL SID反查关闭游戏
         RETURN
     ENDIF
-
-    IF $SID反查当前等级 < 100 and $SID反查每只最多糖果 > 0
-        FOR $SID反查糖果序号 = 1 TO $SID反查每只最多糖果
-            # 当前等级标签支持到99；避免升到100后把已有有效观测判成失败。
-            IF $SID反查当前等级 >= 99
-                BREAK
-            ENDIF
-            $SID反查糖果结果 = SID反查使用神奇糖果($SID反查当前队伍位置, $SID反查糖果识图阈值)
-            IF $SID反查糖果结果 != 1
-                BREAK
-            ENDIF
-            $SID反查动作结果 = SID反查从糖果后打开摘要($SID反查当前队伍位置)
-            $SID反查当前观测序号 = $SID反查糖果序号
-            $SID反查读取结果 = SID反查读取并输出观测($SID反查当前队伍位置, $SID反查当前观测序号, $SID反查识图阈值)
-            IF $SID反查读取结果 != 1
-                PRINT "SIDREV|ERROR|MON=" & $SID反查当前队伍位置 & "|STAGE=CANDY_RECOGNITION|OBS=" & $SID反查当前观测序号
-                BREAK
-            ENDIF
-            IF $SID反查当前等级 >= 100
-                BREAK
-            ENDIF
-        NEXT
-    ENDIF
-
-    $SID反查输出观测数量 = $SID反查当前观测序号 + 1
-    PRINT "SIDREV|MON_DONE|MON=" & $SID反查当前队伍位置 & "|OBS=" & $SID反查输出观测数量
 NEXT
 
 CALL SID反查关闭游戏
@@ -392,14 +454,35 @@ FUNC SID反查读取并输出观测($队伍位置: INT, $观测序号: INT, $识
 
     PRINT "SIDREV|LEGAL|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|HP=" & $SID反查HP最小 & "-" & $SID反查HP最大 & "|ATK=" & $SID反查ATK最小 & "-" & $SID反查ATK最大 & "|DEF=" & $SID反查DEF最小 & "-" & $SID反查DEF最大 & "|SPA=" & $SID反查SPA最小 & "-" & $SID反查SPA最大 & "|SPD=" & $SID反查SPD最小 & "-" & $SID反查SPD最大 & "|SPE=" & $SID反查SPE最小 & "-" & $SID反查SPE最大
 
-    $SID反查当前HP = SID反查识别合法范围能力值(0, $SID反查HP最小, $SID反查HP最大, $识图阈值)
-    $SID反查当前ATK = SID反查识别合法范围能力值(1, $SID反查ATK最小, $SID反查ATK最大, $识图阈值)
-    $SID反查当前DEF = SID反查识别合法范围能力值(2, $SID反查DEF最小, $SID反查DEF最大, $识图阈值)
-    $SID反查当前SPA = SID反查识别合法范围能力值(3, $SID反查SPA最小, $SID反查SPA最大, $识图阈值)
-    $SID反查当前SPD = SID反查识别合法范围能力值(4, $SID反查SPD最小, $SID反查SPD最大, $识图阈值)
-    $SID反查当前SPE = SID反查识别合法范围能力值(5, $SID反查SPE最小, $SID反查SPE最大, $识图阈值)
+    $SID反查能力读取成功 = 0
+    FOR $SID反查能力重读序号 = 0 TO $SID反查能力重读上限
+        IF $SID反查能力重读序号 > 0
+            PRINT "SIDREV|STAT_REREAD|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|SAMPLE=" & $SID反查能力重读序号
+            LEFT
+            WAIT 500
+            RIGHT
+            WAIT 1000
+        ENDIF
 
-    IF $SID反查当前HP < 1 or $SID反查当前ATK < 1 or $SID反查当前DEF < 1 or $SID反查当前SPA < 1 or $SID反查当前SPD < 1 or $SID反查当前SPE < 1
+        $SID反查当前HP = SID反查识别合法范围能力值(0, $SID反查HP最小, $SID反查HP最大, $识图阈值)
+        $SID反查当前ATK = SID反查识别合法范围能力值(1, $SID反查ATK最小, $SID反查ATK最大, $识图阈值)
+        $SID反查当前DEF = SID反查识别合法范围能力值(2, $SID反查DEF最小, $SID反查DEF最大, $识图阈值)
+        $SID反查当前SPA = SID反查识别合法范围能力值(3, $SID反查SPA最小, $SID反查SPA最大, $识图阈值)
+        $SID反查当前SPD = SID反查识别合法范围能力值(4, $SID反查SPD最小, $SID反查SPD最大, $识图阈值)
+        $SID反查当前SPE = SID反查识别合法范围能力值(5, $SID反查SPE最小, $SID反查SPE最大, $识图阈值)
+
+        IF $SID反查当前HP > 0 and $SID反查当前ATK > 0 and $SID反查当前DEF > 0 and $SID反查当前SPA > 0 and $SID反查当前SPD > 0 and $SID反查当前SPE > 0
+            $SID反查IV合并结果 = SID反查校验并合并当前IV范围($队伍位置, $观测序号, $SID反查能力重读序号)
+            IF $SID反查IV合并结果 == 1
+                $SID反查能力读取成功 = 1
+                BREAK
+            ENDIF
+        ENDIF
+    NEXT
+
+    IF $SID反查能力读取成功 == 0
+        $SID反查能力样本总数 = $SID反查能力重读上限 + 1
+        PRINT "SIDREV|STAT_FAILED|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|SAMPLES=" & $SID反查能力样本总数
         RETURN 0
     ENDIF
 
@@ -408,6 +491,91 @@ FUNC SID反查读取并输出观测($队伍位置: INT, $观测序号: INT, $识
     ELSE
         PRINT "SIDREV|OBS|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|SOURCE=WILD|LOCATION=" & $SID反查当前相遇地点 & "|EVHP=" & $SID反查当前努力HP & "|EVATK=" & $SID反查当前努力ATK & "|EVDEF=" & $SID反查当前努力DEF & "|EVSPA=" & $SID反查当前努力SPA & "|EVSPD=" & $SID反查当前努力SPD & "|EVSPE=" & $SID反查当前努力SPE & "|DEX=" & $SID反查当前图鉴编号 & "|NAME=" & $SID反查当前名称 & "|NATURE=" & $SID反查当前性格 & "|GENDER=" & $SID反查当前性别 & "|LEVEL=" & $SID反查当前等级 & "|HP=" & $SID反查当前HP & "|ATK=" & $SID反查当前ATK & "|DEF=" & $SID反查当前DEF & "|SPA=" & $SID反查当前SPA & "|SPD=" & $SID反查当前SPD & "|SPE=" & $SID反查当前SPE
     ENDIF
+    RETURN 1
+ENDFUNC
+
+FUNC SID反查校验并合并当前IV范围($队伍位置: INT, $观测序号: INT, $样本序号: INT): INT
+    IF $SID反查当前图鉴编号 == 292
+        $SID反查HPIV最小 = 0
+        $SID反查HPIV最大 = 31
+    ELSE
+        $SID反查HPIV最小 = 计算HP_IV最小($SID反查种族HP, $SID反查当前努力HP, $SID反查当前等级, $SID反查当前HP)
+        $SID反查HPIV最大 = 计算HP_IV最大($SID反查种族HP, $SID反查当前努力HP, $SID反查当前等级, $SID反查当前HP)
+    ENDIF
+    $SID反查ATKIV最小 = 计算非HP_IV最小($SID反查种族ATK, $SID反查当前努力ATK, $SID反查当前等级, $SID反查当前ATK, $SID反查当前性格, 0)
+    $SID反查ATKIV最大 = 计算非HP_IV最大($SID反查种族ATK, $SID反查当前努力ATK, $SID反查当前等级, $SID反查当前ATK, $SID反查当前性格, 0)
+    $SID反查DEFIV最小 = 计算非HP_IV最小($SID反查种族DEF, $SID反查当前努力DEF, $SID反查当前等级, $SID反查当前DEF, $SID反查当前性格, 1)
+    $SID反查DEFIV最大 = 计算非HP_IV最大($SID反查种族DEF, $SID反查当前努力DEF, $SID反查当前等级, $SID反查当前DEF, $SID反查当前性格, 1)
+    $SID反查SPAIV最小 = 计算非HP_IV最小($SID反查种族SPA, $SID反查当前努力SPA, $SID反查当前等级, $SID反查当前SPA, $SID反查当前性格, 3)
+    $SID反查SPAIV最大 = 计算非HP_IV最大($SID反查种族SPA, $SID反查当前努力SPA, $SID反查当前等级, $SID反查当前SPA, $SID反查当前性格, 3)
+    $SID反查SPDIV最小 = 计算非HP_IV最小($SID反查种族SPD, $SID反查当前努力SPD, $SID反查当前等级, $SID反查当前SPD, $SID反查当前性格, 4)
+    $SID反查SPDIV最大 = 计算非HP_IV最大($SID反查种族SPD, $SID反查当前努力SPD, $SID反查当前等级, $SID反查当前SPD, $SID反查当前性格, 4)
+    $SID反查SPEIV最小 = 计算非HP_IV最小($SID反查种族SPE, $SID反查当前努力SPE, $SID反查当前等级, $SID反查当前SPE, $SID反查当前性格, 2)
+    $SID反查SPEIV最大 = 计算非HP_IV最大($SID反查种族SPE, $SID反查当前努力SPE, $SID反查当前等级, $SID反查当前SPE, $SID反查当前性格, 2)
+
+    IF $SID反查HPIV最小 < 0 or $SID反查ATKIV最小 < 0 or $SID反查DEFIV最小 < 0 or $SID反查SPAIV最小 < 0 or $SID反查SPDIV最小 < 0 or $SID反查SPEIV最小 < 0
+        PRINT "SIDREV|IV_INVALID|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|SAMPLE=" & $样本序号
+        RETURN 0
+    ENDIF
+
+    IF $SID反查累计IV有效 == 1
+        IF $SID反查HPIV最小 < $SID反查累计HPIV最小
+            $SID反查HPIV最小 = $SID反查累计HPIV最小
+        ENDIF
+        IF $SID反查HPIV最大 > $SID反查累计HPIV最大
+            $SID反查HPIV最大 = $SID反查累计HPIV最大
+        ENDIF
+        IF $SID反查ATKIV最小 < $SID反查累计ATKIV最小
+            $SID反查ATKIV最小 = $SID反查累计ATKIV最小
+        ENDIF
+        IF $SID反查ATKIV最大 > $SID反查累计ATKIV最大
+            $SID反查ATKIV最大 = $SID反查累计ATKIV最大
+        ENDIF
+        IF $SID反查DEFIV最小 < $SID反查累计DEFIV最小
+            $SID反查DEFIV最小 = $SID反查累计DEFIV最小
+        ENDIF
+        IF $SID反查DEFIV最大 > $SID反查累计DEFIV最大
+            $SID反查DEFIV最大 = $SID反查累计DEFIV最大
+        ENDIF
+        IF $SID反查SPAIV最小 < $SID反查累计SPAIV最小
+            $SID反查SPAIV最小 = $SID反查累计SPAIV最小
+        ENDIF
+        IF $SID反查SPAIV最大 > $SID反查累计SPAIV最大
+            $SID反查SPAIV最大 = $SID反查累计SPAIV最大
+        ENDIF
+        IF $SID反查SPDIV最小 < $SID反查累计SPDIV最小
+            $SID反查SPDIV最小 = $SID反查累计SPDIV最小
+        ENDIF
+        IF $SID反查SPDIV最大 > $SID反查累计SPDIV最大
+            $SID反查SPDIV最大 = $SID反查累计SPDIV最大
+        ENDIF
+        IF $SID反查SPEIV最小 < $SID反查累计SPEIV最小
+            $SID反查SPEIV最小 = $SID反查累计SPEIV最小
+        ENDIF
+        IF $SID反查SPEIV最大 > $SID反查累计SPEIV最大
+            $SID反查SPEIV最大 = $SID反查累计SPEIV最大
+        ENDIF
+
+        IF $SID反查HPIV最小 > $SID反查HPIV最大 or $SID反查ATKIV最小 > $SID反查ATKIV最大 or $SID反查DEFIV最小 > $SID反查DEFIV最大 or $SID反查SPAIV最小 > $SID反查SPAIV最大 or $SID反查SPDIV最小 > $SID反查SPDIV最大 or $SID反查SPEIV最小 > $SID反查SPEIV最大
+            PRINT "SIDREV|IV_CONFLICT|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|SAMPLE=" & $样本序号 & "|HP=" & $SID反查当前HP & "|ATK=" & $SID反查当前ATK & "|DEF=" & $SID反查当前DEF & "|SPA=" & $SID反查当前SPA & "|SPD=" & $SID反查当前SPD & "|SPE=" & $SID反查当前SPE
+            RETURN 0
+        ENDIF
+    ENDIF
+
+    $SID反查累计HPIV最小 = $SID反查HPIV最小
+    $SID反查累计HPIV最大 = $SID反查HPIV最大
+    $SID反查累计ATKIV最小 = $SID反查ATKIV最小
+    $SID反查累计ATKIV最大 = $SID反查ATKIV最大
+    $SID反查累计DEFIV最小 = $SID反查DEFIV最小
+    $SID反查累计DEFIV最大 = $SID反查DEFIV最大
+    $SID反查累计SPAIV最小 = $SID反查SPAIV最小
+    $SID反查累计SPAIV最大 = $SID反查SPAIV最大
+    $SID反查累计SPDIV最小 = $SID反查SPDIV最小
+    $SID反查累计SPDIV最大 = $SID反查SPDIV最大
+    $SID反查累计SPEIV最小 = $SID反查SPEIV最小
+    $SID反查累计SPEIV最大 = $SID反查SPEIV最大
+    $SID反查累计IV有效 = 1
+    PRINT "SIDREV|IV_RANGE|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|HP=" & $SID反查累计HPIV最小 & "-" & $SID反查累计HPIV最大 & "|ATK=" & $SID反查累计ATKIV最小 & "-" & $SID反查累计ATKIV最大 & "|DEF=" & $SID反查累计DEFIV最小 & "-" & $SID反查累计DEFIV最大 & "|SPA=" & $SID反查累计SPAIV最小 & "-" & $SID反查累计SPAIV最大 & "|SPD=" & $SID反查累计SPDIV最小 & "-" & $SID反查累计SPDIV最大 & "|SPE=" & $SID反查累计SPEIV最小 & "-" & $SID反查累计SPEIV最大
     RETURN 1
 ENDFUNC
 
@@ -484,9 +652,16 @@ FUNC SID反查使用神奇糖果($队伍位置: INT, $糖果识图阈值: INT): 
     WAIT 500
 
     # 等待背包物品页与标签区域稳定。
-    WAIT 1000
+    WAIT 1500
     $SID反查糖果匹配度 = @神奇糖果
-    PRINT "SIDREV|CANDY_LABEL|MON=" & $队伍位置 & "|SCORE=" & $SID反查糖果匹配度 & "|THRESHOLD=" & $糖果识图阈值
+    PRINT "SIDREV|CANDY_LABEL|MON=" & $队伍位置 & "|SAMPLE=1|SCORE=" & $SID反查糖果匹配度 & "|THRESHOLD=" & $糖果识图阈值
+    IF $SID反查糖果匹配度 <= $糖果识图阈值
+        # CLI 首次读取偶尔仍是旧帧；第一格顶部的UP不会改变选择，同时触发画面刷新。
+        UP
+        WAIT 150
+        $SID反查糖果匹配度 = @神奇糖果
+        PRINT "SIDREV|CANDY_LABEL|MON=" & $队伍位置 & "|SAMPLE=2|SCORE=" & $SID反查糖果匹配度 & "|THRESHOLD=" & $糖果识图阈值
+    ENDIF
     IF $SID反查糖果匹配度 <= $糖果识图阈值
         PRINT 没有可用的神奇糖果，停止增加观测
         RETURN 0
