@@ -18,12 +18,12 @@ from automation.easycon118 import (
     probe_easycon_devices,
     validate_runtime,
 )
-from automation.sid_reverse118 import SIDReverseRunRequest, write_sid_reverse_project
-from rng.sid_reverse_workflow import (
-    analyze_shiny_team,
-    parse_sid_reverse_log,
-    resolve_wild_location,
+from automation.sid_reverse118 import (
+    SIDReverseRunRequest,
+    write_sid_reverse_plan,
+    write_sid_reverse_project,
 )
+from rng.sid_reverse_workflow import resolve_wild_location
 from run_sid_reverse import build_report
 
 
@@ -271,6 +271,22 @@ def _run_easycon(command: list[str], cwd: Path) -> tuple[int, str]:
     return process.wait(), "".join(lines)
 
 
+def _write_slot_project(
+    source_dir: Path,
+    output_dir: Path,
+    base_request: SIDReverseRunRequest,
+    slot: int,
+) -> Path:
+    request = replace(base_request, party_count=1, start_slot=slot)
+    return write_sid_reverse_project(
+        source_dir,
+        output_dir,
+        request,
+        copy_assets=slot == 1,
+        plan_filename=f"slot-{slot}-plan.json",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="EasyCon 1.6.4-a Gen 3 SID reverse")
     parser.add_argument("--tid", type=int)
@@ -359,26 +375,14 @@ def main(argv: list[str] | None = None) -> int:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     all_output: list[str] = []
     try:
+        write_sid_reverse_plan(args.source, args.output, base_request)
         for slot in range(1, count + 1):
             print(f"\n=== 采集队伍第{slot}位 ===")
-            request = SIDReverseRunRequest(
-                tid=tid,
-                party_count=1,
-                game=base_request.game,
-                start_slot=slot,
-                max_candies=base_request.max_candies,
-                recognition_threshold=base_request.recognition_threshold,
-                dex_overrides=base_request.dex_overrides,
-                initial_levels=base_request.initial_levels,
-                source_types=base_request.source_types,
-                locations=base_request.locations,
-                effort_values=base_request.effort_values,
-            )
-            main_path = write_sid_reverse_project(
+            main_path = _write_slot_project(
                 args.source,
                 args.output,
-                request,
-                copy_assets=slot == 1,
+                base_request,
+                slot,
             )
             check = validate_runtime(args.ezcon, main_path)
             if not check.ok:
@@ -396,13 +400,7 @@ def main(argv: list[str] | None = None) -> int:
             if code != 0 or "SIDREV|ERROR|" in output:
                 raise RuntimeError(f"队伍第{slot}位采集失败，EasyCon退出码{code}")
 
-            _, observations = parse_sid_reverse_log("".join(all_output))
-            partial = analyze_shiny_team(tid, observations, game=game)
-            if not partial.result.common_psvs:
-                raise RuntimeError("当前宝可梦之间没有共同PSV，请检查OCR、努力值和来源方法")
-            if partial.result.psv_is_unique:
-                print("PSV已经唯一，不再采集后续队伍槽位。")
-                break
+            print(f"队伍第{slot}位采集完成，继续处理用户指定的后续槽位。")
 
         report = build_report("".join(all_output), tid_override=tid, game=game)
         report_path.write_text(report, encoding="utf-8")

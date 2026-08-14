@@ -1,7 +1,13 @@
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
-from automation.sid_reverse118 import SIDReverseRunRequest, configure_sid_reverse_template
+from automation.sid_reverse118 import (
+    SIDReverseRunRequest,
+    configure_sid_reverse_template,
+    write_sid_reverse_plan,
+)
 
 
 class SIDReverse118Tests(unittest.TestCase):
@@ -15,6 +21,16 @@ class SIDReverse118Tests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("$SID反查闪公匹配 = @闪公图标", template)
         self.assertIn("SID反查识别闪光性别", template)
+        self.assertIn("$SID反查糖果识图阈值 = 95", template)
+        self.assertIn("$SID反查糖果匹配度 = @神奇糖果", template)
+        self.assertIn("SIDREV|CANDY_LABEL|MON=", template)
+        self.assertRegex(
+            template,
+            r"# 等待背包物品页与标签区域稳定。\n\s*WAIT 1000\n"
+            r"\s*\$SID反查糖果匹配度 = @神奇糖果\n"
+            r"\s*PRINT \"SIDREV\|CANDY_LABEL\|MON=",
+        )
+        self.assertNotIn("IF @神奇糖果 <= 95", template)
         self.assertNotIn("$SID反查当前等级 = 识别LV", template)
         self.assertIn(
             "$SID反查当前等级 = $SID反查当前初始等级 + $观测序号",
@@ -146,6 +162,38 @@ $SID反查努力SPE = [0,0,0,0,0,0]
         self.assertIn("$SID反查种族HP覆盖 = [83,0,0,0,0,0]", configured)
         self.assertIn("$SID反查种族SPE覆盖 = [91,0,0,0,0,0]", configured)
         self.assertIn("$SID反查性别阈值覆盖 = [127,127,127,127,127,127]", configured)
+
+    def test_slot_plan_does_not_overwrite_base_party_request(self):
+        base_request = SIDReverseRunRequest(
+            tid=17500,
+            party_count=2,
+            max_candies=15,
+            dex_overrides=(18, 143, 0, 0, 0, 0),
+            initial_levels=(46, 30, 1, 1, 1, 1),
+        )
+        slot_request = SIDReverseRunRequest(
+            tid=17500,
+            party_count=1,
+            start_slot=1,
+            max_candies=15,
+            dex_overrides=base_request.dex_overrides,
+            initial_levels=base_request.initial_levels,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            write_sid_reverse_plan("source", output, base_request)
+            write_sid_reverse_plan(
+                "source",
+                output,
+                slot_request,
+                filename="slot-1-plan.json",
+            )
+            base_payload = json.loads((output / "plan.json").read_text(encoding="utf-8"))
+            slot_payload = json.loads(
+                (output / "slot-1-plan.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(base_payload["request"]["party_count"], 2)
+        self.assertEqual(slot_payload["request"]["party_count"], 1)
 
 
 if __name__ == "__main__":

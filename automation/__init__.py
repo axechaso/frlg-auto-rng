@@ -75,6 +75,7 @@ from .tid_starter_flow import (
 from .sid_reverse118 import (
     SID_REVERSE_TEMPLATE_NAME,
     SIDReverseRunRequest,
+    write_sid_reverse_plan,
     write_sid_reverse_project,
 )
 
@@ -104,6 +105,7 @@ __all__ = [
     "TidRngRequest",
     "SID_REVERSE_TEMPLATE_NAME",
     "SIDReverseRunRequest",
+    "write_sid_reverse_plan",
     "EggRunRequest",
     "EasyCon118Options",
     "EasyConRuntimeCheck",

@@ -139,12 +139,44 @@ def configure_sid_reverse_template(template_text: str, request: SIDReverseRunReq
     return configured
 
 
+def write_sid_reverse_plan(
+    source_dir: str | Path,
+    output_dir: str | Path,
+    request: SIDReverseRunRequest,
+    *,
+    filename: str = "plan.json",
+) -> Path:
+    request.validate()
+    plan_name = Path(filename)
+    if plan_name.is_absolute() or plan_name.name != filename:
+        raise ValueError("SID计划文件名必须是不含目录的相对文件名")
+    source_dir = Path(source_dir).resolve()
+    output_dir = Path(output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "mode": "sid_reverse_observation",
+        "source": str(source_dir),
+        "template": SID_REVERSE_TEMPLATE_NAME,
+        "request": asdict(request),
+        "scripts": {
+            "expected_count": EXPECTED_SCRIPT_FILE_COUNT,
+            "expected_sha256": EXPECTED_SCRIPT_SHA256,
+        },
+    }
+    plan_path = output_dir / plan_name
+    plan_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return plan_path
+
+
 def write_sid_reverse_project(
     source_dir: str | Path,
     output_dir: str | Path,
     request: SIDReverseRunRequest,
     *,
     copy_assets: bool = True,
+    plan_filename: str = "plan.json",
 ) -> Path:
     request.validate()
     source_dir = Path(source_dir).resolve()
@@ -174,17 +206,10 @@ def write_sid_reverse_project(
             if target.exists():
                 shutil.rmtree(target)
             shutil.copytree(source, target)
-    manifest = {
-        "mode": "sid_reverse_observation",
-        "source": str(source_dir),
-        "template": template.name,
-        "request": asdict(request),
-        "scripts": {
-            "expected_count": EXPECTED_SCRIPT_FILE_COUNT,
-            "expected_sha256": EXPECTED_SCRIPT_SHA256,
-        },
-    }
-    (output_dir / "plan.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    write_sid_reverse_plan(
+        source_dir,
+        output_dir,
+        request,
+        filename=plan_filename,
     )
     return main_path

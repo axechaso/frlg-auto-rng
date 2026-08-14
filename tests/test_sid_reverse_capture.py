@@ -2,11 +2,16 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from automation.sid_reverse118 import SIDReverseRunRequest
 from run_sid_reverse_capture import (
     _parse_dex_overrides,
     _parse_initial_levels,
+    _write_slot_project,
     load_sid_reverse_request,
+    main,
 )
 
 
@@ -54,6 +59,102 @@ class SIDReverseCaptureTests(unittest.TestCase):
         self.assertEqual(request.initial_levels[:2], (46, 55))
         self.assertEqual(request.source_types[:2], (0, 1))
         self.assertEqual(request.locations[1], "Safari Zone Center")
+
+    @patch("run_sid_reverse_capture.write_sid_reverse_project")
+    def test_slot_project_uses_separate_plan_file(self, write_project):
+        write_project.return_value = Path("output/main.ecs")
+        request = SIDReverseRunRequest(
+            tid=17500,
+            party_count=2,
+            dex_overrides=(18, 143, 0, 0, 0, 0),
+            initial_levels=(46, 30, 1, 1, 1, 1),
+        )
+        result = _write_slot_project(Path("source"), Path("output"), request, 2)
+        self.assertEqual(result, Path("output/main.ecs"))
+        slot_request = write_project.call_args.args[2]
+        self.assertEqual(slot_request.party_count, 1)
+        self.assertEqual(slot_request.start_slot, 2)
+        self.assertEqual(write_project.call_args.kwargs["copy_assets"], False)
+        self.assertEqual(
+            write_project.call_args.kwargs["plan_filename"],
+            "slot-2-plan.json",
+        )
+
+    def test_main_collects_every_requested_slot_before_building_report(self):
+        payload = {
+            "mode": "sid_reverse_observation",
+            "request": {
+                "tid": 17500,
+                "party_count": 2,
+                "game": "fr_nx",
+                "start_slot": 1,
+                "max_candies": 2,
+                "recognition_threshold": 85,
+                "dex_overrides": [18, 143, 0, 0, 0, 0],
+                "initial_levels": [46, 30, 1, 1, 1, 1],
+                "source_types": [1, 0, 0, 0, 0, 0],
+                "locations": ["Route 2", "", "", "", "", ""],
+                "effort_values": [[0, 0, 0, 0, 0, 0]] * 6,
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request_path = root / "request.json"
+            request_path.write_text(json.dumps(payload), encoding="utf-8")
+            output = root / "output"
+            report_path = output / "report.txt"
+            slot_paths = [output / "slot-1.ecs", output / "slot-2.ecs"]
+            with (
+                patch(
+                    "run_sid_reverse_capture.probe_easycon_devices",
+                    return_value=({"COM4"}, {0}, "devices"),
+                ),
+                patch(
+                    "run_sid_reverse_capture.prepare_compat_runner",
+                    return_value=root / "runner.exe",
+                ),
+                patch("run_sid_reverse_capture.write_sid_reverse_plan"),
+                patch(
+                    "run_sid_reverse_capture._write_slot_project",
+                    side_effect=slot_paths,
+                ) as write_slot,
+                patch(
+                    "run_sid_reverse_capture.validate_runtime",
+                    return_value=SimpleNamespace(ok=True, errors=()),
+                ),
+                patch(
+                    "run_sid_reverse_capture.build_run_command",
+                    return_value=["runner"],
+                ),
+                patch(
+                    "run_sid_reverse_capture._run_easycon",
+                    side_effect=[(0, "slot 1 complete\n"), (0, "slot 2 complete\n")],
+                ) as run_easycon,
+                patch("run_sid_reverse_capture.build_report", return_value="report"),
+            ):
+                result = main(
+                    [
+                        "--request-json",
+                        str(request_path),
+                        "--game",
+                        "fr_nx",
+                        "--source",
+                        str(root),
+                        "--ezcon",
+                        str(root / "ezcon.exe"),
+                        "--output",
+                        str(output),
+                        "--port",
+                        "COM4",
+                        "--video",
+                        "0",
+                        "--report-path",
+                        str(report_path),
+                    ]
+                )
+        self.assertEqual(result, 0)
+        self.assertEqual(write_slot.call_count, 2)
+        self.assertEqual(run_easycon.call_count, 2)
 
 
 if __name__ == "__main__":

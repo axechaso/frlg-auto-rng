@@ -44,6 +44,7 @@ from automation import (
     write_configured_egg_project,
     write_configured_project,
     write_configured_tid_project,
+    write_sid_reverse_plan,
     write_sid_reverse_project,
     write_tid_starter_flow_bundle,
 )
@@ -2047,6 +2048,15 @@ class AutoRngApp:
         if self.sid_request is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_dir = self.project_main.parent
+            try:
+                write_sid_reverse_plan(
+                    self.sid_source_var.get(),
+                    output_dir,
+                    self.sid_request,
+                )
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("SID计划写入失败", str(exc))
+                return
             self.sid_log_path = output_dir / f"sid-reverse-{timestamp}.log"
             self.sid_report_path = output_dir / f"sid-reverse-{timestamp}.txt"
             command = [

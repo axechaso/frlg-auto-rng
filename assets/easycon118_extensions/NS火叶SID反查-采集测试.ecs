@@ -13,6 +13,7 @@ $SID反查TID = 12345
 $SID反查队内闪光数量 = 2
 $SID反查每只最多糖果 = 5
 $SID反查识图阈值 = 85
+$SID反查糖果识图阈值 = 95
 
 # 直接在EasyCon运行时保持1；frlg-auto-rng逐只调用时会自动改为当前槽位。
 $SID反查队伍起始位置 = 1
@@ -62,6 +63,7 @@ $SID反查当前SPD = -1
 $SID反查当前SPE = -1
 $SID反查读取结果 = 0
 $SID反查糖果结果 = 0
+$SID反查糖果匹配度 = -1
 $SID反查覆盖索引 = 0
 $SID反查循环末位置 = 0
 $SID反查糖果序号 = 0
@@ -127,8 +129,12 @@ IF $SID反查识图阈值 <= 0 or $SID反查识图阈值 > 100
     PRINT 识图阈值必须在1-100之间
     RETURN
 ENDIF
+IF $SID反查糖果识图阈值 <= 0 or $SID反查糖果识图阈值 > 100
+    PRINT 糖果识图阈值必须在1-100之间
+    RETURN
+ENDIF
 
-PRINT "SIDREV|META|TID=" & $SID反查TID & "|COUNT=" & $SID反查队内闪光数量
+PRINT "SIDREV|META|TID=" & $SID反查TID & "|COUNT=" & $SID反查队内闪光数量 & "|CANDY_THRESHOLD=" & $SID反查糖果识图阈值
 PRINT 提示: 本测试版只采集观测；PID、PSV交集和SID候选由frlg-auto-rng计算
 
 $SID反查循环末位置 = $SID反查队伍起始位置 + $SID反查队内闪光数量 - 1
@@ -208,7 +214,7 @@ FOR $SID反查当前队伍位置 = $SID反查队伍起始位置 TO $SID反查循
             IF $SID反查当前等级 >= 99
                 BREAK
             ENDIF
-            $SID反查糖果结果 = SID反查使用神奇糖果($SID反查当前队伍位置)
+            $SID反查糖果结果 = SID反查使用神奇糖果($SID反查当前队伍位置, $SID反查糖果识图阈值)
             IF $SID反查糖果结果 != 1
                 BREAK
             ENDIF
@@ -457,7 +463,7 @@ FUNC SID反查识别合法范围能力值($能力项: INT, $最小值: INT, $最
     RETURN -1
 ENDFUNC
 
-FUNC SID反查使用神奇糖果($队伍位置: INT): INT
+FUNC SID反查使用神奇糖果($队伍位置: INT, $糖果识图阈值: INT): INT
     B
     WAIT 1500
     B
@@ -477,7 +483,11 @@ FUNC SID反查使用神奇糖果($队伍位置: INT): INT
     UP
     WAIT 500
 
-    IF @神奇糖果 <= 95
+    # 等待背包物品页与标签区域稳定。
+    WAIT 1000
+    $SID反查糖果匹配度 = @神奇糖果
+    PRINT "SIDREV|CANDY_LABEL|MON=" & $队伍位置 & "|SCORE=" & $SID反查糖果匹配度 & "|THRESHOLD=" & $糖果识图阈值
+    IF $SID反查糖果匹配度 <= $糖果识图阈值
         PRINT 没有可用的神奇糖果，停止增加观测
         RETURN 0
     ENDIF

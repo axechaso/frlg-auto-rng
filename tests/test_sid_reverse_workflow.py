@@ -2,6 +2,7 @@ import unittest
 
 from rng.sid_reverse_workflow import (
     SIDObservation,
+    _wild_encounter_categories,
     analyze_observed_pokemon,
     parse_sid_reverse_log,
     resolve_wild_location,
@@ -94,6 +95,12 @@ class SIDReverseWorkflowTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "not present"):
             analyze_observed_pokemon((observation,), game="fr_nx")
+
+    def test_wild_source_accepts_an_evolved_species_caught_as_a_pre_evolution(self):
+        self.assertIn(
+            "Grass",
+            _wild_encounter_categories(18, "Route 2", "fr_nx"),
+        )
 
 
 if __name__ == "__main__":
