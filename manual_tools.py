@@ -7,9 +7,34 @@ import threading
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
-from typing import Callable
+from typing import Any, Callable
 
-from easycon import EasyConController, GamePadKey
+
+class GamePadKey:
+    """Dependency-free key names resolved to EasyCon enums after connecting."""
+
+    A = "A"
+    B = "B"
+    X = "X"
+    Y = "Y"
+    L = "L"
+    R = "R"
+    ZL = "ZL"
+    ZR = "ZR"
+    PLUS = "PLUS"
+    MINUS = "MINUS"
+    CAPTURE = "CAPTURE"
+    HOME = "HOME"
+    LCLICK = "LCLICK"
+    RCLICK = "RCLICK"
+    TOP = "TOP"
+    DOWN = "DOWN"
+    LEFT = "LEFT"
+    RIGHT = "RIGHT"
+    TOP_LEFT = "TOP_LEFT"
+    TOP_RIGHT = "TOP_RIGHT"
+    DOWN_LEFT = "DOWN_LEFT"
+    DOWN_RIGHT = "DOWN_RIGHT"
 
 
 KEYBOARD_GAMEPAD_MAP = {
@@ -68,10 +93,11 @@ class VirtualControllerWindow:
         self.root = root
         self.port_provider = port_provider
         self.on_closed = on_closed
-        self.controller: EasyConController | None = None
+        self.controller: Any | None = None
+        self._native_gamepad_key = None
         self._closed = False
         self._connect_generation = 0
-        self._pressed: set[GamePadKey] = set()
+        self._pressed: set[str] = set()
         self._gamepad_buttons: list[ttk.Button] = []
 
         self.window = tk.Toplevel(root)
@@ -148,7 +174,7 @@ class VirtualControllerWindow:
         self,
         parent,
         label: str,
-        key: GamePadKey,
+        key: str,
         row: int,
         column: int,
         *,
@@ -200,31 +226,45 @@ class VirtualControllerWindow:
         self.status_var.set(f"正在连接 {port}…")
 
         def worker() -> None:
-            controller = EasyConController()
+            controller = None
+            native_gamepad_key = None
             try:
+                from easycon import EasyConController, GamePadKey as NativeGamePadKey
+
+                controller = EasyConController()
+                native_gamepad_key = NativeGamePadKey
                 connected = controller.try_connect_port(
                     port,
                     controller.baudrate,
                     timeout=1.0,
                 )
                 error = ""
+            except ModuleNotFoundError as exc:
+                connected = False
+                if exc.name == "serial":
+                    error = "缺少 pyserial；请用“启动-自动乱数首版.bat”启动"
+                else:
+                    error = f"缺少 Python 模块 {exc.name}"
             except Exception as exc:
                 connected = False
                 error = str(exc)
 
             def finish() -> None:
                 if self._closed or generation != self._connect_generation:
-                    controller.disconnect()
+                    if controller is not None:
+                        controller.disconnect()
                     return
                 self.connect_button.configure(state="normal")
-                if connected:
+                if connected and controller is not None and native_gamepad_key is not None:
                     self.controller = controller
+                    self._native_gamepad_key = native_gamepad_key
                     self.status_var.set(f"已连接 {controller.port_name}")
                     self.connect_button.configure(text="断开")
                     self._set_gamepad_enabled(True)
                     self.window.focus_force()
                 else:
-                    controller.disconnect()
+                    if controller is not None:
+                        controller.disconnect()
                     detail = f"：{error}" if error else ""
                     self.status_var.set(f"无法连接 {port}{detail}")
                     self.connect_button.configure(text="重试")
@@ -244,24 +284,33 @@ class VirtualControllerWindow:
                 controller.release_all()
                 time.sleep(0.06)
             controller.disconnect()
+        self._native_gamepad_key = None
         if not self._closed:
             self.status_var.set("未连接")
             self.connect_button.configure(text="连接", state="normal")
             self._set_gamepad_enabled(False)
 
-    def press(self, key: GamePadKey) -> None:
+    def _resolve_key(self, key: str):
+        if self._native_gamepad_key is None:
+            return None
+        return getattr(self._native_gamepad_key, key)
+
+    def press(self, key: str) -> None:
         if key in self._pressed:
             return
         controller = self.controller
         if controller is None or not controller.is_connected:
             return
+        native_key = self._resolve_key(key)
+        if native_key is None:
+            return
         self._pressed.add(key)
         if key in _DIRECTION_KEYS:
             self._sync_direction(controller)
         else:
-            controller.press(key)
+            controller.press(native_key)
 
-    def release(self, key: GamePadKey) -> None:
+    def release(self, key: str) -> None:
         if key not in self._pressed:
             return
         self._pressed.discard(key)
@@ -270,9 +319,11 @@ class VirtualControllerWindow:
             if key in _DIRECTION_KEYS:
                 self._sync_direction(controller)
             else:
-                controller.release(key)
+                native_key = self._resolve_key(key)
+                if native_key is not None:
+                    controller.release(native_key)
 
-    def _sync_direction(self, controller: EasyConController) -> None:
+    def _sync_direction(self, controller: Any) -> None:
         horizontal = int(GamePadKey.RIGHT in self._pressed) - int(
             GamePadKey.LEFT in self._pressed
         )
@@ -281,9 +332,13 @@ class VirtualControllerWindow:
         )
         direction = _DIRECTION_COMBINATIONS.get((horizontal, vertical))
         if direction is None:
-            controller.release(GamePadKey.TOP)
+            native_top = self._resolve_key(GamePadKey.TOP)
+            if native_top is not None:
+                controller.release(native_top)
         else:
-            controller.press(direction)
+            native_direction = self._resolve_key(direction)
+            if native_direction is not None:
+                controller.press(native_direction)
 
     def release_all(self) -> None:
         self._pressed.clear()

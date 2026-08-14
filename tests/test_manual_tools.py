@@ -1,8 +1,11 @@
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from easycon import GamePadKey
 from manual_tools import (
+    GamePadKey,
     KEYBOARD_GAMEPAD_MAP,
     ManualToolsManager,
     parse_video_device,
@@ -10,6 +13,20 @@ from manual_tools import (
 
 
 class ManualToolsTests(unittest.TestCase):
+    def test_import_does_not_eagerly_load_easycon(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; import manual_tools; raise SystemExit('easycon' in sys.modules)",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_video_device_requires_non_negative_integer(self):
         self.assertEqual(parse_video_device(" 2 "), 2)
         for value in ("", "x", "-1"):
@@ -41,6 +58,7 @@ class ManualToolsTests(unittest.TestCase):
 
         window = object.__new__(VirtualControllerWindow)
         window.controller = FakeController()
+        window._native_gamepad_key = GamePadKey
         window._pressed = set()
 
         window.press(GamePadKey.TOP)
