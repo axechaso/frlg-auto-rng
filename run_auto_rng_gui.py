@@ -58,6 +58,7 @@ from rng.tenlines_utils import (
     get_species_name,
     load_frlg_encounters,
 )
+from manual_tools import ManualToolsManager
 
 
 ROOT = Path(__file__).resolve().parent
@@ -288,12 +289,19 @@ class AutoRngApp:
         self.tid_flow_log_path: Path | None = None
         self.busy = False
         self._updating = False
+        self.manual_tools: ManualToolsManager | None = None
         self.all_locations = self._load_locations()
         self.category_map = {}
         self.location_map = {}
         self.pokemon_map = {}
 
         self._build_ui()
+        self.manual_tools = ManualToolsManager(
+            self.root,
+            port_provider=self.port_var.get,
+            video_provider=self.video_var.get,
+            process_running=self._process_running,
+        )
         self._populate_seed_modes()
         self._populate_categories()
         self._populate_egg_pokemon()
@@ -892,6 +900,20 @@ class AutoRngApp:
         self._labeled_entry(runtime, "采集卡序号", self.video_var, 2, 2, width=8)
         self.device_button = ttk.Button(runtime, text="检测端口/采集卡", command=self.check_devices)
         self.device_button.grid(row=2, column=4, columnspan=2, padx=8)
+        manual_tools = ttk.Frame(runtime)
+        manual_tools.grid(row=3, column=0, columnspan=7, sticky="w", padx=4, pady=(6, 0))
+        self.virtual_controller_button = ttk.Button(
+            manual_tools,
+            text="虚拟手柄",
+            command=self.open_virtual_controller,
+        )
+        self.virtual_controller_button.pack(side="left")
+        self.monitor_button = ttk.Button(
+            manual_tools,
+            text="监视窗口",
+            command=self.open_monitor,
+        )
+        self.monitor_button.pack(side="left", padx=(8, 0))
 
         actions = ttk.Frame(container)
         actions.pack(fill="x", pady=10)
@@ -1501,7 +1523,29 @@ class AutoRngApp:
         self.status_var.set(status)
         self.search_button.configure(state="disabled" if busy else "normal")
         self.device_button.configure(state="disabled" if busy else "normal")
+        self._refresh_manual_tools_buttons()
         self._refresh_start_button()
+
+    def _process_running(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def _refresh_manual_tools_buttons(self) -> None:
+        enabled = not self.busy and not self._process_running()
+        state = "normal" if enabled else "disabled"
+        self.virtual_controller_button.configure(state=state)
+        self.monitor_button.configure(state=state)
+
+    def open_virtual_controller(self) -> None:
+        if self.manual_tools is not None:
+            self.manual_tools.open_virtual_controller()
+
+    def open_monitor(self) -> None:
+        if self.manual_tools is not None:
+            self.manual_tools.open_monitor()
+
+    def _close_manual_tools(self) -> None:
+        if self.manual_tools is not None:
+            self.manual_tools.close_all()
 
     def _refresh_start_button(self):
         process_running = self.process is not None and self.process.poll() is None
@@ -1982,6 +2026,7 @@ class AutoRngApp:
         if self.process is not None and self.process.poll() is None:
             messagebox.showerror("正在运行", "EasyCon 正在运行，停止后才能重新检测设备。")
             return
+        self._close_manual_tools()
         ezcon = Path(self.ezcon_var.get())
         if not ezcon.is_file():
             messagebox.showerror("找不到程序", f"找不到 {ezcon}")
@@ -2032,6 +2077,7 @@ class AutoRngApp:
         if not self.port_var.get().strip():
             messagebox.showerror("输入错误", "串口不能为空。")
             return
+        self._close_manual_tools()
         try:
             ports, videos, _ = probe_easycon_devices(Path(self.ezcon_var.get()))
         except Exception as exc:
@@ -2195,6 +2241,7 @@ class AutoRngApp:
         self.start_button.configure(state="disabled")
         self.search_button.configure(state="disabled")
         self.device_button.configure(state="disabled")
+        self._refresh_manual_tools_buttons()
         self.stop_button.configure(state="normal")
         self.status_var.set(
             "SID 正在逐只采集；详细日志见新打开的终端。"
@@ -2223,6 +2270,7 @@ class AutoRngApp:
         self.stop_button.configure(state="disabled")
         self.search_button.configure(state="normal")
         self.device_button.configure(state="normal")
+        self._refresh_manual_tools_buttons()
         self._refresh_start_button()
         if completed_mode == "sid":
             if code == 0 and report_path is not None and report_path.is_file():
@@ -2304,6 +2352,7 @@ class AutoRngApp:
         if self.process is not None and self.process.poll() is None:
             if not messagebox.askyesno("仍在运行", "EasyCon 仍在运行。关闭界面但保留运行进程？"):
                 return
+        self._close_manual_tools()
         self.root.destroy()
 
 
