@@ -154,6 +154,71 @@ def _normalize_sid_species_name(value: str) -> str:
     return " ".join(value.strip().casefold().replace("’", "'").split())
 
 
+def filter_autocomplete_choices(choices, query: str) -> tuple[str, ...]:
+    """Filter choices while keeping prefix matches ahead of contains matches."""
+    normalized_query = " ".join(query.strip().casefold().split())
+    values = tuple(str(choice) for choice in choices)
+    if not normalized_query:
+        return values
+
+    prefix_matches = []
+    contains_matches = []
+    for choice in values:
+        normalized_choice = " ".join(choice.casefold().split())
+        if normalized_choice.startswith(normalized_query):
+            prefix_matches.append(choice)
+        elif normalized_query in normalized_choice:
+            contains_matches.append(choice)
+    return tuple(prefix_matches + contains_matches)
+
+
+_AUTOCOMPLETE_IGNORED_KEYS = frozenset(
+    {
+        "Up",
+        "Down",
+        "Left",
+        "Right",
+        "Home",
+        "End",
+        "Prior",
+        "Next",
+        "Return",
+        "Escape",
+        "Tab",
+        "Shift_L",
+        "Shift_R",
+        "Control_L",
+        "Control_R",
+        "Alt_L",
+        "Alt_R",
+        "Caps_Lock",
+    }
+)
+
+
+def _install_autocomplete_combo(combo: ttk.Combobox, choices) -> None:
+    all_choices = tuple(choices)
+
+    def update_matches(event) -> None:
+        if event.keysym in _AUTOCOMPLETE_IGNORED_KEYS:
+            return
+        query = combo.get()
+        matches = filter_autocomplete_choices(all_choices, query)
+        combo.configure(values=matches)
+        if not query.strip() or not matches:
+            return
+        try:
+            combo.tk.call("ttk::combobox::Post", str(combo))
+        except tk.TclError:
+            pass
+
+    def restore_choices(_event) -> None:
+        combo.configure(values=all_choices)
+
+    combo.bind("<KeyRelease>", update_matches, add="+")
+    combo.bind("<FocusOut>", restore_choices, add="+")
+
+
 @lru_cache(maxsize=1)
 def sid_species_catalog() -> tuple[tuple[str, ...], dict[str, int]]:
     """Return Gen 1-3 display choices and normalized aliases for SID input."""
@@ -359,6 +424,7 @@ class AutoRngApp:
                 width=22,
             )
             species_combo.grid(row=row, column=1, padx=4, pady=2)
+            _install_autocomplete_combo(species_combo, sid_species_choices)
             row_widgets.append((species_combo, "normal"))
             level_spinbox = ttk.Spinbox(
                 sid_party,
@@ -386,6 +452,7 @@ class AutoRngApp:
                 width=30,
             )
             location_combo.grid(row=row, column=4, sticky="we", padx=4, pady=2)
+            _install_autocomplete_combo(location_combo, location_choices)
             row_widgets.append((location_combo, "normal"))
             for stat_index, variable in enumerate(self.sid_effort_vars[index], 5):
                 effort_spinbox = ttk.Spinbox(

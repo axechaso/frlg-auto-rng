@@ -23,7 +23,11 @@ from automation.sid_reverse118 import (
     write_sid_reverse_plan,
     write_sid_reverse_project,
 )
-from rng.sid_reverse_workflow import resolve_wild_location
+from rng.sid_reverse_workflow import (
+    analyze_observed_pokemon,
+    parse_sid_reverse_log,
+    resolve_wild_location,
+)
 from run_sid_reverse import build_report
 
 
@@ -248,7 +252,38 @@ def _select_device(
     return selected_port, selected_video
 
 
-def _run_easycon(command: list[str], cwd: Path) -> tuple[int, str]:
+def _find_unique_pid(
+    output: str,
+    *,
+    pokemon_index: int,
+    game: str,
+) -> tuple[int, int] | None:
+    """Return the PID and observation count once the current slot is unique."""
+    try:
+        _, observations = parse_sid_reverse_log(output)
+        current = [
+            item for item in observations if item.pokemon_index == pokemon_index
+        ]
+        if not current:
+            return None
+        summary = analyze_observed_pokemon(current, game=game)
+    except ValueError:
+        # Early observations can have too many IV combinations to enumerate.
+        return None
+
+    unique_pids = {candidate.pid for candidate in summary.candidates}
+    if len(unique_pids) != 1:
+        return None
+    return next(iter(unique_pids)), summary.observations
+
+
+def _run_easycon(
+    command: list[str],
+    cwd: Path,
+    *,
+    pokemon_index: int,
+    game: str,
+) -> tuple[int, str, bool]:
     process = subprocess.Popen(
         command,
         cwd=str(cwd),
@@ -260,15 +295,35 @@ def _run_easycon(command: list[str], cwd: Path) -> tuple[int, str]:
         bufsize=1,
     )
     lines: list[str] = []
+    stopped_for_unique_pid = False
     assert process.stdout is not None
     try:
         for line in process.stdout:
             print(line, end="")
             lines.append(line)
+            if "SIDREV|OBS|" not in line:
+                continue
+            unique = _find_unique_pid(
+                "".join(lines),
+                pokemon_index=pokemon_index,
+                game=game,
+            )
+            if unique is None:
+                continue
+            pid, observation_count = unique
+            marker = (
+                f"SIDREV|PID_UNIQUE|MON={pokemon_index}|PID={pid:08X}|"
+                f"OBS={observation_count}\n"
+            )
+            print(marker, end="")
+            lines.append(marker)
+            stopped_for_unique_pid = True
+            process.terminate()
+            break
     except KeyboardInterrupt:
         process.terminate()
         raise
-    return process.wait(), "".join(lines)
+    return process.wait(), "".join(lines), stopped_for_unique_pid
 
 
 def _write_slot_project(
@@ -394,13 +449,23 @@ def main(argv: list[str] | None = None) -> int:
                 video_device=video,
                 video_type="DSHOW",
             )
-            code, output = _run_easycon(command, main_path.parent)
+            code, output, stopped_for_unique_pid = _run_easycon(
+                command,
+                main_path.parent,
+                pokemon_index=slot,
+                game=game,
+            )
             all_output.append(output)
             log_path.write_text("".join(all_output), encoding="utf-8")
-            if code != 0 or "SIDREV|ERROR|" in output:
+            if "SIDREV|ERROR|" in output or (
+                code != 0 and not stopped_for_unique_pid
+            ):
                 raise RuntimeError(f"队伍第{slot}位采集失败，EasyCon退出码{code}")
 
-            print(f"队伍第{slot}位采集完成，继续处理用户指定的后续槽位。")
+            if stopped_for_unique_pid:
+                print(f"队伍第{slot}位PID已经唯一，停止继续喂糖。")
+            else:
+                print(f"队伍第{slot}位采集完成，继续处理用户指定的后续槽位。")
 
         report = build_report("".join(all_output), tid_override=tid, game=game)
         report_path.write_text(report, encoding="utf-8")

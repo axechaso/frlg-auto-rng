@@ -1,8 +1,11 @@
 import unittest
+from types import SimpleNamespace
 
 from run_auto_rng_gui import (
     AutoRngApp,
     MODE_TAB_ORDER,
+    _install_autocomplete_combo,
+    filter_autocomplete_choices,
     iv_ranges_for_preset,
     parse_iv_ranges,
     parse_sid_effort_values,
@@ -12,6 +15,77 @@ from run_auto_rng_gui import (
 
 
 class GuiIvInputTests(unittest.TestCase):
+    def test_autocomplete_filters_chinese_english_and_location_fragments(self):
+        species = ("皮卡丘 (Pikachu)", "雷丘 (Raichu)", "皮皮 (Clefairy)")
+        locations = ("2号道路 (Route 2)", "常青森林 (Viridian Forest)")
+        self.assertEqual(
+            filter_autocomplete_choices(species, "皮卡"),
+            ("皮卡丘 (Pikachu)",),
+        )
+        self.assertEqual(
+            filter_autocomplete_choices(species, "pika"),
+            ("皮卡丘 (Pikachu)",),
+        )
+        self.assertEqual(
+            filter_autocomplete_choices(locations, "route"),
+            ("2号道路 (Route 2)",),
+        )
+        self.assertEqual(
+            filter_autocomplete_choices(locations, "森林"),
+            ("常青森林 (Viridian Forest)",),
+        )
+
+    def test_autocomplete_puts_prefix_matches_before_contains_matches(self):
+        choices = ("X Route 2", "Route 1", "Route 3")
+        self.assertEqual(
+            filter_autocomplete_choices(choices, "route"),
+            ("Route 1", "Route 3", "X Route 2"),
+        )
+        self.assertEqual(filter_autocomplete_choices(choices, ""), choices)
+
+    def test_autocomplete_binding_updates_posts_and_restores_choices(self):
+        class FakeTk:
+            def __init__(self):
+                self.calls = []
+
+            def call(self, *args):
+                self.calls.append(args)
+
+        class FakeCombo:
+            def __init__(self):
+                self.value = ""
+                self.values = ()
+                self.bindings = {}
+                self.tk = FakeTk()
+
+            def __str__(self):
+                return ".species"
+
+            def bind(self, event, callback, add=None):
+                self.bindings[event] = (callback, add)
+
+            def get(self):
+                return self.value
+
+            def configure(self, *, values):
+                self.values = tuple(values)
+
+        choices = ("皮卡丘 (Pikachu)", "雷丘 (Raichu)")
+        combo = FakeCombo()
+        _install_autocomplete_combo(combo, choices)
+
+        combo.value = "pika"
+        combo.bindings["<KeyRelease>"][0](SimpleNamespace(keysym="a"))
+        self.assertEqual(combo.values, ("皮卡丘 (Pikachu)",))
+        self.assertEqual(
+            combo.tk.calls,
+            [("ttk::combobox::Post", ".species")],
+        )
+        self.assertEqual(combo.bindings["<KeyRelease>"][1], "+")
+
+        combo.bindings["<FocusOut>"][0](SimpleNamespace())
+        self.assertEqual(combo.values, choices)
+
     def test_requested_tab_order(self):
         self.assertEqual(
             MODE_TAB_ORDER,

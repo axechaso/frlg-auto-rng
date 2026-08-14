@@ -7,8 +7,10 @@ from unittest.mock import patch
 
 from automation.sid_reverse118 import SIDReverseRunRequest
 from run_sid_reverse_capture import (
+    _find_unique_pid,
     _parse_dex_overrides,
     _parse_initial_levels,
+    _run_easycon,
     _write_slot_project,
     load_sid_reverse_request,
     main,
@@ -16,6 +18,13 @@ from run_sid_reverse_capture import (
 
 
 class SIDReverseCaptureTests(unittest.TestCase):
+    UNIQUE_OBSERVATION = (
+        "SIDREV|OBS|MON=1|SOURCE=STATIC|LOCATION=|"
+        "EVHP=0|EVATK=0|EVDEF=0|EVSPA=0|EVSPD=0|EVSPE=0|"
+        "DEX=1|NATURE=0|LEVEL=100|HP=231|ATK=134|DEF=134|"
+        "SPA=135|SPD=166|SPE=126\n"
+    )
+
     def test_parses_active_dex_numbers_and_pads_unused_slots(self):
         self.assertEqual(
             _parse_dex_overrides("25,148", 2),
@@ -80,6 +89,49 @@ class SIDReverseCaptureTests(unittest.TestCase):
             "slot-2-plan.json",
         )
 
+    def test_finds_unique_pid_from_current_slot_observations(self):
+        result = _find_unique_pid(
+            self.UNIQUE_OBSERVATION,
+            pokemon_index=1,
+            game="fr_nx",
+        )
+        self.assertEqual(result, (0x02B0100B, 1))
+
+    @patch("run_sid_reverse_capture.subprocess.Popen")
+    def test_easycon_is_terminated_as_soon_as_pid_is_unique(self, popen):
+        class FakeProcess:
+            def __init__(self, lines):
+                self.stdout = iter(lines)
+                self.terminated = False
+
+            def terminate(self):
+                self.terminated = True
+
+            def wait(self):
+                return 1 if self.terminated else 0
+
+        process = FakeProcess(
+            [
+                "SIDREV|META|TID=17500|COUNT=1\n",
+                self.UNIQUE_OBSERVATION,
+                "SIDREV|CANDY_LABEL|MON=1|SCORE=97\n",
+            ]
+        )
+        popen.return_value = process
+
+        code, output, stopped = _run_easycon(
+            ["runner"],
+            Path("output"),
+            pokemon_index=1,
+            game="fr_nx",
+        )
+
+        self.assertEqual(code, 1)
+        self.assertTrue(stopped)
+        self.assertTrue(process.terminated)
+        self.assertIn("SIDREV|PID_UNIQUE|MON=1|PID=02B0100B|OBS=1", output)
+        self.assertNotIn("SIDREV|CANDY_LABEL", output)
+
     def test_main_collects_every_requested_slot_before_building_report(self):
         payload = {
             "mode": "sid_reverse_observation",
@@ -128,7 +180,10 @@ class SIDReverseCaptureTests(unittest.TestCase):
                 ),
                 patch(
                     "run_sid_reverse_capture._run_easycon",
-                    side_effect=[(0, "slot 1 complete\n"), (0, "slot 2 complete\n")],
+                    side_effect=[
+                        (1, "slot 1 complete\n", True),
+                        (0, "slot 2 complete\n", False),
+                    ],
                 ) as run_easycon,
                 patch("run_sid_reverse_capture.build_report", return_value="report"),
             ):
