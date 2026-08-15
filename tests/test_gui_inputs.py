@@ -43,7 +43,7 @@ class GuiIvInputTests(unittest.TestCase):
         )
         self.assertEqual(filter_autocomplete_choices(choices, ""), choices)
 
-    def test_autocomplete_binding_updates_posts_and_restores_choices(self):
+    def test_autocomplete_selection_commits_value_before_restoring_choices(self):
         class FakeTk:
             def __init__(self):
                 self.calls = []
@@ -70,9 +70,20 @@ class GuiIvInputTests(unittest.TestCase):
             def configure(self, *, values):
                 self.values = tuple(values)
 
+            def set(self, value):
+                self.value = value
+
+        class FakeVariable:
+            def __init__(self):
+                self.value = "旧值"
+
+            def set(self, value):
+                self.value = value
+
         choices = ("皮卡丘 (Pikachu)", "雷丘 (Raichu)")
         combo = FakeCombo()
-        _install_autocomplete_combo(combo, choices)
+        variable = FakeVariable()
+        _install_autocomplete_combo(combo, choices, variable)
 
         combo.value = "pika"
         combo.bindings["<KeyRelease>"][0](SimpleNamespace(keysym="a"))
@@ -83,8 +94,12 @@ class GuiIvInputTests(unittest.TestCase):
         )
         self.assertEqual(combo.bindings["<KeyRelease>"][1], "+")
 
-        combo.bindings["<FocusOut>"][0](SimpleNamespace())
+        combo.value = "皮卡丘 (Pikachu)"
+        combo.bindings["<<ComboboxSelected>>"][0](SimpleNamespace())
+        self.assertEqual(variable.value, "皮卡丘 (Pikachu)")
+        self.assertEqual(combo.value, "皮卡丘 (Pikachu)")
         self.assertEqual(combo.values, choices)
+        self.assertNotIn("<FocusOut>", combo.bindings)
 
     def test_requested_tab_order(self):
         self.assertEqual(

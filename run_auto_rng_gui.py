@@ -197,7 +197,7 @@ _AUTOCOMPLETE_IGNORED_KEYS = frozenset(
 )
 
 
-def _install_autocomplete_combo(combo: ttk.Combobox, choices) -> None:
+def _install_autocomplete_combo(combo: ttk.Combobox, choices, variable=None) -> None:
     all_choices = tuple(choices)
 
     def update_matches(event) -> None:
@@ -213,11 +213,15 @@ def _install_autocomplete_combo(combo: ttk.Combobox, choices) -> None:
         except tk.TclError:
             pass
 
-    def restore_choices(_event) -> None:
+    def commit_selection(_event) -> None:
+        selected = combo.get()
+        if variable is not None:
+            variable.set(selected)
         combo.configure(values=all_choices)
+        combo.set(selected)
 
     combo.bind("<KeyRelease>", update_matches, add="+")
-    combo.bind("<FocusOut>", restore_choices, add="+")
+    combo.bind("<<ComboboxSelected>>", commit_selection, add="+")
 
 
 @lru_cache(maxsize=1)
@@ -432,7 +436,11 @@ class AutoRngApp:
                 width=22,
             )
             species_combo.grid(row=row, column=1, padx=4, pady=2)
-            _install_autocomplete_combo(species_combo, sid_species_choices)
+            _install_autocomplete_combo(
+                species_combo,
+                sid_species_choices,
+                self.sid_species_vars[index],
+            )
             row_widgets.append((species_combo, "normal"))
             level_spinbox = ttk.Spinbox(
                 sid_party,
@@ -460,7 +468,11 @@ class AutoRngApp:
                 width=30,
             )
             location_combo.grid(row=row, column=4, sticky="we", padx=4, pady=2)
-            _install_autocomplete_combo(location_combo, location_choices)
+            _install_autocomplete_combo(
+                location_combo,
+                location_choices,
+                self.sid_location_vars[index],
+            )
             row_widgets.append((location_combo, "normal"))
             for stat_index, variable in enumerate(self.sid_effort_vars[index], 5):
                 effort_spinbox = ttk.Spinbox(
