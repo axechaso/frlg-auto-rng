@@ -21,6 +21,7 @@ from manual_tools import (
     parse_video_device,
     pressed_keys_text,
     save_key_mapping,
+    set_window_topmost,
 )
 
 
@@ -114,6 +115,22 @@ class ManualToolsTests(unittest.TestCase):
         self.assertEqual(next_monitor_zoom_size(640, 360, -1), (480, 270))
         self.assertEqual(next_monitor_zoom_size(1280, 720, 1), (1280, 720))
         self.assertEqual(next_monitor_zoom_size(320, 180, -1), (320, 180))
+
+    def test_topmost_option_uses_window_attribute(self):
+        class FakeWindow:
+            def __init__(self):
+                self.calls = []
+
+            def attributes(self, *arguments):
+                self.calls.append(arguments)
+
+        window = FakeWindow()
+        set_window_topmost(window, True)
+        set_window_topmost(window, False)
+        self.assertEqual(
+            window.calls,
+            [("-topmost", True), ("-topmost", False)],
+        )
 
     def test_monitor_double_click_toggles_image_only_view(self):
         class FakeWidget:

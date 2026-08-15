@@ -898,8 +898,8 @@ class AutoRngApp:
             row=0, column=6, padx=4
         )
 
-        runtime = ttk.LabelFrame(container, text="EasyCon 1.6.4a 命令行运行", padding=10)
-        runtime.pack(fill="x", pady=(10, 0))
+        runtime = ttk.LabelFrame(container, text="EasyCon 共通设置与工具", padding=10)
+        runtime.pack(fill="x", pady=(0, 10), before=self.mode_notebook)
         self.source_var = tk.StringVar(value=str(DEFAULT_SOURCE_118))
         self.ezcon_var = tk.StringVar(value=str(DEFAULT_EZCON))
         self.port_var = tk.StringVar(value="COM22")

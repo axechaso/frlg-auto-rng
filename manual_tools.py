@@ -200,6 +200,10 @@ def pressed_keys_text(pressed) -> str:
     return " + ".join(labels) if labels else "无"
 
 
+def set_window_topmost(window, enabled: bool) -> None:
+    window.attributes("-topmost", bool(enabled))
+
+
 def encode_tk_png(frame, cv2_module) -> str:
     encoded, png = cv2_module.imencode(
         ".png",
@@ -501,6 +505,13 @@ class VirtualControllerWindow:
 
         footer = ttk.Frame(self.window, padding=(10, 6, 10, 10))
         footer.pack(fill="x")
+        self.topmost_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            footer,
+            text="置顶",
+            variable=self.topmost_var,
+            command=self._apply_topmost,
+        ).pack(side="left")
         ttk.Button(
             footer,
             text="按键映射",
@@ -529,6 +540,9 @@ class VirtualControllerWindow:
             self.disconnect()
         else:
             self.connect()
+
+    def _apply_topmost(self) -> None:
+        set_window_topmost(self.window, self.topmost_var.get())
 
     def open_key_mapping(self) -> None:
         self.release_all()
@@ -760,6 +774,13 @@ class CaptureMonitorWindow:
         ttk.Button(self.toolbar, text="重新打开", command=self.restart).pack(
             side="right"
         )
+        self.topmost_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self.toolbar,
+            text="置顶",
+            variable=self.topmost_var,
+            command=self._apply_topmost,
+        ).pack(side="right", padx=(0, 8))
 
         self.canvas = tk.Canvas(
             self.window,
@@ -797,6 +818,9 @@ class CaptureMonitorWindow:
             self.root.after(0, update)
         except (RuntimeError, tk.TclError):
             pass
+
+    def _apply_topmost(self) -> None:
+        set_window_topmost(self.window, self.topmost_var.get())
 
     def _on_canvas_configure(self, event) -> None:
         if event.width < 16 or event.height < 16:
