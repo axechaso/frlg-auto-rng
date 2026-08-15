@@ -13,6 +13,7 @@ from manual_tools import (
     ManualToolsManager,
     assign_keyboard_key,
     load_key_mapping,
+    mapping_button_text,
     parse_video_device,
     pressed_keys_text,
     save_key_mapping,
@@ -72,6 +73,10 @@ class ManualToolsTests(unittest.TestCase):
             "A + ↑ + →",
         )
         self.assertEqual(pressed_keys_text(set()), "无")
+
+    def test_mapping_button_text_shows_controller_and_keyboard_key(self):
+        self.assertEqual(mapping_button_text(GamePadKey.A, "y"), "A\n[Y]")
+        self.assertEqual(mapping_button_text(GamePadKey.TOP, "w"), "↑\n[W]")
 
     def test_direction_keys_send_diagonal_and_restore_remaining_direction(self):
         class FakeController:

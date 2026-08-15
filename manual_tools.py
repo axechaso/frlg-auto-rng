@@ -185,6 +185,11 @@ def display_keyboard_key(keysym: str) -> str:
     return labels.get(normalized, normalized.upper())
 
 
+def mapping_button_text(gamepad_key: str, keyboard_key: str) -> str:
+    gamepad_label = GAMEPAD_KEY_LABELS.get(gamepad_key, gamepad_key)
+    return f"{gamepad_label}\n[{display_keyboard_key(keyboard_key)}]"
+
+
 def pressed_keys_text(pressed) -> str:
     pressed_set = set(pressed)
     labels = [
@@ -242,44 +247,55 @@ class KeyMappingWindow:
 
         body = ttk.Frame(self.window, padding=10)
         body.pack(fill="both", expand=True)
-        self.tree = ttk.Treeview(
-            body,
-            columns=("gamepad", "keyboard"),
-            show="headings",
-            height=12,
-            selectmode="browse",
-        )
-        self.tree.heading("gamepad", text="手柄按键")
-        self.tree.heading("keyboard", text="键盘按键")
-        self.tree.column("gamepad", width=110, anchor="center", stretch=False)
-        self.tree.column("keyboard", width=140, anchor="center", stretch=False)
-        scrollbar = ttk.Scrollbar(body, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.tree.bind("<Double-1>", lambda _event: self.begin_capture())
+        self.mapping_buttons: dict[str, ttk.Button] = {}
 
-        self.status_var = tk.StringVar(value="选择一项后修改")
-        ttk.Label(body, textvariable=self.status_var, anchor="center").grid(
-            row=1,
-            column=0,
-            columnspan=2,
-            sticky="ew",
-            pady=(8, 6),
+        shoulders = ttk.Frame(body)
+        shoulders.pack(fill="x", pady=(0, 8))
+        for column, gamepad_key in enumerate(
+            (GamePadKey.ZL, GamePadKey.L, GamePadKey.R, GamePadKey.ZR)
+        ):
+            shoulders.columnconfigure(column, weight=1, uniform="shoulders")
+            self._add_mapping_button(shoulders, gamepad_key, 0, column, width=9)
+
+        controls = ttk.Frame(body)
+        controls.pack()
+
+        dpad = ttk.LabelFrame(controls, text="方向键", padding=7)
+        dpad.grid(row=0, column=0, padx=(0, 10), sticky="ns")
+        self._add_mapping_button(dpad, GamePadKey.TOP, 0, 1)
+        self._add_mapping_button(dpad, GamePadKey.LEFT, 1, 0)
+        self._add_mapping_button(dpad, GamePadKey.RIGHT, 1, 2)
+        self._add_mapping_button(dpad, GamePadKey.DOWN, 2, 1)
+
+        system = ttk.LabelFrame(controls, text="系统键", padding=7)
+        system.grid(row=0, column=1, padx=(0, 10), sticky="ns")
+        self._add_mapping_button(system, GamePadKey.MINUS, 0, 0)
+        self._add_mapping_button(system, GamePadKey.PLUS, 0, 1)
+        self._add_mapping_button(system, GamePadKey.HOME, 1, 0, colspan=2)
+        self._add_mapping_button(system, GamePadKey.CAPTURE, 2, 0, colspan=2)
+        self._add_mapping_button(system, GamePadKey.LCLICK, 3, 0)
+        self._add_mapping_button(system, GamePadKey.RCLICK, 3, 1)
+
+        face = ttk.LabelFrame(controls, text="ABXY", padding=7)
+        face.grid(row=0, column=2, sticky="ns")
+        self._add_mapping_button(face, GamePadKey.X, 0, 1)
+        self._add_mapping_button(face, GamePadKey.Y, 1, 0)
+        self._add_mapping_button(face, GamePadKey.A, 1, 2)
+        self._add_mapping_button(face, GamePadKey.B, 2, 1)
+
+        self.status_var = tk.StringVar(value="点击手柄位置后，按新的键盘键")
+        ttk.Label(body, textvariable=self.status_var, anchor="center").pack(
+            fill="x", pady=(8, 6)
         )
 
         actions = ttk.Frame(body)
-        actions.grid(row=2, column=0, columnspan=2, sticky="ew")
-        ttk.Button(actions, text="修改", command=self.begin_capture).pack(side="left")
+        actions.pack(fill="x")
         ttk.Button(actions, text="恢复默认", command=self.restore_defaults).pack(
-            side="left", padx=(6, 0)
+            side="left"
         )
         ttk.Button(actions, text="保存", command=self.save).pack(side="right")
 
-        self._refresh_rows()
-        self.tree.selection_set(GAMEPAD_KEY_ORDER[0])
-        self.tree.focus(GAMEPAD_KEY_ORDER[0])
-        self.window.after(0, self.tree.focus_set)
+        self._refresh_buttons()
 
     @property
     def is_open(self) -> bool:
@@ -288,26 +304,49 @@ class KeyMappingWindow:
     def show(self) -> None:
         self.window.deiconify()
         self.window.lift()
-        self.tree.focus_set()
+        self.window.focus_force()
 
-    def _refresh_rows(self) -> None:
-        for gamepad_key in GAMEPAD_KEY_ORDER:
-            values = (
-                GAMEPAD_KEY_LABELS.get(gamepad_key, gamepad_key),
-                display_keyboard_key(self.mapping[gamepad_key]),
+    def _add_mapping_button(
+        self,
+        parent,
+        gamepad_key: str,
+        row: int,
+        column: int,
+        *,
+        width: int = 7,
+        colspan: int = 1,
+    ) -> None:
+        button = ttk.Button(
+            parent,
+            width=width,
+            command=lambda key=gamepad_key: self.begin_capture(key),
+        )
+        button.grid(
+            row=row,
+            column=column,
+            columnspan=colspan,
+            padx=2,
+            pady=2,
+            sticky="nsew",
+        )
+        self.mapping_buttons[gamepad_key] = button
+
+    def _refresh_buttons(self) -> None:
+        for gamepad_key, button in self.mapping_buttons.items():
+            button.configure(
+                text=mapping_button_text(
+                    gamepad_key,
+                    self.mapping[gamepad_key],
+                )
             )
-            if self.tree.exists(gamepad_key):
-                self.tree.item(gamepad_key, values=values)
-            else:
-                self.tree.insert("", "end", iid=gamepad_key, values=values)
 
-    def begin_capture(self) -> None:
-        selected = self.tree.selection()
-        if not selected:
-            self.status_var.set("请先选择一个手柄按键")
-            return
-        self._capturing = selected[0]
-        label = GAMEPAD_KEY_LABELS.get(self._capturing, self._capturing)
+    def begin_capture(self, gamepad_key: str) -> None:
+        self._capturing = gamepad_key
+        self._refresh_buttons()
+        button = self.mapping_buttons[gamepad_key]
+        label = GAMEPAD_KEY_LABELS.get(gamepad_key, gamepad_key)
+        button.configure(text=f"{label}\n[按新键]")
+        button.focus_set()
         self.status_var.set(f"请按 {label} 的新键，Esc 取消")
         self.window.focus_force()
 
@@ -317,14 +356,13 @@ class KeyMappingWindow:
         keyboard_key = normalize_keysym(event.keysym)
         if keyboard_key == "escape":
             self._capturing = None
+            self._refresh_buttons()
             self.status_var.set("已取消修改")
             return "break"
         gamepad_key = self._capturing
         assign_keyboard_key(self.mapping, gamepad_key, keyboard_key)
         self._capturing = None
-        self._refresh_rows()
-        self.tree.selection_set(gamepad_key)
-        self.tree.see(gamepad_key)
+        self._refresh_buttons()
         label = GAMEPAD_KEY_LABELS.get(gamepad_key, gamepad_key)
         self.status_var.set(f"{label} = {display_keyboard_key(keyboard_key)}")
         return "break"
@@ -332,7 +370,7 @@ class KeyMappingWindow:
     def restore_defaults(self) -> None:
         self.mapping = dict(DEFAULT_GAMEPAD_KEYBOARD_MAP)
         self._capturing = None
-        self._refresh_rows()
+        self._refresh_buttons()
         self.status_var.set("已恢复默认，点击保存后生效")
 
     def save(self) -> None:
