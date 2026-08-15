@@ -211,9 +211,14 @@ def encode_tk_png(frame, cv2_module) -> str:
     return base64.b64encode(png.tobytes()).decode("ascii")
 
 
-def fit_monitor_frame_size(width: int, height: int) -> tuple[int, int]:
-    width = max(1, int(width))
-    height = max(1, int(height))
+def fit_monitor_frame_size(
+    width: int,
+    height: int,
+    max_width: int = 1280,
+    max_height: int = 720,
+) -> tuple[int, int]:
+    width = min(max(1, int(width)), max_width)
+    height = min(max(1, int(height)), max_height)
     aspect_ratio = 16 / 9
     if width / height > aspect_ratio:
         return max(1, round(height * aspect_ratio)), height
@@ -692,7 +697,7 @@ class VirtualControllerWindow:
 class CaptureMonitorWindow:
     FRAME_WIDTH = 640
     FRAME_HEIGHT = 360
-    FRAME_INTERVAL_SECONDS = 1 / 15
+    RENDER_INTERVAL_MS = 16
 
     def __init__(
         self,
@@ -744,7 +749,7 @@ class CaptureMonitorWindow:
         self.canvas.bind("<Double-Button-1>", self.toggle_image_only)
 
         self.restart()
-        self.window.after(66, self._render)
+        self.window.after(self.RENDER_INTERVAL_MS, self._render)
 
     @property
     def is_open(self) -> bool:
@@ -830,7 +835,6 @@ class CaptureMonitorWindow:
         sequence = 0
         failed_reads = 0
         first_frame = True
-        last_encoded_at = 0.0
         try:
             while not stop_event.is_set() and generation == self._generation:
                 ok, frame = capture.read()
@@ -842,10 +846,6 @@ class CaptureMonitorWindow:
                     time.sleep(0.03)
                     continue
                 failed_reads = 0
-                now = time.monotonic()
-                if now - last_encoded_at < self.FRAME_INTERVAL_SECONDS:
-                    continue
-                last_encoded_at = now
                 with self._frame_lock:
                     target_width, target_height = self._target_size
                 shrinking = (
@@ -903,7 +903,7 @@ class CaptureMonitorWindow:
                 if not self._render_error_reported:
                     self.status_var.set(f"画面渲染失败：{exc}")
                     self._render_error_reported = True
-        self.window.after(66, self._render)
+        self.window.after(self.RENDER_INTERVAL_MS, self._render)
 
     def _stop_capture(self) -> None:
         self._generation += 1

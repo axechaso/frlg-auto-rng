@@ -106,6 +106,7 @@ class ManualToolsTests(unittest.TestCase):
         self.assertEqual(fit_monitor_frame_size(800, 600), (800, 450))
         self.assertEqual(fit_monitor_frame_size(400, 100), (178, 100))
         self.assertEqual(fit_monitor_frame_size(320, 180), (320, 180))
+        self.assertEqual(fit_monitor_frame_size(1920, 1080), (1280, 720))
 
     def test_monitor_double_click_toggles_image_only_view(self):
         class FakeWidget:
