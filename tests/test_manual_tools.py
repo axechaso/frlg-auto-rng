@@ -1,14 +1,21 @@
+import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from manual_tools import (
+    DEFAULT_GAMEPAD_KEYBOARD_MAP,
     GamePadKey,
     KEYBOARD_GAMEPAD_MAP,
     ManualToolsManager,
+    assign_keyboard_key,
+    load_key_mapping,
     parse_video_device,
+    pressed_keys_text,
+    save_key_mapping,
 )
 
 
@@ -40,6 +47,32 @@ class ManualToolsTests(unittest.TestCase):
         self.assertEqual(KEYBOARD_GAMEPAD_MAP["y"], GamePadKey.A)
         self.assertEqual(KEYBOARD_GAMEPAD_MAP["c"], GamePadKey.HOME)
 
+    def test_key_mapping_round_trip_and_invalid_file_falls_back_to_defaults(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "keymap.json"
+            mapping = dict(DEFAULT_GAMEPAD_KEYBOARD_MAP)
+            assign_keyboard_key(mapping, GamePadKey.A, "p")
+            save_key_mapping(mapping, path)
+            self.assertEqual(load_key_mapping(path), mapping)
+
+            invalid = dict(mapping)
+            invalid[GamePadKey.B] = invalid[GamePadKey.A]
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            self.assertEqual(load_key_mapping(path), DEFAULT_GAMEPAD_KEYBOARD_MAP)
+
+    def test_assigning_an_in_use_key_swaps_the_two_mappings(self):
+        mapping = dict(DEFAULT_GAMEPAD_KEYBOARD_MAP)
+        assign_keyboard_key(mapping, GamePadKey.A, "u")
+        self.assertEqual(mapping[GamePadKey.A], "u")
+        self.assertEqual(mapping[GamePadKey.B], "y")
+
+    def test_pressed_key_display_is_compact_and_ordered(self):
+        self.assertEqual(
+            pressed_keys_text({GamePadKey.RIGHT, GamePadKey.A, GamePadKey.TOP}),
+            "A + ↑ + →",
+        )
+        self.assertEqual(pressed_keys_text(set()), "无")
+
     def test_direction_keys_send_diagonal_and_restore_remaining_direction(self):
         class FakeController:
             is_connected = True
@@ -54,12 +87,20 @@ class ManualToolsTests(unittest.TestCase):
             def release(self, key):
                 self.released.append(key)
 
+        class FakeVariable:
+            def __init__(self):
+                self.value = ""
+
+            def set(self, value):
+                self.value = value
+
         from manual_tools import VirtualControllerWindow
 
         window = object.__new__(VirtualControllerWindow)
         window.controller = FakeController()
         window._native_gamepad_key = GamePadKey
         window._pressed = set()
+        window.pressed_var = FakeVariable()
 
         window.press(GamePadKey.TOP)
         window.press(GamePadKey.RIGHT)
@@ -71,6 +112,7 @@ class ManualToolsTests(unittest.TestCase):
             [GamePadKey.TOP, GamePadKey.TOP_RIGHT, GamePadKey.TOP],
         )
         self.assertEqual(window.controller.released, [GamePadKey.TOP])
+        self.assertEqual(window.pressed_var.value, "无")
 
     @patch("manual_tools.VirtualControllerWindow")
     def test_controller_window_is_reused(self, window_type):
