@@ -14,6 +14,7 @@ from manual_tools import (
     ManualToolsManager,
     assign_keyboard_key,
     encode_tk_png,
+    fit_monitor_frame_size,
     load_key_mapping,
     mapping_button_text,
     parse_video_device,
@@ -100,6 +101,45 @@ class ManualToolsTests(unittest.TestCase):
         self.assertTrue(base64.b64decode(payload).startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertEqual(cv2_module.arguments[0], ".png")
         self.assertEqual(cv2_module.arguments[2], [16, 1])
+
+    def test_monitor_frame_size_preserves_sixteen_by_nine(self):
+        self.assertEqual(fit_monitor_frame_size(800, 600), (800, 450))
+        self.assertEqual(fit_monitor_frame_size(400, 100), (178, 100))
+        self.assertEqual(fit_monitor_frame_size(320, 180), (320, 180))
+
+    def test_monitor_double_click_toggles_image_only_view(self):
+        class FakeWidget:
+            def __init__(self):
+                self.calls = []
+
+            def pack(self, **kwargs):
+                self.calls.append(("pack", kwargs))
+
+            def pack_forget(self):
+                self.calls.append(("forget", {}))
+
+        class FakeWindow:
+            def __init__(self):
+                self.focused = 0
+
+            def focus_force(self):
+                self.focused += 1
+
+        from manual_tools import CaptureMonitorWindow
+
+        monitor = object.__new__(CaptureMonitorWindow)
+        monitor.canvas = FakeWidget()
+        monitor.toolbar = FakeWidget()
+        monitor.window = FakeWindow()
+        monitor._image_only = False
+
+        self.assertEqual(monitor.toggle_image_only(), "break")
+        self.assertTrue(monitor._image_only)
+        self.assertEqual(monitor.toolbar.calls[-1][0], "forget")
+
+        self.assertEqual(monitor.toggle_image_only(), "break")
+        self.assertFalse(monitor._image_only)
+        self.assertEqual(monitor.toolbar.calls[-1][0], "pack")
 
     def test_direction_keys_send_diagonal_and_restore_remaining_direction(self):
         class FakeController:

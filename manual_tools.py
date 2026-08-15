@@ -211,6 +211,15 @@ def encode_tk_png(frame, cv2_module) -> str:
     return base64.b64encode(png.tobytes()).decode("ascii")
 
 
+def fit_monitor_frame_size(width: int, height: int) -> tuple[int, int]:
+    width = max(1, int(width))
+    height = max(1, int(height))
+    aspect_ratio = 16 / 9
+    if width / height > aspect_ratio:
+        return max(1, round(height * aspect_ratio)), height
+    return width, max(1, round(width / aspect_ratio))
+
+
 _DIRECTION_KEYS = frozenset(
     {GamePadKey.TOP, GamePadKey.DOWN, GamePadKey.LEFT, GamePadKey.RIGHT}
 )
@@ -683,6 +692,7 @@ class VirtualControllerWindow:
 class CaptureMonitorWindow:
     FRAME_WIDTH = 640
     FRAME_HEIGHT = 360
+    FRAME_INTERVAL_SECONDS = 1 / 15
 
     def __init__(
         self,
@@ -699,21 +709,27 @@ class CaptureMonitorWindow:
         self._capture = None
         self._capture_thread: threading.Thread | None = None
         self._frame_lock = threading.Lock()
-        self._latest_frame: tuple[int, str] | None = None
+        self._latest_frame: tuple[int, str, int, int] | None = None
+        self._target_size = (self.FRAME_WIDTH, self.FRAME_HEIGHT)
         self._rendered_sequence = -1
         self._render_error_reported = False
+        self._image_only = False
         self._photo = None
 
         self.window = tk.Toplevel(root)
         self.window.title("监视窗口")
-        self.window.resizable(False, False)
+        self.window.resizable(True, True)
+        self.window.minsize(320, 180)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
+        self.window.bind("<Escape>", self._restore_normal_view, add="+")
 
-        toolbar = ttk.Frame(self.window, padding=(8, 8, 8, 5))
-        toolbar.pack(fill="x")
+        self.toolbar = ttk.Frame(self.window, padding=(8, 8, 8, 5))
+        self.toolbar.pack(fill="x")
         self.status_var = tk.StringVar(value="准备打开采集卡")
-        ttk.Label(toolbar, textvariable=self.status_var).pack(side="left")
-        ttk.Button(toolbar, text="重新打开", command=self.restart).pack(side="right")
+        ttk.Label(self.toolbar, textvariable=self.status_var).pack(side="left")
+        ttk.Button(self.toolbar, text="重新打开", command=self.restart).pack(
+            side="right"
+        )
 
         self.canvas = tk.Canvas(
             self.window,
@@ -722,8 +738,10 @@ class CaptureMonitorWindow:
             background="black",
             highlightthickness=0,
         )
-        self.canvas.pack(padx=8, pady=(0, 8))
+        self.canvas.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.image_item = self.canvas.create_image(0, 0, anchor="nw")
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self.canvas.bind("<Double-Button-1>", self.toggle_image_only)
 
         self.restart()
         self.window.after(66, self._render)
@@ -746,6 +764,31 @@ class CaptureMonitorWindow:
             self.root.after(0, update)
         except (RuntimeError, tk.TclError):
             pass
+
+    def _on_canvas_configure(self, event) -> None:
+        if event.width < 16 or event.height < 16:
+            return
+        target_size = fit_monitor_frame_size(event.width, event.height)
+        with self._frame_lock:
+            self._target_size = target_size
+
+    def toggle_image_only(self, _event=None):
+        self.canvas.pack_forget()
+        if self._image_only:
+            self.toolbar.pack(fill="x")
+            self.canvas.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+            self._image_only = False
+        else:
+            self.toolbar.pack_forget()
+            self.canvas.pack(fill="both", expand=True)
+            self._image_only = True
+        self.window.focus_force()
+        return "break"
+
+    def _restore_normal_view(self, _event=None):
+        if self._image_only:
+            return self.toggle_image_only()
+        return None
 
     def restart(self) -> None:
         try:
@@ -787,6 +830,7 @@ class CaptureMonitorWindow:
         sequence = 0
         failed_reads = 0
         first_frame = True
+        last_encoded_at = 0.0
         try:
             while not stop_event.is_set() and generation == self._generation:
                 ok, frame = capture.read()
@@ -798,10 +842,22 @@ class CaptureMonitorWindow:
                     time.sleep(0.03)
                     continue
                 failed_reads = 0
+                now = time.monotonic()
+                if now - last_encoded_at < self.FRAME_INTERVAL_SECONDS:
+                    continue
+                last_encoded_at = now
+                with self._frame_lock:
+                    target_width, target_height = self._target_size
+                shrinking = (
+                    target_width <= frame.shape[1]
+                    and target_height <= frame.shape[0]
+                )
                 resized = cv2.resize(
                     frame,
-                    (self.FRAME_WIDTH, self.FRAME_HEIGHT),
-                    interpolation=cv2.INTER_AREA,
+                    (target_width, target_height),
+                    interpolation=(
+                        cv2.INTER_AREA if shrinking else cv2.INTER_LINEAR
+                    ),
                 )
                 try:
                     encoded = encode_tk_png(resized, cv2)
@@ -810,7 +866,12 @@ class CaptureMonitorWindow:
                     return
                 sequence += 1
                 with self._frame_lock:
-                    self._latest_frame = (sequence, encoded)
+                    self._latest_frame = (
+                        sequence,
+                        encoded,
+                        target_width,
+                        target_height,
+                    )
                 if first_frame:
                     first_frame = False
                     self._post_status(f"采集卡 {device} 画面已连接")
@@ -828,6 +889,13 @@ class CaptureMonitorWindow:
             try:
                 photo = tk.PhotoImage(master=self.window, data=frame[1], format="png")
                 self.canvas.itemconfigure(self.image_item, image=photo)
+                canvas_width = max(1, self.canvas.winfo_width())
+                canvas_height = max(1, self.canvas.winfo_height())
+                self.canvas.coords(
+                    self.image_item,
+                    max(0, (canvas_width - frame[2]) // 2),
+                    max(0, (canvas_height - frame[3]) // 2),
+                )
                 self._photo = photo
                 self._rendered_sequence = frame[0]
                 self._render_error_reported = False
