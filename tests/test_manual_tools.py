@@ -17,6 +17,7 @@ from manual_tools import (
     fit_monitor_frame_size,
     load_key_mapping,
     mapping_button_text,
+    next_monitor_zoom_size,
     parse_video_device,
     pressed_keys_text,
     save_key_mapping,
@@ -107,6 +108,12 @@ class ManualToolsTests(unittest.TestCase):
         self.assertEqual(fit_monitor_frame_size(400, 100), (178, 100))
         self.assertEqual(fit_monitor_frame_size(320, 180), (320, 180))
         self.assertEqual(fit_monitor_frame_size(1920, 1080), (1280, 720))
+
+    def test_monitor_mouse_wheel_uses_bounded_zoom_steps(self):
+        self.assertEqual(next_monitor_zoom_size(640, 360, 1), (800, 450))
+        self.assertEqual(next_monitor_zoom_size(640, 360, -1), (480, 270))
+        self.assertEqual(next_monitor_zoom_size(1280, 720, 1), (1280, 720))
+        self.assertEqual(next_monitor_zoom_size(320, 180, -1), (320, 180))
 
     def test_monitor_double_click_toggles_image_only_view(self):
         class FakeWidget:

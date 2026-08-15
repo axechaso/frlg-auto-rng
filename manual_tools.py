@@ -225,6 +225,31 @@ def fit_monitor_frame_size(
     return width, max(1, round(width / aspect_ratio))
 
 
+MONITOR_ZOOM_SIZES = (
+    (320, 180),
+    (480, 270),
+    (640, 360),
+    (800, 450),
+    (960, 540),
+    (1120, 630),
+    (1280, 720),
+)
+
+
+def next_monitor_zoom_size(width: int, height: int, direction: int) -> tuple[int, int]:
+    fitted_width, fitted_height = fit_monitor_frame_size(width, height)
+    nearest_index = min(
+        range(len(MONITOR_ZOOM_SIZES)),
+        key=lambda index: (
+            abs(MONITOR_ZOOM_SIZES[index][0] - fitted_width)
+            + abs(MONITOR_ZOOM_SIZES[index][1] - fitted_height)
+        ),
+    )
+    step = 1 if direction > 0 else -1
+    target_index = max(0, min(len(MONITOR_ZOOM_SIZES) - 1, nearest_index + step))
+    return MONITOR_ZOOM_SIZES[target_index]
+
+
 _DIRECTION_KEYS = frozenset(
     {GamePadKey.TOP, GamePadKey.DOWN, GamePadKey.LEFT, GamePadKey.RIGHT}
 )
@@ -747,6 +772,9 @@ class CaptureMonitorWindow:
         self.image_item = self.canvas.create_image(0, 0, anchor="nw")
         self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.canvas.bind("<Double-Button-1>", self.toggle_image_only)
+        self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
+        self.canvas.bind("<Button-4>", lambda _event: self._zoom_monitor(1))
+        self.canvas.bind("<Button-5>", lambda _event: self._zoom_monitor(-1))
 
         self.restart()
         self.window.after(self.RENDER_INTERVAL_MS, self._render)
@@ -776,6 +804,26 @@ class CaptureMonitorWindow:
         target_size = fit_monitor_frame_size(event.width, event.height)
         with self._frame_lock:
             self._target_size = target_size
+
+    def _on_mouse_wheel(self, event):
+        if event.delta == 0:
+            return None
+        return self._zoom_monitor(1 if event.delta > 0 else -1)
+
+    def _zoom_monitor(self, direction: int):
+        canvas_width = max(1, self.canvas.winfo_width())
+        canvas_height = max(1, self.canvas.winfo_height())
+        target_width, target_height = next_monitor_zoom_size(
+            canvas_width,
+            canvas_height,
+            direction,
+        )
+        extra_width = max(0, self.window.winfo_width() - canvas_width)
+        extra_height = max(0, self.window.winfo_height() - canvas_height)
+        self.window.geometry(
+            f"{target_width + extra_width}x{target_height + extra_height}"
+        )
+        return "break"
 
     def toggle_image_only(self, _event=None):
         self.canvas.pack_forget()
