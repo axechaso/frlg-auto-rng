@@ -199,6 +199,18 @@ def pressed_keys_text(pressed) -> str:
     ]
     return " + ".join(labels) if labels else "无"
 
+
+def encode_tk_png(frame, cv2_module) -> str:
+    encoded, png = cv2_module.imencode(
+        ".png",
+        frame,
+        [cv2_module.IMWRITE_PNG_COMPRESSION, 1],
+    )
+    if not encoded:
+        raise ValueError("OpenCV 无法编码监视画面")
+    return base64.b64encode(png.tobytes()).decode("ascii")
+
+
 _DIRECTION_KEYS = frozenset(
     {GamePadKey.TOP, GamePadKey.DOWN, GamePadKey.LEFT, GamePadKey.RIGHT}
 )
@@ -689,6 +701,7 @@ class CaptureMonitorWindow:
         self._frame_lock = threading.Lock()
         self._latest_frame: tuple[int, str] | None = None
         self._rendered_sequence = -1
+        self._render_error_reported = False
         self._photo = None
 
         self.window = tk.Toplevel(root)
@@ -773,6 +786,7 @@ class CaptureMonitorWindow:
         self._post_status(f"采集卡 {device} 已打开")
         sequence = 0
         failed_reads = 0
+        first_frame = True
         try:
             while not stop_event.is_set() and generation == self._generation:
                 ok, frame = capture.read()
@@ -789,12 +803,17 @@ class CaptureMonitorWindow:
                     (self.FRAME_WIDTH, self.FRAME_HEIGHT),
                     interpolation=cv2.INTER_AREA,
                 )
-                rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-                header = f"P6\n{self.FRAME_WIDTH} {self.FRAME_HEIGHT}\n255\n".encode("ascii")
-                encoded = base64.b64encode(header + rgb.tobytes()).decode("ascii")
+                try:
+                    encoded = encode_tk_png(resized, cv2)
+                except Exception as exc:
+                    self._post_status(f"画面编码失败：{exc}")
+                    return
                 sequence += 1
                 with self._frame_lock:
                     self._latest_frame = (sequence, encoded)
+                if first_frame:
+                    first_frame = False
+                    self._post_status(f"采集卡 {device} 画面已连接")
         finally:
             capture.release()
             if self._capture is capture:
@@ -807,12 +826,15 @@ class CaptureMonitorWindow:
             frame = self._latest_frame
         if frame is not None and frame[0] != self._rendered_sequence:
             try:
-                photo = tk.PhotoImage(master=self.window, data=frame[1], format="PPM")
+                photo = tk.PhotoImage(master=self.window, data=frame[1], format="png")
                 self.canvas.itemconfigure(self.image_item, image=photo)
                 self._photo = photo
                 self._rendered_sequence = frame[0]
-            except tk.TclError:
-                pass
+                self._render_error_reported = False
+            except tk.TclError as exc:
+                if not self._render_error_reported:
+                    self.status_var.set(f"画面渲染失败：{exc}")
+                    self._render_error_reported = True
         self.window.after(66, self._render)
 
     def _stop_capture(self) -> None:

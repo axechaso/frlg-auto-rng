@@ -1,3 +1,4 @@
+import base64
 import json
 import subprocess
 import sys
@@ -12,6 +13,7 @@ from manual_tools import (
     KEYBOARD_GAMEPAD_MAP,
     ManualToolsManager,
     assign_keyboard_key,
+    encode_tk_png,
     load_key_mapping,
     mapping_button_text,
     parse_video_device,
@@ -77,6 +79,27 @@ class ManualToolsTests(unittest.TestCase):
     def test_mapping_button_text_shows_controller_and_keyboard_key(self):
         self.assertEqual(mapping_button_text(GamePadKey.A, "y"), "A\n[Y]")
         self.assertEqual(mapping_button_text(GamePadKey.TOP, "w"), "↑\n[W]")
+
+    def test_monitor_frames_are_encoded_as_png_for_tk(self):
+        class FakePng:
+            def tobytes(self):
+                return b"\x89PNG\r\n\x1a\nframe"
+
+        class FakeCv2:
+            IMWRITE_PNG_COMPRESSION = 16
+
+            def __init__(self):
+                self.arguments = None
+
+            def imencode(self, *arguments):
+                self.arguments = arguments
+                return True, FakePng()
+
+        cv2_module = FakeCv2()
+        payload = encode_tk_png(object(), cv2_module)
+        self.assertTrue(base64.b64decode(payload).startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertEqual(cv2_module.arguments[0], ".png")
+        self.assertEqual(cv2_module.arguments[2], [16, 1])
 
     def test_direction_keys_send_diagonal_and_restore_remaining_direction(self):
         class FakeController:
