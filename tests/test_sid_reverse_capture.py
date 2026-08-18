@@ -1,3 +1,4 @@
+import io
 import json
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from run_sid_reverse_capture import (
     _parse_dex_overrides,
     _parse_initial_levels,
     _run_easycon,
+    _safe_print,
     _write_slot_project,
     load_sid_reverse_request,
     main,
@@ -24,6 +26,13 @@ class SIDReverseCaptureTests(unittest.TestCase):
         "DEX=1|NATURE=0|LEVEL=100|HP=231|ATK=134|DEF=134|"
         "SPA=135|SPD=166|SPE=126\n"
     )
+
+    def test_console_output_falls_back_when_active_code_page_is_ascii(self):
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding="ascii")
+        _safe_print("SID反查中文", file=stream)
+        stream.flush()
+        self.assertEqual(raw.getvalue().splitlines(), [b"SID????"])
 
     def test_parses_active_dex_numbers_and_pads_unused_slots(self):
         self.assertEqual(

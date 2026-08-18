@@ -36,6 +36,18 @@ DEFAULT_OUTPUT = Path(__file__).resolve().parent / "runtime" / "sid_reverse"
 ZERO_EVS = (0, 0, 0, 0, 0, 0)
 
 
+def _safe_print(message="", *, file=None, end="\n") -> None:
+    """Print Chinese status text even when a Windows console uses cp1252."""
+    target = file or sys.stdout
+    text = str(message)
+    try:
+        print(text, file=target, end=end)
+    except UnicodeEncodeError:
+        encoding = getattr(target, "encoding", None) or "ascii"
+        safe_text = text.encode(encoding, errors="replace").decode(encoding)
+        print(safe_text, file=target, end=end)
+
+
 def load_sid_reverse_request(path: Path) -> SIDReverseRunRequest:
     payload = json.loads(path.read_text(encoding="utf-8"))
     values = payload.get("request", payload)
@@ -67,11 +79,11 @@ def _ask_int(prompt: str, minimum: int, maximum: int) -> int:
         try:
             value = int(input(prompt).strip())
         except ValueError:
-            print("请输入整数。")
+            _safe_print("请输入整数。")
             continue
         if minimum <= value <= maximum:
             return value
-        print(f"请输入{minimum}-{maximum}。")
+        _safe_print(f"请输入{minimum}-{maximum}。")
 
 
 def _parse_dex_overrides(
@@ -176,7 +188,7 @@ def _collect_origins(
                     )
                     break
                 except ValueError as exc:
-                    print(exc)
+                    _safe_print(exc)
 
     location_parts = locations_arg.split(";") if locations_arg is not None else None
     if location_parts is not None and len(location_parts) != count:
@@ -196,7 +208,7 @@ def _collect_origins(
                 except ValueError as exc:
                     if locations_arg is not None:
                         raise
-                    print(exc)
+                    _safe_print(exc)
                     raw_location = ""
         else:
             locations.append("")
@@ -218,7 +230,7 @@ def _collect_origins(
                 efforts.append(_parse_effort_row(raw))
                 break
             except ValueError as exc:
-                print(exc)
+                _safe_print(exc)
 
     source_types.extend([0] * (6 - count))
     locations.extend([""] * (6 - count))
@@ -299,7 +311,7 @@ def _run_easycon(
     assert process.stdout is not None
     try:
         for line in process.stdout:
-            print(line, end="")
+            _safe_print(line, end="")
             lines.append(line)
             if "SIDREV|OBS|" not in line:
                 continue
@@ -315,7 +327,7 @@ def _run_easycon(
                 f"SIDREV|PID_UNIQUE|MON={pokemon_index}|PID={pid:08X}|"
                 f"OBS={observation_count}\n"
             )
-            print(marker, end="")
+            _safe_print(marker, end="")
             lines.append(marker)
             stopped_for_unique_pid = True
             process.terminate()
@@ -416,11 +428,11 @@ def main(argv: list[str] | None = None) -> int:
         tid = base_request.tid
         count = base_request.party_count
         ports, videos, device_output = probe_easycon_devices(args.ezcon)
-        print(device_output)
+        _safe_print(device_output)
         port, video = _select_device(ports, videos, args.port, args.video)
         runner = prepare_compat_runner(args.ezcon)
     except (OSError, RuntimeError, ValueError) as exc:
-        print(f"SID反查启动失败: {exc}", file=sys.stderr)
+        _safe_print(f"SID反查启动失败: {exc}", file=sys.stderr)
         return 1
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -432,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         write_sid_reverse_plan(args.source, args.output, base_request)
         for slot in range(1, count + 1):
-            print(f"\n=== 采集队伍第{slot}位 ===")
+            _safe_print(f"\n=== 采集队伍第{slot}位 ===")
             main_path = _write_slot_project(
                 args.source,
                 args.output,
@@ -463,20 +475,20 @@ def main(argv: list[str] | None = None) -> int:
                 raise RuntimeError(f"队伍第{slot}位采集失败，EasyCon退出码{code}")
 
             if stopped_for_unique_pid:
-                print(f"队伍第{slot}位PID已经唯一，停止继续喂糖。")
+                _safe_print(f"队伍第{slot}位PID已经唯一，停止继续喂糖。")
             else:
-                print(f"队伍第{slot}位采集完成，继续处理用户指定的后续槽位。")
+                _safe_print(f"队伍第{slot}位采集完成，继续处理用户指定的后续槽位。")
 
         report = build_report("".join(all_output), tid_override=tid, game=game)
         report_path.write_text(report, encoding="utf-8")
-        print("\n" + report)
-        print(f"\n完整日志: {log_path}")
-        print(f"结果报告: {report_path}")
+        _safe_print("\n" + report)
+        _safe_print(f"\n完整日志: {log_path}")
+        _safe_print(f"结果报告: {report_path}")
     except (KeyboardInterrupt, OSError, RuntimeError, ValueError) as exc:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("".join(all_output), encoding="utf-8")
-        print(f"SID反查失败: {exc}", file=sys.stderr)
-        print(f"已保留日志: {log_path}", file=sys.stderr)
+        _safe_print(f"SID反查失败: {exc}", file=sys.stderr)
+        _safe_print(f"已保留日志: {log_path}", file=sys.stderr)
         return 1
     return 0
 
