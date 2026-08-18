@@ -291,6 +291,7 @@ class AutoRngApp:
         self.sid_report_path: Path | None = None
         self.sid_log_path: Path | None = None
         self.tid_flow_log_path: Path | None = None
+        self.egg_log_path: Path | None = None
         self.busy = False
         self._updating = False
         self.manual_tools: ManualToolsManager | None = None
@@ -2234,15 +2235,32 @@ class AutoRngApp:
             except (OSError, ValueError, RuntimeError) as exc:
                 messagebox.showerror("启动后端检查失败", str(exc))
                 return
-            command = build_run_command(
+            easycon_command = build_run_command(
                 runner_path,
                 self.project_main,
                 port=selected_port,
                 video_device=video_device,
                 video_type="DSHOW",
             )
-            command_cwd = self.project_main.parent
-            self.running_mode = "easycon"
+            if self.egg_request is not None:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.egg_log_path = self.project_main.parent / f"egg-{timestamp}.log"
+                command = [
+                    sys.executable,
+                    str(ROOT / "run_easycon_logged.py"),
+                    "--log-path",
+                    str(self.egg_log_path),
+                    "--cwd",
+                    str(self.project_main.parent),
+                    "--",
+                    *easycon_command,
+                ]
+                command_cwd = ROOT
+                self.running_mode = "egg"
+            else:
+                command = easycon_command
+                command_cwd = self.project_main.parent
+                self.running_mode = "easycon"
         flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         try:
             self.process = subprocess.Popen(command, cwd=str(command_cwd), creationflags=flags)
@@ -2261,7 +2279,11 @@ class AutoRngApp:
             else (
                 "TID/SID → 研究所 → 1.1.8 御三家流程正在运行；详细日志见新打开的终端。"
                 if self.running_mode == "tid_flow"
-                else "EasyCon 正在运行；详细日志见新打开的终端。"
+                else (
+                    f"孵蛋流程正在运行；日志将保存到 {self.egg_log_path}。"
+                    if self.running_mode == "egg"
+                    else "EasyCon 正在运行；详细日志见新打开的终端。"
+                )
             )
         )
         self.root.after(1000, self.poll_process)
@@ -2277,6 +2299,7 @@ class AutoRngApp:
         report_path = self.sid_report_path
         log_path = self.sid_log_path
         tid_flow_log_path = self.tid_flow_log_path
+        egg_log_path = self.egg_log_path
         self.process = None
         self.running_mode = None
         self.stop_button.configure(state="disabled")
@@ -2297,6 +2320,18 @@ class AutoRngApp:
                 self.status_var.set(f"TID/SID 到御三家连续流程已完成{detail}")
             else:
                 self.status_var.set(f"连续流程已退出，退出码 {code}{detail}")
+        elif completed_mode == "egg":
+            detail = f"；日志：{egg_log_path}" if egg_log_path is not None else ""
+            log_text = ""
+            if egg_log_path is not None and egg_log_path.is_file():
+                log_text = egg_log_path.read_text(encoding="utf-8", errors="replace")
+                self.set_result("孵蛋运行日志：\n\n" + log_text[-16000:])
+            if code == 0 and "孵蛋流程测试完成" in log_text:
+                self.status_var.set(f"孵蛋流程测试完成{detail}")
+            elif "孵蛋流程测试失败" in log_text:
+                self.status_var.set(f"孵蛋流程在检查或执行阶段停止{detail}")
+            else:
+                self.status_var.set(f"孵蛋流程已退出，退出码 {code}{detail}")
         else:
             self.status_var.set(f"EasyCon 已退出，退出码 {code}。")
 

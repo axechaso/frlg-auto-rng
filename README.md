@@ -112,6 +112,8 @@ runtime\launcher.log
 
 Python 当前不重复执行蛋目标搜索；它只接收 Ten Lines Egg 页已经选好的结果。孵蛋 ECS 已通过代码与 EasyCon 1.6.4a 语法检查，但尚未完成本机实机验收。
 
+孵蛋运行进入 Options 后，会分别识别文字速度、战斗动画、声音和按键模式；每项最多重试 3 次，并在终端输出各候选标签分数，避免页面刚切换时的一次低分直接终止。GUI 会同时把完整输出保存到 `runtime/easycon118/egg-日期_时间.log`，结束后在结果区显示日志尾部。
+
 ### SID 查找
 
 1. 把用于反查的闪光宝可梦依次放到队伍前 N 位，背包第一页第一格放神奇糖果，并在游戏内保存。
@@ -164,7 +166,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
-截至 2026-08-14，GitHub Actions 对应的自动乱数测试集合共 77 项，使用项目 `.venv` 全部通过。它们覆盖计划择优、IV 输入、SID 采集请求/初始等级/完整种族值注入与反查、御三家最低闪光目标、完整 Ten Lines Seed 时间表和 SID 判定、TID 连续流程三阶段生成/预检/终止标记、Seed 模式、静态目标白名单、路线边界、1.1.8 参数替换、孵蛋参数、TID/SID 1.3.7 日英模板与标签、标签兼容、EasyCon 1.6.4a 预检和 GUI/CLI 识图取整兼容 runner。测试通过不等于 Switch 实机长跑已经验收。
+截至 2026-08-18，GitHub Actions 对应的自动乱数测试集合共 88 项，使用项目 `.venv` 全部通过。它们覆盖计划择优、IV 输入、SID 采集请求/初始等级/完整种族值注入与反查、御三家最低闪光目标、完整 Ten Lines Seed 时间表和 SID 判定、TID 连续流程三阶段生成/预检/终止标记、Seed 模式、静态目标白名单、路线边界、1.1.8 参数替换、孵蛋参数与设置识别有限重试、TID/SID 1.3.7 日英模板与标签、标签兼容、EasyCon 1.6.4a 预检和 GUI/CLI 识图取整兼容 runner。测试通过不等于 Switch 实机长跑已经验收。
 
 ## 目录结构
 

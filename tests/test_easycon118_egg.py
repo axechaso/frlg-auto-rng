@@ -1,7 +1,11 @@
 import unittest
+from pathlib import Path
 
 from automation.easycon118 import (
+    EGG_SETTINGS_GLOBALS,
+    EGG_SETTINGS_OVERRIDE_PATH,
     EggRunRequest,
+    _apply_egg_settings_runtime_override_text,
     configure_egg_template_text,
     egg_request_to_user_values,
 )
@@ -67,6 +71,32 @@ class EasyCon118EggTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 with self.assertRaisesRegex(ValueError, message):
                     egg_request(**changes).validate()
+
+    def test_settings_runtime_override_is_bounded_and_idempotent(self):
+        original = """\
+$孵蛋库_设置结果 = 0
+FUNC 孵蛋测试_检查校正并保存游戏设置($Seed模式: INT, $识图阈值: INT): INT
+    PRINT 原始单次检查
+    RETURN 0
+ENDFUNC
+
+FUNC 孵蛋测试_执行前置准备($Seed模式: INT, $识图阈值: INT): INT
+    RETURN 1
+ENDFUNC
+"""
+        override = Path(EGG_SETTINGS_OVERRIDE_PATH).read_text(encoding="utf-8")
+        configured = _apply_egg_settings_runtime_override_text(original, override)
+        configured_again = _apply_egg_settings_runtime_override_text(configured, override)
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(EGG_SETTINGS_GLOBALS, configured)
+        self.assertNotIn("原始单次检查", configured)
+        self.assertEqual(configured.count("FOR $孵蛋库_设置识别尝试 = 1 TO 3"), 4)
+        self.assertIn("设置识别 TEXT 第", configured)
+        self.assertIn("设置识别 BATTLE 第", configured)
+        self.assertIn("设置识别 SOUND 第", configured)
+        self.assertIn("设置识别 BUTTON 第", configured)
+        self.assertIn("WAIT 2000", configured)
 
 
 if __name__ == "__main__":

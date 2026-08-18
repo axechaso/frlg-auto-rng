@@ -37,6 +37,7 @@ jobs:
           python -m py_compile
           run_auto_rng_gui.py
           run_auto_planner.py
+          run_easycon_logged.py
           run_sid_reverse.py
           run_sid_reverse_capture.py
           run_tid_starter_flow.py

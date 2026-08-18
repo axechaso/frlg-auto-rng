@@ -45,6 +45,24 @@ EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
 EXPECTED_TEMPLATE_NAMES = (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME)
 EXPECTED_SCRIPT_FILE_COUNT = 33
 EXPECTED_SCRIPT_SHA256 = "1ffa4db222405231276179fa7f2be277d71759ed9455a80be8cddc5b9c118625"
+EGG_SETTINGS_OVERRIDE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "egg_settings_retry.ecs"
+)
+EGG_SETTINGS_LIBRARY_NAME = "27_孵蛋测试流程.ecs"
+EGG_SETTINGS_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：游戏设置 OCR 使用有限重试"
+EGG_SETTINGS_NEXT_FUNCTION = "FUNC 孵蛋测试_执行前置准备"
+EGG_SETTINGS_GLOBALS = """\
+$孵蛋库_设置识别尝试 = 0
+$孵蛋库_设置分数1 = -1
+$孵蛋库_设置分数2 = -1
+$孵蛋库_设置分数3 = -1
+$孵蛋库_设置候选分数 = -1
+$孵蛋库_设置最佳分数 = -1
+$孵蛋库_设置状态 = -1
+"""
 
 
 @dataclass(frozen=True)
@@ -339,6 +357,47 @@ def configure_egg_template_text(template_text: str, request: EggRunRequest) -> s
     return _configure_user_values(template_text, egg_request_to_user_values(request))
 
 
+def _apply_egg_settings_runtime_override_text(
+    library_text: str,
+    override_text: str,
+) -> str:
+    """Replace only the egg settings checker in a copied 1.1.8 runtime library."""
+    global_anchor = "$孵蛋库_设置结果 = 0\n"
+    if EGG_SETTINGS_GLOBALS not in library_text:
+        if library_text.count(global_anchor) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的设置结果全局变量，拒绝应用运行时修正")
+        library_text = library_text.replace(
+            global_anchor,
+            global_anchor + EGG_SETTINGS_GLOBALS,
+            1,
+        )
+
+    if EGG_SETTINGS_OVERRIDE_MARKER in library_text:
+        start = library_text.index(EGG_SETTINGS_OVERRIDE_MARKER)
+    else:
+        original_function = "FUNC 孵蛋测试_检查校正并保存游戏设置"
+        if library_text.count(original_function) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的游戏设置检查函数，拒绝应用运行时修正")
+        start = library_text.index(original_function)
+    if library_text.count(EGG_SETTINGS_NEXT_FUNCTION) != 1:
+        raise ValueError("孵蛋流程库缺少唯一的前置准备函数，拒绝应用运行时修正")
+    end = library_text.index(EGG_SETTINGS_NEXT_FUNCTION, start)
+    replacement = override_text.rstrip() + "\n\n"
+    return library_text[:start] + replacement + library_text[end:]
+
+
+def apply_egg_settings_runtime_override(library_path: str | Path) -> str:
+    """Apply the GUI-only settings retry overlay and return its SHA-256."""
+    library_path = Path(library_path)
+    override_text = EGG_SETTINGS_OVERRIDE_PATH.read_text(encoding="utf-8")
+    configured = _apply_egg_settings_runtime_override_text(
+        library_path.read_text(encoding="utf-8"),
+        override_text,
+    )
+    library_path.write_text(configured, encoding="utf-8")
+    return hashlib.sha256(override_text.encode("utf-8")).hexdigest()
+
+
 def write_configured_project(
     source_dir: str | Path,
     output_dir: str | Path,
@@ -449,11 +508,18 @@ def write_configured_egg_project(
                 shutil.rmtree(target)
             shutil.copytree(source, target)
 
+    override_sha256 = apply_egg_settings_runtime_override(
+        output_dir / "lib" / EGG_SETTINGS_LIBRARY_NAME
+    )
+
     manifest = {
         "source": str(source_dir),
         "template": template_path.name,
         "egg_request": request.to_dict(),
         "experimental": True,
+        "runtime_overrides": {
+            "egg_settings_retry_sha256": override_sha256,
+        },
         "labels": {
             "expected_count": EXPECTED_LABEL_COUNT,
             "expected_methods": EXPECTED_LABEL_METHODS,
