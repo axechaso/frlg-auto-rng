@@ -11,6 +11,8 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any, Callable
 
+from app_paths import DATA_ROOT
+
 
 class GamePadKey:
     """Dependency-free key names resolved to EasyCon enums after connecting."""
@@ -92,7 +94,7 @@ DEFAULT_GAMEPAD_KEYBOARD_MAP = {
 }
 
 KEY_MAPPING_PATH = (
-    Path(__file__).resolve().parent / "runtime" / "manual_controller_keymap.json"
+    DATA_ROOT / "runtime" / "manual_controller_keymap.json"
 )
 
 

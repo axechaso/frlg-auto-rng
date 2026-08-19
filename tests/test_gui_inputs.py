@@ -5,8 +5,10 @@ from run_auto_rng_gui import (
     AutoRngApp,
     MODE_TAB_ORDER,
     _install_autocomplete_combo,
+    build_egg_config_payload,
     filter_autocomplete_choices,
     iv_ranges_for_preset,
+    parse_egg_config_payload,
     parse_iv_ranges,
     parse_sid_effort_values,
     parse_sid_species,
@@ -15,6 +17,37 @@ from run_auto_rng_gui import (
 
 
 class GuiIvInputTests(unittest.TestCase):
+    def test_egg_config_payload_round_trips_requested_fields(self):
+        payload = build_egg_config_payload(
+            "叶绿",
+            2,
+            143,
+            "50",
+            [31, 20, 15, 0, 28, 7],
+            [10, 11, 12, 13, 14, 15],
+        )
+        self.assertEqual(
+            payload,
+            {
+                "version": 1,
+                "game": "叶绿",
+                "nx_model": 2,
+                "egg_species_id": 143,
+                "compatibility": 50,
+                "parent_a_ivs": [31, 20, 15, 0, 28, 7],
+                "parent_b_ivs": [10, 11, 12, 13, 14, 15],
+            },
+        )
+        self.assertEqual(parse_egg_config_payload(payload), payload)
+
+    def test_egg_config_rejects_invalid_values(self):
+        with self.assertRaisesRegex(ValueError, "相性"):
+            build_egg_config_payload("火红", 1, 25, 30, [31] * 6, [31] * 6)
+        with self.assertRaisesRegex(ValueError, "亲本A攻击"):
+            build_egg_config_payload("火红", 1, 25, 70, [31, 32, 31, 31, 31, 31], [31] * 6)
+        with self.assertRaisesRegex(ValueError, "版本"):
+            parse_egg_config_payload({"version": 2})
+
     def test_autocomplete_filters_chinese_english_and_location_fragments(self):
         species = ("皮卡丘 (Pikachu)", "雷丘 (Raichu)", "皮皮 (Clefairy)")
         locations = ("2号道路 (Route 2)", "常青森林 (Viridian Forest)")

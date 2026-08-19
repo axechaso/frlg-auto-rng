@@ -2,11 +2,13 @@ import os
 import yaml
 from typing import Any, Dict
 
+from app_paths import DATA_ROOT, RESOURCE_ROOT
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+_PROJECT_ROOT = str(RESOURCE_ROOT)
 _DEFAULT_PATH = os.environ.get(
     "EASYCON_CONFIG", os.path.join(_PROJECT_ROOT, "default.yaml"))
-_CUSTOM_PATH = os.path.join(_PROJECT_ROOT, "custom.yaml")
+_CUSTOM_PATH = os.path.join(str(DATA_ROOT), "custom.yaml")
 
 config_data: Dict[str, Any] = {}
 loaded_flag = False

@@ -98,6 +98,21 @@ ENDFUNC
         self.assertIn("设置识别 BUTTON 第", configured)
         self.assertIn("WAIT 2000", configured)
 
+    def test_bundled_egg_flow_soft_resets_before_254_steps(self):
+        root = Path(__file__).resolve().parents[1]
+        library = (root / "local_assets" / "easycon118" / "lib" / "27_孵蛋测试流程.ecs").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("FUNC 孵蛋测试_软重启并跳过回忆", library)
+        self.assertIn("A DOWN\n    B DOWN\n    X DOWN\n    Y DOWN", library)
+        preparation = library.split(
+            "FUNC 孵蛋测试_执行前置准备", 1
+        )[1].split("ENDFUNC", 1)[0]
+        self.assertLess(
+            preparation.index("CALL 孵蛋测试_软重启并跳过回忆"),
+            preparation.index("CALL 孵蛋测试_跑到254步准备位"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

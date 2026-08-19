@@ -12,6 +12,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from app_paths import DATA_ROOT, RESOURCE_ROOT
+
 from assets.game_text import (
     CATEGORY_EN_TO_ZH,
     SPECIES_EN_TO_ZH,
@@ -61,7 +63,8 @@ from rng.tenlines_utils import (
 from manual_tools import ManualToolsManager
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = RESOURCE_ROOT
+WRITABLE_ROOT = DATA_ROOT
 IMPORTED_SOURCE_118 = ROOT / "local_assets" / "easycon118"
 DOWNLOADED_SOURCE_118 = Path.home() / "Downloads" / "NS火叶全自动一键乱数1.1.8"
 DEFAULT_SOURCE_118 = IMPORTED_SOURCE_118 if IMPORTED_SOURCE_118.is_dir() else DOWNLOADED_SOURCE_118
@@ -70,6 +73,22 @@ IV_STAT_LABELS = ("HP", "攻击", "防御", "特攻", "特防", "速度")
 IV_PRESETS = ("不限", "6V", "0A", "0S", "0A0S")
 SID_SOURCE_LABELS = ("定点", "野生")
 MODE_TAB_ORDER = ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）")
+
+
+def build_worker_command(worker: str, arguments: list[str]) -> list[str]:
+    """Build a source or frozen command for one of the GUI worker modes."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--worker", worker, *arguments]
+    worker_scripts = {
+        "sid-capture": "run_sid_reverse_capture.py",
+        "tid-flow": "run_tid_starter_flow.py",
+        "easycon-log": "run_easycon_logged.py",
+    }
+    try:
+        script_name = worker_scripts[worker]
+    except KeyError as exc:
+        raise ValueError(f"未知后台工作模式: {worker}") from exc
+    return [sys.executable, str(ROOT / script_name), *arguments]
 
 
 def iv_ranges_for_preset(preset: str) -> tuple[tuple[int, int], ...]:
@@ -127,6 +146,79 @@ def parse_exact_ivs(values, label: str) -> tuple[int, int, int, int, int, int]:
             raise ValueError(f"{label}{stat}必须在 0-31 之间")
         result.append(value)
     return tuple(result)  # type: ignore[return-value]
+
+
+EGG_CONFIG_VERSION = 1
+
+
+def build_egg_config_payload(
+    game: str,
+    nx_model,
+    species_id,
+    compatibility,
+    parent_a_ivs,
+    parent_b_ivs,
+) -> dict:
+    """Validate the egg-page settings and return a portable JSON payload."""
+    game = str(game).strip()
+    if game not in {"火红", "叶绿"}:
+        raise ValueError("游戏版本只能是火红或叶绿")
+    try:
+        nx_model = int(nx_model)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("机型必须是 Switch 1 或 Switch 2") from exc
+    if nx_model not in {1, 2}:
+        raise ValueError("机型必须是 Switch 1 或 Switch 2")
+    try:
+        species_id = int(species_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("蛋种全国图鉴编号必须是整数") from exc
+    if not 1 <= species_id <= 386:
+        raise ValueError("蛋种全国图鉴编号必须在 1-386 之间")
+    try:
+        compatibility = int(compatibility)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("双亲相性只能填写 20、50 或 70") from exc
+    if compatibility not in {20, 50, 70}:
+        raise ValueError("双亲相性只能填写 20、50 或 70")
+    for values, label in ((parent_a_ivs, "亲本A"), (parent_b_ivs, "亲本B")):
+        if isinstance(values, (str, bytes)):
+            raise ValueError(f"{label}必须包含六项 IV")
+        try:
+            len(values)
+        except TypeError as exc:
+            raise ValueError(f"{label}必须包含六项 IV") from exc
+    parent_a_ivs = parse_exact_ivs(parent_a_ivs, "亲本A")
+    parent_b_ivs = parse_exact_ivs(parent_b_ivs, "亲本B")
+    return {
+        "version": EGG_CONFIG_VERSION,
+        "game": game,
+        "nx_model": nx_model,
+        "egg_species_id": species_id,
+        "compatibility": compatibility,
+        "parent_a_ivs": list(parent_a_ivs),
+        "parent_b_ivs": list(parent_b_ivs),
+    }
+
+
+def parse_egg_config_payload(payload) -> dict:
+    """Validate a saved egg JSON object and return its canonical values."""
+    if not isinstance(payload, dict):
+        raise ValueError("配置文件顶层必须是 JSON 对象")
+    try:
+        version = int(payload.get("version", EGG_CONFIG_VERSION))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("配置文件版本无效") from exc
+    if version != EGG_CONFIG_VERSION:
+        raise ValueError(f"不支持的孵蛋配置版本: {version}")
+    return build_egg_config_payload(
+        payload.get("game"),
+        payload.get("nx_model"),
+        payload.get("egg_species_id"),
+        payload.get("compatibility"),
+        payload.get("parent_a_ivs"),
+        payload.get("parent_b_ivs"),
+    )
 
 
 def parse_sid_effort_values(values, slot: int) -> tuple[int, int, int, int, int, int]:
@@ -685,6 +777,18 @@ class AutoRngApp:
             text="允许生成并运行实验性的同 Seed 孵蛋时间轴（尚未完成本机实机验收）",
             variable=self.egg_ack_var,
         ).grid(row=4, column=0, columnspan=8, sticky="w", padx=6, pady=(5, 0))
+        egg_config_actions = ttk.Frame(egg)
+        egg_config_actions.grid(row=5, column=0, columnspan=8, sticky="w", padx=6, pady=(7, 0))
+        ttk.Button(
+            egg_config_actions,
+            text="保存孵蛋配置",
+            command=self.save_egg_config,
+        ).pack(side="left")
+        ttk.Button(
+            egg_config_actions,
+            text="载入孵蛋配置",
+            command=self.load_egg_config,
+        ).pack(side="left", padx=(8, 0))
 
         tid_identity = ttk.LabelFrame(tid_tab, text="1. TID / SID 基本条件", padding=8)
         tid_identity.pack(fill="x")
@@ -1368,6 +1472,95 @@ class AutoRngApp:
             seed_mode=seed_mode,
         )
 
+    def _egg_config_payload(self) -> dict:
+        pokemon = self.egg_pokemon_map.get(self.egg_pokemon_var.get())
+        if not pokemon:
+            raise ValueError("请选择孵蛋蛋种")
+        return build_egg_config_payload(
+            self.game_var.get(),
+            {"Switch 1": 1, "Switch 2": 2}.get(self.nx_var.get()),
+            get_species_id(pokemon),
+            self.egg_compatibility_var.get(),
+            [variable.get() for variable in self.egg_parent_a_iv_vars],
+            [variable.get() for variable in self.egg_parent_b_iv_vars],
+        )
+
+    def save_egg_config(self):
+        try:
+            payload = self._egg_config_payload()
+        except (TypeError, ValueError) as exc:
+            messagebox.showerror("保存孵蛋配置失败", str(exc))
+            return
+        path = filedialog.asksaveasfilename(
+            title="保存孵蛋配置",
+            initialdir=str(ROOT),
+            initialfile="孵蛋配置.json",
+            defaultextension=".json",
+            filetypes=(("JSON 配置", "*.json"), ("所有文件", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            messagebox.showerror("保存孵蛋配置失败", str(exc))
+            return
+        self.status_var.set(f"孵蛋配置已保存：{path}")
+
+    def load_egg_config(self):
+        path = filedialog.askopenfilename(
+            title="载入孵蛋配置",
+            initialdir=str(ROOT),
+            filetypes=(("JSON 配置", "*.json"), ("所有文件", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+            config = parse_egg_config_payload(payload)
+            game = config["game"]
+            nx_model = config["nx_model"]
+            species_id = config["egg_species_id"]
+            self._updating = True
+            try:
+                self.game_var.set(game)
+                self.nx_var.set("Switch 2" if nx_model == 2 else "Switch 1")
+            finally:
+                self._updating = False
+            self._on_game_change()
+            display = next(
+                (
+                    key
+                    for key, value in self.egg_pokemon_map.items()
+                    if get_species_id(value) == species_id
+                ),
+                None,
+            )
+            if display is None:
+                raise ValueError(f"无法在当前蛋种列表中找到图鉴编号 {species_id}")
+            self._updating = True
+            try:
+                self.egg_pokemon_var.set(display)
+                self.egg_compatibility_var.set(str(config["compatibility"]))
+                for variable, value in zip(
+                    self.egg_parent_a_iv_vars, config["parent_a_ivs"]
+                ):
+                    variable.set(str(value))
+                for variable, value in zip(
+                    self.egg_parent_b_iv_vars, config["parent_b_ivs"]
+                ):
+                    variable.set(str(value))
+            finally:
+                self._updating = False
+            self.invalidate_plan()
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            messagebox.showerror("载入孵蛋配置失败", str(exc))
+            return
+        self.status_var.set(f"孵蛋配置已载入：{path}")
+
     def collect_egg_request(self) -> EggRunRequest:
         pokemon = self.egg_pokemon_map.get(self.egg_pokemon_var.get())
         if not pokemon:
@@ -1628,7 +1821,7 @@ class AutoRngApp:
                 project_main = None
                 check = None
                 generation_error = None
-                plan_dir = ROOT / "rng_logs" / "plans"
+                plan_dir = WRITABLE_ROOT / "rng_logs" / "plans"
                 plan_dir.mkdir(parents=True, exist_ok=True)
                 plan_path = plan_dir / (datetime.now().strftime("%Y%m%d_%H%M%S") + ".json")
                 plan_path.write_text(
@@ -1639,7 +1832,7 @@ class AutoRngApp:
                     raise SearchCancelledError("操作已由用户取消")
                 if result.plan.route_support.can_start:
                     try:
-                        output = ROOT / "runtime" / "easycon118"
+                        output = WRITABLE_ROOT / "runtime" / "easycon118"
                         project_main = write_configured_project(
                             source_path,
                             output,
@@ -1679,7 +1872,7 @@ class AutoRngApp:
 
         def worker():
             try:
-                output = ROOT / "runtime" / "sid_reverse"
+                output = WRITABLE_ROOT / "runtime" / "sid_reverse"
                 project_main = write_sid_reverse_project(source_path, output, request)
                 check = validate_runtime(ezcon_path, project_main)
                 self.root.after(
@@ -1765,7 +1958,7 @@ class AutoRngApp:
             try:
                 flow_plan = None
                 if flow_request is not None:
-                    output = ROOT / "runtime" / "tid_starter_flow"
+                    output = WRITABLE_ROOT / "runtime" / "tid_starter_flow"
                     flow_plan = build_tid_starter_flow_plan(flow_request)
                     write_tid_starter_flow_bundle(
                         source_path,
@@ -1775,7 +1968,7 @@ class AutoRngApp:
                     )
                     project_main = output / "01_id" / "main.ecs"
                 else:
-                    output = ROOT / "runtime" / "tid_rng137"
+                    output = WRITABLE_ROOT / "runtime" / "tid_rng137"
                     project_main = write_configured_tid_project(source_path, output, request)
                 if flow_plan is not None:
                     bridge_main = output / "02_lab_bridge" / "main.ecs"
@@ -1787,7 +1980,7 @@ class AutoRngApp:
                     )
                 else:
                     check = validate_tid_runtime(ezcon_path, project_main)
-                plan_dir = ROOT / "rng_logs" / "plans"
+                plan_dir = WRITABLE_ROOT / "rng_logs" / "plans"
                 plan_dir.mkdir(parents=True, exist_ok=True)
                 plan_path = plan_dir / (
                     datetime.now().strftime("%Y%m%d_%H%M%S") + "_tid.json"
@@ -1899,10 +2092,10 @@ class AutoRngApp:
 
         def worker():
             try:
-                output = ROOT / "runtime" / "easycon118"
+                output = WRITABLE_ROOT / "runtime" / "easycon118"
                 project_main = write_configured_egg_project(source_path, output, request)
                 check = validate_runtime(ezcon_path, project_main)
-                plan_dir = ROOT / "rng_logs" / "plans"
+                plan_dir = WRITABLE_ROOT / "rng_logs" / "plans"
                 plan_dir.mkdir(parents=True, exist_ok=True)
                 plan_path = plan_dir / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_egg.json")
                 plan_path.write_text(
@@ -2185,9 +2378,7 @@ class AutoRngApp:
                 return
             self.sid_log_path = output_dir / f"sid-reverse-{timestamp}.log"
             self.sid_report_path = output_dir / f"sid-reverse-{timestamp}.txt"
-            command = [
-                sys.executable,
-                str(ROOT / "run_sid_reverse_capture.py"),
+            command = build_worker_command("sid-capture", [
                 "--request-json",
                 str(output_dir / "plan.json"),
                 "--game",
@@ -2206,16 +2397,14 @@ class AutoRngApp:
                 str(self.sid_log_path),
                 "--report-path",
                 str(self.sid_report_path),
-            ]
+            ])
             command_cwd = ROOT
             self.running_mode = "sid"
         elif self.tid_flow_plan is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             flow_dir = self.project_main.parents[1]
             self.tid_flow_log_path = flow_dir / f"tid-starter-{timestamp}.log"
-            command = [
-                sys.executable,
-                str(ROOT / "run_tid_starter_flow.py"),
+            command = build_worker_command("tid-flow", [
                 "--flow-dir",
                 str(flow_dir),
                 "--ezcon",
@@ -2226,7 +2415,7 @@ class AutoRngApp:
                 str(video_device),
                 "--log-path",
                 str(self.tid_flow_log_path),
-            ]
+            ])
             command_cwd = ROOT
             self.running_mode = "tid_flow"
         else:
@@ -2245,16 +2434,14 @@ class AutoRngApp:
             if self.egg_request is not None:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.egg_log_path = self.project_main.parent / f"egg-{timestamp}.log"
-                command = [
-                    sys.executable,
-                    str(ROOT / "run_easycon_logged.py"),
+                command = build_worker_command("easycon-log", [
                     "--log-path",
                     str(self.egg_log_path),
                     "--cwd",
                     str(self.project_main.parent),
                     "--",
                     *easycon_command,
-                ]
+                ])
                 command_cwd = ROOT
                 self.running_mode = "egg"
             else:

@@ -138,6 +138,12 @@ $SID反查累计SPDIV最大 = -1
 $SID反查累计SPEIV最小 = -1
 $SID反查累计SPEIV最大 = -1
 
+# 唤醒设备
+FOR 5
+    LCLICK 120
+    100
+NEXT
+
 PRINT ""
 PRINT ========================
 PRINT SID反查观测采集

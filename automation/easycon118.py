@@ -6,11 +6,13 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from assets.game_text import CATEGORY_EN_TO_ZH, location_to_zh
+from app_paths import RESOURCE_ROOT
 
 from .planner import RunPlan
 
@@ -34,6 +36,8 @@ DEFAULT_EZCON_PATH = (
     / "publish"
     / "ezcon.exe"
 )
+if getattr(sys, "frozen", False):
+    DEFAULT_EZCON_PATH = RESOURCE_ROOT / "easycon" / "publish" / "ezcon.exe"
 DEFAULT_COMPAT_RUNNER_PATH = (
     Path(__file__).resolve().parents[1]
     / "runtime_backend"
@@ -44,7 +48,7 @@ STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8.ecs"
 EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
 EXPECTED_TEMPLATE_NAMES = (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME)
 EXPECTED_SCRIPT_FILE_COUNT = 33
-EXPECTED_SCRIPT_SHA256 = "1ffa4db222405231276179fa7f2be277d71759ed9455a80be8cddc5b9c118625"
+EXPECTED_SCRIPT_SHA256 = "eef8dc0d794b8f4443c98c4bea859a0a96ac67df161f1e68af74861fc389a88f"
 EGG_SETTINGS_OVERRIDE_PATH = (
     Path(__file__).resolve().parents[1]
     / "assets"
