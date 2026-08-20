@@ -56,6 +56,7 @@ jobs:
           tests.test_auto_planner.PlannerSelectionTests
           tests.test_easycon118_egg
           tests.test_easycon164a_backend
+          tests.test_easycon_logged
           tests.test_gui_inputs
           tests.test_label_matcher
           tests.test_sid_reverse

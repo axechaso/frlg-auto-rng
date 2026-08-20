@@ -1,6 +1,7 @@
 """Run an EasyCon command while teeing its combined output to a UTF-8 log."""
 
 import argparse
+import codecs
 import subprocess
 import sys
 from pathlib import Path
@@ -26,22 +27,34 @@ def run_logged(command: list[str], cwd: Path, log_path: Path) -> int:
             cwd=str(cwd),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
+            bufsize=0,
         )
         assert process.stdout is not None
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         try:
-            for line in process.stdout:
-                _write_console(line)
-                log_file.write(line)
+            # EasyCon terminates the previous log entry only when the next one
+            # starts. Reading by line would therefore hide the final entry
+            # throughout a long RNG scan (for example the SPE IV range).
+            while chunk := process.stdout.read(4096):
+                text = decoder.decode(chunk)
+                if not text:
+                    continue
+                _write_console(text)
+                log_file.write(text)
+                log_file.flush()
+            tail = decoder.decode(b"", final=True)
+            if tail:
+                _write_console(tail)
+                log_file.write(tail)
                 log_file.flush()
             return process.wait()
         except KeyboardInterrupt:
             if process.poll() is None:
                 process.terminate()
+            process.wait()
             return 130
+        finally:
+            process.stdout.close()
 
 
 def main(argv: list[str] | None = None) -> int:
