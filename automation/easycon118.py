@@ -48,7 +48,7 @@ STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8.ecs"
 EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
 EXPECTED_TEMPLATE_NAMES = (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME)
 EXPECTED_SCRIPT_FILE_COUNT = 33
-EXPECTED_SCRIPT_SHA256 = "eef8dc0d794b8f4443c98c4bea859a0a96ac67df161f1e68af74861fc389a88f"
+EXPECTED_SCRIPT_SHA256 = "7d5e13e4391d5bcc9045044544f409919a6f95c602e2ad0308313470ce23e625"
 EGG_SETTINGS_OVERRIDE_PATH = (
     Path(__file__).resolve().parents[1]
     / "assets"
@@ -58,6 +58,22 @@ EGG_SETTINGS_OVERRIDE_PATH = (
 EGG_SETTINGS_LIBRARY_NAME = "27_孵蛋测试流程.ecs"
 EGG_SETTINGS_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：游戏设置 OCR 使用有限重试"
 EGG_SETTINGS_NEXT_FUNCTION = "FUNC 孵蛋测试_执行前置准备"
+EGG_HOME_RESAMPLE_ORIGINAL = """\
+        IF $孵蛋库_主页匹配 < $识图阈值 and $孵蛋库_主页NS2匹配 < $识图阈值
+            HOME 100
+            WAIT 1500
+        ENDIF
+"""
+EGG_HOME_RESAMPLE_FIXED = """\
+        IF $孵蛋库_主页匹配 < $识图阈值 and $孵蛋库_主页NS2匹配 < $识图阈值
+            HOME 100
+            WAIT 1500
+            IF $孵蛋库_调试日志输出 == 1
+                PRINT 孵蛋重启识图|已从游戏内请求主页，重新采样
+            ENDIF
+            CONTINUE
+        ENDIF
+"""
 EGG_SETTINGS_GLOBALS = """\
 $孵蛋库_设置识别尝试 = 0
 $孵蛋库_设置分数1 = -1
@@ -390,12 +406,28 @@ def _apply_egg_settings_runtime_override_text(
     return library_text[:start] + replacement + library_text[end:]
 
 
+def _apply_egg_home_resample_fix_text(library_text: str) -> str:
+    """Discard the stale in-game scores after HOME and sample the Home screen."""
+    if EGG_HOME_RESAMPLE_FIXED in library_text:
+        return library_text
+    if library_text.count(EGG_HOME_RESAMPLE_ORIGINAL) != 1:
+        raise ValueError("孵蛋流程库缺少唯一的游戏内返回主页分支，拒绝应用重启修正")
+    return library_text.replace(
+        EGG_HOME_RESAMPLE_ORIGINAL,
+        EGG_HOME_RESAMPLE_FIXED,
+        1,
+    )
+
+
 def apply_egg_settings_runtime_override(library_path: str | Path) -> str:
-    """Apply the GUI-only settings retry overlay and return its SHA-256."""
+    """Apply the GUI-only restart/settings overlays and return the asset SHA-256."""
     library_path = Path(library_path)
     override_text = EGG_SETTINGS_OVERRIDE_PATH.read_text(encoding="utf-8")
+    configured = _apply_egg_home_resample_fix_text(
+        library_path.read_text(encoding="utf-8")
+    )
     configured = _apply_egg_settings_runtime_override_text(
-        library_path.read_text(encoding="utf-8"),
+        configured,
         override_text,
     )
     library_path.write_text(configured, encoding="utf-8")
@@ -523,6 +555,7 @@ def write_configured_egg_project(
         "experimental": True,
         "runtime_overrides": {
             "egg_settings_retry_sha256": override_sha256,
+            "egg_home_resample": "after-home-continue-v1",
         },
         "labels": {
             "expected_count": EXPECTED_LABEL_COUNT,

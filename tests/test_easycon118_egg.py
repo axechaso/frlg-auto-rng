@@ -5,6 +5,7 @@ from automation.easycon118 import (
     EGG_SETTINGS_GLOBALS,
     EGG_SETTINGS_OVERRIDE_PATH,
     EggRunRequest,
+    _apply_egg_home_resample_fix_text,
     _apply_egg_settings_runtime_override_text,
     configure_egg_template_text,
     egg_request_to_user_values,
@@ -98,20 +99,67 @@ ENDFUNC
         self.assertIn("设置识别 BUTTON 第", configured)
         self.assertIn("WAIT 2000", configured)
 
+    def test_game_start_resamples_after_pressing_home(self):
+        original = """\
+FUNC 孵蛋测试_关闭游戏($识图阈值: INT): INT
+    FOR
+        IF $孵蛋库_主页匹配 < $识图阈值 and $孵蛋库_主页NS2匹配 < $识图阈值
+            HOME 100
+            WAIT 1500
+        ENDIF
+        PRINT 不应使用按HOME前的旧分数
+    NEXT
+ENDFUNC
+"""
+        configured = _apply_egg_home_resample_fix_text(original)
+        configured_again = _apply_egg_home_resample_fix_text(configured)
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn("WAIT 1500\n            IF $孵蛋库_调试日志输出 == 1", configured)
+        self.assertIn("重新采样\n            ENDIF\n            CONTINUE", configured)
+
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]
-        library = (root / "local_assets" / "easycon118" / "lib" / "27_孵蛋测试流程.ecs").read_text(
-            encoding="utf-8"
-        )
+        template_path = root / "local_assets" / "easycon118" / "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
+        library_path = root / "local_assets" / "easycon118" / "lib" / "27_孵蛋测试流程.ecs"
+        if not template_path.is_file() or not library_path.is_file():
+            self.skipTest("requires the imported 1.1.8 egg runtime")
+        template = template_path.read_text(encoding="utf-8")
+        self.assertIn("$调试日志输出 = 1", template)
+        library = library_path.read_text(encoding="utf-8")
         self.assertIn("FUNC 孵蛋测试_软重启并跳过回忆", library)
-        self.assertIn("A DOWN\n    B DOWN\n    X DOWN\n    Y DOWN", library)
+        soft_reset = library.split(
+            "FUNC 孵蛋测试_软重启并跳过回忆", 1
+        )[1].split("ENDFUNC", 1)[0]
+        library = _apply_egg_home_resample_fix_text(library)
+        close_game = library.split(
+            "FUNC 孵蛋测试_关闭游戏", 1
+        )[1].split("ENDFUNC", 1)[0]
+        self.assertIn("HOME 100", close_game)
+        self.assertIn("@主页", close_game)
+        self.assertIn("@正确退出", close_game)
+        self.assertIn("@正在关闭", close_game)
+        self.assertIn("孵蛋重启识图|主页=", close_game)
+        self.assertIn("孵蛋重启识图失败", close_game)
+        self.assertIn("已从游戏内请求主页，重新采样", close_game)
+        self.assertIn("CONTINUE", close_game)
+        self.assertIn(
+            "WAIT 1500\n    A\n    WAIT 1200\n    A\n    WAIT 8000",
+            soft_reset,
+        )
+        self.assertIn(
+            "A DOWN\n    WAIT 3000\n    A UP\n    WAIT 500\n    A DOWN\n    WAIT 1000\n    A UP\n    WAIT 500\n    B\n    WAIT 2500",
+            soft_reset,
+        )
         preparation = library.split(
             "FUNC 孵蛋测试_执行前置准备", 1
         )[1].split("ENDFUNC", 1)[0]
         self.assertLess(
-            preparation.index("CALL 孵蛋测试_软重启并跳过回忆"),
+            preparation.index("孵蛋测试_软重启并跳过回忆($识图阈值)"),
             preparation.index("CALL 孵蛋测试_跑到254步准备位"),
         )
+        self.assertIn("孵蛋测试_软重启并跳过回忆($识图阈值)", preparation)
+        self.assertIn("重启识图失败，停止前置流程", preparation)
 
 
 if __name__ == "__main__":
