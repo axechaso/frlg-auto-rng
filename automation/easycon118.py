@@ -87,6 +87,9 @@ OCR_NAME_LIBRARY_NAME = "19_OCR_GEN3战斗场景名称.ecs"
 OCR_RUNTIME_FALLBACK_MARKER = "# GUI 运行时覆盖：OCR 不可用时直接回到单字识别"
 OCR_NAME_ORIGINAL_FUNCTION = "FUNC OCR识别抓捕对象名称(): STRING"
 OCR_NAME_NEXT_FUNCTION = "FUNC OCR最小3"
+WILD_PID_RETRY_LIMIT_MARKER = "# GUI 运行时覆盖：野生 PID 尝试上限"
+WILD_PID_RETRY_LIMIT_IMPORTED = "$野生PID尝试上限 = 1000"
+WILD_PID_RETRY_LIMIT_RUNTIME = "$野生PID尝试上限 = 200"
 OCR_RUNTIME_FALLBACK_FUNCTION = """\
 # GUI 运行时覆盖：OCR 不可用时直接回到单字识别
 FUNC OCR识别抓捕对象名称(): STRING
@@ -506,6 +509,32 @@ def apply_ocr_runtime_fallback(library_path: str | Path) -> str:
     return hashlib.sha256(OCR_RUNTIME_FALLBACK_FUNCTION.encode("utf-8")).hexdigest()
 
 
+def _apply_wild_pid_retry_limit_text(template_text: str) -> str:
+    """Set the reviewed runtime Wild PID retry cap without altering its algorithms."""
+    if WILD_PID_RETRY_LIMIT_MARKER in template_text:
+        return template_text
+    imported_count = template_text.count(WILD_PID_RETRY_LIMIT_IMPORTED)
+    if imported_count != 1:
+        raise ValueError("1.1.8 模板的野生 PID 尝试上限不唯一，拒绝生成运行副本")
+    return template_text.replace(
+        WILD_PID_RETRY_LIMIT_IMPORTED,
+        WILD_PID_RETRY_LIMIT_MARKER + "\n" + WILD_PID_RETRY_LIMIT_RUNTIME,
+        1,
+    )
+
+
+def apply_wild_pid_retry_limit(main_path: str | Path) -> str:
+    """Apply the configured Wild PID retry cap and return the overlay hash."""
+    main_path = Path(main_path)
+    configured = _apply_wild_pid_retry_limit_text(main_path.read_text(encoding="utf-8"))
+    main_path.write_text(configured, encoding="utf-8")
+    return hashlib.sha256(
+        (WILD_PID_RETRY_LIMIT_MARKER + "\n" + WILD_PID_RETRY_LIMIT_RUNTIME).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
 def _apply_egg_party_slot_main_runtime_override_text(
     template_text: str,
     override_text: str,
@@ -767,6 +796,7 @@ def write_configured_project(
     )
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
+    wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
 
     if copy_assets:
         for directory in ("lib", "ImgLabel"):
@@ -798,6 +828,7 @@ def write_configured_project(
         },
         "runtime_overrides": {
             "ocr_unavailable_fallback_sha256": ocr_fallback_sha256,
+            "wild_pid_retry_limit_sha256": wild_pid_retry_limit_sha256,
         },
         "backend": {
             "name": EASYCON_BACKEND_NAME,
@@ -855,6 +886,7 @@ def write_configured_egg_project(
     )
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
+    wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
 
     if copy_assets:
         for directory in ("lib", "ImgLabel"):
@@ -879,6 +911,7 @@ def write_configured_egg_project(
     runtime_overrides["egg_party_slot_main_sha256"] = hashlib.sha256(
         party_slot_main_override_text.encode("utf-8")
     ).hexdigest()
+    runtime_overrides["wild_pid_retry_limit_sha256"] = wild_pid_retry_limit_sha256
     manifest = {
         "source": str(source_dir),
         "template": template_path.name,

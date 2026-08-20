@@ -10,6 +10,7 @@ from automation.easycon118 import (
     EGG_RESTART_OVERRIDE_PATH,
     EGG_SETTINGS_GLOBALS,
     EGG_SETTINGS_OVERRIDE_PATH,
+    WILD_PID_RETRY_LIMIT_MARKER,
     EggRunRequest,
     _apply_egg_home_resample_fix_text,
     _apply_egg_home_buffer_runtime_override_text,
@@ -18,6 +19,7 @@ from automation.easycon118 import (
     _apply_egg_restart_runtime_override_text,
     _apply_egg_summary_fix_text,
     _apply_egg_settings_runtime_override_text,
+    _apply_wild_pid_retry_limit_text,
     configure_egg_template_text,
     egg_request_to_user_values,
 )
@@ -42,6 +44,22 @@ def egg_request(**changes):
 
 
 class EasyCon118EggTests(unittest.TestCase):
+    def test_generated_projects_use_the_reviewed_wild_pid_retry_limit(self):
+        imported = """\\
+$野生PID尝试上限 = 1000
+FUNC 测试(): INT
+    RETURN 1
+ENDFUNC
+"""
+        configured = _apply_wild_pid_retry_limit_text(imported)
+
+        self.assertIn(WILD_PID_RETRY_LIMIT_MARKER, configured)
+        self.assertIn("$野生PID尝试上限 = 200", configured)
+        self.assertNotIn("$野生PID尝试上限 = 1000", configured)
+        self.assertEqual(_apply_wild_pid_retry_limit_text(configured), configured)
+        with self.assertRaises(ValueError):
+            _apply_wild_pid_retry_limit_text("$野生PID尝试上限 = 100\n")
+
     def test_request_maps_same_seed_egg_fields(self):
         values = egg_request_to_user_values(egg_request())
         self.assertEqual(values["静态或野生"], "孵蛋")
