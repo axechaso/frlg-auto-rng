@@ -581,7 +581,11 @@ def resolve_ability_idx(ability_name: str, species_id: int) -> Optional[int]:
     In that case filtering to slot 0 would incorrectly discard every valid
     PID whose ability bit is 1, so ``None`` deliberately means both slots.
     """
-    if not ability_name or ability_name.lower() == "any":
+    if (
+        not ability_name
+        or ability_name.strip().lower() == "any"
+        or ability_name.strip() == "不限"
+    ):
         return None
     personal = get_personal(species_id)
     matching_slots = [

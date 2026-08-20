@@ -1,6 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
+from assets.game_text import ABILITY_ZH_TO_EN
 from run_auto_rng_gui import (
     AutoRngApp,
     MODE_TAB_ORDER,
@@ -17,6 +18,9 @@ from run_auto_rng_gui import (
 
 
 class GuiIvInputTests(unittest.TestCase):
+    def test_unrestricted_ability_maps_to_ten_lines_any(self):
+        self.assertEqual(ABILITY_ZH_TO_EN["不限"], "Any")
+
     def test_egg_config_payload_round_trips_requested_fields(self):
         payload = build_egg_config_payload(
             "叶绿",

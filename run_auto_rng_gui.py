@@ -15,7 +15,13 @@ from tkinter import filedialog, messagebox, ttk
 from app_paths import DATA_ROOT, RESOURCE_ROOT
 
 from assets.game_text import (
+    ABILITY_EN_TO_ZH,
+    ABILITY_ZH_TO_EN,
     CATEGORY_EN_TO_ZH,
+    FILTER_GENDER_ZH_TO_EN,
+    FILTER_NATURE_ZH_TO_EN,
+    FILTER_SHINY_ZH_TO_EN,
+    FILTER_TYPE_ZH_TO_EN,
     SPECIES_EN_TO_ZH,
     WILD_CATEGORIES,
     location_to_zh,
@@ -51,8 +57,6 @@ from automation import (
     write_tid_starter_flow_bundle,
 )
 from rng.tenlines_utils import (
-    NATURES,
-    TYPES,
     get_ability_name,
     get_encounter_species_list,
     get_personal,
@@ -637,12 +641,16 @@ class AutoRngApp:
         filters.pack(fill="x", pady=(10, 0))
         self.iv_min_vars = tuple(tk.StringVar(value="0") for _ in IV_STAT_LABELS)
         self.iv_max_vars = tuple(tk.StringVar(value="31") for _ in IV_STAT_LABELS)
+        self.search_mode_var = tk.StringVar(value="筛选搜索")
+        self.direct_seed_var = tk.StringVar(value="0000")
+        self.direct_adv_var = tk.StringVar(value="3000")
+        self.min_adv_var = tk.StringVar(value="3000")
         self.max_adv_var = tk.StringVar(value="100000")
-        self.shiny_var = tk.StringVar(value="Star/Square")
-        self.nature_var = tk.StringVar(value="Any")
-        self.gender_var = tk.StringVar(value="Any")
-        self.ability_var = tk.StringVar(value="Any")
-        self.hidden_type_var = tk.StringVar(value="Any")
+        self.shiny_var = tk.StringVar(value="星形/方形闪光")
+        self.nature_var = tk.StringVar(value="不限")
+        self.gender_var = tk.StringVar(value="不限")
+        self.ability_var = tk.StringVar(value="不限")
+        self.hidden_type_var = tk.StringVar(value="不限")
         self.seed_mode_var = tk.StringVar(value="自动选择")
         self.auto_capture_var = tk.BooleanVar(value=False)
         self.paralysis_var = tk.BooleanVar(value=False)
@@ -697,18 +705,42 @@ class AutoRngApp:
                 command=lambda value=preset: self.apply_iv_preset(value),
             ).pack(side="left", padx=(0, 4))
 
-        self._labeled_entry(filters, "最大 Advance", self.max_adv_var, 1, 0, width=14)
-        self._labeled_combo(filters, "闪光", self.shiny_var, ("Star/Square", "Star", "Square", "Any"), 1, 2)
-        self._labeled_combo(filters, "性格", self.nature_var, ("Any", *NATURES), 1, 4)
-        self._labeled_combo(filters, "性别", self.gender_var, ("Any", "M", "F", "-"), 1, 6)
-        self.ability_combo = self._labeled_combo(filters, "特性", self.ability_var, ("Any",), 2, 0)
-        self._labeled_combo(filters, "觉醒力量", self.hidden_type_var, ("Any", *TYPES), 2, 2)
+        self._labeled_combo(filters, "运行模式", self.search_mode_var, ("筛选搜索", "指定 Seed/帧数"), 1, 0)
+        self._labeled_entry(filters, "最小 Advance", self.min_adv_var, 1, 2, width=12)
+        self._labeled_entry(filters, "最大 Advance", self.max_adv_var, 1, 4, width=12)
+        self._labeled_combo(
+            filters, "闪光", self.shiny_var,
+            ("不限", *[value for value in FILTER_SHINY_ZH_TO_EN if value != "不限"]), 2, 0,
+        )
+        self._labeled_combo(
+            filters, "性格", self.nature_var,
+            ("不限", *[value for value in FILTER_NATURE_ZH_TO_EN if value != "不限"]), 2, 2, width=12,
+        )
+        self._labeled_combo(
+            filters, "性别", self.gender_var,
+            ("不限", *[value for value in FILTER_GENDER_ZH_TO_EN if value != "不限"]), 2, 4,
+        )
+        self.ability_combo = self._labeled_combo(filters, "特性", self.ability_var, ("不限",), 2, 6, width=14)
+        self._labeled_combo(
+            filters, "觉醒力量", self.hidden_type_var,
+            ("不限", *[value for value in FILTER_TYPE_ZH_TO_EN if value != "不限"]), 3, 0,
+        )
         self.seed_mode_combo = self._labeled_combo(
             filters, "Seed 模式", self.seed_mode_var,
-            ("自动选择", *SEED_MODE_CHOICES), 2, 4, width=36, span=3,
+            ("自动选择", *SEED_MODE_CHOICES), 3, 2, width=36, span=3,
         )
+        direct_frame = ttk.Frame(filters)
+        direct_frame.grid(row=4, column=0, columnspan=8, sticky="w", padx=4, pady=(3, 0))
+        self._labeled_entry(direct_frame, "指定初始 Seed", self.direct_seed_var, 0, 0, width=10)
+        self._labeled_entry(direct_frame, "指定消耗帧", self.direct_adv_var, 0, 2, width=12)
+        ttk.Label(direct_frame, text="指定模式会跳过筛选搜索，Seed 模式必须手动选择。").grid(
+            row=0, column=4, columnspan=4, sticky="w", padx=4
+        )
+        self.search_mode_combo = filters.grid_slaves(row=1, column=1)[0]
+        self.search_mode_combo.bind("<<ComboboxSelected>>", lambda _: self._update_search_mode_controls())
+        self._direct_entries = direct_frame.winfo_children()
         capture_options = ttk.Frame(filters)
-        capture_options.grid(row=3, column=0, columnspan=8, sticky="w", padx=6, pady=(2, 0))
+        capture_options.grid(row=5, column=0, columnspan=8, sticky="w", padx=6, pady=(2, 0))
         ttk.Checkbutton(capture_options, text="出闪后自动抓捕", variable=self.auto_capture_var).pack(side="left")
         ttk.Checkbutton(capture_options, text="麻痹", variable=self.paralysis_var).pack(side="left", padx=(12, 0))
         ttk.Checkbutton(capture_options, text="点到为止", variable=self.false_swipe_var).pack(side="left", padx=(12, 0))
@@ -1105,7 +1137,8 @@ class AutoRngApp:
             self.mode_var, self.game_var, self.nx_var, self.tid_var, self.sid_var, self.method_var,
             self.category_var, self.location_var, self.pokemon_var,
             *self.iv_min_vars, *self.iv_max_vars,
-            self.max_adv_var, self.shiny_var, self.nature_var,
+            self.search_mode_var, self.direct_seed_var, self.direct_adv_var,
+            self.min_adv_var, self.max_adv_var, self.shiny_var, self.nature_var,
             self.gender_var, self.ability_var, self.hidden_type_var, self.seed_mode_var,
             self.auto_capture_var, self.paralysis_var, self.false_swipe_var,
             self.source_var, self.ezcon_var,
@@ -1144,6 +1177,7 @@ class AutoRngApp:
         )
         for variable in self.tracked_variables:
             variable.trace_add("write", self.invalidate_plan)
+        self._update_search_mode_controls()
 
     def _refresh_sid_party_rows(self, *_):
         try:
@@ -1425,18 +1459,30 @@ class AutoRngApp:
 
     def _populate_abilities(self):
         pokemon = self.pokemon_map.get(self.pokemon_var.get())
-        abilities = ["Any"]
+        abilities = ["不限"]
         if pokemon:
             personal = get_personal(get_species_id(pokemon), self._game_code())
             abilities.extend(
-                dict.fromkeys(get_ability_name(ability_id) for ability_id in personal["abilities"] if ability_id)
+                dict.fromkeys(
+                    ABILITY_EN_TO_ZH.get(get_ability_name(ability_id), get_ability_name(ability_id))
+                    for ability_id in personal["abilities"] if ability_id
+                )
             )
         self._updating = True
         try:
             self.ability_combo.configure(values=abilities)
-            self.ability_var.set("Any")
+            self.ability_var.set("不限")
         finally:
             self._updating = False
+
+    def _update_search_mode_controls(self):
+        """Enable direct Seed/Advance fields only in the explicit-target mode."""
+        direct = self.search_mode_var.get() == "指定 Seed/帧数"
+        for widget in getattr(self, "_direct_entries", ()):
+            if isinstance(widget, (ttk.Entry, ttk.Spinbox)):
+                widget.configure(state="normal" if direct else "disabled")
+        if direct:
+            self.min_adv_var.set(self.min_adv_var.get() or "3000")
 
     def collect_request(self):
         category = self.category_map.get(self.category_var.get())
@@ -1461,15 +1507,19 @@ class AutoRngApp:
             category=category,
             location=location,
             pokemon=pokemon,
+            min_advances=int(self.min_adv_var.get()),
             max_advances=int(self.max_adv_var.get()),
             iv_min=iv_min,
             iv_max=iv_max,
-            shiny=self.shiny_var.get(),
-            nature=self.nature_var.get(),
-            gender=self.gender_var.get(),
-            ability=self.ability_var.get(),
-            hidden_type=self.hidden_type_var.get(),
+            shiny=FILTER_SHINY_ZH_TO_EN[self.shiny_var.get()],
+            nature=FILTER_NATURE_ZH_TO_EN[self.nature_var.get()],
+            gender=FILTER_GENDER_ZH_TO_EN[self.gender_var.get()],
+            ability=ABILITY_ZH_TO_EN.get(self.ability_var.get(), self.ability_var.get()),
+            hidden_type=FILTER_TYPE_ZH_TO_EN[self.hidden_type_var.get()],
             seed_mode=seed_mode,
+            direct_mode=self.search_mode_var.get() == "指定 Seed/帧数",
+            direct_seed=self.direct_seed_var.get().strip(),
+            direct_advances=int(self.direct_adv_var.get()),
         )
 
     def _egg_config_payload(self) -> dict:
@@ -2169,15 +2219,25 @@ class AutoRngApp:
         self.runtime_check = check
         plan = result.plan
         ivs = plan.target.ivs
+        direct_mode = plan.request.direct_mode
         lines = [
-            f"最优结果：{plan.request.pokemon} / {plan.target.nature} / {plan.target.shiny}",
+            (
+                f"指定目标：{plan.request.pokemon} / Seed {plan.initial_seed.seed} / "
+                f"Advance {plan.initial_seed.advances}"
+                if direct_mode
+                else f"最优结果：{plan.request.pokemon} / {plan.target.nature} / {plan.target.shiny}"
+            ),
             f"IV：{ivs.hp}/{ivs.attack}/{ivs.defense}/{ivs.sp_attack}/{ivs.sp_defense}/{ivs.speed}",
             f"IV 总和：{plan.iv_total}，平均：{plan.iv_average:.2f}",
             f"目标状态 Seed：{plan.target.target_seed}（{plan.target.method}）",
             f"初始 Seed：{plan.initial_seed.seed}",
             f"Advance：{plan.initial_seed.advances}",
             f"Seed 模式：{plan.seed_mode}",
-            f"扫描候选：{result.matching_outcomes}，可行路线：{result.feasible_routes}",
+            (
+                "指定模式：已跳过筛选搜索"
+                if direct_mode
+                else f"扫描候选：{result.matching_outcomes}，可行路线：{result.feasible_routes}"
+            ),
             f"路线状态：{plan.route_support.level.value}",
             f"出闪后处理：{'自动抓捕' if self.auto_capture_var.get() else '停止并交给用户'}",
             f"计划文件：{plan_path}",

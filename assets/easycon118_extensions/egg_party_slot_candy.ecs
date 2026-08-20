@@ -1,0 +1,87 @@
+# GUI 孵蛋运行时覆盖：神奇糖果按目标身份选择队伍末位或固定槽位
+FUNC 孵蛋测试_使用神奇糖果指定槽($队伍位置: INT, $目标为队伍末位: INT): INT
+    PRINT 正在给队伍第 & $队伍位置 & " 位使用神奇糖果..."
+    B
+    WAIT 1500
+    B
+    WAIT 500
+    B
+    WAIT 1500
+    DOWN
+    WAIT 500
+    A
+    WAIT 1500
+    LEFT
+    WAIT 500
+    LEFT
+    WAIT 500
+    UP
+    WAIT 500
+    UP
+    WAIT 500
+    IF @神奇糖果 <= 95
+        PRINT 没有神奇糖果了
+        RETURN 0
+    ENDIF
+    A
+    WAIT 500
+    A
+    WAIT 1500
+    IF $目标为队伍末位 == 1
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+    ELIF $队伍位置 == 5
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+    ELIF $队伍位置 == 6
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+    ELSE
+        PRINT 孵蛋糖果队伍槽参数无效: & $队伍位置
+        RETURN 0
+    ENDIF
+    A
+    WAIT 500
+    B
+    WAIT 2500
+    B
+    WAIT 500
+    B
+    WAIT 500
+    B
+    WAIT 2000
+    IF @学习招式 > 95
+        B
+        WAIT 1500
+    ELIF @想要学习招式 > 95
+        B
+        WAIT 1500
+        B
+        WAIT 1500
+        B
+        WAIT 1500
+        A
+        WAIT 2000
+        B
+        WAIT 1500
+    ENDIF
+    WAIT 500
+    IF @正在进化 > 95
+        WAIT 7500
+        B
+        WAIT 3000
+        B
+        WAIT 2000
+    ENDIF
+    B
+    WAIT 1500
+    RETURN 1
+ENDFUNC

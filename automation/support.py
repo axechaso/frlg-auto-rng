@@ -97,16 +97,16 @@ def get_route_support(
 
     if category_key == "grass":
         return RouteSupport(
-            RouteSupportLevel.EXPERIMENTAL,
-            "新版 1.1.8 已包含中央/东/北/西区草丛路线，但尚未完成本机实机验收；只允许生成计划。",
-            False,
+            RouteSupportLevel.BASELINE_118,
+            "1.1.8 已实现中央/东/北/西区草丛路线，可生成并启动。",
+            True,
         )
 
     if is_rod:
         return RouteSupport(
-            RouteSupportLevel.EXPERIMENTAL,
-            "新版 1.1.8 已包含狩猎区钓鱼路线，但尚未完成本机实机验收；只允许生成计划。",
-            False,
+            RouteSupportLevel.BASELINE_118,
+            "1.1.8 已实现狩猎区三种钓竿路线，可生成并启动。",
+            True,
         )
 
     if category_key == "surfing":

@@ -13,6 +13,27 @@ if (-not (Test-Path -LiteralPath $Python)) {
     throw "找不到 Python 构建环境：$Python"
 }
 
+# tkinter is part of the CPython distribution, not a pip package.  Some
+# installations cannot be inspected by PyInstaller's Tcl/Tk hook (for
+# example when Tcl cannot be initialized on the build machine), so resolve
+# and pass the runtime files explicitly.
+$PythonBase = (& $Python -c "import sys; print(sys.base_prefix)" | Select-Object -Last 1).Trim()
+if (-not $PythonBase -or -not (Test-Path -LiteralPath $PythonBase)) {
+    throw "无法确定 Python 基础安装目录：$PythonBase"
+}
+$TkinterBinary = Join-Path $PythonBase "DLLs\_tkinter.pyd"
+$TclBinary = Join-Path $PythonBase "DLLs\tcl86t.dll"
+$TkBinary = Join-Path $PythonBase "DLLs\tk86t.dll"
+$TkinterPackage = Join-Path $PythonBase "Lib\tkinter"
+$TclData = Join-Path $PythonBase "tcl\tcl8.6"
+$TkData = Join-Path $PythonBase "tcl\tk8.6"
+$TclModules = Join-Path $PythonBase "tcl\tcl8"
+foreach ($required in @($TkinterBinary, $TclBinary, $TkBinary, $TkinterPackage, $TclData, $TkData, $TclModules)) {
+    if (-not (Test-Path -LiteralPath $required)) {
+        throw "找不到 tkinter/Tcl 运行时文件：$required"
+    }
+}
+
 if (-not $EasyConPublish) {
     $candidate = Get-ChildItem -LiteralPath (Join-Path $Root "dist") -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Join-Path $_.FullName "easycon\publish" } |
@@ -43,6 +64,15 @@ $args = @(
     "--hidden-import", "run_easycon_logged",
     "--hidden-import", "calibration_bind",
     "--hidden-import", "cv2",
+    "--hidden-import", "tkinter",
+    "--hidden-import", "_tkinter",
+    "--add-binary", "$TkinterBinary;.",
+    "--add-binary", "$TclBinary;.",
+    "--add-binary", "$TkBinary;.",
+    "--add-data", "$TkinterPackage;tkinter",
+    "--add-data", "$TclData;_tcl_data",
+    "--add-data", "$TkData;_tk_data",
+    "--add-data", "$TclModules;tcl8",
     "--add-data", "$(Join-Path $Root 'assets');assets",
     "--add-data", "$(Join-Path $Root 'rng\resources');rng\resources",
     "--add-data", "$(Join-Path $Root 'local_assets');local_assets",

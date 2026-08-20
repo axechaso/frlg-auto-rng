@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--category", required=True, help="例如 Gift、Grass、SuperRod")
     parser.add_argument("--location", default="", help="野生地点的 Ten Lines 英文名")
     parser.add_argument("--pokemon", required=True, help="英文名或全国图鉴编号")
+    parser.add_argument("--min-advances", type=int, default=3000)
     parser.add_argument("--max-advances", type=int, required=True)
     parser.add_argument("--iv-min", type=parse_ivs, default=(0, 0, 0, 0, 0, 0))
     parser.add_argument("--iv-max", type=parse_ivs, default=(31, 31, 31, 31, 31, 31))
@@ -102,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
 def print_plan(result) -> None:
     plan = result.plan
     ivs = plan.target.ivs
-    print("\n已生成最优方案")
+    print("\n已生成方案")
     print(f"  宝可梦: {plan.request.pokemon} / {plan.target.nature} / {plan.target.shiny}")
     print(
         "  IV: "
@@ -117,7 +118,7 @@ def print_plan(result) -> None:
     print(f"  路线状态: {plan.route_support.level.value} | 可启动: {plan.route_support.can_start}")
     print(
         f"  扫描到 {result.matching_outcomes} 个候选结果，"
-        f"{result.feasible_routes} 条路线符合最大 Advance。"
+        f"{result.feasible_routes} 条路线符合 Advance 范围。"
     )
     for warning in plan.warnings:
         print(f"  注意: {warning}")
@@ -138,6 +139,7 @@ def main(argv=None) -> int:
         category=args.category,
         location=location,
         pokemon=args.pokemon,
+        min_advances=args.min_advances,
         max_advances=args.max_advances,
         iv_min=args.iv_min,
         iv_max=args.iv_max,

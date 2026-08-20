@@ -4,6 +4,8 @@ from pathlib import Path
 from automation.easycon118 import (
     EGG_HOME_BUFFER_GLOBALS,
     EGG_HOME_BUFFER_OVERRIDE_PATH,
+    EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
+    EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
     EGG_RESTART_GLOBALS,
     EGG_RESTART_OVERRIDE_PATH,
     EGG_SETTINGS_GLOBALS,
@@ -11,6 +13,8 @@ from automation.easycon118 import (
     EggRunRequest,
     _apply_egg_home_resample_fix_text,
     _apply_egg_home_buffer_runtime_override_text,
+    _apply_egg_party_slot_candy_runtime_override_text,
+    _apply_egg_party_slot_main_runtime_override_text,
     _apply_egg_restart_runtime_override_text,
     _apply_egg_summary_fix_text,
     _apply_egg_settings_runtime_override_text,
@@ -223,6 +227,91 @@ ENDFUNC
             "CALL 孵蛋流程_重开下一轮\n    IF $孵蛋HOME_BUFFER失败 == 1",
             configured,
         )
+
+    def test_wild_reverse_uses_party_tail_but_egg_keeps_fixed_fifth_slot(self):
+        original = """\
+FUNC 孵蛋流程_选择队伍槽($队伍位置: INT): INT
+    RETURN 1
+ENDFUNC
+
+FUNC 孵蛋流程_打开指定槽能力页($队伍位置: INT): INT
+    RETURN 1
+ENDFUNC
+
+# -------------------- 野生Seed验证 --------------------
+FUNC 孵蛋流程_验证野生Seed($队伍位置: INT): INT
+    $孵蛋流程开页结果 = 孵蛋流程_打开指定槽能力页($队伍位置)
+    $神奇糖果结果 = 孵蛋测试_使用神奇糖果指定槽($队伍位置)
+    RETURN 1
+ENDFUNC
+
+FUNC 孵蛋流程_执行蛋个体反查(): INT
+    $孵蛋流程开页结果 = 孵蛋流程_打开指定槽能力页(5)
+    $神奇糖果结果 = 孵蛋测试_使用神奇糖果指定槽(5)
+    RETURN 1
+ENDFUNC
+"""
+        override = Path(EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH).read_text(encoding="utf-8")
+        configured = _apply_egg_party_slot_main_runtime_override_text(original, override)
+        configured_again = _apply_egg_party_slot_main_runtime_override_text(
+            configured,
+            override,
+        )
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(
+            "孵蛋流程_打开指定槽能力页($队伍位置, 1)",
+            configured,
+        )
+        self.assertIn(
+            "孵蛋测试_使用神奇糖果指定槽($队伍位置, 1)",
+            configured,
+        )
+        self.assertIn("孵蛋流程_打开指定槽能力页(5, 0)", configured)
+        self.assertIn("孵蛋测试_使用神奇糖果指定槽(5, 0)", configured)
+
+        tail_branch = configured.split("IF $目标为队伍末位 == 1", 1)[1].split(
+            "ELIF $队伍位置 == 5",
+            1,
+        )[0]
+        fifth_slot_branch = configured.split("ELIF $队伍位置 == 5", 1)[1].split(
+            "ELIF $队伍位置 == 6",
+            1,
+        )[0]
+        self.assertEqual(tail_branch.count("        UP\n"), 2)
+        self.assertEqual(fifth_slot_branch.count("        UP\n"), 3)
+
+    def test_candy_navigation_uses_the_same_party_tail_rule(self):
+        original = """\
+FUNC 孵蛋测试_使用神奇糖果指定槽($队伍位置: INT): INT
+    RETURN 1
+ENDFUNC
+
+# ============================================================
+# Seed启动与同Seed两次命中
+"""
+        override = Path(EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH).read_text(encoding="utf-8")
+        configured = _apply_egg_party_slot_candy_runtime_override_text(original, override)
+        configured_again = _apply_egg_party_slot_candy_runtime_override_text(
+            configured,
+            override,
+        )
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(
+            "FUNC 孵蛋测试_使用神奇糖果指定槽($队伍位置: INT, $目标为队伍末位: INT): INT",
+            configured,
+        )
+        tail_branch = configured.split("IF $目标为队伍末位 == 1", 1)[1].split(
+            "ELIF $队伍位置 == 5",
+            1,
+        )[0]
+        fifth_slot_branch = configured.split("ELIF $队伍位置 == 5", 1)[1].split(
+            "ELIF $队伍位置 == 6",
+            1,
+        )[0]
+        self.assertEqual(tail_branch.count("        UP\n"), 2)
+        self.assertEqual(fifth_slot_branch.count("        UP\n"), 3)
 
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]

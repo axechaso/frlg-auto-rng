@@ -222,10 +222,37 @@ class CompatibilityTests(unittest.TestCase):
         west_rod = get_route_support("Wild", "SuperRod", "Safari Zone West")
         east_grass = get_route_support("Wild", "Grass", "Safari Zone East")
         surf = get_route_support("Wild", "Surfing", "Safari Zone Center")
-        self.assertEqual(west_rod.level, RouteSupportLevel.EXPERIMENTAL)
-        self.assertFalse(west_rod.can_start)
-        self.assertFalse(east_grass.can_start)
+        self.assertEqual(west_rod.level, RouteSupportLevel.BASELINE_118)
+        self.assertTrue(west_rod.can_start)
+        self.assertTrue(east_grass.can_start)
         self.assertFalse(surf.can_start)
+
+    def test_minimum_advance_is_applied_before_route_selection(self):
+        item = target("00000001", (31,) * 6)
+        result = search_best_plan(
+            request(min_advances=3000, max_advances=5000),
+            target_search=lambda **_: [item],
+            seed_search=lambda **_: [route("1111", 2500), route("2222", 3500)],
+        )
+        self.assertEqual(result.plan.initial_seed.seed, "2222")
+
+    def test_direct_seed_mode_skips_target_search(self):
+        request_value = request(
+            seed_mode=0,
+            direct_mode=True,
+            direct_seed="11C7",
+            direct_advances=4321,
+        )
+        result = search_best_plan(
+            request_value,
+            target_search=lambda **_: (_ for _ in ()).throw(AssertionError("search called")),
+        )
+        self.assertEqual(result.plan.initial_seed.seed, "11C7")
+        self.assertEqual(result.plan.initial_seed.advances, 4321)
+
+    def test_direct_seed_mode_requires_explicit_seed_mode(self):
+        with self.assertRaisesRegex(ValueError, "必须选择 Seed 模式"):
+            request(direct_mode=True, direct_seed="9E2E", direct_advances=1).validate()
 
     def test_118_static_whitelist_has_version_specific_thirty_targets(self):
         for game in ("fr", "lg"):
@@ -297,7 +324,7 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(manifest["count"], 33)
         self.assertEqual(
             manifest["sha256"],
-            "eef8dc0d794b8f4443c98c4bea859a0a96ac67df161f1e68af74861fc389a88f",
+            "7d5e13e4391d5bcc9045044544f409919a6f95c602e2ad0308313470ce23e625",
         )
         self.assertEqual(
             manifest["templates"],

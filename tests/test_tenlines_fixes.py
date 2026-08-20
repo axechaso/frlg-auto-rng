@@ -31,6 +31,9 @@ class TenLinesFixTests(unittest.TestCase):
     def test_duplicate_ability_slots_do_not_filter_pid_bit(self):
         self.assertIsNone(resolve_ability_idx("Static", 25))
 
+    def test_chinese_unrestricted_ability_is_treated_as_any(self):
+        self.assertIsNone(resolve_ability_idx("不限", 1))
+
     def test_initial_seed_settings_are_structured_without_losing_suffix(self):
         results = initial_seed(
             game="fr_nx",

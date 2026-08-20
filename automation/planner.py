@@ -13,9 +13,12 @@ from rng.tenlines_utils import (
     SearcherResult,
     SearchWorkLimitError,
     TYPES,
+    frame_to_ms,
     get_species_id,
     get_species_name,
+    get_seed_time,
     initial_seed,
+    ms_to_time_str,
     search_target_tiers,
 )
 
@@ -46,6 +49,9 @@ class AutoSearchRequest:
     location: str
     pokemon: str
     max_advances: int
+    # API callers historically searched from frame 0; the GUI/CLI expose a
+    # safer 3000-frame default explicitly without changing that contract.
+    min_advances: int = 0
     iv_min: tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0)
     iv_max: tuple[int, int, int, int, int, int] = (31, 31, 31, 31, 31, 31)
     shiny: str = "Star/Square"
@@ -56,6 +62,9 @@ class AutoSearchRequest:
     initial_seed_result_count: int = 1
     max_iv_combinations: int = 25_000_000
     seed_mode: Optional[int] = None
+    direct_mode: bool = False
+    direct_seed: Optional[str] = None
+    direct_advances: Optional[int] = None
 
     def validate(self) -> None:
         if self.game not in {"fr_nx", "fr_nx2", "lg_nx", "lg_nx2"}:
@@ -64,8 +73,12 @@ class AutoSearchRequest:
             raise ValueError("TID 必须在 0-65535 之间")
         if not (0 <= self.sid <= 65535):
             raise ValueError("SID 必须在 0-65535 之间")
+        if self.min_advances < 0:
+            raise ValueError("最小 Advance 不能为负数")
         if self.max_advances < 0:
             raise ValueError("最大 Advance 不能为负数")
+        if not self.direct_mode and self.min_advances > self.max_advances:
+            raise ValueError("最小 Advance 不能大于最大 Advance")
         if self.initial_seed_result_count <= 0:
             raise ValueError("初始 Seed 候选数必须大于 0")
         if self.max_iv_combinations <= 0:
@@ -96,6 +109,22 @@ class AutoSearchRequest:
             raise ValueError(f"不支持的性别筛选: {self.gender}")
         if self.hidden_type not in ("Any", *TYPES):
             raise ValueError(f"不支持的隐藏属性筛选: {self.hidden_type}")
+        if self.direct_mode:
+            if self.seed_mode is None:
+                raise ValueError("指定 Seed/帧数模式必须选择 Seed 模式")
+            raw_seed = (self.direct_seed or "").strip().upper()
+            if raw_seed.startswith("0X"):
+                raw_seed = raw_seed[2:]
+            if not raw_seed or len(raw_seed) > 8 or not raw_seed.isascii():
+                raise ValueError("指定 Seed 必须是十六进制数")
+            try:
+                seed_value = int(raw_seed, 16)
+            except ValueError as exc:
+                raise ValueError("指定 Seed 必须是十六进制数") from exc
+            if not 0 <= seed_value <= 0xFFFF:
+                raise ValueError("指定 Seed 必须在 0000-FFFF 范围内")
+            if self.direct_advances is None or self.direct_advances < 0:
+                raise ValueError("指定消耗帧必须为非负整数")
         if "Wild" in self.method and not self.location:
             raise ValueError("野生搜索必须选择遭遇地点")
         if "Wild" not in self.method and self.category == "Roaming":
@@ -236,6 +265,67 @@ def _candidate_key(item: tuple[SearcherResult, InitialSeedResult, int]) -> tuple
     )
 
 
+def _direct_plan(request: AutoSearchRequest) -> PlanSearchResult:
+    """Build a plan from an explicit initial Seed/Advance without target search."""
+    raw_seed = (request.direct_seed or "").strip().upper()
+    if raw_seed.startswith("0X"):
+        raw_seed = raw_seed[2:]
+    seed = f"{int(raw_seed, 16):04X}"
+    settings = seed_mode_to_settings(request.seed_mode)  # validated above
+    try:
+        seed_time = get_seed_time(seed, request.game, settings)
+    except (KeyError, ValueError) as exc:
+        raise ValueError(
+            f"指定 Seed {seed} 不在 {request.game} 的 Seed 表/模式 {request.seed_mode} 中"
+        ) from exc
+    advances = int(request.direct_advances)
+    console = "NX2" if request.game.endswith("nx2") else "NX"
+    total_frames = (seed_time / 16) + advances
+    initial = InitialSeedResult(
+        seed=seed,
+        advances=advances,
+        total_frames=round(total_frames),
+        total_time=ms_to_time_str(frame_to_ms(total_frames, console)),
+        seed_time=seed_time,
+        settings=settings,
+    )
+    method = "Wild 1" if "Wild" in request.method else "Static 1"
+    target = SearcherResult(
+        target_seed=seed,
+        method=method,
+        pokemon=get_species_name(get_species_id(request.pokemon)),
+        shiny=request.shiny,
+        nature=request.nature,
+        ability=request.ability,
+        hidden_type=request.hidden_type,
+        ivs=IVs(*request.iv_min),
+        gender=request.gender,
+    )
+    support = get_route_support(
+        request.method,
+        request.category,
+        request.location,
+        game=request.game,
+        pokemon=get_species_name(get_species_id(request.pokemon)),
+    )
+    warnings = ["指定 Seed/帧数模式未执行筛选搜索，直接使用用户输入的目标参数。"]
+    if not support.can_start:
+        warnings.append(support.summary)
+    return PlanSearchResult(
+        plan=RunPlan(
+            request=request,
+            target=target,
+            initial_seed=initial,
+            iv_total=sum(request.iv_min),
+            route_support=support,
+            warnings=tuple(warnings),
+        ),
+        matching_outcomes=1,
+        reachable_outcomes=1,
+        feasible_routes=1,
+    )
+
+
 def search_best_plan(
     request: AutoSearchRequest,
     *,
@@ -246,6 +336,8 @@ def search_best_plan(
 ) -> PlanSearchResult:
     """Select by highest IV total, then by the smallest feasible Advance."""
     request.validate()
+    if request.direct_mode:
+        return _direct_plan(request)
     console = "NX2" if request.game.endswith("nx2") else "NX"
 
     search_kwargs = dict(
@@ -310,7 +402,10 @@ def search_best_plan(
             if not routes:
                 continue
             reachable_outcomes += 1
-            feasible = [r for r in routes if r.advances <= request.max_advances]
+            feasible = [
+                r for r in routes
+                if request.min_advances <= r.advances <= request.max_advances
+            ]
             if request.seed_mode is not None:
                 feasible = [
                     route for route in feasible
@@ -344,8 +439,8 @@ def search_best_plan(
                 "Ten Lines 没有找到满足宝可梦、闪光、性格和个体值条件的结果"
             )
         raise NoReachablePlanError(
-            f"找到了 {matching_outcomes} 个个体结果，但没有初始 Seed 方案低于最大 "
-            f"Advance {request.max_advances}"
+            f"找到了 {matching_outcomes} 个个体结果，但没有初始 Seed 方案落在 "
+            f"Advance {request.min_advances}-{request.max_advances}"
         )
 
     target, route, iv_total = selected
@@ -366,8 +461,7 @@ def search_best_plan(
         )
     if "Safari Zone" in request.location and route.advances > 14400:
         warnings.append(
-            "新版 1.1.8 已加入狩猎区 Teachy TV 路线；当前仍按实验路线处理，"
-            "实机验收前不会开放普通自动启动。"
+            "该狩猎区路线会进入 Teachy TV 长流程；启动前确认游戏内钓竿/道具快捷键设置。"
         )
 
     return PlanSearchResult(

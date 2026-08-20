@@ -1,0 +1,44 @@
+# GUI 孵蛋运行时覆盖：按目标身份选择队伍末位或固定槽位
+FUNC 孵蛋流程_选择队伍槽($队伍位置: INT, $目标为队伍末位: INT): INT
+    IF $目标为队伍末位 == 1
+        # 刚抓到的野生永远位于当前队伍末位；从队首向上绕过取消按钮只需两次。
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+    ELIF $队伍位置 == 5
+        # 正式轮先领蛋到第5位、再抓复核野生到第6位；孵化后的蛋不再是末位。
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+    ELIF $队伍位置 == 6
+        UP
+        WAIT 500
+        UP
+        WAIT 500
+    ELSE
+        PRINT 孵蛋队伍槽参数无效: & $队伍位置
+        RETURN 0
+    ENDIF
+    RETURN 1
+ENDFUNC
+
+FUNC 孵蛋流程_打开指定槽能力页($队伍位置: INT, $目标为队伍末位: INT): INT
+    X
+    WAIT 500
+    A
+    WAIT 1500
+    $孵蛋流程选槽结果 = 孵蛋流程_选择队伍槽($队伍位置, $目标为队伍末位)
+    IF $孵蛋流程选槽结果 != 1
+        RETURN 0
+    ENDIF
+    A
+    WAIT 500
+    A
+    WAIT 1500
+    $刚使用神奇糖果 = 0
+    RETURN 1
+ENDFUNC

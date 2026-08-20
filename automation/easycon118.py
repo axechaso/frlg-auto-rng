@@ -67,6 +67,18 @@ EGG_HOME_BUFFER_OVERRIDE_PATH = (
     / "easycon118_extensions"
     / "egg_home_buffer_refine.ecs"
 )
+EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "egg_party_slot_main.ecs"
+)
+EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "egg_party_slot_candy.ecs"
+)
 EGG_SETTINGS_LIBRARY_NAME = "27_孵蛋测试流程.ecs"
 EGG_SETTINGS_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：游戏设置 OCR 使用有限重试"
 EGG_SETTINGS_NEXT_FUNCTION = "FUNC 孵蛋测试_执行前置准备"
@@ -80,6 +92,12 @@ $孵蛋库_已请求主页 = 0
 EGG_HOME_BUFFER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按当前 NX 机型二分查找 HOME_BUFFER 窗口"
 EGG_HOME_BUFFER_ORIGINAL_FUNCTION = "FUNC HOME_BUFFER"
 EGG_HOME_BUFFER_NEXT_FUNCTION = "FUNC 各阶段脚本固定延迟转帧数"
+EGG_PARTY_SLOT_MAIN_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按目标身份选择队伍末位或固定槽位"
+EGG_PARTY_SLOT_MAIN_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_选择队伍槽"
+EGG_PARTY_SLOT_MAIN_NEXT_SECTION = "# -------------------- 野生Seed验证"
+EGG_PARTY_SLOT_CANDY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：神奇糖果按目标身份选择队伍末位或固定槽位"
+EGG_PARTY_SLOT_CANDY_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
+EGG_PARTY_SLOT_CANDY_NEXT_SECTION = "# ============================================================\n# Seed启动与同Seed两次命中"
 EGG_HOME_BUFFER_GLOBALS = """\
 $孵蛋HOME_BUFFER尝试 = 0
 $孵蛋HOME_BUFFER短边界 = 0
@@ -426,6 +444,72 @@ def _apply_egg_summary_fix_text(template_text: str) -> str:
     return template_text
 
 
+def _apply_egg_party_slot_main_runtime_override_text(
+    template_text: str,
+    override_text: str,
+) -> str:
+    """Select just-caught wild Pokémon by party tail and the egg by slot five."""
+    if EGG_PARTY_SLOT_MAIN_OVERRIDE_MARKER in template_text:
+        start = template_text.index(EGG_PARTY_SLOT_MAIN_OVERRIDE_MARKER)
+    else:
+        if template_text.count(EGG_PARTY_SLOT_MAIN_ORIGINAL_FUNCTION) != 1:
+            raise ValueError("孵蛋模板缺少唯一的队伍槽选择函数，拒绝应用末位导航修正")
+        start = template_text.index(EGG_PARTY_SLOT_MAIN_ORIGINAL_FUNCTION)
+    if template_text.count(EGG_PARTY_SLOT_MAIN_NEXT_SECTION) != 1:
+        raise ValueError("孵蛋模板缺少野生Seed验证分区，拒绝应用末位导航修正")
+    end = template_text.index(EGG_PARTY_SLOT_MAIN_NEXT_SECTION, start)
+    replacement = override_text.rstrip() + "\n\n"
+    template_text = template_text[:start] + replacement + template_text[end:]
+
+    call_replacements = (
+        (
+            "$孵蛋流程开页结果 = 孵蛋流程_打开指定槽能力页($队伍位置)",
+            "$孵蛋流程开页结果 = 孵蛋流程_打开指定槽能力页($队伍位置, 1)",
+            "野生能力页末位选择",
+        ),
+        (
+            "$神奇糖果结果 = 孵蛋测试_使用神奇糖果指定槽($队伍位置)",
+            "$神奇糖果结果 = 孵蛋测试_使用神奇糖果指定槽($队伍位置, 1)",
+            "野生神奇糖果末位选择",
+        ),
+        (
+            "$孵蛋流程开页结果 = 孵蛋流程_打开指定槽能力页(5)",
+            "$孵蛋流程开页结果 = 孵蛋流程_打开指定槽能力页(5, 0)",
+            "蛋能力页第五槽选择",
+        ),
+        (
+            "$神奇糖果结果 = 孵蛋测试_使用神奇糖果指定槽(5)",
+            "$神奇糖果结果 = 孵蛋测试_使用神奇糖果指定槽(5, 0)",
+            "蛋神奇糖果第五槽选择",
+        ),
+    )
+    for original, fixed, description in call_replacements:
+        if fixed in template_text:
+            continue
+        if template_text.count(original) != 1:
+            raise ValueError(f"孵蛋模板缺少唯一的{description}调用，拒绝应用末位导航修正")
+        template_text = template_text.replace(original, fixed, 1)
+    return template_text
+
+
+def _apply_egg_party_slot_candy_runtime_override_text(
+    library_text: str,
+    override_text: str,
+) -> str:
+    """Use the same party-tail rule when feeding candy during reverse lookup."""
+    if EGG_PARTY_SLOT_CANDY_OVERRIDE_MARKER in library_text:
+        start = library_text.index(EGG_PARTY_SLOT_CANDY_OVERRIDE_MARKER)
+    else:
+        if library_text.count(EGG_PARTY_SLOT_CANDY_ORIGINAL_FUNCTION) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的神奇糖果函数，拒绝应用末位导航修正")
+        start = library_text.index(EGG_PARTY_SLOT_CANDY_ORIGINAL_FUNCTION)
+    if library_text.count(EGG_PARTY_SLOT_CANDY_NEXT_SECTION) != 1:
+        raise ValueError("孵蛋流程库缺少Seed启动分区，拒绝应用末位导航修正")
+    end = library_text.index(EGG_PARTY_SLOT_CANDY_NEXT_SECTION, start)
+    replacement = override_text.rstrip() + "\n\n"
+    return library_text[:start] + replacement + library_text[end:]
+
+
 def _apply_egg_home_buffer_runtime_override_text(
     template_text: str,
     override_text: str,
@@ -556,10 +640,13 @@ def _apply_egg_home_resample_fix_text(library_text: str) -> str:
 
 
 def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, str]:
-    """Apply the GUI-only restart/settings overlays and return their fingerprints."""
+    """Apply the GUI-only egg library overlays and return their fingerprints."""
     library_path = Path(library_path)
     restart_override_text = EGG_RESTART_OVERRIDE_PATH.read_text(encoding="utf-8")
     settings_override_text = EGG_SETTINGS_OVERRIDE_PATH.read_text(encoding="utf-8")
+    party_slot_candy_override_text = EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH.read_text(
+        encoding="utf-8"
+    )
     configured = _apply_egg_restart_runtime_override_text(
         library_path.read_text(encoding="utf-8"),
         restart_override_text,
@@ -568,6 +655,10 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
         configured,
         settings_override_text,
     )
+    configured = _apply_egg_party_slot_candy_runtime_override_text(
+        configured,
+        party_slot_candy_override_text,
+    )
     library_path.write_text(configured, encoding="utf-8")
     return {
         "egg_restart_original_flow_sha256": hashlib.sha256(
@@ -575,6 +666,9 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
         ).hexdigest(),
         "egg_settings_retry_sha256": hashlib.sha256(
             settings_override_text.encode("utf-8")
+        ).hexdigest(),
+        "egg_party_slot_candy_sha256": hashlib.sha256(
+            party_slot_candy_override_text.encode("utf-8")
         ).hexdigest(),
     }
 
@@ -683,6 +777,13 @@ def write_configured_egg_project(
         configured,
         home_buffer_override_text,
     )
+    party_slot_main_override_text = EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH.read_text(
+        encoding="utf-8"
+    )
+    configured = _apply_egg_party_slot_main_runtime_override_text(
+        configured,
+        party_slot_main_override_text,
+    )
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
 
@@ -701,6 +802,9 @@ def write_configured_egg_project(
     )
     runtime_overrides["egg_home_buffer_refine_sha256"] = hashlib.sha256(
         home_buffer_override_text.encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["egg_party_slot_main_sha256"] = hashlib.sha256(
+        party_slot_main_override_text.encode("utf-8")
     ).hexdigest()
     manifest = {
         "source": str(source_dir),
