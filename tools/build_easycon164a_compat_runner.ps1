@@ -3,6 +3,8 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $root ".build\easycon164a"
 $output = Join-Path $root "runtime_backend\easycon164a-cli-gui-rounding-selfcontained"
+$buildRoot = [IO.Path]::GetFullPath((Join-Path $root ".build"))
+$staging = [IO.Path]::GetFullPath((Join-Path $buildRoot "publish-easycon164a-compat"))
 $patch = Join-Path $PSScriptRoot "patches\easycon164a-cli-gui-rounding.patch"
 $commit = "9c86137c7e63bff842175470895727a5fa9bab52"
 
@@ -32,7 +34,15 @@ $project = Join-Path $source "src\EasyCon2.CLI\EasyCon2.CLI.csproj"
 dotnet restore $project -r win-x64 -p:DefaultTargetFramework=net9.0 -p:LtsTargetFramework=net9.0
 if ($LASTEXITCODE -ne 0) { throw "NuGet restore failed" }
 
-dotnet publish $project -c Release --no-restore -r win-x64 `
+if (Test-Path -LiteralPath $staging) {
+    $expectedPrefix = $buildRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $staging.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clear a staging directory outside .build: $staging"
+    }
+    Remove-Item -LiteralPath $staging -Recurse -Force
+}
+
+dotnet publish $project -c Release --no-restore -r win-x64 -t:Rebuild `
     -p:DefaultTargetFramework=net9.0 `
     -p:LtsTargetFramework=net9.0 `
     -p:PublishSingleFile=true `
@@ -40,18 +50,29 @@ dotnet publish $project -c Release --no-restore -r win-x64 `
     -p:IncludeNativeLibrariesForSelfExtract=true `
     -p:DebugType=None `
     -p:DebugSymbols=false `
-    -o $output
+    -o $staging
 if ($LASTEXITCODE -ne 0) { throw "Compatibility runner build failed" }
 
+$stagedRunner = Join-Path $staging "EasyCon2.CLI.exe"
+if (-not (Test-Path -LiteralPath $stagedRunner)) {
+    throw "Compatibility runner publish did not produce EasyCon2.CLI.exe"
+}
+$stagedVersion = (& $stagedRunner --version | Select-Object -Last 1).Trim()
+if ($LASTEXITCODE -ne 0 -or $stagedVersion -ne "1.6.4-a+$commit") {
+    throw "Staged compatibility runner failed its version check: $stagedVersion"
+}
+
+New-Item -ItemType Directory -Force -Path $output | Out-Null
 $runner = Join-Path $output "EasyCon2.CLI.exe"
+Copy-Item -LiteralPath $stagedRunner -Destination $runner -Force
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $runner).Hash.ToLowerInvariant()
 $length = (Get-Item -LiteralPath $runner).Length
 $manifest = [ordered]@{
     source_repository = "https://github.com/EasyConNS/EasyCon.git"
     source_commit = $commit
     source_version = "1.6.4-a"
-    patch_id = "cli-image-label-ceiling-v1"
-    description = "Make ezcon run round ImgLabel confidence with Math.Ceiling, matching the EasyCon 1.6.4-a GUI."
+    patch_id = "cli-latest-frame-ceiling-v2"
+    description = "Continuously capture the newest DSHOW frame, log its dimensions, and use the EasyCon 1.6.4-a GUI's Math.Ceiling confidence rounding."
     build_target = "net9.0/win-x64 self-contained single-file"
     filename = "EasyCon2.CLI.exe"
     bytes = $length

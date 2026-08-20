@@ -164,7 +164,7 @@ ENDFUNC
         self.assertIn("PRINT 亲本: A & $孵蛋亲本A性别", configured)
         self.assertNotIn('PRINT 亲本: A " &', configured)
 
-    def test_egg_home_buffer_uses_only_selected_nx_labels_and_refines(self):
+    def test_egg_home_buffer_brackets_selected_nx_window(self):
         original = """\
 $HOME_BUFFER当前错误退出_NS2 = 0
 FUNC HOME_BUFFER
@@ -193,6 +193,7 @@ ENDFUNC
             configured,
             override,
         )
+
         self.assertEqual(configured_again, configured)
         self.assertIn(EGG_HOME_BUFFER_GLOBALS, configured)
         self.assertIn("IF $NX机型 == 1", configured)
@@ -210,14 +211,12 @@ ENDFUNC
             configured,
         )
         self.assertIn(
-            "$孵蛋HOME_BUFFER步长 = $孵蛋HOME_BUFFER步长 / 10",
+            "$孵蛋HOME_BUFFER下一延迟 = ($孵蛋HOME_BUFFER短边界 + $孵蛋HOME_BUFFER长边界) / 2",
             configured,
         )
-        self.assertIn("$孵蛋HOME_BUFFER尝试 > 40", configured)
+        self.assertIn("$孵蛋HOME_BUFFER尝试 > 20", configured)
         self.assertEqual(
-            configured.count(
-                "孵蛋流程停止：HOME_BUFFER未找到当前主机的可用延迟"
-            ),
+            configured.count("孵蛋流程停止：HOME_BUFFER未找到当前主机的可用延迟"),
             2,
         )
         self.assertIn(

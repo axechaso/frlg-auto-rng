@@ -10,6 +10,28 @@ import automation.easycon118 as backend
 
 
 class EasyCon164aBackendTests(unittest.TestCase):
+    def test_compat_patch_uses_a_continuous_latest_frame_capture(self):
+        root = Path(__file__).resolve().parents[1]
+        patch_text = (
+            root / "tools" / "patches" / "easycon164a-cli-gui-rounding.patch"
+        ).read_text(encoding="utf-8")
+        additions = "\n".join(
+            line[1:]
+            for line in patch_text.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        )
+
+        self.assertEqual(
+            backend.EXPECTED_COMPAT_PATCH_ID,
+            "cli-latest-frame-ceiling-v2",
+        )
+        self.assertIn("captureTask = Task.Run", additions)
+        self.assertIn("latestFrame = frame.Clone()", additions)
+        self.assertIn("snapshot = latestFrame.Clone()", additions)
+        self.assertIn("il.Search(snapshot, out var md)", additions)
+        self.assertIn("return (int)Math.Ceiling(md)", additions)
+        self.assertIn("采集卡实际画面", additions)
+
     def test_default_backend_is_the_pinned_164a_package(self):
         self.assertEqual(
             backend.EXPECTED_EZCON_VERSION,

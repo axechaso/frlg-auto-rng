@@ -1,16 +1,19 @@
-# GUI 孵蛋运行时覆盖：按当前 NX 机型细化 HOME_BUFFER 延迟
+# GUI 孵蛋运行时覆盖：按当前 NX 机型二分查找 HOME_BUFFER 窗口
 FUNC HOME_BUFFER
     $孵蛋HOME_BUFFER尝试 = 0
-    $孵蛋HOME_BUFFER步长 = 100
-    $孵蛋HOME_BUFFER上次方向 = 0
+    $孵蛋HOME_BUFFER短边界 = 0
+    $孵蛋HOME_BUFFER长边界 = 0
+    $孵蛋HOME_BUFFER已有短边界 = 0
+    $孵蛋HOME_BUFFER已有长边界 = 0
     $孵蛋HOME_BUFFER失败 = 0
     FOR
         $孵蛋HOME_BUFFER尝试 = $孵蛋HOME_BUFFER尝试 + 1
-        IF $孵蛋HOME_BUFFER尝试 > 40
-            PRINT HOME_BUFFER校准失败：40轮内未找到当前主机的可用延迟
+        IF $孵蛋HOME_BUFFER尝试 > 20
+            PRINT HOME_BUFFER校准失败：20轮内未找到当前主机的可用延迟
             $孵蛋HOME_BUFFER失败 = 1
             RETURN
         ENDIF
+
         A
         WAIT 1500
         A
@@ -20,6 +23,7 @@ FUNC HOME_BUFFER
         ENDIF
         HOME 100
         WAIT 1500
+
         $HOME_BUFFER当前正确退出 = @HOME_BUFFER正确退出
         $HOME_BUFFER当前正确退出_NS2 = @HOME_BUFFER正确退出_NS2
         $HOME_BUFFER当前正确退出普通 = @正确退出
@@ -27,7 +31,7 @@ FUNC HOME_BUFFER
         $HOME_BUFFER当前错误退出 = @错误退出
         $HOME_BUFFER当前错误退出_NS2 = @错误退出_NS2
 
-        # 只使用当前主机对应的标签。NS1 不能用 NS2 分数判定，反之亦然。
+        # 只使用用户选择的主机标签；NS1 和 NS2 的画面分数不互相兜底。
         IF $NX机型 == 1
             $孵蛋HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出
             $孵蛋HOME_BUFFER选中普通 = $HOME_BUFFER当前正确退出普通
@@ -38,7 +42,7 @@ FUNC HOME_BUFFER
             $孵蛋HOME_BUFFER选中错误 = $HOME_BUFFER当前错误退出_NS2
         ENDIF
         IF $调试日志输出 == 1
-            PRINT "HOME_BUFFER_LABEL|NX=" & $NX机型 & "|BUFFER=" & $孵蛋HOME_BUFFER选中正确 & "|NORMAL=" & $孵蛋HOME_BUFFER选中普通 & "|ERROR=" & $孵蛋HOME_BUFFER选中错误 & "|NS1_BUFFER=" & $HOME_BUFFER当前正确退出 & "|NS2_BUFFER=" & $HOME_BUFFER当前正确退出_NS2 & "|STEP=" & $孵蛋HOME_BUFFER步长
+            PRINT "HOME_BUFFER_LABEL|NX=" & $NX机型 & "|BUFFER=" & $孵蛋HOME_BUFFER选中正确 & "|NORMAL=" & $孵蛋HOME_BUFFER选中普通 & "|ERROR=" & $孵蛋HOME_BUFFER选中错误 & "|NS1_BUFFER=" & $HOME_BUFFER当前正确退出 & "|NS2_BUFFER=" & $HOME_BUFFER当前正确退出_NS2
         ENDIF
 
         IF $孵蛋HOME_BUFFER选中正确 >= 95
@@ -49,21 +53,20 @@ FUNC HOME_BUFFER
             B
             WAIT 1500
             CALL 关闭游戏
+            CONTINUE
         ELIF $孵蛋HOME_BUFFER选中普通 >= 95
-            # 过长后向下搜索；若刚从“过短”翻转而来，把100ms步长细化为10ms，再细化为1ms。
-            IF $孵蛋HOME_BUFFER上次方向 == 1 and $孵蛋HOME_BUFFER步长 > 1
-                $孵蛋HOME_BUFFER步长 = $孵蛋HOME_BUFFER步长 / 10
+            # 已进入普通退出画面，当前延迟在可用窗口右侧。
+            $孵蛋HOME_BUFFER长边界 = $HOME_BUFFER延迟
+            $孵蛋HOME_BUFFER已有长边界 = 1
+            IF $孵蛋HOME_BUFFER已有短边界 == 1
+                $孵蛋HOME_BUFFER下一延迟 = ($孵蛋HOME_BUFFER短边界 + $孵蛋HOME_BUFFER长边界) / 2
+            ELSE
+                $孵蛋HOME_BUFFER下一延迟 = $HOME_BUFFER延迟 - 100
             ENDIF
             IF $调试日志输出 == 1
-                PRINT HOME_BUFFER延迟过长，减 & $孵蛋HOME_BUFFER步长 & " 继续尝试中"
+                PRINT HOME_BUFFER延迟过长，下一次尝试: & $孵蛋HOME_BUFFER下一延迟 & " ms"
             ENDIF
-            $孵蛋HOME_BUFFER上次方向 = -1
-            $HOME_BUFFER延迟 = $HOME_BUFFER延迟 - $孵蛋HOME_BUFFER步长
-            IF $HOME_BUFFER延迟 < 100
-                PRINT HOME_BUFFER校准失败：延迟已低于100 ms
-                $孵蛋HOME_BUFFER失败 = 1
-                RETURN
-            ENDIF
+
             X
             WAIT 1500
             A
@@ -77,21 +80,32 @@ FUNC HOME_BUFFER
             NEXT
             CALL 关闭游戏
         ELSE
-            # 保留原版“其他状态视为过短”的规则，只把方向翻转后的步长逐级细化。
-            IF $孵蛋HOME_BUFFER上次方向 == -1 and $孵蛋HOME_BUFFER步长 > 1
-                $孵蛋HOME_BUFFER步长 = $孵蛋HOME_BUFFER步长 / 10
+            # 保留原版规则：既非正确窗口、普通退出，也非休眠菜单时视为过短。
+            $孵蛋HOME_BUFFER短边界 = $HOME_BUFFER延迟
+            $孵蛋HOME_BUFFER已有短边界 = 1
+            IF $孵蛋HOME_BUFFER已有长边界 == 1
+                $孵蛋HOME_BUFFER下一延迟 = ($孵蛋HOME_BUFFER短边界 + $孵蛋HOME_BUFFER长边界) / 2
+            ELSE
+                $孵蛋HOME_BUFFER下一延迟 = $HOME_BUFFER延迟 + 100
             ENDIF
             IF $调试日志输出 == 1
-                PRINT HOME_BUFFER延迟过短，增 & $孵蛋HOME_BUFFER步长 & " 继续尝试中"
-            ENDIF
-            $孵蛋HOME_BUFFER上次方向 = 1
-            $HOME_BUFFER延迟 = $HOME_BUFFER延迟 + $孵蛋HOME_BUFFER步长
-            IF $HOME_BUFFER延迟 > 3000
-                PRINT HOME_BUFFER校准失败：延迟已超过3000 ms
-                $孵蛋HOME_BUFFER失败 = 1
-                RETURN
+                PRINT HOME_BUFFER延迟过短，下一次尝试: & $孵蛋HOME_BUFFER下一延迟 & " ms"
             ENDIF
             CALL 关闭游戏
         ENDIF
+
+        IF $孵蛋HOME_BUFFER下一延迟 < 100 or $孵蛋HOME_BUFFER下一延迟 > 3000
+            PRINT HOME_BUFFER校准失败：下一延迟超出100-3000 ms
+            $孵蛋HOME_BUFFER失败 = 1
+            RETURN
+        ENDIF
+        IF $孵蛋HOME_BUFFER已有短边界 == 1 and $孵蛋HOME_BUFFER已有长边界 == 1
+            IF $孵蛋HOME_BUFFER下一延迟 <= $孵蛋HOME_BUFFER短边界 or $孵蛋HOME_BUFFER下一延迟 >= $孵蛋HOME_BUFFER长边界
+                PRINT HOME_BUFFER校准失败：短/长边界之间没有达到95分的整数延迟
+                $孵蛋HOME_BUFFER失败 = 1
+                RETURN
+            ENDIF
+        ENDIF
+        $HOME_BUFFER延迟 = $孵蛋HOME_BUFFER下一延迟
     NEXT
 ENDFUNC

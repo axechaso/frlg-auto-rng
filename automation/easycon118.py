@@ -24,7 +24,7 @@ EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
 EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
-EXPECTED_COMPAT_PATCH_ID = "cli-image-label-ceiling-v1"
+EXPECTED_COMPAT_PATCH_ID = "cli-latest-frame-ceiling-v2"
 EXPECTED_TESSDATA_SHA256 = {
     "frlg_battle.traineddata": "7abcaef4936727b33717656b38fd5b5027823e1cafec21abb06cc8ef1f7ff758",
     "FRLG_EN_ALL.traineddata": "3272f23a6f259518813025d89be77d706574ccdf163132ccf6f5be15ca19cfa0",
@@ -77,13 +77,16 @@ EGG_RESTART_GLOBALS = """\
 $孵蛋库_重启识别尝试 = 0
 $孵蛋库_已请求主页 = 0
 """
-EGG_HOME_BUFFER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按当前 NX 机型细化 HOME_BUFFER 延迟"
+EGG_HOME_BUFFER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按当前 NX 机型二分查找 HOME_BUFFER 窗口"
 EGG_HOME_BUFFER_ORIGINAL_FUNCTION = "FUNC HOME_BUFFER"
 EGG_HOME_BUFFER_NEXT_FUNCTION = "FUNC 各阶段脚本固定延迟转帧数"
 EGG_HOME_BUFFER_GLOBALS = """\
 $孵蛋HOME_BUFFER尝试 = 0
-$孵蛋HOME_BUFFER步长 = 100
-$孵蛋HOME_BUFFER上次方向 = 0
+$孵蛋HOME_BUFFER短边界 = 0
+$孵蛋HOME_BUFFER长边界 = 0
+$孵蛋HOME_BUFFER已有短边界 = 0
+$孵蛋HOME_BUFFER已有长边界 = 0
+$孵蛋HOME_BUFFER下一延迟 = 0
 $孵蛋HOME_BUFFER选中正确 = 0
 $孵蛋HOME_BUFFER选中普通 = 0
 $孵蛋HOME_BUFFER选中错误 = 0
@@ -427,11 +430,11 @@ def _apply_egg_home_buffer_runtime_override_text(
     template_text: str,
     override_text: str,
 ) -> str:
-    """Refine HOME_BUFFER using only the labels for the configured NX model."""
+    """Replace HOME_BUFFER with a bounded, NX-specific bracket search."""
     global_anchor = "$HOME_BUFFER当前错误退出_NS2 = 0\n"
     if EGG_HOME_BUFFER_GLOBALS not in template_text:
         if template_text.count(global_anchor) != 1:
-            raise ValueError("孵蛋模板缺少唯一的 HOME_BUFFER 状态区，拒绝应用细搜覆盖")
+            raise ValueError("孵蛋模板缺少唯一的 HOME_BUFFER 状态区，拒绝应用窗口搜索覆盖")
         template_text = template_text.replace(
             global_anchor,
             global_anchor + EGG_HOME_BUFFER_GLOBALS,
@@ -442,10 +445,10 @@ def _apply_egg_home_buffer_runtime_override_text(
         start = template_text.index(EGG_HOME_BUFFER_OVERRIDE_MARKER)
     else:
         if template_text.count(EGG_HOME_BUFFER_ORIGINAL_FUNCTION) != 1:
-            raise ValueError("孵蛋模板缺少唯一的 HOME_BUFFER 函数，拒绝应用细搜覆盖")
+            raise ValueError("孵蛋模板缺少唯一的 HOME_BUFFER 函数，拒绝应用窗口搜索覆盖")
         start = template_text.index(EGG_HOME_BUFFER_ORIGINAL_FUNCTION)
     if template_text.count(EGG_HOME_BUFFER_NEXT_FUNCTION) != 1:
-        raise ValueError("孵蛋模板缺少 HOME_BUFFER 后继函数，拒绝应用细搜覆盖")
+        raise ValueError("孵蛋模板缺少 HOME_BUFFER 后继函数，拒绝应用窗口搜索覆盖")
     end = template_text.index(EGG_HOME_BUFFER_NEXT_FUNCTION, start)
     replacement = override_text.rstrip() + "\n\n"
     template_text = template_text[:start] + replacement + template_text[end:]
@@ -482,7 +485,9 @@ def _apply_egg_home_buffer_runtime_override_text(
     ):
         if guarded not in template_text:
             if template_text.count(original) != 1:
-                raise ValueError(f"孵蛋模板缺少唯一的{description}位置，拒绝应用细搜覆盖")
+                raise ValueError(
+                    f"孵蛋模板缺少唯一的{description}位置，拒绝应用窗口搜索覆盖"
+                )
             template_text = template_text.replace(original, guarded, 1)
     return template_text
 
@@ -697,7 +702,6 @@ def write_configured_egg_project(
     runtime_overrides["egg_home_buffer_refine_sha256"] = hashlib.sha256(
         home_buffer_override_text.encode("utf-8")
     ).hexdigest()
-
     manifest = {
         "source": str(source_dir),
         "template": template_path.name,
@@ -876,12 +880,15 @@ def prepare_compat_runner(
     ezcon_path: str | Path,
     runner_path: str | Path = DEFAULT_COMPAT_RUNNER_PATH,
 ) -> Path:
-    """Validate the pinned GUI-rounding CLI and sync the audited OCR models.
+    """Validate the pinned latest-frame CLI and sync the audited OCR models.
 
     EasyCon 1.6.4-a's GUI rounds image-label confidence upward with
-    ``Math.Ceiling`` while its bundled ``ezcon.exe run`` truncates it.  The
+    ``Math.Ceiling`` and continuously drains the capture device.  Its bundled
+    ``ezcon.exe run`` truncates confidence and reads only when a label is
+    evaluated, which can return buffered DSHOW transition frames.  The
     compatibility runner is built from the exact 1.6.4-a source commit and
-    changes only that runtime behavior (plus .NET 9 build-only compatibility).
+    adds latest-frame consumption plus the GUI's rounding behavior (and .NET 9
+    build-only compatibility).
     """
     ezcon_path = Path(ezcon_path).resolve()
     runner_path = Path(runner_path).resolve()
@@ -891,7 +898,7 @@ def prepare_compat_runner(
         raise ValueError("原始 EasyCon 1.6.4-a ezcon.exe 指纹不一致，拒绝准备兼容运行器")
     if not runner_path.is_file():
         raise FileNotFoundError(
-            "缺少 EasyCon 1.6.4-a GUI 识图取整兼容运行器；请先运行 "
+            "缺少 EasyCon 1.6.4-a GUI 持续采帧兼容运行器；请先运行 "
             "tools\\build_easycon164a_compat_runner.ps1"
         )
 
