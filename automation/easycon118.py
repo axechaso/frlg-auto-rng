@@ -61,6 +61,12 @@ EGG_RESTART_OVERRIDE_PATH = (
     / "easycon118_extensions"
     / "egg_restart_original_flow.ecs"
 )
+EGG_HOME_BUFFER_OVERRIDE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "egg_home_buffer_refine.ecs"
+)
 EGG_SETTINGS_LIBRARY_NAME = "27_孵蛋测试流程.ecs"
 EGG_SETTINGS_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：游戏设置 OCR 使用有限重试"
 EGG_SETTINGS_NEXT_FUNCTION = "FUNC 孵蛋测试_执行前置准备"
@@ -70,6 +76,18 @@ EGG_RESTART_NEXT_FUNCTION = "FUNC 孵蛋测试_软重启并跳过回忆"
 EGG_RESTART_GLOBALS = """\
 $孵蛋库_重启识别尝试 = 0
 $孵蛋库_已请求主页 = 0
+"""
+EGG_HOME_BUFFER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按当前 NX 机型细化 HOME_BUFFER 延迟"
+EGG_HOME_BUFFER_ORIGINAL_FUNCTION = "FUNC HOME_BUFFER"
+EGG_HOME_BUFFER_NEXT_FUNCTION = "FUNC 各阶段脚本固定延迟转帧数"
+EGG_HOME_BUFFER_GLOBALS = """\
+$孵蛋HOME_BUFFER尝试 = 0
+$孵蛋HOME_BUFFER步长 = 100
+$孵蛋HOME_BUFFER上次方向 = 0
+$孵蛋HOME_BUFFER选中正确 = 0
+$孵蛋HOME_BUFFER选中普通 = 0
+$孵蛋HOME_BUFFER选中错误 = 0
+$孵蛋HOME_BUFFER失败 = 0
 """
 EGG_SETTINGS_GLOBALS = """\
 $孵蛋库_设置识别尝试 = 0
@@ -405,6 +423,70 @@ def _apply_egg_summary_fix_text(template_text: str) -> str:
     return template_text
 
 
+def _apply_egg_home_buffer_runtime_override_text(
+    template_text: str,
+    override_text: str,
+) -> str:
+    """Refine HOME_BUFFER using only the labels for the configured NX model."""
+    global_anchor = "$HOME_BUFFER当前错误退出_NS2 = 0\n"
+    if EGG_HOME_BUFFER_GLOBALS not in template_text:
+        if template_text.count(global_anchor) != 1:
+            raise ValueError("孵蛋模板缺少唯一的 HOME_BUFFER 状态区，拒绝应用细搜覆盖")
+        template_text = template_text.replace(
+            global_anchor,
+            global_anchor + EGG_HOME_BUFFER_GLOBALS,
+            1,
+        )
+
+    if EGG_HOME_BUFFER_OVERRIDE_MARKER in template_text:
+        start = template_text.index(EGG_HOME_BUFFER_OVERRIDE_MARKER)
+    else:
+        if template_text.count(EGG_HOME_BUFFER_ORIGINAL_FUNCTION) != 1:
+            raise ValueError("孵蛋模板缺少唯一的 HOME_BUFFER 函数，拒绝应用细搜覆盖")
+        start = template_text.index(EGG_HOME_BUFFER_ORIGINAL_FUNCTION)
+    if template_text.count(EGG_HOME_BUFFER_NEXT_FUNCTION) != 1:
+        raise ValueError("孵蛋模板缺少 HOME_BUFFER 后继函数，拒绝应用细搜覆盖")
+    end = template_text.index(EGG_HOME_BUFFER_NEXT_FUNCTION, start)
+    replacement = override_text.rstrip() + "\n\n"
+    template_text = template_text[:start] + replacement + template_text[end:]
+
+    initial_restart = """\
+    CALL 孵蛋流程_重开下一轮
+
+    $孵蛋流程尝试次数 = 0
+"""
+    guarded_initial_restart = """\
+    CALL 孵蛋流程_重开下一轮
+    IF $孵蛋HOME_BUFFER失败 == 1
+        PRINT 孵蛋流程停止：HOME_BUFFER未找到当前主机的可用延迟
+        RETURN 0
+    ENDIF
+
+    $孵蛋流程尝试次数 = 0
+"""
+    loop_start = """\
+    FOR
+        $孵蛋流程尝试次数 += 1
+"""
+    guarded_loop_start = """\
+    FOR
+        IF $孵蛋HOME_BUFFER失败 == 1
+            PRINT 孵蛋流程停止：HOME_BUFFER未找到当前主机的可用延迟
+            RETURN 0
+        ENDIF
+        $孵蛋流程尝试次数 += 1
+"""
+    for original, guarded, description in (
+        (initial_restart, guarded_initial_restart, "首次 HOME_BUFFER 结果检查"),
+        (loop_start, guarded_loop_start, "重试 HOME_BUFFER 结果检查"),
+    ):
+        if guarded not in template_text:
+            if template_text.count(original) != 1:
+                raise ValueError(f"孵蛋模板缺少唯一的{description}位置，拒绝应用细搜覆盖")
+            template_text = template_text.replace(original, guarded, 1)
+    return template_text
+
+
 def _apply_egg_settings_runtime_override_text(
     library_text: str,
     override_text: str,
@@ -589,6 +671,13 @@ def write_configured_egg_project(
     configured = configure_egg_template_text(
         template_path.read_text(encoding="utf-8"), request
     )
+    home_buffer_override_text = EGG_HOME_BUFFER_OVERRIDE_PATH.read_text(
+        encoding="utf-8"
+    )
+    configured = _apply_egg_home_buffer_runtime_override_text(
+        configured,
+        home_buffer_override_text,
+    )
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
 
@@ -605,6 +694,9 @@ def write_configured_egg_project(
     runtime_overrides = apply_egg_settings_runtime_override(
         output_dir / "lib" / EGG_SETTINGS_LIBRARY_NAME
     )
+    runtime_overrides["egg_home_buffer_refine_sha256"] = hashlib.sha256(
+        home_buffer_override_text.encode("utf-8")
+    ).hexdigest()
 
     manifest = {
         "source": str(source_dir),

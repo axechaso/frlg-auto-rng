@@ -2,12 +2,15 @@ import unittest
 from pathlib import Path
 
 from automation.easycon118 import (
+    EGG_HOME_BUFFER_GLOBALS,
+    EGG_HOME_BUFFER_OVERRIDE_PATH,
     EGG_RESTART_GLOBALS,
     EGG_RESTART_OVERRIDE_PATH,
     EGG_SETTINGS_GLOBALS,
     EGG_SETTINGS_OVERRIDE_PATH,
     EggRunRequest,
     _apply_egg_home_resample_fix_text,
+    _apply_egg_home_buffer_runtime_override_text,
     _apply_egg_restart_runtime_override_text,
     _apply_egg_summary_fix_text,
     _apply_egg_settings_runtime_override_text,
@@ -160,6 +163,67 @@ ENDFUNC
         self.assertIn("$孵蛋蛋种名称文本 = 目标中文名称", configured)
         self.assertIn("PRINT 亲本: A & $孵蛋亲本A性别", configured)
         self.assertNotIn('PRINT 亲本: A " &', configured)
+
+    def test_egg_home_buffer_uses_only_selected_nx_labels_and_refines(self):
+        original = """\
+$HOME_BUFFER当前错误退出_NS2 = 0
+FUNC HOME_BUFFER
+    IF @HOME_BUFFER正确退出 >= 95 or @HOME_BUFFER正确退出_NS2 >= 95
+        RETURN
+    ENDIF
+ENDFUNC
+
+FUNC 各阶段脚本固定延迟转帧数
+    RETURN
+ENDFUNC
+
+FUNC 孵蛋流程_执行(): INT
+    CALL 孵蛋流程_重开下一轮
+
+    $孵蛋流程尝试次数 = 0
+    FOR
+        $孵蛋流程尝试次数 += 1
+    NEXT
+    RETURN 1
+ENDFUNC
+"""
+        override = Path(EGG_HOME_BUFFER_OVERRIDE_PATH).read_text(encoding="utf-8")
+        configured = _apply_egg_home_buffer_runtime_override_text(original, override)
+        configured_again = _apply_egg_home_buffer_runtime_override_text(
+            configured,
+            override,
+        )
+        self.assertEqual(configured_again, configured)
+        self.assertIn(EGG_HOME_BUFFER_GLOBALS, configured)
+        self.assertIn("IF $NX机型 == 1", configured)
+        self.assertIn(
+            "$孵蛋HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出\n",
+            configured,
+        )
+        self.assertIn(
+            "$孵蛋HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出_NS2\n",
+            configured,
+        )
+        self.assertIn("IF $孵蛋HOME_BUFFER选中正确 >= 95", configured)
+        self.assertNotIn(
+            "IF @HOME_BUFFER正确退出 >= 95 or @HOME_BUFFER正确退出_NS2 >= 95",
+            configured,
+        )
+        self.assertIn(
+            "$孵蛋HOME_BUFFER步长 = $孵蛋HOME_BUFFER步长 / 10",
+            configured,
+        )
+        self.assertIn("$孵蛋HOME_BUFFER尝试 > 40", configured)
+        self.assertEqual(
+            configured.count(
+                "孵蛋流程停止：HOME_BUFFER未找到当前主机的可用延迟"
+            ),
+            2,
+        )
+        self.assertIn(
+            "CALL 孵蛋流程_重开下一轮\n    IF $孵蛋HOME_BUFFER失败 == 1",
+            configured,
+        )
 
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]
