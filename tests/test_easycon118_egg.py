@@ -4,6 +4,7 @@ from pathlib import Path
 from automation.easycon118 import (
     EGG_HOME_BUFFER_GLOBALS,
     EGG_HOME_BUFFER_OVERRIDE_PATH,
+    EGG_HATCH_EXIT_OVERRIDE_PATH,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
     EGG_PREPARED_254_OVERRIDE_MARKER,
@@ -17,6 +18,7 @@ from automation.easycon118 import (
     EggRunRequest,
     _apply_egg_home_resample_fix_text,
     _apply_egg_home_buffer_runtime_override_text,
+    _apply_egg_hatch_exit_runtime_override_text,
     _apply_egg_party_slot_candy_runtime_override_text,
     _apply_egg_party_slot_main_runtime_override_text,
     _apply_egg_prepared_254_runtime_override_text,
@@ -433,6 +435,45 @@ ENDFUNC
         self.assertIn("$Seed预校准索引_NS2", configured)
         self.assertIn("正式版锁定与相邻Seed毫秒细调", configured)
         self.assertNotIn("$孵蛋Seed等待MS = $孵蛋Seed等待MS -", configured)
+
+    def test_hatch_waits_between_all_menu_exit_layers_before_walking(self):
+        original = """\
+FUNC 孵蛋测试_执行骑车孵化($全国图鉴编号: INT, $周期覆盖: INT, $每循环步数: INT, $安全循环数: INT): INT
+    B
+    WAIT 500
+    B
+    WAIT 500
+    B
+    WAIT 800
+    UP 200
+    RETURN 1
+ENDFUNC
+
+FUNC 孵蛋测试_使用神奇糖果指定槽($队伍位置: INT): INT
+    RETURN 1
+ENDFUNC
+"""
+        override = Path(EGG_HATCH_EXIT_OVERRIDE_PATH).read_text(encoding="utf-8")
+        configured = _apply_egg_hatch_exit_runtime_override_text(original, override)
+        configured_again = _apply_egg_hatch_exit_runtime_override_text(
+            configured,
+            override,
+        )
+
+        self.assertEqual(configured_again, configured)
+        exit_section = configured[
+            configured.index("PRINT 【孵化准备】正在逐层退出能力页与菜单") : configured.index(
+                "PRINT 【孵化准备】开始位置校正与骑车"
+            )
+        ]
+        self.assertIn("FOR $孵蛋库_孵化退出层 = 1 TO 5", exit_section)
+        self.assertIn("WAIT 1500", exit_section)
+        self.assertNotIn("WAIT 500", exit_section)
+        self.assertLess(
+            configured.index("孵化退出进度:"),
+            configured.index("UP 200"),
+        )
+        self.assertIn("孵化骑车进度:", configured)
 
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]

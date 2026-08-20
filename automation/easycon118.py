@@ -95,6 +95,12 @@ EGG_SEED_CONTROLLER_OVERRIDE_PATH = (
     / "easycon118_extensions"
     / "egg_seed_controller_main.ecs"
 )
+EGG_HATCH_EXIT_OVERRIDE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "egg_hatch_exit_retry.ecs"
+)
 OCR_NAME_LIBRARY_NAME = "19_OCR_GEN3战斗场景名称.ecs"
 OCR_RUNTIME_FALLBACK_MARKER = "# GUI 运行时覆盖：OCR 不可用时直接回到单字识别"
 OCR_NAME_ORIGINAL_FUNCTION = "FUNC OCR识别抓捕对象名称(): STRING"
@@ -156,6 +162,9 @@ EGG_SURF_BATTLE_NEXT_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
 EGG_SEED_CONTROLLER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：复用正式版 Seed 锁定与相邻毫秒细调控制器"
 EGG_SEED_CONTROLLER_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_按观测Seed校正等待"
 EGG_SEED_CONTROLLER_NEXT_SECTION = "# -------------------- 蛋个体反查"
+EGG_HATCH_EXIT_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：孵化骑车前可靠退出能力页、队伍菜单和主菜单"
+EGG_HATCH_EXIT_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
+EGG_HATCH_EXIT_NEXT_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
 EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
 EGG_PREPARED_254_GLOBAL = "$孵蛋从已完成254步开始"
 EGG_PREPARED_254_GLOBAL_ANCHOR = "$孵蛋同Seed模式 = 1"
@@ -718,6 +727,24 @@ def _apply_egg_seed_controller_runtime_override_text(
     return template_text[:start] + replacement + template_text[end:]
 
 
+def _apply_egg_hatch_exit_runtime_override_text(
+    library_text: str,
+    override_text: str,
+) -> str:
+    """Reliably leave summary/menu layers before starting the bicycle loop."""
+    if EGG_HATCH_EXIT_OVERRIDE_MARKER in library_text:
+        start = library_text.index(EGG_HATCH_EXIT_OVERRIDE_MARKER)
+    else:
+        if library_text.count(EGG_HATCH_EXIT_ORIGINAL_FUNCTION) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的骑车孵化函数，拒绝应用退页修正")
+        start = library_text.index(EGG_HATCH_EXIT_ORIGINAL_FUNCTION)
+    if library_text.count(EGG_HATCH_EXIT_NEXT_FUNCTION) != 1:
+        raise ValueError("孵蛋流程库缺少骑车孵化后继函数，拒绝应用退页修正")
+    end = library_text.index(EGG_HATCH_EXIT_NEXT_FUNCTION, start)
+    replacement = override_text.rstrip() + "\n\n"
+    return library_text[:start] + replacement + library_text[end:]
+
+
 def _apply_egg_home_buffer_runtime_override_text(
     template_text: str,
     override_text: str,
@@ -858,6 +885,9 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
     surf_battle_override_text = EGG_SURF_BATTLE_OVERRIDE_PATH.read_text(
         encoding="utf-8"
     )
+    hatch_exit_override_text = EGG_HATCH_EXIT_OVERRIDE_PATH.read_text(
+        encoding="utf-8"
+    )
     configured = _apply_egg_restart_runtime_override_text(
         library_path.read_text(encoding="utf-8"),
         restart_override_text,
@@ -874,6 +904,10 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
         configured,
         surf_battle_override_text,
     )
+    configured = _apply_egg_hatch_exit_runtime_override_text(
+        configured,
+        hatch_exit_override_text,
+    )
     library_path.write_text(configured, encoding="utf-8")
     return {
         "egg_restart_original_flow_sha256": hashlib.sha256(
@@ -887,6 +921,9 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
         ).hexdigest(),
         "egg_surf_battle_retry_sha256": hashlib.sha256(
             surf_battle_override_text.encode("utf-8")
+        ).hexdigest(),
+        "egg_hatch_exit_retry_sha256": hashlib.sha256(
+            hatch_exit_override_text.encode("utf-8")
         ).hexdigest(),
     }
 
