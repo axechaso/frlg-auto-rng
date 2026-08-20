@@ -138,6 +138,9 @@ EGG_PARTY_SLOT_MAIN_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_选择队伍槽"
 EGG_PARTY_SLOT_MAIN_NEXT_SECTION = "# -------------------- 野生Seed验证"
 EGG_PARTY_SLOT_CANDY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：神奇糖果按目标身份选择队伍末位或固定槽位"
 EGG_PARTY_SLOT_CANDY_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
+EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
+EGG_PREPARED_254_GLOBAL = "$孵蛋从已完成254步开始"
+EGG_PREPARED_254_GLOBAL_ANCHOR = "$孵蛋同Seed模式 = 1"
 EGG_PARTY_SLOT_CANDY_NEXT_SECTION = "# ============================================================\n# Seed启动与同Seed两次命中"
 EGG_HOME_BUFFER_GLOBALS = """\
 $孵蛋HOME_BUFFER尝试 = 0
@@ -185,6 +188,7 @@ class EggRunRequest:
     parent_a_ivs: tuple[int, int, int, int, int, int]
     parent_b_gender: str
     parent_b_ivs: tuple[int, int, int, int, int, int]
+    start_from_prepared_254: bool = False
 
     @property
     def nx_model(self) -> int:
@@ -224,6 +228,8 @@ class EggRunRequest:
             raise ValueError("孵蛋亲本 B 必须是雄或无性别")
         if self.parent_a_gender == self.parent_b_gender == "无性别":
             raise ValueError("两只亲本不能同时填写无性别")
+        if not isinstance(self.start_from_prepared_254, bool):
+            raise ValueError("孵蛋254步启动模式必须是布尔值")
         for label, ivs in (("A", self.parent_a_ivs), ("B", self.parent_b_ivs)):
             if len(ivs) != 6 or any(not 0 <= iv <= 31 for iv in ivs):
                 raise ValueError(f"亲本 {label} 的六项 IV 必须均在 0-31 之间")
@@ -483,6 +489,63 @@ def _apply_egg_summary_fix_text(template_text: str) -> str:
             raise ValueError("孵蛋模板缺少唯一的亲本摘要，拒绝应用日志修正")
         template_text = template_text.replace(bad_parents, fixed_parents, 1)
     return template_text
+
+
+def _egg_prepared_254_override_text(enabled: bool) -> str:
+    value = 1 if enabled else 0
+    return f"""\
+{EGG_PREPARED_254_OVERRIDE_MARKER}
+{EGG_PREPARED_254_GLOBAL} = {value}
+"""
+
+
+def _apply_egg_prepared_254_runtime_override_text(
+    template_text: str,
+    enabled: bool,
+) -> str:
+    """Optionally skip only the one-time walk/settings/save preparation."""
+    override = _egg_prepared_254_override_text(enabled).rstrip()
+    if EGG_PREPARED_254_OVERRIDE_MARKER in template_text:
+        assignment = re.compile(
+            rf"(?m)^\s*{re.escape(EGG_PREPARED_254_GLOBAL)}\s*=\s*[01]\s*$"
+        )
+        template_text, count = assignment.subn(
+            f"{EGG_PREPARED_254_GLOBAL} = {1 if enabled else 0}",
+            template_text,
+        )
+        if count != 1:
+            raise ValueError("孵蛋模板的254步启动模式字段不唯一，拒绝生成运行副本")
+        return template_text
+
+    if template_text.count(EGG_PREPARED_254_GLOBAL_ANCHOR) != 1:
+        raise ValueError("孵蛋模板缺少唯一的同Seed模式字段，拒绝添加254步启动模式")
+    template_text = template_text.replace(
+        EGG_PREPARED_254_GLOBAL_ANCHOR,
+        EGG_PREPARED_254_GLOBAL_ANCHOR + "\n" + override,
+        1,
+    )
+
+    original = """\
+    $孵蛋前置结果 = 孵蛋测试_执行前置准备($Seed模式, $游戏设置识图阈值)
+    IF $孵蛋前置结果 != 1
+        RETURN 0
+    ENDIF
+    CALL 孵蛋流程_重开下一轮
+"""
+    replacement = """\
+    IF $孵蛋从已完成254步开始 == 1
+        PRINT 【孵蛋准备】使用已有254步基础存档，跳过走位、设置检查和存档
+    ELSE
+        $孵蛋前置结果 = 孵蛋测试_执行前置准备($Seed模式, $游戏设置识图阈值)
+        IF $孵蛋前置结果 != 1
+            RETURN 0
+        ENDIF
+    ENDIF
+    CALL 孵蛋流程_重开下一轮
+"""
+    if template_text.count(original) != 1:
+        raise ValueError("孵蛋模板缺少唯一的前置准备调用，拒绝添加254步启动模式")
+    return template_text.replace(original, replacement, 1)
 
 
 def _apply_ocr_runtime_fallback_text(library_text: str) -> str:
@@ -870,6 +933,10 @@ def write_configured_egg_project(
     configured = configure_egg_template_text(
         template_path.read_text(encoding="utf-8"), request
     )
+    configured = _apply_egg_prepared_254_runtime_override_text(
+        configured,
+        request.start_from_prepared_254,
+    )
     home_buffer_override_text = EGG_HOME_BUFFER_OVERRIDE_PATH.read_text(
         encoding="utf-8"
     )
@@ -910,6 +977,11 @@ def write_configured_egg_project(
     ).hexdigest()
     runtime_overrides["egg_party_slot_main_sha256"] = hashlib.sha256(
         party_slot_main_override_text.encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["egg_prepared_254_start_sha256"] = hashlib.sha256(
+        _egg_prepared_254_override_text(request.start_from_prepared_254).encode(
+            "utf-8"
+        )
     ).hexdigest()
     runtime_overrides["wild_pid_retry_limit_sha256"] = wild_pid_retry_limit_sha256
     manifest = {

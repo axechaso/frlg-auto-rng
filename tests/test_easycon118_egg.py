@@ -6,6 +6,7 @@ from automation.easycon118 import (
     EGG_HOME_BUFFER_OVERRIDE_PATH,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
+    EGG_PREPARED_254_OVERRIDE_MARKER,
     EGG_RESTART_GLOBALS,
     EGG_RESTART_OVERRIDE_PATH,
     EGG_SETTINGS_GLOBALS,
@@ -16,6 +17,7 @@ from automation.easycon118 import (
     _apply_egg_home_buffer_runtime_override_text,
     _apply_egg_party_slot_candy_runtime_override_text,
     _apply_egg_party_slot_main_runtime_override_text,
+    _apply_egg_prepared_254_runtime_override_text,
     _apply_egg_restart_runtime_override_text,
     _apply_egg_summary_fix_text,
     _apply_egg_settings_runtime_override_text,
@@ -68,6 +70,35 @@ ENDFUNC
         self.assertEqual(values["孵蛋领取目标帧"], 10021)
         self.assertEqual(values["孵蛋双亲A_HP"], 31)
         self.assertEqual(values["孵蛋双亲B_SPE"], 5)
+        self.assertFalse(egg_request().to_dict()["start_from_prepared_254"])
+
+    def test_prepared_254_mode_skips_only_one_time_preparation(self):
+        original = """\
+$孵蛋同Seed模式 = 1
+FUNC 孵蛋流程_执行(): INT
+    $孵蛋前置结果 = 孵蛋测试_执行前置准备($Seed模式, $游戏设置识图阈值)
+    IF $孵蛋前置结果 != 1
+        RETURN 0
+    ENDIF
+    CALL 孵蛋流程_重开下一轮
+
+    $孵蛋流程尝试次数 = 0
+    RETURN 1
+ENDFUNC
+"""
+        configured = _apply_egg_prepared_254_runtime_override_text(original, True)
+
+        self.assertIn(EGG_PREPARED_254_OVERRIDE_MARKER, configured)
+        self.assertIn("$孵蛋从已完成254步开始 = 1", configured)
+        self.assertIn("跳过走位、设置检查和存档", configured)
+        self.assertIn("CALL 孵蛋流程_重开下一轮", configured)
+        self.assertIn("孵蛋测试_执行前置准备", configured)
+        self.assertEqual(
+            _apply_egg_prepared_254_runtime_override_text(configured, True),
+            configured,
+        )
+        full_mode = _apply_egg_prepared_254_runtime_override_text(configured, False)
+        self.assertIn("$孵蛋从已完成254步开始 = 0", full_mode)
 
     def test_template_replaces_all_required_egg_inputs(self):
         names = (
@@ -109,6 +140,7 @@ ENDFUNC
             ({"compatibility": 60}, "20、50 或 70"),
             ({"parent_a_gender": "雄"}, "亲本 A"),
             ({"parent_a_ivs": (31, 31, 31, 31, 31, 32)}, "0-31"),
+            ({"start_from_prepared_254": 1}, "布尔值"),
         )
         for changes, message in invalid:
             with self.subTest(changes=changes):

@@ -77,6 +77,9 @@ IV_STAT_LABELS = ("HP", "攻击", "防御", "特攻", "特防", "速度")
 IV_PRESETS = ("不限", "6V", "0A", "0S", "0A0S")
 SID_SOURCE_LABELS = ("定点", "野生")
 MODE_TAB_ORDER = ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）")
+EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
+EGG_START_MODE_PREPARED = "从已完成254步准备开始"
+EGG_START_MODES = (EGG_START_MODE_FULL, EGG_START_MODE_PREPARED)
 
 
 def build_worker_command(worker: str, arguments: list[str]) -> list[str]:
@@ -162,6 +165,7 @@ def build_egg_config_payload(
     compatibility,
     parent_a_ivs,
     parent_b_ivs,
+    start_from_prepared_254=False,
 ) -> dict:
     """Validate the egg-page settings and return a portable JSON payload."""
     game = str(game).strip()
@@ -194,6 +198,8 @@ def build_egg_config_payload(
             raise ValueError(f"{label}必须包含六项 IV") from exc
     parent_a_ivs = parse_exact_ivs(parent_a_ivs, "亲本A")
     parent_b_ivs = parse_exact_ivs(parent_b_ivs, "亲本B")
+    if not isinstance(start_from_prepared_254, bool):
+        raise ValueError("254步启动模式必须是布尔值")
     return {
         "version": EGG_CONFIG_VERSION,
         "game": game,
@@ -202,6 +208,7 @@ def build_egg_config_payload(
         "compatibility": compatibility,
         "parent_a_ivs": list(parent_a_ivs),
         "parent_b_ivs": list(parent_b_ivs),
+        "start_from_prepared_254": start_from_prepared_254,
     }
 
 
@@ -222,6 +229,7 @@ def parse_egg_config_payload(payload) -> dict:
         payload.get("compatibility"),
         payload.get("parent_a_ivs"),
         payload.get("parent_b_ivs"),
+        payload.get("start_from_prepared_254", False),
     )
 
 
@@ -750,6 +758,7 @@ class AutoRngApp:
         egg_identity.pack(fill="x")
         self.egg_seed_mode_var = tk.StringVar(value="请选择")
         self.egg_pokemon_var = tk.StringVar()
+        self.egg_start_mode_var = tk.StringVar(value=EGG_START_MODE_FULL)
         self.egg_pokemon_map = {}
         self.egg_game_combo = self._labeled_combo(
             egg_identity, "游戏", self.game_var, ("火红", "叶绿"), 0, 0
@@ -768,6 +777,20 @@ class AutoRngApp:
             egg_identity,
             text="Seed 模式必须与 Ten Lines Egg 页使用的游戏设置一致。",
         ).grid(row=1, column=4, columnspan=3, sticky="w", padx=4, pady=4)
+        self._labeled_combo(
+            egg_identity,
+            "启动准备",
+            self.egg_start_mode_var,
+            EGG_START_MODES,
+            2,
+            0,
+            width=34,
+            span=3,
+        )
+        ttk.Label(
+            egg_identity,
+            text="第二项要求当前存档已经完成254步准备；仍会执行HOME_BUFFER与全部校准流程。",
+        ).grid(row=2, column=4, columnspan=3, sticky="w", padx=4, pady=4)
         self.egg_game_combo.bind("<<ComboboxSelected>>", lambda _: self._on_game_change())
         self.egg_nx_combo.bind("<<ComboboxSelected>>", lambda _: self._on_game_change())
 
@@ -1144,6 +1167,7 @@ class AutoRngApp:
             self.source_var, self.ezcon_var,
             self.egg_seed_var, self.egg_held_var, self.egg_pickup_var,
             self.egg_seed_mode_var, self.egg_pokemon_var, self.egg_compatibility_var,
+            self.egg_start_mode_var,
             self.egg_parent_a_gender_var, self.egg_parent_b_gender_var,
             *self.egg_parent_a_iv_vars, *self.egg_parent_b_iv_vars,
             self.egg_ack_var,
@@ -1533,6 +1557,7 @@ class AutoRngApp:
             self.egg_compatibility_var.get(),
             [variable.get() for variable in self.egg_parent_a_iv_vars],
             [variable.get() for variable in self.egg_parent_b_iv_vars],
+            self.egg_start_mode_var.get() == EGG_START_MODE_PREPARED,
         )
 
     def save_egg_config(self):
@@ -1595,6 +1620,11 @@ class AutoRngApp:
             try:
                 self.egg_pokemon_var.set(display)
                 self.egg_compatibility_var.set(str(config["compatibility"]))
+                self.egg_start_mode_var.set(
+                    EGG_START_MODE_PREPARED
+                    if config["start_from_prepared_254"]
+                    else EGG_START_MODE_FULL
+                )
                 for variable, value in zip(
                     self.egg_parent_a_iv_vars, config["parent_a_ivs"]
                 ):
@@ -1634,6 +1664,9 @@ class AutoRngApp:
             parent_b_gender=self.egg_parent_b_gender_var.get(),
             parent_b_ivs=parse_exact_ivs(
                 [variable.get() for variable in self.egg_parent_b_iv_vars], "亲本B"
+            ),
+            start_from_prepared_254=(
+                self.egg_start_mode_var.get() == EGG_START_MODE_PREPARED
             ),
         )
 
@@ -2178,6 +2211,11 @@ class AutoRngApp:
         pokemon = get_species_name(request.species_id)
         lines = [
             "孵蛋模式：同 Seed 时间轴测试版（实验性）",
+            (
+                "启动准备：从已完成254步的基础存档开始"
+                if request.start_from_prepared_254
+                else "启动准备：完整准备（自动走254步、检查设置并存档）"
+            ),
             f"蛋种：{SPECIES_EN_TO_ZH.get(pokemon, pokemon)} ({pokemon})",
             f"目标 Seed：{request.normalized_seed}，Seed 模式：{request.seed_mode}",
             f"Held/生成帧：{request.held_advances}",
@@ -2406,10 +2444,16 @@ class AutoRngApp:
                 "脚本会自动退出游戏两次；确认当前存档可以被新建流程替代，且主页、名称、性别和固定延迟均正确，是否继续？"
             )
         elif self.egg_request is not None:
+            preparation = (
+                "本次会跳过254步走位、设置检查和存档；请确认当前存档确实是已完成254步准备的基础档。"
+                if self.egg_request.start_from_prepared_254
+                else "本次会自动完成254步走位、设置检查并建立基础存档。"
+            )
             confirmation = (
                 "将启动 1.1.8 的实验性同 Seed 孵蛋时间轴。\n"
                 f"Seed {self.egg_request.normalized_seed} / Held {self.egg_request.held_advances} / "
                 f"Pickup {self.egg_request.pickup_advances}\n"
+                f"{preparation}\n"
                 "确认已在培育屋内按脚本要求存档、队伍保留两个空位、队首可使用甜甜香气，是否继续？"
             )
         else:

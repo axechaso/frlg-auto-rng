@@ -40,9 +40,17 @@ class GuiIvInputTests(unittest.TestCase):
                 "compatibility": 50,
                 "parent_a_ivs": [31, 20, 15, 0, 28, 7],
                 "parent_b_ivs": [10, 11, 12, 13, 14, 15],
+                "start_from_prepared_254": False,
             },
         )
         self.assertEqual(parse_egg_config_payload(payload), payload)
+
+        prepared = dict(payload, start_from_prepared_254=True)
+        self.assertTrue(parse_egg_config_payload(prepared)["start_from_prepared_254"])
+
+        legacy = dict(payload)
+        legacy.pop("start_from_prepared_254")
+        self.assertFalse(parse_egg_config_payload(legacy)["start_from_prepared_254"])
 
     def test_egg_config_rejects_invalid_values(self):
         with self.assertRaisesRegex(ValueError, "相性"):
@@ -51,6 +59,19 @@ class GuiIvInputTests(unittest.TestCase):
             build_egg_config_payload("火红", 1, 25, 70, [31, 32, 31, 31, 31, 31], [31] * 6)
         with self.assertRaisesRegex(ValueError, "版本"):
             parse_egg_config_payload({"version": 2})
+        with self.assertRaisesRegex(ValueError, "布尔值"):
+            parse_egg_config_payload(
+                {
+                    "version": 1,
+                    "game": "火红",
+                    "nx_model": 1,
+                    "egg_species_id": 25,
+                    "compatibility": 70,
+                    "parent_a_ivs": [31] * 6,
+                    "parent_b_ivs": [31] * 6,
+                    "start_from_prepared_254": 1,
+                }
+            )
 
     def test_autocomplete_filters_chinese_english_and_location_fragments(self):
         species = ("皮卡丘 (Pikachu)", "雷丘 (Raichu)", "皮皮 (Clefairy)")
