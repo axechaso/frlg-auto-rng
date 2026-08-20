@@ -9,8 +9,10 @@ from automation.easycon118 import (
     EGG_PREPARED_254_OVERRIDE_MARKER,
     EGG_RESTART_GLOBALS,
     EGG_RESTART_OVERRIDE_PATH,
+    EGG_SEED_CONTROLLER_OVERRIDE_PATH,
     EGG_SETTINGS_GLOBALS,
     EGG_SETTINGS_OVERRIDE_PATH,
+    EGG_SURF_BATTLE_OVERRIDE_PATH,
     WILD_PID_RETRY_LIMIT_MARKER,
     EggRunRequest,
     _apply_egg_home_resample_fix_text,
@@ -19,8 +21,10 @@ from automation.easycon118 import (
     _apply_egg_party_slot_main_runtime_override_text,
     _apply_egg_prepared_254_runtime_override_text,
     _apply_egg_restart_runtime_override_text,
+    _apply_egg_seed_controller_runtime_override_text,
     _apply_egg_summary_fix_text,
     _apply_egg_settings_runtime_override_text,
+    _apply_egg_surf_battle_runtime_override_text,
     _apply_wild_pid_retry_limit_text,
     configure_egg_template_text,
     egg_request_to_user_values,
@@ -362,6 +366,73 @@ ENDFUNC
         )[0]
         self.assertEqual(tail_branch.count("        UP\n"), 2)
         self.assertEqual(fifth_slot_branch.count("        UP\n"), 3)
+
+    def test_pond_route_waits_for_battle_before_name_ocr(self):
+        original = """\
+FUNC 孵蛋测试_前往池塘并甜甜香气抓捕($识图阈值: INT, $出闪后继续抓捕: INT): INT
+    WAIT 800
+    $孵蛋库_抓捕对象名称 = 识别抓捕对象名称优先OCR($识图阈值)
+    RETURN 1
+ENDFUNC
+
+FUNC 孵蛋测试_执行骑车孵化($全国图鉴编号: INT, $周期覆盖: INT, $每循环步数: INT, $安全循环数: INT): INT
+    RETURN 1
+ENDFUNC
+"""
+        override = Path(EGG_SURF_BATTLE_OVERRIDE_PATH).read_text(encoding="utf-8")
+        configured = _apply_egg_surf_battle_runtime_override_text(original, override)
+        configured_again = _apply_egg_surf_battle_runtime_override_text(
+            configured,
+            override,
+        )
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn("WAIT 2000", configured)
+        self.assertIn("@野生出现", configured)
+        self.assertIn("@抓捕就绪", configured)
+        battle_gate = configured[
+            configured.index("FUNC 孵蛋测试_等待池塘野生战斗") : configured.index(
+                "FUNC 孵蛋测试_前往池塘并甜甜香气抓捕"
+            )
+        ]
+        self.assertIn("$孵蛋库_池塘野生出现匹配 > 90", battle_gate)
+        self.assertIn("$孵蛋库_池塘抓捕就绪匹配 > 95", battle_gate)
+        self.assertNotIn("\n        A\n", battle_gate)
+        self.assertIn("本轮安全重启", configured)
+        self.assertLess(
+            configured.index("孵蛋测试_等待池塘野生战斗()"),
+            configured.index("识别抓捕对象名称优先OCR"),
+        )
+
+    def test_egg_seed_correction_reuses_formal_lock_controller(self):
+        original = """\
+FUNC 孵蛋流程_按观测Seed校正等待($Seed差索引: INT): INT
+    $孵蛋流程观测Seed差MS = 取MS($游戏版本, $目标索引 + $Seed差索引) - 取MS($游戏版本, $目标索引)
+    $孵蛋Seed等待MS = $孵蛋Seed等待MS - $孵蛋流程观测Seed差MS
+    RETURN 1
+ENDFUNC
+
+# -------------------- 蛋个体反查 --------------------
+"""
+        override = Path(EGG_SEED_CONTROLLER_OVERRIDE_PATH).read_text(
+            encoding="utf-8"
+        )
+        configured = _apply_egg_seed_controller_runtime_override_text(
+            original,
+            override,
+        )
+        configured_again = _apply_egg_seed_controller_runtime_override_text(
+            configured,
+            override,
+        )
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn("计算Seed锁定众数修正()", configured)
+        self.assertIn("$Seed精细修正MS", configured)
+        self.assertIn("$Seed预校准索引_NS1", configured)
+        self.assertIn("$Seed预校准索引_NS2", configured)
+        self.assertIn("正式版锁定与相邻Seed毫秒细调", configured)
+        self.assertNotIn("$孵蛋Seed等待MS = $孵蛋Seed等待MS -", configured)
 
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]

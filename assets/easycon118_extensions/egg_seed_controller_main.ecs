@@ -1,0 +1,89 @@
+# GUI 孵蛋运行时覆盖：复用正式版 Seed 锁定与相邻毫秒细调控制器
+# 本文件由 Python 替换到 1.1.8 的孵蛋主脚本，不单独执行。
+
+$孵蛋Seed控制器已初始化 = 0
+$孵蛋Seed控制器初始累计索引 = 0
+$孵蛋流程目标Seed基准MS = 0
+$孵蛋流程Seed控制器初始化结果 = 0
+
+FUNC 孵蛋流程_初始化Seed校准控制器(): INT
+    IF $孵蛋Seed控制器已初始化 == 1
+        RETURN 1
+    ENDIF
+
+    $孵蛋Seed控制器初始累计索引 = $Seed预校准索引_NS1
+    IF $NX机型 == 2
+        $孵蛋Seed控制器初始累计索引 = $Seed预校准索引_NS2
+    ENDIF
+    $Seed累计修正索引 = $孵蛋Seed控制器初始累计索引
+    $Seed修正目标索引 = $目标索引 + $Seed累计修正索引
+    IF $Seed修正目标索引 < 0
+        $Seed修正目标索引 = 0
+    ENDIF
+    IF $Seed修正目标索引 > $Seed最大索引
+        $Seed修正目标索引 = $Seed最大索引
+    ENDIF
+    $SeedMS实际执行修正量 = 取MS($游戏版本, $Seed修正目标索引) - 取MS($游戏版本, $目标索引)
+    $SeedMS上次实际执行修正量 = $SeedMS实际执行修正量
+
+    # 与正式版方案1共用同一个计算函数；这里只重置该控制器的跨轮状态。
+    $Seed锁定启用 = 0
+    $Seed锁定窗口样本数 = 0
+    $Seed锁定窗口指针 = 0
+    $Seed粗调上次有效 = 0
+    $Seed精细校准启用 = 0
+    $Seed精细修正MS = 0
+    $Seed锁定参数累计修正 = $Seed累计修正索引
+    $Seed锁定参数精细修正MS = 0
+    $孵蛋Seed控制器已初始化 = 1
+    PRINT 孵蛋Seed校准控制器: 正式版锁定与相邻Seed毫秒细调，初始累计索引 & $Seed累计修正索引
+    RETURN 1
+ENDFUNC
+
+FUNC 孵蛋流程_按观测Seed校正等待($Seed差索引: INT): INT
+    $孵蛋流程观测Seed索引 = $目标索引 + $Seed差索引
+    IF $孵蛋流程观测Seed索引 < 0 or $孵蛋流程观测Seed索引 > $Seed最大索引
+        PRINT 孵蛋Seed校正索引越界: & $孵蛋流程观测Seed索引
+        RETURN 0
+    ENDIF
+
+    $孵蛋流程Seed控制器初始化结果 = 孵蛋流程_初始化Seed校准控制器()
+    IF $孵蛋流程Seed控制器初始化结果 != 1
+        RETURN 0
+    ENDIF
+
+    # 野生反查只有在全部候选属于同一个 Seed 时才会进入这里，因此本轮 Seed 轴可信。
+    $命中差索引 = $Seed差索引
+    $Seed差绝对 = $Seed差索引
+    IF $Seed差绝对 < 0
+        $Seed差绝对 = 0 - $Seed差绝对
+    ENDIF
+    $Seed本轮可信 = 1
+    $Seed本次修正索引 = 计算Seed锁定众数修正()
+
+    $Seed累计修正索引 = 累加实际执行修正量($Seed累计修正索引, $Seed本次修正索引)
+    $Seed修正目标索引 = $目标索引 + $Seed累计修正索引
+    IF $Seed修正目标索引 < 0
+        $Seed修正目标索引 = 0
+    ENDIF
+    IF $Seed修正目标索引 > $Seed最大索引
+        $Seed修正目标索引 = $Seed最大索引
+    ENDIF
+    $SeedMS上次实际执行修正量 = $SeedMS实际执行修正量
+    $SeedMS实际执行修正量 = 取MS($游戏版本, $Seed修正目标索引) - 取MS($游戏版本, $目标索引)
+    $SeedMS本次新增修正量 = $SeedMS实际执行修正量 - $SeedMS上次实际执行修正量
+
+    $孵蛋流程目标Seed基准MS = 取MS($游戏版本, $目标索引) + $NXSeed平台偏移MS
+    $孵蛋Seed等待MS = $孵蛋流程目标Seed基准MS - $SeedMS实际执行修正量 + $Seed基础补偿 + $Seed精细修正MS
+    IF $孵蛋Seed等待MS <= 0
+        PRINT 孵蛋Seed校准生成了无效等待: & $孵蛋Seed等待MS
+        RETURN 0
+    ENDIF
+
+    PRINT 【孵蛋Seed校准】
+    PRINT 观测差: & $Seed差索引 & "；修正模式: " & $Seed修正模式文本
+    PRINT 索引修正: 本次 & $Seed本次修正索引 & "，累计 " & $Seed累计修正索引 & "，查表累计 " & $SeedMS实际执行修正量 & " ms"
+    PRINT 毫秒细调: 启用 & $Seed精细校准启用 & "，区间 " & $Seed精细下界MS & ".." & $Seed精细上界MS & " ms，当前 " & $Seed精细修正MS & " ms"
+    PRINT 下轮Seed等待: & $孵蛋Seed等待MS & " ms"
+    RETURN 1
+ENDFUNC

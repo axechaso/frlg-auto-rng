@@ -83,6 +83,18 @@ EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH = (
     / "easycon118_extensions"
     / "egg_party_slot_candy.ecs"
 )
+EGG_SURF_BATTLE_OVERRIDE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "egg_surf_battle_retry.ecs"
+)
+EGG_SEED_CONTROLLER_OVERRIDE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "egg_seed_controller_main.ecs"
+)
 OCR_NAME_LIBRARY_NAME = "19_OCR_GEN3战斗场景名称.ecs"
 OCR_RUNTIME_FALLBACK_MARKER = "# GUI 运行时覆盖：OCR 不可用时直接回到单字识别"
 OCR_NAME_ORIGINAL_FUNCTION = "FUNC OCR识别抓捕对象名称(): STRING"
@@ -138,6 +150,12 @@ EGG_PARTY_SLOT_MAIN_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_选择队伍槽"
 EGG_PARTY_SLOT_MAIN_NEXT_SECTION = "# -------------------- 野生Seed验证"
 EGG_PARTY_SLOT_CANDY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：神奇糖果按目标身份选择队伍末位或固定槽位"
 EGG_PARTY_SLOT_CANDY_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
+EGG_SURF_BATTLE_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：冲浪确认留足窗口，并在名称 OCR 前确认已进入野生战斗"
+EGG_SURF_BATTLE_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_前往池塘并甜甜香气抓捕"
+EGG_SURF_BATTLE_NEXT_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
+EGG_SEED_CONTROLLER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：复用正式版 Seed 锁定与相邻毫秒细调控制器"
+EGG_SEED_CONTROLLER_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_按观测Seed校正等待"
+EGG_SEED_CONTROLLER_NEXT_SECTION = "# -------------------- 蛋个体反查"
 EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
 EGG_PREPARED_254_GLOBAL = "$孵蛋从已完成254步开始"
 EGG_PREPARED_254_GLOBAL_ANCHOR = "$孵蛋同Seed模式 = 1"
@@ -664,6 +682,42 @@ def _apply_egg_party_slot_candy_runtime_override_text(
     return library_text[:start] + replacement + library_text[end:]
 
 
+def _apply_egg_surf_battle_runtime_override_text(
+    library_text: str,
+    override_text: str,
+) -> str:
+    """Gate egg-route name OCR on a verified wild-battle screen."""
+    if EGG_SURF_BATTLE_OVERRIDE_MARKER in library_text:
+        start = library_text.index(EGG_SURF_BATTLE_OVERRIDE_MARKER)
+    else:
+        if library_text.count(EGG_SURF_BATTLE_ORIGINAL_FUNCTION) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的池塘抓捕函数，拒绝应用冲浪修正")
+        start = library_text.index(EGG_SURF_BATTLE_ORIGINAL_FUNCTION)
+    if library_text.count(EGG_SURF_BATTLE_NEXT_FUNCTION) != 1:
+        raise ValueError("孵蛋流程库缺少池塘抓捕后继函数，拒绝应用冲浪修正")
+    end = library_text.index(EGG_SURF_BATTLE_NEXT_FUNCTION, start)
+    replacement = override_text.rstrip() + "\n\n"
+    return library_text[:start] + replacement + library_text[end:]
+
+
+def _apply_egg_seed_controller_runtime_override_text(
+    template_text: str,
+    override_text: str,
+) -> str:
+    """Reuse the formal Seed lock/fine-tune controller in the egg entry."""
+    if EGG_SEED_CONTROLLER_OVERRIDE_MARKER in template_text:
+        start = template_text.index(EGG_SEED_CONTROLLER_OVERRIDE_MARKER)
+    else:
+        if template_text.count(EGG_SEED_CONTROLLER_ORIGINAL_FUNCTION) != 1:
+            raise ValueError("孵蛋模板缺少唯一的Seed校正函数，拒绝应用控制器修正")
+        start = template_text.index(EGG_SEED_CONTROLLER_ORIGINAL_FUNCTION)
+    if template_text.count(EGG_SEED_CONTROLLER_NEXT_SECTION) != 1:
+        raise ValueError("孵蛋模板缺少蛋个体反查分区，拒绝应用Seed控制器修正")
+    end = template_text.index(EGG_SEED_CONTROLLER_NEXT_SECTION, start)
+    replacement = override_text.rstrip() + "\n\n"
+    return template_text[:start] + replacement + template_text[end:]
+
+
 def _apply_egg_home_buffer_runtime_override_text(
     template_text: str,
     override_text: str,
@@ -801,6 +855,9 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
     party_slot_candy_override_text = EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH.read_text(
         encoding="utf-8"
     )
+    surf_battle_override_text = EGG_SURF_BATTLE_OVERRIDE_PATH.read_text(
+        encoding="utf-8"
+    )
     configured = _apply_egg_restart_runtime_override_text(
         library_path.read_text(encoding="utf-8"),
         restart_override_text,
@@ -813,6 +870,10 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
         configured,
         party_slot_candy_override_text,
     )
+    configured = _apply_egg_surf_battle_runtime_override_text(
+        configured,
+        surf_battle_override_text,
+    )
     library_path.write_text(configured, encoding="utf-8")
     return {
         "egg_restart_original_flow_sha256": hashlib.sha256(
@@ -823,6 +884,9 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
         ).hexdigest(),
         "egg_party_slot_candy_sha256": hashlib.sha256(
             party_slot_candy_override_text.encode("utf-8")
+        ).hexdigest(),
+        "egg_surf_battle_retry_sha256": hashlib.sha256(
+            surf_battle_override_text.encode("utf-8")
         ).hexdigest(),
     }
 
@@ -951,6 +1015,13 @@ def write_configured_egg_project(
         configured,
         party_slot_main_override_text,
     )
+    seed_controller_override_text = EGG_SEED_CONTROLLER_OVERRIDE_PATH.read_text(
+        encoding="utf-8"
+    )
+    configured = _apply_egg_seed_controller_runtime_override_text(
+        configured,
+        seed_controller_override_text,
+    )
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
     wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
@@ -977,6 +1048,9 @@ def write_configured_egg_project(
     ).hexdigest()
     runtime_overrides["egg_party_slot_main_sha256"] = hashlib.sha256(
         party_slot_main_override_text.encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["egg_seed_controller_sha256"] = hashlib.sha256(
+        seed_controller_override_text.encode("utf-8")
     ).hexdigest()
     runtime_overrides["egg_prepared_254_start_sha256"] = hashlib.sha256(
         _egg_prepared_254_override_text(request.start_from_prepared_254).encode(
