@@ -145,7 +145,7 @@ TID/SID 页使用“自定义TID SID 御三家乱数多功能包1.3”中的英�
 
 脚本会新建存档并自动退出游戏两次。名称或性别改变后必须先重新做固定延迟检查。日文 1.3.7 原脚本的 `FOR $InputLen` 在 1.6.4-a 会触发只读临时变量错误；生成器只在运行副本中将其替换为等价的显式索引循环，原始模板不被修改。
 
-英文 1.3.7 的用户区结束标记之后保持与原版逐字一致，`HOME_BUFFER` 等函数不会被生成器改写。EasyCon 1.6.4-a GUI 会持续读取采集卡并对 ImgLabel 置信度使用 `Math.Ceiling`；同包 `ezcon.exe run` 只在每次标签求值时读一帧，且直接截断小数，DSHOW 缓冲帧可导致 CLI 在同一延迟看到旧画面。自动启动使用由同一 `9c86137` 源码构建的兼容 runner：后台持续清空采集队列，标签只读最新帧副本，并保留 GUI 的向上取整。启动时会输出采集卡返回的实际宽高。原始 `ezcon.exe` 仍负责版本/哈希、设备、Tessdata 与 `format` 预检，视频后端仍为 DSHOW。
+英文 1.3.7 的用户区结束标记之后保持与原版逐字一致，`HOME_BUFFER` 等函数不会被生成器改写。EasyCon 1.6.4-a GUI 会持续读取采集卡并对 ImgLabel 置信度使用 `Math.Ceiling`；同包 `ezcon.exe run` 只在每次标签求值时读一帧，且直接截断小数，DSHOW 缓冲帧可导致 CLI 在同一延迟看到旧画面。自动启动使用由同一 `9c86137` 源码构建的兼容 runner：后台持续清空采集队列，图片标签与本地 Tesseract OCR 共用最新帧副本，并保留 GUI 的向上取整。runner 使用自包含文件夹发布，避免 Tesseract 在单文件发布中无法定位原生库。启动时会输出采集卡返回的实际宽高。原始 `ezcon.exe` 仍负责版本/哈希、设备、Tessdata 与 `format` 预检，视频后端仍为 DSHOW。
 
 TID 到御三家的连续流程不再复制样本中的旧御三家控制器。`automation/tid_starter_flow.py` 生成一份英文 1.3.7 ID 工程、独立研究所桥接工程，以及把搜索结果写入现有 1.1.8 `Starter` 流程的第三阶段工程；`run_tid_starter_flow.py` 在每一段成功退出后才启动下一段。`rng/starter_sid_verification.py` 使用 Ten Lines Seed 表从 ADV 1500 起搜索最早可达的闪光 Method 1 御三家目标。日文 1.3.7 仍可单独运行，但现有 1.1.8 的 Seed 表和 OCR 只审计了英文版，因此暂不开放日文连续流程。
 
@@ -164,7 +164,7 @@ TID 到御三家的连续流程不再复制样本中的旧御三家控制器。`
   --iv-max 29/31/27/29/29/30
 ```
 
-只有显式增加 `--run` 才会把控制权交给兼容 runner。换设备后如未复制 `runtime_backend` 中的可执行文件，可运行 `tools\build_easycon164a_compat_runner.ps1` 重新构建。
+只有显式增加 `--run` 才会把控制权交给兼容 runner。换设备后必须复制完整的 `runtime_backend` runner 文件夹；若缺失，可运行 `tools\build_easycon164a_compat_runner.ps1` 重新构建。
 
 ## 测试
 

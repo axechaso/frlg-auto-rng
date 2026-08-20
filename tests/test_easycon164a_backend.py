@@ -10,6 +10,30 @@ import automation.easycon118 as backend
 
 
 class EasyCon164aBackendTests(unittest.TestCase):
+    def test_ocr_unavailable_sentinel_skips_name_correction(self):
+        original = """\
+FUNC OCR识别抓捕对象名称(): STRING
+    $name = OCR(310, 141, 360, 53, "frlg_battle")
+    $fixedName = OCR名称V2后处理($name)
+    RETURN $fixedName
+ENDFUNC
+
+FUNC OCR最小3($A: INT, $B: INT, $C: INT): INT
+    RETURN $A
+ENDFUNC
+"""
+        configured = backend._apply_ocr_runtime_fallback_text(original)
+        configured_again = backend._apply_ocr_runtime_fallback_text(configured)
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(backend.OCR_RUNTIME_FALLBACK_MARKER, configured)
+        self.assertIn('IF $name == "OCR NOT SUPPORT"', configured)
+        self.assertIn('IF $name == "OCR ARGS ERR!"', configured)
+        self.assertLess(
+            configured.index('IF $name == "OCR NOT SUPPORT"'),
+            configured.index("$fixedName = OCR名称V2后处理($name)"),
+        )
+
     def test_compat_patch_uses_a_continuous_latest_frame_capture(self):
         root = Path(__file__).resolve().parents[1]
         patch_text = (
@@ -23,14 +47,33 @@ class EasyCon164aBackendTests(unittest.TestCase):
 
         self.assertEqual(
             backend.EXPECTED_COMPAT_PATCH_ID,
-            "cli-latest-frame-ceiling-v2",
+            "cli-latest-frame-ceiling-ocr-onedir-v4",
         )
         self.assertIn("captureTask = Task.Run", additions)
         self.assertIn("latestFrame = frame.Clone()", additions)
-        self.assertIn("snapshot = latestFrame.Clone()", additions)
+        self.assertIn("using var snapshot = CloneLatestFrame()", additions)
+        self.assertIn("return latestFrame.Clone()", additions)
         self.assertIn("il.Search(snapshot, out var md)", additions)
         self.assertIn("return (int)Math.Ceiling(md)", additions)
+        self.assertIn(
+            "OcrDelegateFactory.Create(CloneLatestFrame)", additions
+        )
+        self.assertIn(
+            "runner.Run(outdap, pad, ocr, externalGetters, cancellationToken)",
+            additions,
+        )
+        self.assertNotIn(
+            "runner.Run(outdap, pad, null, externalGetters, cancellationToken)",
+            additions,
+        )
         self.assertIn("采集卡实际画面", additions)
+
+        build_script = (
+            root / "tools" / "build_easycon164a_compat_runner.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("-p:PublishSingleFile=false", build_script)
+        self.assertNotIn("-p:PublishSingleFile=true", build_script)
+        self.assertIn("self-contained onedir", build_script)
 
     def test_default_backend_is_the_pinned_164a_package(self):
         self.assertEqual(
@@ -39,6 +82,10 @@ class EasyCon164aBackendTests(unittest.TestCase):
         )
         self.assertEqual(backend.DEFAULT_EZCON_PATH.name, "ezcon.exe")
         self.assertIn("v1.6.4alpha", str(backend.DEFAULT_EZCON_PATH))
+        self.assertEqual(
+            backend.DEFAULT_COMPAT_RUNNER_PATH.name,
+            "EasyCon2.CLI-ocr-v4.exe",
+        )
 
     def test_runtime_preflight_uses_format_instead_of_170_ir(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -60,7 +107,6 @@ class EasyCon164aBackendTests(unittest.TestCase):
             }
             for name, data in models.items():
                 (tessdata / name).write_bytes(data)
-
             expected_models = {
                 name: hashlib.sha256(data).hexdigest()
                 for name, data in models.items()
@@ -130,6 +176,14 @@ class EasyCon164aBackendTests(unittest.TestCase):
             }
             for name, data in models.items():
                 (tessdata / name).write_bytes(data)
+            native_files = {
+                "x64/leptonica-1.82.0.dll": b"leptonica-native",
+                "x64/tesseract50.dll": b"tesseract-native",
+            }
+            for relative_name, data in native_files.items():
+                path = runner_dir / Path(relative_name)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
             manifest = {
                 "source_commit": backend.EXPECTED_COMPAT_SOURCE_COMMIT,
                 "patch_id": backend.EXPECTED_COMPAT_PATCH_ID,
@@ -157,6 +211,14 @@ class EasyCon164aBackendTests(unittest.TestCase):
                     },
                 ),
                 mock.patch.object(
+                    backend,
+                    "EXPECTED_COMPAT_OCR_NATIVE_SHA256",
+                    {
+                        name: hashlib.sha256(data).hexdigest()
+                        for name, data in native_files.items()
+                    },
+                ),
+                mock.patch.object(
                     backend.subprocess, "run", return_value=version_result
                 ),
             ):
@@ -165,6 +227,8 @@ class EasyCon164aBackendTests(unittest.TestCase):
             self.assertEqual(result, runner.resolve())
             for name, data in models.items():
                 self.assertEqual((runner_dir / "Tessdata" / name).read_bytes(), data)
+            for relative_name, data in native_files.items():
+                self.assertEqual((runner_dir / Path(relative_name)).read_bytes(), data)
 
 
 if __name__ == "__main__":

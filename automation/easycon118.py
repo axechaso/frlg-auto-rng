@@ -24,10 +24,14 @@ EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
 EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
-EXPECTED_COMPAT_PATCH_ID = "cli-latest-frame-ceiling-v2"
+EXPECTED_COMPAT_PATCH_ID = "cli-latest-frame-ceiling-ocr-onedir-v4"
 EXPECTED_TESSDATA_SHA256 = {
     "frlg_battle.traineddata": "7abcaef4936727b33717656b38fd5b5027823e1cafec21abb06cc8ef1f7ff758",
     "FRLG_EN_ALL.traineddata": "3272f23a6f259518813025d89be77d706574ccdf163132ccf6f5be15ca19cfa0",
+}
+EXPECTED_COMPAT_OCR_NATIVE_SHA256 = {
+    "x64/leptonica-1.82.0.dll": "dfcb3e6ed0b16bc55bfdbcf53543cfe42a354b87c3e35bd3a95eebf005d73e76",
+    "x64/tesseract50.dll": "de4d04ec75095374d98f5dd7a60d14d7e2e0f76589db693eccf7ae658be8cb2b",
 }
 DEFAULT_EZCON_PATH = (
     Path.home()
@@ -42,7 +46,7 @@ DEFAULT_COMPAT_RUNNER_PATH = (
     Path(__file__).resolve().parents[1]
     / "runtime_backend"
     / "easycon164a-cli-gui-rounding-selfcontained"
-    / "EasyCon2.CLI.exe"
+    / "EasyCon2.CLI-ocr-v4.exe"
 )
 STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8.ecs"
 EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
@@ -79,6 +83,40 @@ EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH = (
     / "easycon118_extensions"
     / "egg_party_slot_candy.ecs"
 )
+OCR_NAME_LIBRARY_NAME = "19_OCR_GEN3战斗场景名称.ecs"
+OCR_RUNTIME_FALLBACK_MARKER = "# GUI 运行时覆盖：OCR 不可用时直接回到单字识别"
+OCR_NAME_ORIGINAL_FUNCTION = "FUNC OCR识别抓捕对象名称(): STRING"
+OCR_NAME_NEXT_FUNCTION = "FUNC OCR最小3"
+OCR_RUNTIME_FALLBACK_FUNCTION = """\
+# GUI 运行时覆盖：OCR 不可用时直接回到单字识别
+FUNC OCR识别抓捕对象名称(): STRING
+
+    $name = OCR(310, 141, 360, 53, "frlg_battle")
+    IF $name == "OCR NOT SUPPORT"
+        PRINT ""
+        PRINT 【OCR名称识别】
+        PRINT "OCR原文:" & $name
+        PRINT OCR运行时不可用，跳过名称后处理
+        RETURN ""
+    ENDIF
+    IF $name == "OCR ARGS ERR!"
+        PRINT ""
+        PRINT 【OCR名称识别】
+        PRINT "OCR原文:" & $name
+        PRINT OCR区域参数无效，跳过名称后处理
+        RETURN ""
+    ENDIF
+
+    $fixedName = OCR名称V2后处理($name)
+
+    PRINT ""
+    PRINT 【OCR名称识别】
+    PRINT "OCR原文:" & $name
+    PRINT "后处理:" & $fixedName
+
+    RETURN $fixedName
+ENDFUNC
+"""
 EGG_SETTINGS_LIBRARY_NAME = "27_孵蛋测试流程.ecs"
 EGG_SETTINGS_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：游戏设置 OCR 使用有限重试"
 EGG_SETTINGS_NEXT_FUNCTION = "FUNC 孵蛋测试_执行前置准备"
@@ -444,6 +482,30 @@ def _apply_egg_summary_fix_text(template_text: str) -> str:
     return template_text
 
 
+def _apply_ocr_runtime_fallback_text(library_text: str) -> str:
+    """Do not feed EasyCon OCR sentinel strings into Pokémon-name correction."""
+    if OCR_RUNTIME_FALLBACK_MARKER in library_text:
+        return library_text
+    if library_text.count(OCR_NAME_ORIGINAL_FUNCTION) != 1:
+        raise ValueError("OCR 名称库缺少唯一的识别函数，拒绝应用不可用兜底")
+    if library_text.count(OCR_NAME_NEXT_FUNCTION) != 1:
+        raise ValueError("OCR 名称库缺少唯一的后继函数，拒绝应用不可用兜底")
+    start = library_text.index(OCR_NAME_ORIGINAL_FUNCTION)
+    end = library_text.index(OCR_NAME_NEXT_FUNCTION, start)
+    replacement = OCR_RUNTIME_FALLBACK_FUNCTION.rstrip() + "\n\n"
+    return library_text[:start] + replacement + library_text[end:]
+
+
+def apply_ocr_runtime_fallback(library_path: str | Path) -> str:
+    """Patch a copied runtime library and return the audited overlay hash."""
+    library_path = Path(library_path)
+    configured = _apply_ocr_runtime_fallback_text(
+        library_path.read_text(encoding="utf-8")
+    )
+    library_path.write_text(configured, encoding="utf-8")
+    return hashlib.sha256(OCR_RUNTIME_FALLBACK_FUNCTION.encode("utf-8")).hexdigest()
+
+
 def _apply_egg_party_slot_main_runtime_override_text(
     template_text: str,
     override_text: str,
@@ -716,6 +778,10 @@ def write_configured_project(
                 shutil.rmtree(target)
             shutil.copytree(source, target)
 
+    ocr_fallback_sha256 = apply_ocr_runtime_fallback(
+        output_dir / "lib" / OCR_NAME_LIBRARY_NAME
+    )
+
     manifest = {
         "source": str(source_dir.resolve()),
         "template": template_path.name,
@@ -729,6 +795,9 @@ def write_configured_project(
         "scripts": {
             "expected_count": EXPECTED_SCRIPT_FILE_COUNT,
             "expected_sha256": EXPECTED_SCRIPT_SHA256,
+        },
+        "runtime_overrides": {
+            "ocr_unavailable_fallback_sha256": ocr_fallback_sha256,
         },
         "backend": {
             "name": EASYCON_BACKEND_NAME,
@@ -797,9 +866,13 @@ def write_configured_egg_project(
                 shutil.rmtree(target)
             shutil.copytree(source, target)
 
+    ocr_fallback_sha256 = apply_ocr_runtime_fallback(
+        output_dir / "lib" / OCR_NAME_LIBRARY_NAME
+    )
     runtime_overrides = apply_egg_settings_runtime_override(
         output_dir / "lib" / EGG_SETTINGS_LIBRARY_NAME
     )
+    runtime_overrides["ocr_unavailable_fallback_sha256"] = ocr_fallback_sha256
     runtime_overrides["egg_home_buffer_refine_sha256"] = hashlib.sha256(
         home_buffer_override_text.encode("utf-8")
     ).hexdigest()
@@ -984,7 +1057,7 @@ def prepare_compat_runner(
     ezcon_path: str | Path,
     runner_path: str | Path = DEFAULT_COMPAT_RUNNER_PATH,
 ) -> Path:
-    """Validate the pinned latest-frame CLI and sync the audited OCR models.
+    """Validate the pinned latest-frame CLI and sync audited local-OCR assets.
 
     EasyCon 1.6.4-a's GUI rounds image-label confidence upward with
     ``Math.Ceiling`` and continuously drains the capture device.  Its bundled
@@ -1052,6 +1125,18 @@ def prepare_compat_runner(
         target = target_tessdata / model
         if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha256:
             shutil.copy2(source, target)
+    for relative_name, expected_sha256 in EXPECTED_COMPAT_OCR_NATIVE_SHA256.items():
+        relative_path = Path(relative_name)
+        native_path = runner_path.parent / relative_path
+        if not native_path.is_file():
+            raise FileNotFoundError(
+                f"兼容运行器缺少 OCR 原生依赖 {relative_name}；请重新构建 runner"
+            )
+        native_sha256 = hashlib.sha256(native_path.read_bytes()).hexdigest()
+        if native_sha256 != expected_sha256:
+            raise ValueError(
+                f"兼容运行器 OCR 原生依赖/{relative_name} 指纹不一致: {native_sha256}"
+            )
     return runner_path
 
 

@@ -7,6 +7,7 @@ $buildRoot = [IO.Path]::GetFullPath((Join-Path $root ".build"))
 $staging = [IO.Path]::GetFullPath((Join-Path $buildRoot "publish-easycon164a-compat"))
 $patch = Join-Path $PSScriptRoot "patches\easycon164a-cli-gui-rounding.patch"
 $commit = "9c86137c7e63bff842175470895727a5fa9bab52"
+$runnerFilename = "EasyCon2.CLI-ocr-v4.exe"
 
 if (-not (Test-Path -LiteralPath (Join-Path $source ".git"))) {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $source) | Out-Null
@@ -45,9 +46,8 @@ if (Test-Path -LiteralPath $staging) {
 dotnet publish $project -c Release --no-restore -r win-x64 -t:Rebuild `
     -p:DefaultTargetFramework=net9.0 `
     -p:LtsTargetFramework=net9.0 `
-    -p:PublishSingleFile=true `
+    -p:PublishSingleFile=false `
     -p:SelfContained=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -o $staging
@@ -63,7 +63,10 @@ if ($LASTEXITCODE -ne 0 -or $stagedVersion -ne "1.6.4-a+$commit") {
 }
 
 New-Item -ItemType Directory -Force -Path $output | Out-Null
-$runner = Join-Path $output "EasyCon2.CLI.exe"
+$runner = Join-Path $output $runnerFilename
+Get-ChildItem -LiteralPath $staging -Force | Where-Object { $_.Name -ne "EasyCon2.CLI.exe" } | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $output -Recurse -Force
+}
 Copy-Item -LiteralPath $stagedRunner -Destination $runner -Force
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $runner).Hash.ToLowerInvariant()
 $length = (Get-Item -LiteralPath $runner).Length
@@ -71,10 +74,10 @@ $manifest = [ordered]@{
     source_repository = "https://github.com/EasyConNS/EasyCon.git"
     source_commit = $commit
     source_version = "1.6.4-a"
-    patch_id = "cli-latest-frame-ceiling-v2"
-    description = "Continuously capture the newest DSHOW frame, log its dimensions, and use the EasyCon 1.6.4-a GUI's Math.Ceiling confidence rounding."
-    build_target = "net9.0/win-x64 self-contained single-file"
-    filename = "EasyCon2.CLI.exe"
+    patch_id = "cli-latest-frame-ceiling-ocr-onedir-v4"
+    description = "Continuously capture the newest DSHOW frame, share it with local OCR, log its dimensions, and use the EasyCon 1.6.4-a GUI's Math.Ceiling confidence rounding."
+    build_target = "net9.0/win-x64 self-contained onedir"
+    filename = $runnerFilename
     bytes = $length
     sha256 = $hash
 }

@@ -33,8 +33,11 @@ rng/dev/
 .tools/
 local_assets/
 runtime/
-runtime_backend/**/EasyCon2.CLI.exe
+runtime_backend/**/EasyCon2.CLI*.exe
 runtime_backend/**/Tessdata/
+runtime_backend/**/x64/
+runtime_backend/easycon164a-cli-gui-rounding-selfcontained/*
+!runtime_backend/easycon164a-cli-gui-rounding-selfcontained/build-manifest.json
 launch.log
 
 # DeepSeek TUI local config
