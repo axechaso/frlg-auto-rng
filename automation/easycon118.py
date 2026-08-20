@@ -55,24 +55,21 @@ EGG_SETTINGS_OVERRIDE_PATH = (
     / "easycon118_extensions"
     / "egg_settings_retry.ecs"
 )
+EGG_RESTART_OVERRIDE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "egg_restart_original_flow.ecs"
+)
 EGG_SETTINGS_LIBRARY_NAME = "27_孵蛋测试流程.ecs"
 EGG_SETTINGS_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：游戏设置 OCR 使用有限重试"
 EGG_SETTINGS_NEXT_FUNCTION = "FUNC 孵蛋测试_执行前置准备"
-EGG_HOME_RESAMPLE_ORIGINAL = """\
-        IF $孵蛋库_主页匹配 < $识图阈值 and $孵蛋库_主页NS2匹配 < $识图阈值
-            HOME 100
-            WAIT 1500
-        ENDIF
-"""
-EGG_HOME_RESAMPLE_FIXED = """\
-        IF $孵蛋库_主页匹配 < $识图阈值 and $孵蛋库_主页NS2匹配 < $识图阈值
-            HOME 100
-            WAIT 1500
-            IF $孵蛋库_调试日志输出 == 1
-                PRINT 孵蛋重启识图|已从游戏内请求主页，重新采样
-            ENDIF
-            CONTINUE
-        ENDIF
+EGG_RESTART_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按 1.1.8 原版顺序关闭游戏，优先处理退出状态"
+EGG_RESTART_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_关闭游戏"
+EGG_RESTART_NEXT_FUNCTION = "FUNC 孵蛋测试_软重启并跳过回忆"
+EGG_RESTART_GLOBALS = """\
+$孵蛋库_重启识别尝试 = 0
+$孵蛋库_已请求主页 = 0
 """
 EGG_SETTINGS_GLOBALS = """\
 $孵蛋库_设置识别尝试 = 0
@@ -374,7 +371,38 @@ def _configure_user_values(template_text: str, values: dict[str, Any]) -> str:
 
 def configure_egg_template_text(template_text: str, request: EggRunRequest) -> str:
     """Configure the 1.6.4a-only experimental same-seed egg entry."""
-    return _configure_user_values(template_text, egg_request_to_user_values(request))
+    configured = _configure_user_values(template_text, egg_request_to_user_values(request))
+    return _apply_egg_summary_fix_text(configured)
+
+
+def _apply_egg_summary_fix_text(template_text: str) -> str:
+    """Keep function calls out of PRINT and remove a stray quote in the egg summary."""
+    inline_species = (
+        "    PRINT 孵蛋蛋种: & 目标中文名称($游戏版本, $孵蛋蛋种族全国图鉴编号)"
+        " & \"（全国图鉴 \" & $孵蛋蛋种族全国图鉴编号 & \"）\""
+    )
+    fixed_species = (
+        "    $孵蛋蛋种名称文本 = 目标中文名称($游戏版本, $孵蛋蛋种族全国图鉴编号)\n"
+        "    PRINT 孵蛋蛋种: & $孵蛋蛋种名称文本 & \"（全国图鉴 \""
+        " & $孵蛋蛋种族全国图鉴编号 & \"）\""
+    )
+    bad_parents = (
+        "    PRINT 亲本: A \" & $孵蛋亲本A性别 & \"，B \""
+        " & $孵蛋亲本B性别 & \"，相性 \" & $孵蛋双亲相性"
+    )
+    fixed_parents = (
+        "    PRINT 亲本: A & $孵蛋亲本A性别 & \"，B \""
+        " & $孵蛋亲本B性别 & \"，相性 \" & $孵蛋双亲相性"
+    )
+    if fixed_species not in template_text:
+        if template_text.count(inline_species) != 1:
+            raise ValueError("孵蛋模板缺少唯一的蛋种摘要，拒绝应用日志修正")
+        template_text = template_text.replace(inline_species, fixed_species, 1)
+    if fixed_parents not in template_text:
+        if template_text.count(bad_parents) != 1:
+            raise ValueError("孵蛋模板缺少唯一的亲本摘要，拒绝应用日志修正")
+        template_text = template_text.replace(bad_parents, fixed_parents, 1)
+    return template_text
 
 
 def _apply_egg_settings_runtime_override_text(
@@ -406,32 +434,62 @@ def _apply_egg_settings_runtime_override_text(
     return library_text[:start] + replacement + library_text[end:]
 
 
+def _apply_egg_restart_runtime_override_text(
+    library_text: str,
+    override_text: str,
+) -> str:
+    """Replace the whole egg restart helper with the audited original flow."""
+    global_anchor = "$孵蛋库_正在关闭匹配 = 0\n"
+    if EGG_RESTART_GLOBALS not in library_text:
+        if library_text.count(global_anchor) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的关闭状态全局变量，拒绝应用重启覆盖")
+        library_text = library_text.replace(
+            global_anchor,
+            global_anchor + EGG_RESTART_GLOBALS,
+            1,
+        )
+
+    if EGG_RESTART_OVERRIDE_MARKER in library_text:
+        start = library_text.index(EGG_RESTART_OVERRIDE_MARKER)
+    else:
+        if library_text.count(EGG_RESTART_ORIGINAL_FUNCTION) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的关闭游戏函数，拒绝应用重启覆盖")
+        start = library_text.index(EGG_RESTART_ORIGINAL_FUNCTION)
+    if library_text.count(EGG_RESTART_NEXT_FUNCTION) != 1:
+        raise ValueError("孵蛋流程库缺少唯一的软重启函数，拒绝应用重启覆盖")
+    end = library_text.index(EGG_RESTART_NEXT_FUNCTION, start)
+    replacement = override_text.rstrip() + "\n\n"
+    return library_text[:start] + replacement + library_text[end:]
+
+
 def _apply_egg_home_resample_fix_text(library_text: str) -> str:
-    """Discard the stale in-game scores after HOME and sample the Home screen."""
-    if EGG_HOME_RESAMPLE_FIXED in library_text:
-        return library_text
-    if library_text.count(EGG_HOME_RESAMPLE_ORIGINAL) != 1:
-        raise ValueError("孵蛋流程库缺少唯一的游戏内返回主页分支，拒绝应用重启修正")
-    return library_text.replace(
-        EGG_HOME_RESAMPLE_ORIGINAL,
-        EGG_HOME_RESAMPLE_FIXED,
-        1,
-    )
+    """Compatibility wrapper for the complete original-flow restart overlay."""
+    override_text = EGG_RESTART_OVERRIDE_PATH.read_text(encoding="utf-8")
+    return _apply_egg_restart_runtime_override_text(library_text, override_text)
 
 
-def apply_egg_settings_runtime_override(library_path: str | Path) -> str:
-    """Apply the GUI-only restart/settings overlays and return the asset SHA-256."""
+def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, str]:
+    """Apply the GUI-only restart/settings overlays and return their fingerprints."""
     library_path = Path(library_path)
-    override_text = EGG_SETTINGS_OVERRIDE_PATH.read_text(encoding="utf-8")
-    configured = _apply_egg_home_resample_fix_text(
-        library_path.read_text(encoding="utf-8")
+    restart_override_text = EGG_RESTART_OVERRIDE_PATH.read_text(encoding="utf-8")
+    settings_override_text = EGG_SETTINGS_OVERRIDE_PATH.read_text(encoding="utf-8")
+    configured = _apply_egg_restart_runtime_override_text(
+        library_path.read_text(encoding="utf-8"),
+        restart_override_text,
     )
     configured = _apply_egg_settings_runtime_override_text(
         configured,
-        override_text,
+        settings_override_text,
     )
     library_path.write_text(configured, encoding="utf-8")
-    return hashlib.sha256(override_text.encode("utf-8")).hexdigest()
+    return {
+        "egg_restart_original_flow_sha256": hashlib.sha256(
+            restart_override_text.encode("utf-8")
+        ).hexdigest(),
+        "egg_settings_retry_sha256": hashlib.sha256(
+            settings_override_text.encode("utf-8")
+        ).hexdigest(),
+    }
 
 
 def write_configured_project(
@@ -544,7 +602,7 @@ def write_configured_egg_project(
                 shutil.rmtree(target)
             shutil.copytree(source, target)
 
-    override_sha256 = apply_egg_settings_runtime_override(
+    runtime_overrides = apply_egg_settings_runtime_override(
         output_dir / "lib" / EGG_SETTINGS_LIBRARY_NAME
     )
 
@@ -553,10 +611,7 @@ def write_configured_egg_project(
         "template": template_path.name,
         "egg_request": request.to_dict(),
         "experimental": True,
-        "runtime_overrides": {
-            "egg_settings_retry_sha256": override_sha256,
-            "egg_home_resample": "after-home-continue-v1",
-        },
+        "runtime_overrides": runtime_overrides,
         "labels": {
             "expected_count": EXPECTED_LABEL_COUNT,
             "expected_methods": EXPECTED_LABEL_METHODS,

@@ -2,10 +2,14 @@ import unittest
 from pathlib import Path
 
 from automation.easycon118 import (
+    EGG_RESTART_GLOBALS,
+    EGG_RESTART_OVERRIDE_PATH,
     EGG_SETTINGS_GLOBALS,
     EGG_SETTINGS_OVERRIDE_PATH,
     EggRunRequest,
     _apply_egg_home_resample_fix_text,
+    _apply_egg_restart_runtime_override_text,
+    _apply_egg_summary_fix_text,
     _apply_egg_settings_runtime_override_text,
     configure_egg_template_text,
     egg_request_to_user_values,
@@ -52,12 +56,25 @@ class EasyCon118EggTests(unittest.TestCase):
             "孵蛋双亲B_SPA", "孵蛋双亲B_SPD", "孵蛋双亲B_SPE",
         )
         template = "\n".join(f'${name} = "old"' for name in names)
+        template += (
+            "\n    PRINT 孵蛋蛋种: & 目标中文名称($游戏版本, $孵蛋蛋种族全国图鉴编号)"
+            " & \"（全国图鉴 \" & $孵蛋蛋种族全国图鉴编号 & \"）\""
+        )
+        template += (
+            "\n    PRINT 亲本: A \" & $孵蛋亲本A性别 & \"，B \""
+            " & $孵蛋亲本B性别 & \"，相性 \" & $孵蛋双亲相性"
+        )
         template += "\n# ============================进阶设置\n$内部参数 = 1"
         configured = configure_egg_template_text(template, egg_request())
         self.assertIn('$静态或野生 = "孵蛋"', configured)
         self.assertIn('$目标Seed = "75D1"', configured)
         self.assertIn('$孵蛋双亲A_DEF = 29', configured)
         self.assertIn('$孵蛋双亲B_SPA = 3', configured)
+        self.assertIn(
+            "$孵蛋蛋种名称文本 = 目标中文名称($游戏版本, $孵蛋蛋种族全国图鉴编号)",
+            configured,
+        )
+        self.assertIn("PRINT 亲本: A & $孵蛋亲本A性别", configured)
 
     def test_request_rejects_unsupported_timeline_inputs(self):
         invalid = (
@@ -99,8 +116,9 @@ ENDFUNC
         self.assertIn("设置识别 BUTTON 第", configured)
         self.assertIn("WAIT 2000", configured)
 
-    def test_game_start_resamples_after_pressing_home(self):
+    def test_game_restart_uses_original_flow_with_exit_state_priority(self):
         original = """\
+$孵蛋库_正在关闭匹配 = 0
 FUNC 孵蛋测试_关闭游戏($识图阈值: INT): INT
     FOR
         IF $孵蛋库_主页匹配 < $识图阈值 and $孵蛋库_主页NS2匹配 < $识图阈值
@@ -110,13 +128,38 @@ FUNC 孵蛋测试_关闭游戏($识图阈值: INT): INT
         PRINT 不应使用按HOME前的旧分数
     NEXT
 ENDFUNC
+
+FUNC 孵蛋测试_软重启并跳过回忆($识图阈值: INT): INT
+    RETURN 1
+ENDFUNC
 """
-        configured = _apply_egg_home_resample_fix_text(original)
-        configured_again = _apply_egg_home_resample_fix_text(configured)
+        override = Path(EGG_RESTART_OVERRIDE_PATH).read_text(encoding="utf-8")
+        configured = _apply_egg_restart_runtime_override_text(original, override)
+        configured_again = _apply_egg_restart_runtime_override_text(configured, override)
 
         self.assertEqual(configured_again, configured)
-        self.assertIn("WAIT 1500\n            IF $孵蛋库_调试日志输出 == 1", configured)
-        self.assertIn("重新采样\n            ENDIF\n            CONTINUE", configured)
+        self.assertIn(EGG_RESTART_GLOBALS, configured)
+        self.assertLess(
+            configured.index("IF ($孵蛋库_正确退出匹配"),
+            configured.index("ELIF $孵蛋库_主页匹配"),
+        )
+        self.assertEqual(configured.count("HOME 100"), 1)
+        self.assertIn("$孵蛋库_已请求主页 == 0", configured)
+        self.assertIn("$孵蛋库_重启识别尝试 < 3", configured)
+        self.assertIn("已从游戏内请求主页，重新采样", configured)
+
+    def test_egg_summary_fix_is_idempotent(self):
+        original = """\
+    PRINT 孵蛋蛋种: & 目标中文名称($游戏版本, $孵蛋蛋种族全国图鉴编号) & "（全国图鉴 " & $孵蛋蛋种族全国图鉴编号 & "）"
+    PRINT 亲本: A " & $孵蛋亲本A性别 & "，B " & $孵蛋亲本B性别 & "，相性 " & $孵蛋双亲相性
+"""
+        configured = _apply_egg_summary_fix_text(original)
+        configured_again = _apply_egg_summary_fix_text(configured)
+        self.assertEqual(configured_again, configured)
+        self.assertNotIn("PRINT 孵蛋蛋种: & 目标中文名称", configured)
+        self.assertIn("$孵蛋蛋种名称文本 = 目标中文名称", configured)
+        self.assertIn("PRINT 亲本: A & $孵蛋亲本A性别", configured)
+        self.assertNotIn('PRINT 亲本: A " &', configured)
 
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]
@@ -143,6 +186,11 @@ ENDFUNC
         self.assertIn("孵蛋重启识图失败", close_game)
         self.assertIn("已从游戏内请求主页，重新采样", close_game)
         self.assertIn("CONTINUE", close_game)
+        self.assertLess(
+            close_game.index("IF ($孵蛋库_正确退出匹配"),
+            close_game.index("ELIF $孵蛋库_主页匹配"),
+        )
+        self.assertEqual(close_game.count("HOME 100"), 1)
         self.assertIn(
             "WAIT 1500\n    A\n    WAIT 1200\n    A\n    WAIT 8000",
             soft_reset,
