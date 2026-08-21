@@ -11,6 +11,7 @@ from run_auto_rng_gui import (
     filter_autocomplete_choices,
     iv_ranges_for_preset,
     parse_egg_config_payload,
+    parse_egg_species,
     parse_iv_ranges,
     parse_sid_effort_values,
     parse_sid_species,
@@ -236,6 +237,19 @@ class GuiIvInputTests(unittest.TestCase):
         self.assertEqual(parse_sid_species("皮卡丘 (Pikachu)", 1), 25)
         self.assertEqual(parse_sid_species("25", 1), 25)
         self.assertEqual(parse_sid_species("大葱鸭", 1), 83)
+
+    def test_egg_species_accepts_typed_chinese_english_display_and_dex(self):
+        self.assertEqual(parse_egg_species("派拉斯"), 46)
+        self.assertEqual(parse_egg_species("Paras"), 46)
+        self.assertEqual(parse_egg_species("派拉斯 (Paras)"), 46)
+        self.assertEqual(parse_egg_species("46"), 46)
+        self.assertEqual(parse_egg_species("Farfetch’d"), 83)
+
+    def test_egg_species_rejects_blank_and_unknown_names(self):
+        with self.assertRaisesRegex(ValueError, "孵蛋蛋种"):
+            parse_egg_species("")
+        with self.assertRaisesRegex(ValueError, "无法识别孵蛋蛋种"):
+            parse_egg_species("不是宝可梦")
 
     def test_sid_species_rejects_blank_and_unknown_names(self):
         with self.assertRaisesRegex(ValueError, "第2位"):

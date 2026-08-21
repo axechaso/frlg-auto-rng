@@ -130,7 +130,7 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 
 ### 孵蛋（测试）
 
-- 独立显示游戏、主机、Seed 模式和蛋种；
+- 独立显示游戏、主机、Seed 模式和蛋种；蛋种为可编辑自动补全框，接受中文名、英文名、完整下拉显示名或全国图鉴编号；
 - 目标 Seed、Held/生成帧、Pickup/领取帧；
 - 双亲相性 20/50/70；
 - 双亲性别和六项 IV；
@@ -286,7 +286,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 ```
 
-2026-08-21 的代码基线：项目 `.venv` 运行 153 项单元测试全部通过；正式模板、时间轴模板、当前生成脚本和内置冲浪菜单探针均通过真实 EasyCon 1.6.4-a `format`。下载包共有 23 个 `Tools/check_*.py`，当前 20 个通过；以下 3 个是外部下载包对旧函数/文案的已知陈旧断言，不是本轮高级模式新增失败：`check_egg_timeline_mode.py`、`check_seed_mode_calibration.py`、`check_seed_success_hold.py`。换设备复测必须同时报告“20/23”和这三个文件名，不能简写成全部通过。SID 第一只闪光雄性大比鸟曾完成两轮连续实机采集，均得到 Lv46、Jolly、`133/120/83/72/73/144`；本轮还完成四个正式页签顺序、默认隐藏高级页、SID 输入/运行链、御三家目标搜索和英文三阶段连续流程生成/预检的静态验证。确认：
+2026-08-21 的代码基线：项目 `.venv` 运行 155 项单元测试全部通过；正式模板、时间轴模板、当前生成脚本和内置冲浪菜单探针均通过真实 EasyCon 1.6.4-a `format`。下载包共有 23 个 `Tools/check_*.py`，当前 20 个通过；以下 3 个是外部下载包对旧函数/文案的已知陈旧断言，不是本轮高级模式新增失败：`check_egg_timeline_mode.py`、`check_seed_mode_calibration.py`、`check_seed_success_hold.py`。换设备复测必须同时报告“20/23”和这三个文件名，不能简写成全部通过。SID 第一只闪光雄性大比鸟曾完成两轮连续实机采集，均得到 Lv46、Jolly、`133/120/83/72/73/144`；本轮还完成四个正式页签顺序、默认隐藏高级页、SID 输入/运行链、御三家目标搜索和英文三阶段连续流程生成/预检的静态验证。确认：
 
 - 页签顺序固定为 SID 查找、TID 乱数、野生/静态、孵蛋；
 - 设备枚举会自动回填可用串口；
@@ -319,7 +319,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 
 按风险从低到高：
 
-1. 在新设备重新跑安装、153 项测试、EasyCon `--check-only` 和设备枚举。
+1. 在新设备重新跑安装、155 项测试、EasyCon `--check-only` 和设备枚举。
 2. 用不会影响存档的短 ECS 验证单片机控制、停止和重新连接。
 3. 选一个普通野生基线路线做单轮命中、OCR、反查和校准日志验收。
 4. 再做重复循环、抓捕和长时间稳定性。
@@ -343,5 +343,5 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 
-测试基线是 153 项。下载包 ECS Tools 为 20/23；三个已知陈旧失败固定是 check_egg_timeline_mode.py、check_seed_mode_calibration.py、check_seed_success_hold.py。完成环境核对后，请根据我接下来的要求继续，不要自行扩大到实机运行或修改外部 1.1.8/TID/EasyCon 原包。
+测试基线是 155 项。下载包 ECS Tools 为 20/23；三个已知陈旧失败固定是 check_egg_timeline_mode.py、check_seed_mode_calibration.py、check_seed_success_hold.py。完成环境核对后，请根据我接下来的要求继续，不要自行扩大到实机运行或修改外部 1.1.8/TID/EasyCon 原包。
 ```

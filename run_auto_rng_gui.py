@@ -262,7 +262,7 @@ def parse_sid_effort_values(values, slot: int) -> tuple[int, int, int, int, int,
     return tuple(parsed)  # type: ignore[return-value]
 
 
-def _normalize_sid_species_name(value: str) -> str:
+def _normalize_species_name(value: str) -> str:
     return " ".join(value.strip().casefold().replace("’", "'").split())
 
 
@@ -336,34 +336,49 @@ def _install_autocomplete_combo(combo: ttk.Combobox, choices, variable=None) -> 
 
 
 @lru_cache(maxsize=1)
-def sid_species_catalog() -> tuple[tuple[str, ...], dict[str, int]]:
-    """Return Gen 1-3 display choices and normalized aliases for SID input."""
+def species_input_catalog() -> tuple[tuple[str, ...], dict[str, int]]:
+    """Return Gen 1-3 display choices and normalized input aliases."""
     chinese_by_english = {
-        _normalize_sid_species_name(english): chinese
+        _normalize_species_name(english): chinese
         for english, chinese in SPECIES_EN_TO_ZH.items()
     }
     choices = []
     aliases: dict[str, int] = {}
     for species_id in range(1, 387):
         english = get_species_name(species_id)
-        chinese = chinese_by_english.get(_normalize_sid_species_name(english), "")
+        chinese = chinese_by_english.get(_normalize_species_name(english), "")
         display = f"{chinese} ({english})" if chinese else english
         choices.append(display)
         for alias in (str(species_id), english, chinese, display):
             if alias:
-                aliases[_normalize_sid_species_name(alias)] = species_id
+                aliases[_normalize_species_name(alias)] = species_id
     return tuple(choices), aliases
 
 
 def parse_sid_species(value: str, slot: int) -> int:
-    normalized = _normalize_sid_species_name(value)
+    normalized = _normalize_species_name(value)
     if not normalized:
         raise ValueError(f"队伍第{slot}位必须填写宝可梦名称或全国图鉴编号")
-    _, aliases = sid_species_catalog()
+    _, aliases = species_input_catalog()
     species_id = aliases.get(normalized)
     if species_id is None:
         raise ValueError(
             f"无法识别队伍第{slot}位宝可梦“{value.strip()}”，"
+            "请填写中文名、英文名或1-386的全国图鉴编号"
+        )
+    return species_id
+
+
+def parse_egg_species(value: str) -> int:
+    """Resolve an egg species from Chinese, English, display text or dex ID."""
+    normalized = _normalize_species_name(value)
+    if not normalized:
+        raise ValueError("必须填写孵蛋蛋种名称或全国图鉴编号")
+    _, aliases = species_input_catalog()
+    species_id = aliases.get(normalized)
+    if species_id is None:
+        raise ValueError(
+            f"无法识别孵蛋蛋种“{value.strip()}”，"
             "请填写中文名、英文名或1-386的全国图鉴编号"
         )
     return species_id
@@ -534,7 +549,7 @@ class AutoRngApp:
             tuple(tk.StringVar(value="0") for _ in IV_STAT_LABELS)
             for _ in range(6)
         )
-        sid_species_choices, _ = sid_species_catalog()
+        sid_species_choices, _ = species_input_catalog()
         self.sid_party_row_widgets = []
         self.sid_location_map = {}
         for locations in self.all_locations.values():
@@ -784,7 +799,21 @@ class AutoRngApp:
             ("请选择", *SEED_MODE_CHOICES), 0, 4, width=36,
         )
         self.egg_pokemon_combo = self._labeled_combo(
-            egg_identity, "蛋种", self.egg_pokemon_var, (), 1, 0, width=24, span=3
+            egg_identity,
+            "蛋种（名称/编号）",
+            self.egg_pokemon_var,
+            (),
+            1,
+            0,
+            width=24,
+            span=3,
+        )
+        egg_species_choices, _ = species_input_catalog()
+        self.egg_pokemon_combo.configure(state="normal", values=egg_species_choices)
+        _install_autocomplete_combo(
+            self.egg_pokemon_combo,
+            egg_species_choices,
+            self.egg_pokemon_var,
         )
         ttk.Label(
             egg_identity,
@@ -1578,11 +1607,15 @@ class AutoRngApp:
             f"{SPECIES_EN_TO_ZH.get(name, name)} ({name})": name
             for name in names
         }
-        current = self.egg_pokemon_map.get(self.egg_pokemon_var.get())
+        current_text = self.egg_pokemon_var.get()
+        try:
+            current_species_id = parse_egg_species(current_text)
+        except ValueError:
+            current_species_id = None
         self._updating = True
         try:
             self.egg_pokemon_combo.configure(values=list(self.egg_pokemon_map))
-            if current not in names:
+            if current_species_id is None:
                 preferred = next(
                     (key for key, value in self.egg_pokemon_map.items() if value == "Pikachu"),
                     None,
@@ -1657,13 +1690,11 @@ class AutoRngApp:
         )
 
     def _egg_config_payload(self) -> dict:
-        pokemon = self.egg_pokemon_map.get(self.egg_pokemon_var.get())
-        if not pokemon:
-            raise ValueError("请选择孵蛋蛋种")
+        species_id = parse_egg_species(self.egg_pokemon_var.get())
         return build_egg_config_payload(
             self.game_var.get(),
             {"Switch 1": 1, "Switch 2": 2}.get(self.nx_var.get()),
-            get_species_id(pokemon),
+            species_id,
             self.egg_compatibility_var.get(),
             [variable.get() for variable in self.egg_parent_a_iv_vars],
             [variable.get() for variable in self.egg_parent_b_iv_vars],
@@ -1752,9 +1783,7 @@ class AutoRngApp:
         self.status_var.set(f"孵蛋配置已载入：{path}")
 
     def collect_egg_request(self) -> EggRunRequest:
-        pokemon = self.egg_pokemon_map.get(self.egg_pokemon_var.get())
-        if not pokemon:
-            raise ValueError("请选择孵蛋蛋种")
+        species_id = parse_egg_species(self.egg_pokemon_var.get())
         if self.egg_seed_mode_var.get() == "请选择":
             raise ValueError("孵蛋测试必须选择与 Ten Lines 结果一致的 Seed 模式")
         if not self.egg_ack_var.get():
@@ -1765,7 +1794,7 @@ class AutoRngApp:
             target_seed=self.egg_seed_var.get(),
             held_advances=int(self.egg_held_var.get()),
             pickup_advances=int(self.egg_pickup_var.get()),
-            species_id=get_species_id(pokemon),
+            species_id=species_id,
             compatibility=int(self.egg_compatibility_var.get()),
             parent_a_gender=self.egg_parent_a_gender_var.get(),
             parent_a_ivs=parse_exact_ivs(
