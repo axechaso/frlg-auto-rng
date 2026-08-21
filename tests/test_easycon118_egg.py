@@ -390,8 +390,17 @@ ENDFUNC
 
         self.assertEqual(configured_again, configured)
         self.assertIn("WAIT 2000", configured)
+        self.assertIn("@三代菜单栏", configured)
         self.assertIn("@野生出现", configured)
         self.assertIn("@抓捕就绪", configured)
+        menu_gate = configured[
+            configured.index("FUNC 孵蛋测试_可靠打开池塘主菜单") : configured.index(
+                "FUNC 孵蛋测试_等待池塘野生战斗"
+            )
+        ]
+        self.assertIn("$孵蛋库_池塘菜单匹配 > 90", menu_gate)
+        self.assertEqual(menu_gate.count("\n        X\n"), 1)
+        self.assertNotIn("\n        DOWN\n", menu_gate)
         battle_gate = configured[
             configured.index("FUNC 孵蛋测试_等待池塘野生战斗") : configured.index(
                 "FUNC 孵蛋测试_前往池塘并甜甜香气抓捕"
@@ -401,6 +410,14 @@ ENDFUNC
         self.assertIn("$孵蛋库_池塘抓捕就绪匹配 > 95", battle_gate)
         self.assertNotIn("\n        A\n", battle_gate)
         self.assertIn("本轮安全重启", configured)
+        sweet_scent_route = configured.split(
+            "PRINT 【孵蛋Seed验证】使用队首甜甜香气",
+            1,
+        )[1]
+        self.assertLess(
+            sweet_scent_route.index("孵蛋测试_可靠打开池塘主菜单()"),
+            sweet_scent_route.index("\n    DOWN\n"),
+        )
         self.assertLess(
             configured.index("孵蛋测试_等待池塘野生战斗()"),
             configured.index("识别抓捕对象名称优先OCR"),
