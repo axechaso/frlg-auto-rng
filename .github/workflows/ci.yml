@@ -42,6 +42,7 @@ jobs:
           run_sid_reverse_capture.py
           run_tid_starter_flow.py
           automation/easycon118.py
+          automation/script_test.py
           automation/sid_reverse118.py
           automation/tid_rng137.py
           automation/tid_starter_flow.py
@@ -57,6 +58,7 @@ jobs:
           tests.test_easycon118_egg
           tests.test_easycon164a_backend
           tests.test_easycon_logged
+          tests.test_egg_surf_menu_probe
           tests.test_gui_inputs
           tests.test_label_matcher
           tests.test_sid_reverse
@@ -64,6 +66,7 @@ jobs:
           tests.test_sid_reverse_capture
           tests.test_sid_reverse_workflow
           tests.test_starter_sid_verification
+          tests.test_script_test
           tests.test_tenlines_fixes
           tests.test_tid_starter_flow
           tests.test_tid_starter_runner

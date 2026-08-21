@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from assets.game_text import ABILITY_ZH_TO_EN
 from run_auto_rng_gui import (
+    ADVANCED_TAB_LABEL,
     AutoRngApp,
     MODE_TAB_ORDER,
     _install_autocomplete_combo,
@@ -164,6 +165,7 @@ class GuiIvInputTests(unittest.TestCase):
             MODE_TAB_ORDER,
             ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）"),
         )
+        self.assertEqual(ADVANCED_TAB_LABEL, "脚本测试（高级）")
 
     def test_manual_ranges_are_parsed_in_stat_order(self):
         minimums, maximums = parse_iv_ranges(

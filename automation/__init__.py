@@ -78,6 +78,15 @@ from .sid_reverse118 import (
     write_sid_reverse_plan,
     write_sid_reverse_project,
 )
+from .script_test import (
+    SCRIPT_TEST_BACKEND_COMPAT,
+    SCRIPT_TEST_BACKEND_ORIGINAL,
+    SCRIPT_TEST_BACKENDS,
+    ScriptTestPreparation,
+    inspect_script_label_references,
+    prepare_script_test_runtime,
+    write_builtin_egg_surf_menu_probe,
+)
 
 __all__ = [
     "AutoSearchRequest",
@@ -105,6 +114,10 @@ __all__ = [
     "TidRngRequest",
     "SID_REVERSE_TEMPLATE_NAME",
     "SIDReverseRunRequest",
+    "SCRIPT_TEST_BACKEND_COMPAT",
+    "SCRIPT_TEST_BACKEND_ORIGINAL",
+    "SCRIPT_TEST_BACKENDS",
+    "ScriptTestPreparation",
     "write_sid_reverse_plan",
     "EggRunRequest",
     "EasyCon118Options",
@@ -130,12 +143,14 @@ __all__ = [
     "get_static_targets",
     "inspect_label_corpus",
     "inspect_script_corpus",
+    "inspect_script_label_references",
     "inspect_tid_package",
     "verify_tid_package",
     "is_supported_static_target",
     "plan_to_user_values",
     "probe_easycon_devices",
     "prepare_compat_runner",
+    "prepare_script_test_runtime",
     "seed_mode_label",
     "seed_mode_to_settings",
     "search_best_plan",
@@ -146,4 +161,5 @@ __all__ = [
     "write_configured_project",
     "write_configured_tid_project",
     "write_sid_reverse_project",
+    "write_builtin_egg_surf_menu_probe",
 ]

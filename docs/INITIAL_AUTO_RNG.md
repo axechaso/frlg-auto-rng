@@ -12,6 +12,7 @@
 6. 完整搜索后没有符合条件的结果时提示放宽条件；若达到首版工作量安全上限，会明确提示“搜索未完成”，不会误报无结果。
 7. 碎岩、狩猎区或其他实验路线仍显示并保存计划，但不生成可启动脚本。
 8. 预检通过后点击“开始运行”。原始 `ezcon.exe` 负责固定版本/哈希、设备、Tessdata 与 `format` 预检；实际执行使用同一 1.6.4-a commit 构建的 CLI 兼容 runner，使 ImgLabel 分数取整与伊机控 GUI 的 `Math.Ceiling` 行为一致。
+9. 需要隔离排查 ECS、原始 1.6.4-a CLI 与工具兼容 runner 时，勾选公共设置中的“高级模式”，使用默认隐藏的“脚本测试（高级）”页；它不参与正式方案生成。
 
 运行入口：
 
@@ -44,10 +45,13 @@
 | Ten Lines Python 源码 | 按筛选条件生成目标状态，计算初始 Seed 与 Advance |
 | `automation/planner.py` | 分层搜索、最高 IV 总和优先、同分最小 Advance、最大 Advance 限制 |
 | `automation/easycon118.py` | 把普通或孵蛋结果写入对应 1.1.8 用户输入区，复制 `lib/ImgLabel`，预检 EasyCon/Tessdata |
+| `automation/script_test.py` | 原地预检任意 ECS、核对直接标签引用、选择原始/兼容后端并准备内置冲浪菜单探针 |
 | EasyCon 1.6.4a `ezcon.exe` | 串口、采集卡、方法 1/5/14 标签和本地 Tesseract OCR、ECS 执行 |
 | 1.1.8 | 命中、校准、投票、吃糖缩小 IV、抓捕和重试状态机 |
 
 导入快照放在 `local_assets/easycon118/`，生成内容放在 `runtime/easycon118/`，计划记录放在 `rng_logs/plans/`；三者都是本机运行产物，不修改原始 1.1.8 包。
+
+高级模式的直接脚本页默认隐藏。启用后可选择任意 `.ecs`，使用“工具兼容运行器（正式工具）”或“原始 EasyCon 1.6.4-a CLI（A/B 对照）”运行。预检始终由固定原始 `ezcon.exe` 完成版本/哈希、两份火叶 OCR 模型和 `format` 检查，同时扫描所选主脚本及同目录 `lib/*.ecs` 的直接 `@标签` 引用；它不会执行搜索、参数替换、脚本复制或 1.1.8 完整语料指纹校验。运行日志统一写入 `runtime/script_tests/logs/`。所选脚本仍可任意控制手柄，因此该功能只用于已经人工审阅的测试工程，不是安全沙箱。
 
 1.1.8 的静态白名单共 8 类、每版 30 只；首版界面开放 Starter、Fossil、Gift、GameCorner、Stationary、Legend、Event 共 27 只，游戏角会按版本区分飞天螳螂和凯罗斯。Roaming 三圣兽暂不开放：它们有火叶特有的截断 IV bug，还取决于本存档选择的御三家；普通六维 IV 分层会生成错误结果，必须另做搜索器后再接入。
 

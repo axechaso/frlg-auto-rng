@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Simple end-to-end GUI: inputs -> best plan -> configured ECS -> ezcon."""
 
+import hashlib
 import json
 import signal
 import subprocess
@@ -34,8 +35,11 @@ from automation import (
     EasyCon118Options,
     SEED_MODE_CHOICES,
     SearchCancelledError,
+    SCRIPT_TEST_BACKEND_COMPAT,
+    SCRIPT_TEST_BACKENDS,
     SID_REVERSE_TEMPLATE_NAME,
     SIDReverseRunRequest,
+    ScriptTestPreparation,
     TidRngRequest,
     TidStarterFlowPlan,
     TidStarterFlowRequest,
@@ -43,6 +47,7 @@ from automation import (
     build_tid_starter_flow_plan,
     build_run_command,
     prepare_compat_runner,
+    prepare_script_test_runtime,
     probe_easycon_devices,
     search_best_plan,
     get_static_targets,
@@ -55,6 +60,7 @@ from automation import (
     write_sid_reverse_plan,
     write_sid_reverse_project,
     write_tid_starter_flow_bundle,
+    write_builtin_egg_surf_menu_probe,
 )
 from rng.tenlines_utils import (
     get_ability_name,
@@ -77,6 +83,7 @@ IV_STAT_LABELS = ("HP", "攻击", "防御", "特攻", "特防", "速度")
 IV_PRESETS = ("不限", "6V", "0A", "0S", "0A0S")
 SID_SOURCE_LABELS = ("定点", "野生")
 MODE_TAB_ORDER = ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）")
+ADVANCED_TAB_LABEL = "脚本测试（高级）"
 EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
 EGG_START_MODE_PREPARED = "从已完成254步准备开始"
 EGG_START_MODES = (EGG_START_MODE_FULL, EGG_START_MODE_PREPARED)
@@ -389,6 +396,7 @@ class AutoRngApp:
         self.sid_request: SIDReverseRunRequest | None = None
         self.project_main: Path | None = None
         self.runtime_check = None
+        self.script_test_preparation: ScriptTestPreparation | None = None
         self.process: subprocess.Popen | None = None
         self.search_cancel: threading.Event | None = None
         self.running_mode: str | None = None
@@ -396,6 +404,7 @@ class AutoRngApp:
         self.sid_log_path: Path | None = None
         self.tid_flow_log_path: Path | None = None
         self.egg_log_path: Path | None = None
+        self.script_test_log_path: Path | None = None
         self.busy = False
         self._updating = False
         self.manual_tools: ManualToolsManager | None = None
@@ -451,6 +460,7 @@ class AutoRngApp:
         tid_tab = ttk.Frame(self.mode_notebook, padding=6)
         normal_tab = ttk.Frame(self.mode_notebook, padding=6)
         egg_tab = ttk.Frame(self.mode_notebook, padding=6)
+        self.script_test_tab = ttk.Frame(self.mode_notebook, padding=6)
         for tab, label in zip(
             (sid_tab, tid_tab, normal_tab, egg_tab), MODE_TAB_ORDER
         ):
@@ -460,7 +470,10 @@ class AutoRngApp:
             str(tid_tab): "tid",
             str(normal_tab): "normal",
             str(egg_tab): "egg",
+            str(self.script_test_tab): "script_test",
         }
+        self.mode_notebook.add(self.script_test_tab, text=ADVANCED_TAB_LABEL)
+        self.mode_notebook.hide(self.script_test_tab)
         self.mode_notebook.pack(fill="x")
 
         sid_identity = ttk.LabelFrame(sid_tab, text="1. SID 查找条件", padding=10)
@@ -1058,6 +1071,65 @@ class AutoRngApp:
             row=0, column=6, padx=4
         )
 
+        script_test = ttk.LabelFrame(
+            self.script_test_tab,
+            text="直接运行 ECS 测试脚本",
+            padding=10,
+        )
+        script_test.pack(fill="x")
+        self.script_test_path_var = tk.StringVar(value="")
+        self.script_test_backend_var = tk.StringVar(value=SCRIPT_TEST_BACKEND_COMPAT)
+        self.script_test_verbose_var = tk.BooleanVar(value=False)
+        self._labeled_entry(
+            script_test,
+            "ECS 文件",
+            self.script_test_path_var,
+            0,
+            0,
+            width=78,
+            span=5,
+        )
+        ttk.Button(
+            script_test,
+            text="选择脚本",
+            command=self.choose_script_test,
+        ).grid(row=0, column=6, padx=4)
+        self._labeled_combo(
+            script_test,
+            "运行后端",
+            self.script_test_backend_var,
+            SCRIPT_TEST_BACKENDS,
+            1,
+            0,
+            width=42,
+            span=3,
+        )
+        ttk.Checkbutton(
+            script_test,
+            text="输出 EasyCon 详细日志（--verbose）",
+            variable=self.script_test_verbose_var,
+        ).grid(row=1, column=5, columnspan=2, sticky="w", padx=4, pady=4)
+        ttk.Button(
+            script_test,
+            text="准备内置冲浪菜单测试",
+            command=self.prepare_builtin_surf_menu_probe,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 4))
+        ttk.Label(
+            script_test,
+            text=(
+                "所选 ECS 会原地直接执行，不经过方案搜索、参数替换或正式 main.ecs 生成。"
+                "兼容后端等同正式工具；原始 CLI 用于 A/B 对照。"
+            ),
+        ).grid(row=2, column=2, columnspan=5, sticky="w", padx=4, pady=(8, 4))
+        ttk.Label(
+            script_test,
+            text=(
+                "警告：测试脚本拥有完整手柄控制权限。开始前请人工核对脚本内容、游戏位置和存档状态；"
+                "同目录的 lib 与 ImgLabel 会被 EasyCon 使用。"
+            ),
+            foreground="#9a3412",
+        ).grid(row=3, column=0, columnspan=7, sticky="w", padx=4, pady=(4, 0))
+
         runtime = ttk.LabelFrame(container, text="EasyCon 共通设置与工具", padding=10)
         runtime.pack(fill="x", pady=(0, 10), before=self.mode_notebook)
         self.source_var = tk.StringVar(value=str(DEFAULT_SOURCE_118))
@@ -1086,6 +1158,14 @@ class AutoRngApp:
             command=self.open_monitor,
         )
         self.monitor_button.pack(side="left", padx=(8, 0))
+        self.advanced_mode_var = tk.BooleanVar(value=False)
+        self.advanced_mode_check = ttk.Checkbutton(
+            manual_tools,
+            text="高级模式（显示直接脚本测试页）",
+            variable=self.advanced_mode_var,
+            command=self._toggle_advanced_mode,
+        )
+        self.advanced_mode_check.pack(side="left", padx=(18, 0))
 
         actions = ttk.Frame(container)
         actions.pack(fill="x", pady=10)
@@ -1198,6 +1278,8 @@ class AutoRngApp:
             *self.sid_location_vars,
             *(variable for row in self.sid_effort_vars for variable in row),
             self.sid_source_var,
+            self.script_test_path_var, self.script_test_backend_var,
+            self.script_test_verbose_var,
         )
         for variable in self.tracked_variables:
             variable.trace_add("write", self.invalidate_plan)
@@ -1250,6 +1332,7 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
         self.start_button.configure(state="disabled")
@@ -1338,6 +1421,29 @@ class AutoRngApp:
     def _is_sid_mode(self):
         return self.mode_var.get() == "sid"
 
+    def _is_script_test_mode(self):
+        return self.mode_var.get() == "script_test"
+
+    def _toggle_advanced_mode(self):
+        if self.busy or self._process_running():
+            self._updating = True
+            try:
+                self.advanced_mode_var.set(not self.advanced_mode_var.get())
+            finally:
+                self._updating = False
+            return
+        if self.advanced_mode_var.get():
+            self.mode_notebook.add(self.script_test_tab, text=ADVANCED_TAB_LABEL)
+            self.mode_notebook.select(self.script_test_tab)
+        else:
+            if self._is_script_test_mode():
+                normal_tab = next(
+                    tab for tab, mode in self.tab_modes.items() if mode == "normal"
+                )
+                self.mode_notebook.select(normal_tab)
+            self.mode_notebook.hide(self.script_test_tab)
+        self.root.after_idle(self._update_page_scrollregion)
+
     def _on_mode_tab_change(self, _event=None):
         mode = self.tab_modes.get(self.mode_notebook.select(), "normal")
         if self.mode_var.get() != mode:
@@ -1345,9 +1451,11 @@ class AutoRngApp:
         is_egg = mode == "egg"
         is_tid = mode == "tid"
         is_sid = mode == "sid"
+        is_script_test = mode == "script_test"
         self.search_button.configure(
             text=(
-                "准备 SID 查找" if is_sid
+                "预检所选脚本" if is_script_test
+                else "准备 SID 查找" if is_sid
                 else "生成孵蛋测试脚本" if is_egg
                 else (
                     "生成 TID/SID + 御三家计划"
@@ -1359,7 +1467,9 @@ class AutoRngApp:
         )
         if not self.busy:
             self.status_var.set(
-                "填写 SID 查找条件后点击“准备 SID 查找”。"
+                "选择 ECS 和运行后端后点击“预检所选脚本”。"
+                if is_script_test
+                else "填写 SID 查找条件后点击“准备 SID 查找”。"
                 if is_sid
                 else "填写孵蛋参数后点击“生成孵蛋测试脚本”。"
                 if is_egg
@@ -1823,6 +1933,7 @@ class AutoRngApp:
         state = "normal" if enabled else "disabled"
         self.virtual_controller_button.configure(state=state)
         self.monitor_button.configure(state=state)
+        self.advanced_mode_check.configure(state=state)
 
     def open_virtual_controller(self) -> None:
         if self.manual_tools is not None:
@@ -1842,10 +1953,19 @@ class AutoRngApp:
             self.plan_result and self.plan_result.plan.route_support.can_start
         )
         tid_can_start = self.tid_request is not None
+        script_test_can_start = bool(
+            self._is_script_test_mode() and self.script_test_preparation
+        )
         can_start = bool(
             not self.busy
             and not process_running
-            and (normal_can_start or self.egg_request or tid_can_start or self.sid_request)
+            and (
+                normal_can_start
+                or self.egg_request
+                or tid_can_start
+                or self.sid_request
+                or script_test_can_start
+            )
             and self.project_main
             and self.runtime_check
             and self.runtime_check.ok
@@ -1859,6 +1979,9 @@ class AutoRngApp:
             messagebox.showerror("正在运行", "请先停止当前 EasyCon 进程，再生成新方案。")
             return
         try:
+            if self._is_script_test_mode():
+                self.generate_script_test_preflight()
+                return
             if self._is_sid_mode():
                 sid_request = self.collect_sid_request()
                 self.generate_sid_project(sid_request)
@@ -1890,6 +2013,7 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
         self.set_busy(True, "正在从最高 IV 总和向下搜索……")
@@ -1939,6 +2063,89 @@ class AutoRngApp:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def generate_script_test_preflight(self):
+        script_text = self.script_test_path_var.get().strip()
+        if not script_text:
+            raise ValueError("请先选择要直接运行的 .ecs 测试脚本")
+        script_path = Path(script_text)
+        backend = self.script_test_backend_var.get()
+        ezcon_path = Path(self.ezcon_var.get())
+        input_fingerprint = self.input_fingerprint()
+        self.plan_result = None
+        self.egg_request = None
+        self.tid_request = None
+        self.tid_flow_plan = None
+        self.sid_request = None
+        self.script_test_preparation = None
+        self.project_main = None
+        self.runtime_check = None
+        self.set_busy(True, "正在原地预检所选 ECS 与 1.6.4-a 测试后端……")
+        self.set_result(
+            "高级测试不会生成或改写 main.ecs；正在检查原文件、直接标签引用和运行后端。"
+        )
+
+        def worker():
+            try:
+                preparation = prepare_script_test_runtime(
+                    ezcon_path,
+                    script_path,
+                    backend,
+                )
+                self.root.after(
+                    0,
+                    lambda: self.finish_script_test_preflight(
+                        preparation,
+                        input_fingerprint,
+                    ),
+                )
+            except Exception as exc:
+                self.root.after(0, lambda error=exc: self.fail_search(error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_script_test_preflight(
+        self,
+        preparation: ScriptTestPreparation,
+        input_fingerprint,
+    ):
+        if input_fingerprint != self.input_fingerprint():
+            self.fail_search(ValueError("预检期间输入发生变化，请按当前选择重新预检。"))
+            return
+        self.plan_result = None
+        self.egg_request = None
+        self.tid_request = None
+        self.tid_flow_plan = None
+        self.sid_request = None
+        self.script_test_preparation = preparation
+        self.project_main = preparation.script_path
+        self.runtime_check = preparation.check
+        lines = [
+            "高级模式：直接 ECS 测试",
+            f"脚本：{preparation.script_path}",
+            f"工作目录：{preparation.project_dir}",
+            f"运行后端：{preparation.backend}",
+            f"实际执行文件：{preparation.runner_path or '(预检未通过)'}",
+            f"直接标签引用：{len(preparation.label_references)} 个",
+            "参数处理：无（不会修改、复制或重新生成所选 ECS）",
+        ]
+        if preparation.label_references:
+            lines.append("标签：" + "、".join(preparation.label_references))
+        if preparation.check.ok:
+            lines.extend(
+                f"预检提示：{warning}" for warning in preparation.check.warnings
+            )
+            status = "所选测试脚本已通过预检，可以直接运行。"
+        else:
+            lines.extend(
+                f"预检失败：{error}" for error in preparation.check.errors
+            )
+            lines.extend(
+                f"预检提示：{warning}" for warning in preparation.check.warnings
+            )
+            status = "所选测试脚本预检失败，已阻止启动。"
+        self.set_result("\n".join(lines))
+        self.set_busy(False, status)
+
     def generate_sid_project(self, request: SIDReverseRunRequest):
         source_path = Path(self.sid_source_var.get())
         ezcon_path = Path(self.ezcon_var.get())
@@ -1948,6 +2155,7 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
         self.set_busy(True, "正在生成 SID 采集脚本并执行 1.6.4-a 预检……")
@@ -1980,6 +2188,7 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = request
+        self.script_test_preparation = None
         self.project_main = project_main
         self.runtime_check = check
         active_slots = range(request.party_count)
@@ -2018,6 +2227,7 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
         status = (
@@ -2106,6 +2316,7 @@ class AutoRngApp:
         self.tid_request = request
         self.tid_flow_plan = flow_plan
         self.sid_request = None
+        self.script_test_preparation = None
         self.project_main = project_main
         self.runtime_check = check
         mode_name = "乱数模式" if request.mode == 1 else "穷举模式"
@@ -2168,6 +2379,7 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
         self.set_busy(True, "正在生成孵蛋测试脚本并执行 1.6.4a 预检……")
@@ -2206,6 +2418,7 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.script_test_preparation = None
         self.project_main = project_main
         self.runtime_check = check
         pokemon = get_species_name(request.species_id)
@@ -2253,6 +2466,7 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.script_test_preparation = None
         self.project_main = project_main
         self.runtime_check = check
         plan = result.plan
@@ -2308,6 +2522,7 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
         self.start_button.configure(state="disabled")
@@ -2368,7 +2583,11 @@ class AutoRngApp:
 
     def start_run(self):
         if not (
-            self.plan_result or self.egg_request or self.tid_request or self.sid_request
+            self.plan_result
+            or self.egg_request
+            or self.tid_request
+            or self.sid_request
+            or self.script_test_preparation
         ) or not self.project_main:
             return
         try:
@@ -2400,7 +2619,16 @@ class AutoRngApp:
                 f"EasyCon 当前没有列出采集卡序号 {video_device}。请重新检测并选择正确序号。",
             )
             return
-        if self.tid_flow_plan is not None:
+        if self.script_test_preparation is not None:
+            preparation = prepare_script_test_runtime(
+                Path(self.ezcon_var.get()),
+                Path(self.script_test_path_var.get()),
+                self.script_test_backend_var.get(),
+            )
+            self.script_test_preparation = preparation
+            self.project_main = preparation.script_path
+            check = preparation.check
+        elif self.tid_flow_plan is not None:
             flow_dir = self.project_main.parents[1]
             check = validate_tid_starter_flow_runtime(
                 Path(self.ezcon_var.get()),
@@ -2417,7 +2645,15 @@ class AutoRngApp:
             messagebox.showerror("预检失败", "\n".join(check.errors))
             self.start_button.configure(state="disabled")
             return
-        if self.sid_request is not None:
+        if self.script_test_preparation is not None:
+            confirmation = (
+                "将直接执行所选 ECS，不进行参数替换或正式脚本生成。\n"
+                f"脚本：{self.script_test_preparation.script_path}\n"
+                f"后端：{self.script_test_preparation.backend}\n"
+                f"串口 {selected_port} / 采集卡 {video_device} / DSHOW\n"
+                "测试脚本拥有完整手柄控制权限；确认已检查脚本内容、游戏位置和存档状态，是否继续？"
+            )
+        elif self.sid_request is not None:
             confirmation = (
                 "将逐只启动 SID 采集脚本，并在每只结束后由 Python 反查 PID/PSV。\n"
                 f"TID {self.sid_request.tid:05d} / "
@@ -2468,7 +2704,66 @@ class AutoRngApp:
             confirmation,
         ):
             return
-        if self.sid_request is not None:
+        if self.script_test_preparation is not None:
+            runner_path = self.script_test_preparation.runner_path
+            if runner_path is None:
+                messagebox.showerror("启动后端检查失败", "测试后端没有可执行文件。")
+                return
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_dir = WRITABLE_ROOT / "runtime" / "script_tests" / "logs"
+            backend_tag = (
+                "compat"
+                if self.script_test_preparation.backend == SCRIPT_TEST_BACKEND_COMPAT
+                else "original"
+            )
+            self.script_test_log_path = (
+                log_dir / f"script-test-{backend_tag}-{timestamp}.log"
+            )
+            easycon_command = build_run_command(
+                runner_path,
+                self.project_main,
+                port=selected_port,
+                video_device=video_device,
+                video_type="DSHOW",
+                verbose=self.script_test_verbose_var.get(),
+            )
+            metadata_path = self.script_test_log_path.with_suffix(".json")
+            try:
+                metadata_path.parent.mkdir(parents=True, exist_ok=True)
+                metadata_path.write_text(
+                    json.dumps(
+                        {
+                            "script": str(self.project_main),
+                            "script_sha256": hashlib.sha256(
+                                self.project_main.read_bytes()
+                            ).hexdigest(),
+                            "backend": self.script_test_preparation.backend,
+                            "runner": str(runner_path),
+                            "port": selected_port,
+                            "video_device": video_device,
+                            "video_type": "DSHOW",
+                            "verbose": self.script_test_verbose_var.get(),
+                            "command": easycon_command,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                messagebox.showerror("测试日志准备失败", str(exc))
+                return
+            command = build_worker_command("easycon-log", [
+                "--log-path",
+                str(self.script_test_log_path),
+                "--cwd",
+                str(self.project_main.parent),
+                "--",
+                *easycon_command,
+            ])
+            command_cwd = ROOT
+            self.running_mode = "script_test"
+        elif self.sid_request is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_dir = self.project_main.parent
             try:
@@ -2565,7 +2860,9 @@ class AutoRngApp:
         self._refresh_manual_tools_buttons()
         self.stop_button.configure(state="normal")
         self.status_var.set(
-            "SID 正在逐只采集；详细日志见新打开的终端。"
+            f"测试脚本正在直接运行；日志将保存到 {self.script_test_log_path}。"
+            if self.running_mode == "script_test"
+            else "SID 正在逐只采集；详细日志见新打开的终端。"
             if self.running_mode == "sid"
             else (
                 "TID/SID → 研究所 → 1.1.8 御三家流程正在运行；详细日志见新打开的终端。"
@@ -2591,6 +2888,7 @@ class AutoRngApp:
         log_path = self.sid_log_path
         tid_flow_log_path = self.tid_flow_log_path
         egg_log_path = self.egg_log_path
+        script_test_log_path = self.script_test_log_path
         self.process = None
         self.running_mode = None
         self.stop_button.configure(state="disabled")
@@ -2598,7 +2896,21 @@ class AutoRngApp:
         self.device_button.configure(state="normal")
         self._refresh_manual_tools_buttons()
         self._refresh_start_button()
-        if completed_mode == "sid":
+        if completed_mode == "script_test":
+            detail = (
+                f"；日志：{script_test_log_path}"
+                if script_test_log_path is not None
+                else ""
+            )
+            log_text = ""
+            if script_test_log_path is not None and script_test_log_path.is_file():
+                log_text = script_test_log_path.read_text(
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                self.set_result("直接脚本测试日志：\n\n" + log_text[-20000:])
+            self.status_var.set(f"测试脚本已退出，退出码 {code}{detail}")
+        elif completed_mode == "sid":
             if code == 0 and report_path is not None and report_path.is_file():
                 self.set_result(report_path.read_text(encoding="utf-8"))
                 self.status_var.set(f"SID 查找完成，报告已保存：{report_path}")
@@ -2664,6 +2976,40 @@ class AutoRngApp:
         )
         if path:
             self.ezcon_var.set(path)
+
+    def choose_script_test(self):
+        current = Path(self.script_test_path_var.get().strip())
+        initial_dir = (
+            current.parent
+            if current.is_file()
+            else WRITABLE_ROOT / "runtime" / "script_tests"
+        )
+        path = filedialog.askopenfilename(
+            initialdir=str(initial_dir),
+            filetypes=(("EasyCon ECS", "*.ecs"), ("All files", "*.*")),
+        )
+        if path:
+            self.script_test_path_var.set(path)
+
+    def prepare_builtin_surf_menu_probe(self):
+        if self.busy or self._process_running():
+            messagebox.showerror("正在运行", "请先等待当前操作结束或停止 EasyCon。")
+            return
+        try:
+            output_dir = (
+                WRITABLE_ROOT
+                / "runtime"
+                / "script_tests"
+                / "egg_surf_menu_probe"
+            )
+            main_path = write_builtin_egg_surf_menu_probe(
+                Path(self.source_var.get()),
+                output_dir,
+            )
+            self.script_test_path_var.set(str(main_path))
+            self.generate_script_test_preflight()
+        except Exception as exc:
+            messagebox.showerror("内置测试准备失败", str(exc))
 
     def choose_tid_source(self):
         path = filedialog.askdirectory(
