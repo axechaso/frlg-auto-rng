@@ -19,6 +19,7 @@ from automation.easycon118 import (  # noqa: E402
     EXPECTED_SCRIPT_SHA256,
     EXPECTED_TESSDATA_SHA256,
     LEGACY_SCRIPT_SHA256,
+    PREVIOUS_SCRIPT_SHA256,
     copy_easycon118_extension_labels,
     inspect_label_corpus,
     inspect_script_corpus,
@@ -64,6 +65,7 @@ def import_package(source: Path, destination: Path) -> Path:
         raise ValueError(f"主脚本/lib 文件数不匹配: {script_manifest['count']}")
     if script_manifest["sha256"] not in {
         LEGACY_SCRIPT_SHA256,
+        PREVIOUS_SCRIPT_SHA256,
         EXPECTED_SCRIPT_SHA256,
     }:
         raise ValueError(f"主脚本/lib 指纹不匹配: {script_manifest['sha256']}")

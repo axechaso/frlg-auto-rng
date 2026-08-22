@@ -17,6 +17,7 @@ from automation.easycon118 import (
     EGG_SETTINGS_OVERRIDE_PATH,
     EGG_SURF_BATTLE_OVERRIDE_PATH,
     EGG_TRANSIENT_RETRY_OVERRIDE_MARKER,
+    TOGEPI_HATCH_CYCLE_OVERRIDE_PATH,
     WILD_PID_RETRY_LIMIT_MARKER,
     EggRunRequest,
     _apply_egg_home_resample_fix_text,
@@ -32,6 +33,7 @@ from automation.easycon118 import (
     _apply_egg_settings_runtime_override_text,
     _apply_egg_surf_battle_runtime_override_text,
     _apply_egg_transient_retry_runtime_override_text,
+    _apply_togepi_hatch_cycle_override_text,
     _apply_wild_pid_retry_limit_text,
     configure_egg_template_text,
     egg_request_to_user_values,
@@ -534,6 +536,52 @@ ENDFUNC
             configured.index("UP 200"),
         )
         self.assertIn("孵化骑车进度:", configured)
+        self.assertIn("FUNC 孵蛋测试_执行周期骑车与孵化收尾", configured)
+        shared_hatch = configured.split(
+            "FUNC 孵蛋测试_执行周期骑车与孵化收尾", 1
+        )[1].split("ENDFUNC", 1)[0]
+        self.assertNotIn("@蛋孵化", shared_hatch)
+        self.assertIn("WAIT 500\n    B\n    WAIT 12000\n    B\n    WAIT 500", shared_hatch)
+        wrapper = configured.split("FUNC 孵蛋测试_执行骑车孵化", 1)[1].split(
+            "ENDFUNC", 1
+        )[0]
+        self.assertIn("RETURN 孵蛋测试_执行周期骑车与孵化收尾", wrapper)
+
+    def test_static_togepi_uses_the_shared_fixed_cycle_hatch(self):
+        original = """\
+# 175: 波克比 / Togepi
+FUNC 获取波克比($F2: INT, $目标全国图鉴编号: INT, $进入TV: INT): INT
+    FOR
+        LEFT DOWN
+        IF @蛋孵化 > 95
+            BREAK
+        ENDIF
+    NEXT
+    RETURN 1
+ENDFUNC
+
+# 243: 雷公 / Raikou
+FUNC 获取游走($F2: INT, $目标全国图鉴编号: INT, $进入TV: INT, $出闪后继续抓捕: INT, $识图阈值: INT): INT
+    RETURN 1
+ENDFUNC
+"""
+        override = Path(TOGEPI_HATCH_CYCLE_OVERRIDE_PATH).read_text(
+            encoding="utf-8"
+        )
+        configured = _apply_togepi_hatch_cycle_override_text(original, override)
+        configured_again = _apply_togepi_hatch_cycle_override_text(
+            configured,
+            override,
+        )
+
+        self.assertEqual(configured_again, configured)
+        togepi = configured.split("FUNC 获取波克比", 1)[1].split("ENDFUNC", 1)[0]
+        self.assertNotIn("@蛋孵化", togepi)
+        self.assertNotIn("FOR\n        LEFT DOWN", togepi)
+        self.assertIn(
+            "RETURN 孵蛋测试_执行周期骑车与孵化收尾($目标全国图鉴编号, 0, 38, 1)",
+            togepi,
+        )
 
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]
@@ -550,6 +598,21 @@ ENDFUNC
         self.assertIn("识别冲浪结束后再打开菜单", library)
         self.assertIn(EGG_POND_SETTLE_FIXED, library)
         self.assertIn("FUNC 孵蛋测试_软重启并跳过回忆", library)
+        self.assertIn("FUNC 孵蛋测试_执行周期骑车与孵化收尾", library)
+        self.assertNotIn(
+            "@蛋孵化",
+            library.split("FUNC 孵蛋测试_执行周期骑车与孵化收尾", 1)[1].split(
+                "ENDFUNC", 1
+            )[0],
+        )
+        static_library = (
+            root / "local_assets" / "easycon118" / "lib" / "16_获取_静态目标.ecs"
+        ).read_text(encoding="utf-8")
+        togepi = static_library.split("FUNC 获取波克比", 1)[1].split(
+            "ENDFUNC", 1
+        )[0]
+        self.assertNotIn("@蛋孵化", togepi)
+        self.assertIn("孵蛋测试_执行周期骑车与孵化收尾", togepi)
         soft_reset = library.split(
             "FUNC 孵蛋测试_软重启并跳过回忆", 1
         )[1].split("ENDFUNC", 1)[0]

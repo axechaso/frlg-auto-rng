@@ -1,0 +1,58 @@
+# 1.6.4-a 共享孵化执行：定点波克比按孵化周期骑车，不再读取蛋孵化标签。
+# 本文件由 Python 替换到 1.1.8 的 lib/16_获取_静态目标.ecs，不单独执行。
+
+# 175: 波克比 / Togepi
+FUNC 获取波克比($F2: INT, $目标全国图鉴编号: INT, $进入TV: INT): INT
+    $F2执行 = $F2
+    A
+    WAIT 1500
+    B
+    WAIT 1500
+    B
+    WAIT 1500
+    B
+    WAIT 1500
+    B
+    WAIT 1500
+    B
+    WAIT 1500
+    IF $计数 == 0
+        $计数 = 1
+        $time_F2 = TIME()
+        RETURN $time_F2
+    ENDIF
+    $静态目标时间轴超时 = 静态目标等待F2($F2执行)
+    A
+    WAIT 3000
+    B
+    WAIT 1500
+    B
+    WAIT 1000
+    IF $进入TV == 0
+        Y
+        WAIT 500
+    ELSE
+        X
+        WAIT 500
+        DOWN
+        WAIT 500
+        DOWN
+        WAIT 500
+        A
+        WAIT 1500
+        RIGHT
+        WAIT 1500
+        FOR 3
+            DOWN
+            WAIT 500
+        NEXT
+        A
+        WAIT 500
+        A
+        WAIT 1500
+    ENDIF
+
+    # 波克比属于10孵化周期；沿用孵蛋页的每轮38步和1轮安全余量。
+    # 共享函数按周期完成骑车及孵化收尾，不再检测孵化标签。
+    RETURN 孵蛋测试_执行周期骑车与孵化收尾($目标全国图鉴编号, 0, 38, 1)
+ENDFUNC

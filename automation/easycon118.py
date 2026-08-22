@@ -56,7 +56,11 @@ EXPECTED_SCRIPT_FILE_COUNT = 33
 # ignored local cache.  Generators only run against the materialized corpus so
 # direct EasyCon execution and GUI-generated execution use the same fixes.
 LEGACY_SCRIPT_SHA256 = "7d5e13e4391d5bcc9045044544f409919a6f95c602e2ad0308313470ce23e625"
-EXPECTED_SCRIPT_SHA256 = "aea14e79615bfda89e1f7428014adc2dcc848005bd7ebad0bd170eac67703aef"
+# Previous materialized corpus accepted as an upgrade input.  Keep this
+# separate from the current fingerprint so existing installations can be
+# upgraded in place without accepting arbitrary script changes.
+PREVIOUS_SCRIPT_SHA256 = "aea14e79615bfda89e1f7428014adc2dcc848005bd7ebad0bd170eac67703aef"
+EXPECTED_SCRIPT_SHA256 = "fe0ae41be3fe035cbefec9afd525b968a070c8781a73595e1ae16b4cd1e2e839"
 EASYCON118_EXTENSION_LABEL_DIR = (
     Path(__file__).resolve().parents[1]
     / "assets"
@@ -108,6 +112,12 @@ EGG_HATCH_EXIT_OVERRIDE_PATH = (
     / "assets"
     / "easycon118_extensions"
     / "egg_hatch_exit_retry.ecs"
+)
+TOGEPI_HATCH_CYCLE_OVERRIDE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "togepi_hatch_cycle.ecs"
 )
 OCR_NAME_LIBRARY_NAME = "19_OCR_GEN3战斗场景名称.ecs"
 OCR_RUNTIME_FALLBACK_MARKER = "# GUI 运行时覆盖：OCR 不可用时直接回到单字识别"
@@ -173,6 +183,9 @@ EGG_SEED_CONTROLLER_NEXT_SECTION = "# -------------------- 蛋个体反查"
 EGG_HATCH_EXIT_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：孵化骑车前可靠退出能力页、队伍菜单和主菜单"
 EGG_HATCH_EXIT_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
 EGG_HATCH_EXIT_NEXT_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
+TOGEPI_HATCH_CYCLE_OVERRIDE_MARKER = "# 1.6.4-a 共享孵化执行：定点波克比按孵化周期骑车，不再读取蛋孵化标签。"
+TOGEPI_HATCH_CYCLE_ORIGINAL_FUNCTION = "FUNC 获取波克比"
+TOGEPI_HATCH_CYCLE_NEXT_FUNCTION = "FUNC 获取游走"
 EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
 EGG_TRANSIENT_RETRY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：瞬时动作失败重启后继续下一轮"
 EGG_POND_SETTLE_ORIGINAL = """\
@@ -855,6 +868,30 @@ def _apply_egg_hatch_exit_runtime_override_text(
     return library_text[:start] + replacement + library_text[end:]
 
 
+def _apply_togepi_hatch_cycle_override_text(
+    library_text: str,
+    override_text: str,
+) -> str:
+    """Use the shared fixed-cycle hatch execution for the static Togepi gift."""
+    if TOGEPI_HATCH_CYCLE_OVERRIDE_MARKER in library_text:
+        start = library_text.index(TOGEPI_HATCH_CYCLE_OVERRIDE_MARKER)
+    else:
+        if library_text.count(TOGEPI_HATCH_CYCLE_ORIGINAL_FUNCTION) != 1:
+            raise ValueError("静态目标库缺少唯一的波克比函数，拒绝应用周期孵化修正")
+        start = library_text.index(TOGEPI_HATCH_CYCLE_ORIGINAL_FUNCTION)
+        comment_start = library_text.rfind("# 175:", 0, start)
+        if comment_start >= 0:
+            start = comment_start
+    if library_text.count(TOGEPI_HATCH_CYCLE_NEXT_FUNCTION) != 1:
+        raise ValueError("静态目标库缺少波克比后继函数，拒绝应用周期孵化修正")
+    end = library_text.index(TOGEPI_HATCH_CYCLE_NEXT_FUNCTION, start)
+    next_comment = library_text.rfind("# 243:", start, end)
+    if next_comment >= 0:
+        end = next_comment
+    replacement = override_text.rstrip() + "\n\n"
+    return library_text[:start] + replacement + library_text[end:]
+
+
 def _apply_egg_home_buffer_runtime_override_text(
     template_text: str,
     override_text: str,
@@ -1072,6 +1109,12 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     apply_egg_settings_runtime_override(
         source_dir / "lib" / EGG_SETTINGS_LIBRARY_NAME
     )
+    static_target_path = source_dir / "lib" / "16_获取_静态目标.ecs"
+    static_target_text = _apply_togepi_hatch_cycle_override_text(
+        static_target_path.read_text(encoding="utf-8"),
+        TOGEPI_HATCH_CYCLE_OVERRIDE_PATH.read_text(encoding="utf-8"),
+    )
+    static_target_path.write_text(static_target_text, encoding="utf-8")
     return inspect_script_corpus(source_dir)
 
 
