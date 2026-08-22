@@ -7,6 +7,8 @@ from automation.easycon118 import (
     EGG_HATCH_EXIT_OVERRIDE_PATH,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
+    EGG_POND_SETTLE_FIXED,
+    EGG_POND_SETTLE_ORIGINAL,
     EGG_PREPARED_254_OVERRIDE_MARKER,
     EGG_RESTART_GLOBALS,
     EGG_RESTART_OVERRIDE_PATH,
@@ -22,6 +24,7 @@ from automation.easycon118 import (
     _apply_egg_hatch_exit_runtime_override_text,
     _apply_egg_party_slot_candy_runtime_override_text,
     _apply_egg_party_slot_main_runtime_override_text,
+    _apply_egg_pond_settle_delay_text,
     _apply_egg_prepared_254_runtime_override_text,
     _apply_egg_restart_runtime_override_text,
     _apply_egg_seed_controller_runtime_override_text,
@@ -457,6 +460,12 @@ ENDFUNC
         self.assertIn("$孵蛋流程Seed已预校准 = 0", configured)
         self.assertEqual(configured.count("RETURN 2"), 3)
 
+    def test_pond_route_waits_after_the_final_down_input(self):
+        configured = _apply_egg_pond_settle_delay_text(EGG_POND_SETTLE_ORIGINAL)
+
+        self.assertEqual(configured, EGG_POND_SETTLE_FIXED)
+        self.assertEqual(_apply_egg_pond_settle_delay_text(configured), configured)
+
     def test_egg_seed_correction_reuses_formal_lock_controller(self):
         original = """\
 FUNC 孵蛋流程_按观测Seed校正等待($Seed差索引: INT): INT
@@ -534,7 +543,12 @@ ENDFUNC
             self.skipTest("requires the imported 1.1.8 egg runtime")
         template = template_path.read_text(encoding="utf-8")
         self.assertIn("$调试日志输出 = 1", template)
+        self.assertIn(EGG_TRANSIENT_RETRY_OVERRIDE_MARKER, template)
+        self.assertIn("抓捕失败，关闭游戏并继续下一轮", template)
+        self.assertIn("RETURN 2", template)
         library = library_path.read_text(encoding="utf-8")
+        self.assertIn("识别冲浪结束后再打开菜单", library)
+        self.assertIn(EGG_POND_SETTLE_FIXED, library)
         self.assertIn("FUNC 孵蛋测试_软重启并跳过回忆", library)
         soft_reset = library.split(
             "FUNC 孵蛋测试_软重启并跳过回忆", 1

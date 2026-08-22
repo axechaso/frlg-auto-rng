@@ -52,7 +52,11 @@ STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8.ecs"
 EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
 EXPECTED_TEMPLATE_NAMES = (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME)
 EXPECTED_SCRIPT_FILE_COUNT = 33
-EXPECTED_SCRIPT_SHA256 = "7d5e13e4391d5bcc9045044544f409919a6f95c602e2ad0308313470ce23e625"
+# The legacy package is still accepted by the importer, then upgraded in the
+# ignored local cache.  Generators only run against the materialized corpus so
+# direct EasyCon execution and GUI-generated execution use the same fixes.
+LEGACY_SCRIPT_SHA256 = "7d5e13e4391d5bcc9045044544f409919a6f95c602e2ad0308313470ce23e625"
+EXPECTED_SCRIPT_SHA256 = "aea14e79615bfda89e1f7428014adc2dcc848005bd7ebad0bd170eac67703aef"
 EASYCON118_EXTENSION_LABEL_DIR = (
     Path(__file__).resolve().parents[1]
     / "assets"
@@ -171,6 +175,19 @@ EGG_HATCH_EXIT_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
 EGG_HATCH_EXIT_NEXT_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
 EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
 EGG_TRANSIENT_RETRY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：瞬时动作失败重启后继续下一轮"
+EGG_POND_SETTLE_ORIGINAL = """\
+    LS RESET
+    WAIT 500
+    DOWN
+    $孵蛋库_已到池塘 = 1
+"""
+EGG_POND_SETTLE_FIXED = """\
+    LS RESET
+    WAIT 500
+    DOWN
+    WAIT 500
+    $孵蛋库_已到池塘 = 1
+"""
 EGG_PREPARED_254_GLOBAL = "$孵蛋从已完成254步开始"
 EGG_PREPARED_254_GLOBAL_ANCHOR = "$孵蛋同Seed模式 = 1"
 EGG_PARTY_SLOT_CANDY_NEXT_SECTION = "# ============================================================\n# Seed启动与同Seed两次命中"
@@ -807,6 +824,19 @@ def _apply_egg_transient_retry_runtime_override_text(template_text: str) -> str:
     return configured
 
 
+def _apply_egg_pond_settle_delay_text(library_text: str) -> str:
+    """Let the final pond-facing input settle before the surf sequence starts."""
+    if EGG_POND_SETTLE_FIXED in library_text:
+        return library_text
+    if library_text.count(EGG_POND_SETTLE_ORIGINAL) != 1:
+        raise ValueError("孵蛋流程库缺少唯一的池塘到位等待位置，拒绝应用稳定延迟")
+    return library_text.replace(
+        EGG_POND_SETTLE_ORIGINAL,
+        EGG_POND_SETTLE_FIXED,
+        1,
+    )
+
+
 def _apply_egg_hatch_exit_runtime_override_text(
     library_text: str,
     override_text: str,
@@ -988,6 +1018,7 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
         configured,
         hatch_exit_override_text,
     )
+    configured = _apply_egg_pond_settle_delay_text(configured)
     library_path.write_text(configured, encoding="utf-8")
     return {
         "egg_restart_original_flow_sha256": hashlib.sha256(
@@ -1006,6 +1037,42 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
             hatch_exit_override_text.encode("utf-8")
         ).hexdigest(),
     }
+
+
+def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
+    """Bake reviewed 1.6.4-a fixes into both direct-run 1.1.8 entries."""
+    source_dir = Path(source_dir).resolve()
+    standard_path = source_dir / STANDARD_TEMPLATE_NAME
+    egg_path = source_dir / EGG_TEMPLATE_NAME
+    if not standard_path.is_file() or not egg_path.is_file():
+        raise FileNotFoundError("1.1.8 包缺少正式版或时间轴版主脚本")
+
+    configured = _apply_egg_summary_fix_text(
+        egg_path.read_text(encoding="utf-8")
+    )
+    configured = _apply_egg_prepared_254_runtime_override_text(configured, False)
+    configured = _apply_egg_home_buffer_runtime_override_text(
+        configured,
+        EGG_HOME_BUFFER_OVERRIDE_PATH.read_text(encoding="utf-8"),
+    )
+    configured = _apply_egg_party_slot_main_runtime_override_text(
+        configured,
+        EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH.read_text(encoding="utf-8"),
+    )
+    configured = _apply_egg_seed_controller_runtime_override_text(
+        configured,
+        EGG_SEED_CONTROLLER_OVERRIDE_PATH.read_text(encoding="utf-8"),
+    )
+    configured = _apply_egg_transient_retry_runtime_override_text(configured)
+    egg_path.write_text(configured, encoding="utf-8")
+
+    apply_wild_pid_retry_limit(standard_path)
+    apply_wild_pid_retry_limit(egg_path)
+    apply_ocr_runtime_fallback(source_dir / "lib" / OCR_NAME_LIBRARY_NAME)
+    apply_egg_settings_runtime_override(
+        source_dir / "lib" / EGG_SETTINGS_LIBRARY_NAME
+    )
+    return inspect_script_corpus(source_dir)
 
 
 def write_configured_project(
