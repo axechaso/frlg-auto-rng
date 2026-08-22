@@ -17,9 +17,9 @@ from app_paths import RESOURCE_ROOT
 from .planner import RunPlan
 
 
-EXPECTED_LABEL_COUNT = 1149
-EXPECTED_LABEL_METHODS = {1: 17, 3: 1, 5: 776, 11: 1, 14: 354}
-EXPECTED_LABEL_SHA256 = "4b716978deddcf974c270d098ea898f2c2844cadb5023273c7033b741a3f31f1"
+EXPECTED_LABEL_COUNT = 1150
+EXPECTED_LABEL_METHODS = {1: 17, 3: 1, 5: 777, 11: 1, 14: 354}
+EXPECTED_LABEL_SHA256 = "00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e"
 EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
@@ -53,10 +53,14 @@ EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
 EXPECTED_TEMPLATE_NAMES = (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME)
 EXPECTED_SCRIPT_FILE_COUNT = 33
 EXPECTED_SCRIPT_SHA256 = "7d5e13e4391d5bcc9045044544f409919a6f95c602e2ad0308313470ce23e625"
-EGG_SETTINGS_OVERRIDE_PATH = (
+EASYCON118_EXTENSION_LABEL_DIR = (
     Path(__file__).resolve().parents[1]
     / "assets"
     / "easycon118_extensions"
+)
+EASYCON118_EXTENSION_LABEL_NAMES = ("闪公图标.IL", "冲浪.IL")
+EGG_SETTINGS_OVERRIDE_PATH = (
+    EASYCON118_EXTENSION_LABEL_DIR
     / "egg_settings_retry.ecs"
 )
 EGG_RESTART_OVERRIDE_PATH = (
@@ -156,7 +160,7 @@ EGG_PARTY_SLOT_MAIN_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_选择队伍槽"
 EGG_PARTY_SLOT_MAIN_NEXT_SECTION = "# -------------------- 野生Seed验证"
 EGG_PARTY_SLOT_CANDY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：神奇糖果按目标身份选择队伍末位或固定槽位"
 EGG_PARTY_SLOT_CANDY_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
-EGG_SURF_BATTLE_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：冲浪确认留足窗口，并在名称 OCR 前确认已进入野生战斗"
+EGG_SURF_BATTLE_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：识别冲浪结束后再打开菜单，并在名称 OCR 前确认已进入野生战斗"
 EGG_SURF_BATTLE_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_前往池塘并甜甜香气抓捕"
 EGG_SURF_BATTLE_NEXT_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
 EGG_SEED_CONTROLLER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：复用正式版 Seed 锁定与相邻毫秒细调控制器"
@@ -331,6 +335,23 @@ def inspect_label_corpus(label_dir: str | Path) -> dict[str, Any]:
         "methods": method_counts,
         "sha256": digest.hexdigest(),
     }
+
+
+def copy_easycon118_extension_labels(label_dir: str | Path) -> None:
+    """Install the audited repository labels into an ImgLabel directory.
+
+    The bundled text files may carry a source-control newline. EasyCon's
+    audited corpus uses the original one-line IL form, so normalize only the
+    trailing line ending while copying.
+    """
+    label_dir = Path(label_dir)
+    if not label_dir.is_dir():
+        raise FileNotFoundError(f"1.1.8 包缺少 ImgLabel 目录: {label_dir}")
+    for name in EASYCON118_EXTENSION_LABEL_NAMES:
+        source = EASYCON118_EXTENSION_LABEL_DIR / name
+        if not source.is_file():
+            raise FileNotFoundError(f"仓库缺少 EasyCon 扩展标签: {name}")
+        (label_dir / name).write_bytes(source.read_bytes().rstrip(b"\r\n"))
 
 
 def inspect_script_corpus(source_dir: str | Path) -> dict[str, Any]:
@@ -971,6 +992,8 @@ def write_configured_project(
             if target.exists():
                 shutil.rmtree(target)
             shutil.copytree(source, target)
+            if directory == "ImgLabel":
+                copy_easycon118_extension_labels(target)
 
     ocr_fallback_sha256 = apply_ocr_runtime_fallback(
         output_dir / "lib" / OCR_NAME_LIBRARY_NAME
@@ -1072,6 +1095,8 @@ def write_configured_egg_project(
             if target.exists():
                 shutil.rmtree(target)
             shutil.copytree(source, target)
+            if directory == "ImgLabel":
+                copy_easycon118_extension_labels(target)
 
     ocr_fallback_sha256 = apply_ocr_runtime_fallback(
         output_dir / "lib" / OCR_NAME_LIBRARY_NAME

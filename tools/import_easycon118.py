@@ -5,6 +5,7 @@ import hashlib
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -17,6 +18,7 @@ from automation.easycon118 import (  # noqa: E402
     EXPECTED_SCRIPT_FILE_COUNT,
     EXPECTED_SCRIPT_SHA256,
     EXPECTED_TESSDATA_SHA256,
+    copy_easycon118_extension_labels,
     inspect_label_corpus,
     inspect_script_corpus,
 )
@@ -29,38 +31,31 @@ DEFAULT_DESTINATION = ROOT / "local_assets" / "easycon118"
 EXTENSION_DIR = ROOT / "assets" / "easycon118_extensions"
 
 
-def _copy_shiny_male_label(source: Path, target: Path) -> None:
-    """Copy the one-line IL asset in its canonical no-trailing-newline form."""
-    target.write_bytes(source.read_bytes().rstrip(b"\r\n"))
-
-
 def import_package(source: Path, destination: Path) -> Path:
     source = source.resolve()
     destination = destination.resolve()
     if ROOT.resolve() not in destination.parents:
         raise ValueError("导入目标必须位于当前项目目录内")
     label_dir = source / "ImgLabel"
-    shiny_male_label = label_dir / "闪公图标.IL"
-    bundled_shiny_male_label = EXTENSION_DIR / "闪公图标.IL"
-    # Older 1.1.8 packages predate the shiny-summary male label.  The
-    # repository bundles this audited extension so a fresh device can import
-    # the original package and still obtain the current SID collector assets.
-    inspect_dir = label_dir
-    if not shiny_male_label.is_file():
-        if not bundled_shiny_male_label.is_file():
-            raise FileNotFoundError("缺少SID闪光摘要页雄性标签: 闪公图标.IL")
-        inspect_dir = destination.parent / ".easycon118-label-audit"
-        if inspect_dir.exists():
-            shutil.rmtree(inspect_dir)
+    # The upstream 1.1.8 package may predate either repository extension:
+    # the SID shiny-male icon and the egg pond surf-complete marker. Always
+    # audit a copy with both canonical labels installed so old and new source
+    # folders produce the same deterministic 1150-label corpus.
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".easycon118-label-audit-",
+        dir=destination.parent,
+    ) as audit_root:
+        inspect_dir = Path(audit_root) / "ImgLabel"
         shutil.copytree(label_dir, inspect_dir)
-        _copy_shiny_male_label(bundled_shiny_male_label, inspect_dir / "闪公图标.IL")
-    manifest = inspect_label_corpus(inspect_dir)
-    if manifest["count"] != EXPECTED_LABEL_COUNT:
-        raise ValueError(f"标签数量不是 {EXPECTED_LABEL_COUNT}: {manifest['count']}")
-    if manifest["methods"] != EXPECTED_LABEL_METHODS:
-        raise ValueError(f"标签方法分布不匹配: {manifest['methods']}")
-    if manifest["sha256"] != EXPECTED_LABEL_SHA256:
-        raise ValueError(f"标签指纹不匹配: {manifest['sha256']}")
+        copy_easycon118_extension_labels(inspect_dir)
+        manifest = inspect_label_corpus(inspect_dir)
+        if manifest["count"] != EXPECTED_LABEL_COUNT:
+            raise ValueError(f"标签数量不是 {EXPECTED_LABEL_COUNT}: {manifest['count']}")
+        if manifest["methods"] != EXPECTED_LABEL_METHODS:
+            raise ValueError(f"标签方法分布不匹配: {manifest['methods']}")
+        if manifest["sha256"] != EXPECTED_LABEL_SHA256:
+            raise ValueError(f"标签指纹不匹配: {manifest['sha256']}")
 
     script_manifest = inspect_script_corpus(source)
     if script_manifest["count"] != EXPECTED_SCRIPT_FILE_COUNT:
@@ -100,8 +95,8 @@ def import_package(source: Path, destination: Path) -> Path:
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(source_path, target)
-        if name == "ImgLabel" and not (target / "闪公图标.IL").is_file():
-            _copy_shiny_male_label(bundled_shiny_male_label, target / "闪公图标.IL")
+        if name == "ImgLabel":
+            copy_easycon118_extension_labels(target)
     for old_template in destination.glob("*.ecs"):
         old_template.unlink()
     for template in templates:
@@ -119,8 +114,6 @@ def import_package(source: Path, destination: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    if inspect_dir != label_dir and inspect_dir.exists():
-        shutil.rmtree(inspect_dir)
     return destination
 
 

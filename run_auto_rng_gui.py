@@ -1140,7 +1140,7 @@ class AutoRngApp:
         ).grid(row=1, column=5, columnspan=2, sticky="w", padx=4, pady=4)
         ttk.Button(
             script_test,
-            text="准备内置冲浪菜单测试",
+            text="准备内置冲浪结束测试",
             command=self.prepare_builtin_surf_menu_probe,
         ).grid(row=2, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 4))
         ttk.Label(

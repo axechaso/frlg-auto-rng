@@ -182,10 +182,10 @@ class DirectScriptTestTests(unittest.TestCase):
             main = script_test.write_builtin_egg_surf_menu_probe(source, output)
 
             self.assertTrue(main.is_file())
-            self.assertIn("SURF_MENU|SUMMARY", main.read_text(encoding="utf-8"))
+            self.assertIn("SURF_MENU|SURF_SUMMARY", main.read_text(encoding="utf-8"))
             self.assertEqual(
                 sorted(path.name for path in (output / "ImgLabel").iterdir()),
-                ["三代菜单栏.IL", "火红BAG.IL"],
+                ["冲浪.IL"],
             )
             manifest = json.loads(
                 (output / "script-test.json").read_text(encoding="utf-8")

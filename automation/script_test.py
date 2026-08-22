@@ -13,6 +13,7 @@ from pathlib import Path
 from app_paths import RESOURCE_ROOT
 
 from .easycon118 import (
+    EASYCON118_EXTENSION_LABEL_DIR,
     EXPECTED_EZCON_SHA256,
     EXPECTED_EZCON_VERSION,
     EXPECTED_TESSDATA_SHA256,
@@ -34,7 +35,7 @@ BUILTIN_EGG_SURF_MENU_PROBE = (
     / "easycon118_extensions"
     / "egg_surf_menu_probe.ecs"
 )
-BUILTIN_EGG_SURF_MENU_LABELS = ("三代菜单栏", "火红BAG")
+BUILTIN_EGG_SURF_MENU_LABELS = ("冲浪",)
 
 _LABEL_REFERENCE_RE = re.compile(r"@([\w]+)", re.UNICODE)
 
@@ -226,20 +227,17 @@ def write_builtin_egg_surf_menu_probe(
     source_dir: str | Path,
     output_dir: str | Path,
 ) -> Path:
-    """Create the standalone surf/menu probe with only its two labels."""
+    """Create the standalone surf-complete probe with its audited label."""
     source_dir = Path(source_dir).resolve()
     output_dir = Path(output_dir).resolve()
-    source_label_dir = source_dir / "ImgLabel"
     if not BUILTIN_EGG_SURF_MENU_PROBE.is_file():
-        raise FileNotFoundError(f"缺少内置冲浪菜单测试脚本: {BUILTIN_EGG_SURF_MENU_PROBE}")
-    if not source_label_dir.is_dir():
-        raise FileNotFoundError(f"1.1.8 包缺少 ImgLabel: {source_label_dir}")
+        raise FileNotFoundError(f"缺少内置冲浪结束测试脚本: {BUILTIN_EGG_SURF_MENU_PROBE}")
 
     label_sources = []
     for name in BUILTIN_EGG_SURF_MENU_LABELS:
-        label_path = source_label_dir / f"{name}.IL"
+        label_path = EASYCON118_EXTENSION_LABEL_DIR / f"{name}.IL"
         if not label_path.is_file():
-            raise FileNotFoundError(f"1.1.8 包缺少测试标签: {label_path.name}")
+            raise FileNotFoundError(f"仓库缺少内置测试标签: {label_path.name}")
         label_sources.append(label_path)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -248,7 +246,9 @@ def write_builtin_egg_surf_menu_probe(
     main_path = output_dir / "main.ecs"
     shutil.copy2(BUILTIN_EGG_SURF_MENU_PROBE, main_path)
     for label_path in label_sources:
-        shutil.copy2(label_path, output_label_dir / label_path.name)
+        (output_label_dir / label_path.name).write_bytes(
+            label_path.read_bytes().rstrip(b"\r\n")
+        )
 
     manifest = {
         "kind": "builtin_egg_surf_menu_probe",

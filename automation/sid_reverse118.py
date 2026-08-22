@@ -13,6 +13,7 @@ from rng.tenlines_utils import get_personal
 from .easycon118 import (
     EXPECTED_SCRIPT_FILE_COUNT,
     EXPECTED_SCRIPT_SHA256,
+    copy_easycon118_extension_labels,
     inspect_script_corpus,
 )
 
@@ -206,6 +207,8 @@ def write_sid_reverse_project(
             if target.exists():
                 shutil.rmtree(target)
             shutil.copytree(source, target)
+            if directory == "ImgLabel":
+                copy_easycon118_extension_labels(target)
     write_sid_reverse_plan(
         source_dir,
         output_dir,
