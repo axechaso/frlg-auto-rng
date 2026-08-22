@@ -59,8 +59,11 @@ LEGACY_SCRIPT_SHA256 = "7d5e13e4391d5bcc9045044544f409919a6f95c602e2ad0308313470
 # Previous materialized corpus accepted as an upgrade input.  Keep this
 # separate from the current fingerprint so existing installations can be
 # upgraded in place without accepting arbitrary script changes.
-PREVIOUS_SCRIPT_SHA256 = "aea14e79615bfda89e1f7428014adc2dcc848005bd7ebad0bd170eac67703aef"
-EXPECTED_SCRIPT_SHA256 = "fe0ae41be3fe035cbefec9afd525b968a070c8781a73595e1ae16b4cd1e2e839"
+PREVIOUS_SCRIPT_SHA256S = (
+    "aea14e79615bfda89e1f7428014adc2dcc848005bd7ebad0bd170eac67703aef",
+    "fe0ae41be3fe035cbefec9afd525b968a070c8781a73595e1ae16b4cd1e2e839",
+)
+EXPECTED_SCRIPT_SHA256 = "43c3944bad75a1cb424203237b6aad51b351aa5c9bb81bfc6aa2c93ce96932cf"
 EASYCON118_EXTENSION_LABEL_DIR = (
     Path(__file__).resolve().parents[1]
     / "assets"
@@ -118,6 +121,12 @@ TOGEPI_HATCH_CYCLE_OVERRIDE_PATH = (
     / "assets"
     / "easycon118_extensions"
     / "togepi_hatch_cycle.ecs"
+)
+PARTY_SUMMARY_NAVIGATION_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "party_summary_up_navigation.ecs"
 )
 OCR_NAME_LIBRARY_NAME = "19_OCR_GEN3战斗场景名称.ecs"
 OCR_RUNTIME_FALLBACK_MARKER = "# GUI 运行时覆盖：OCR 不可用时直接回到单字识别"
@@ -186,6 +195,26 @@ EGG_HATCH_EXIT_NEXT_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
 TOGEPI_HATCH_CYCLE_OVERRIDE_MARKER = "# 1.6.4-a 共享孵化执行：定点波克比按孵化周期骑车，不再读取蛋孵化标签。"
 TOGEPI_HATCH_CYCLE_ORIGINAL_FUNCTION = "FUNC 获取波克比"
 TOGEPI_HATCH_CYCLE_NEXT_FUNCTION = "FUNC 获取游走"
+PARTY_SUMMARY_NAVIGATION_MARKER = "# 1.6.4-a 共享反查导航：队伍页按上移次数选择目标。"
+PARTY_SUMMARY_NAVIGATION_ANCHOR = "FUNC 打开能力值识图页面"
+PARTY_SUMMARY_ORIGINAL_UP_BLOCK = """\
+            ELSE
+                UP
+                500
+                UP
+                500
+            ENDIF
+"""
+PARTY_SUMMARY_INVALID_CALL_BLOCK = """\
+            ELSE
+                CALL 反查_队伍页按上移次数选择目标(2)
+            ENDIF
+"""
+PARTY_SUMMARY_SHARED_UP_BLOCK = """\
+            ELSE
+                $反查队伍槽选择结果 = 反查_队伍页按上移次数选择目标(2)
+            ENDIF
+"""
 EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
 EGG_TRANSIENT_RETRY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：瞬时动作失败重启后继续下一轮"
 EGG_POND_SETTLE_ORIGINAL = """\
@@ -892,6 +921,39 @@ def _apply_togepi_hatch_cycle_override_text(
     return library_text[:start] + replacement + library_text[end:]
 
 
+def _apply_party_summary_navigation_text(
+    template_text: str,
+    helper_text: str,
+) -> str:
+    """Share party-page target selection between normal and egg reverse lookup."""
+    if PARTY_SUMMARY_NAVIGATION_MARKER not in template_text:
+        if template_text.count(PARTY_SUMMARY_NAVIGATION_ANCHOR) != 1:
+            raise ValueError("主脚本缺少唯一的能力页入口，拒绝注入共享队伍导航")
+        anchor = template_text.index(PARTY_SUMMARY_NAVIGATION_ANCHOR)
+        template_text = (
+            template_text[:anchor]
+            + helper_text.rstrip()
+            + "\n\n"
+            + template_text[anchor:]
+        )
+
+    if PARTY_SUMMARY_SHARED_UP_BLOCK in template_text:
+        return template_text
+    if PARTY_SUMMARY_INVALID_CALL_BLOCK in template_text:
+        return template_text.replace(
+            PARTY_SUMMARY_INVALID_CALL_BLOCK,
+            PARTY_SUMMARY_SHARED_UP_BLOCK,
+            1,
+        )
+    if template_text.count(PARTY_SUMMARY_ORIGINAL_UP_BLOCK) != 1:
+        raise ValueError("主脚本普通反查的末位导航不唯一，拒绝替换共享队伍导航")
+    return template_text.replace(
+        PARTY_SUMMARY_ORIGINAL_UP_BLOCK,
+        PARTY_SUMMARY_SHARED_UP_BLOCK,
+        1,
+    )
+
+
 def _apply_egg_home_buffer_runtime_override_text(
     template_text: str,
     override_text: str,
@@ -1102,6 +1164,16 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     )
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
     egg_path.write_text(configured, encoding="utf-8")
+
+    party_summary_helper = PARTY_SUMMARY_NAVIGATION_PATH.read_text(
+        encoding="utf-8"
+    )
+    for template_path in (standard_path, egg_path):
+        configured = _apply_party_summary_navigation_text(
+            template_path.read_text(encoding="utf-8"),
+            party_summary_helper,
+        )
+        template_path.write_text(configured, encoding="utf-8")
 
     apply_wild_pid_retry_limit(standard_path)
     apply_wild_pid_retry_limit(egg_path)

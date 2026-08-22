@@ -17,6 +17,7 @@ from automation.easycon118 import (
     EGG_SETTINGS_OVERRIDE_PATH,
     EGG_SURF_BATTLE_OVERRIDE_PATH,
     EGG_TRANSIENT_RETRY_OVERRIDE_MARKER,
+    PARTY_SUMMARY_NAVIGATION_PATH,
     TOGEPI_HATCH_CYCLE_OVERRIDE_PATH,
     WILD_PID_RETRY_LIMIT_MARKER,
     EggRunRequest,
@@ -33,6 +34,7 @@ from automation.easycon118 import (
     _apply_egg_settings_runtime_override_text,
     _apply_egg_surf_battle_runtime_override_text,
     _apply_egg_transient_retry_runtime_override_text,
+    _apply_party_summary_navigation_text,
     _apply_togepi_hatch_cycle_override_text,
     _apply_wild_pid_retry_limit_text,
     configure_egg_template_text,
@@ -341,8 +343,52 @@ ENDFUNC
             "ELIF $队伍位置 == 6",
             1,
         )[0]
-        self.assertEqual(tail_branch.count("        UP\n"), 2)
-        self.assertEqual(fifth_slot_branch.count("        UP\n"), 3)
+        self.assertIn("反查_队伍页按上移次数选择目标(2)", tail_branch)
+        self.assertIn("反查_队伍页按上移次数选择目标(3)", fifth_slot_branch)
+        self.assertNotIn("        UP\n", tail_branch)
+        self.assertNotIn("        UP\n", fifth_slot_branch)
+
+    def test_normal_and_egg_summary_navigation_share_the_up_count_helper(self):
+        original = """\
+FUNC 打开能力值识图页面
+    IF $刚使用神奇糖果 == 0
+        IF $目标全国图鉴编号 != 1
+            IF $道具乱数模式 == 1
+                CALL 选择道具乱数本轮捕获位置
+            ELSE
+                UP
+                500
+                UP
+                500
+            ENDIF
+        ENDIF
+    ENDIF
+ENDFUNC
+"""
+        helper = Path(PARTY_SUMMARY_NAVIGATION_PATH).read_text(encoding="utf-8")
+        configured = _apply_party_summary_navigation_text(original, helper)
+        configured_again = _apply_party_summary_navigation_text(configured, helper)
+
+        self.assertEqual(configured_again, configured)
+        self.assertEqual(
+            configured.count("FUNC 反查_队伍页按上移次数选择目标"),
+            1,
+        )
+        summary = configured.split("FUNC 打开能力值识图页面", 1)[1]
+        self.assertIn(
+            "$反查队伍槽选择结果 = 反查_队伍页按上移次数选择目标(2)",
+            summary,
+        )
+        self.assertNotIn("ELSE\n            UP\n", summary)
+
+        egg_override = Path(EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH).read_text(
+            encoding="utf-8"
+        )
+        fifth_slot = egg_override.split("ELIF $队伍位置 == 5", 1)[1].split(
+            "ELIF $队伍位置 == 6",
+            1,
+        )[0]
+        self.assertIn("反查_队伍页按上移次数选择目标(3)", fifth_slot)
 
     def test_candy_navigation_uses_the_same_party_tail_rule(self):
         original = """\

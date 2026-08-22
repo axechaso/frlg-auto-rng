@@ -324,7 +324,7 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(manifest["count"], 33)
         self.assertEqual(
             manifest["sha256"],
-            "fe0ae41be3fe035cbefec9afd525b968a070c8781a73595e1ae16b4cd1e2e839",
+            "43c3944bad75a1cb424203237b6aad51b351aa5c9bb81bfc6aa2c93ce96932cf",
         )
         self.assertEqual(
             manifest["templates"],
