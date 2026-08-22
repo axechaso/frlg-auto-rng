@@ -14,6 +14,7 @@ from automation.easycon118 import (
     EGG_SETTINGS_GLOBALS,
     EGG_SETTINGS_OVERRIDE_PATH,
     EGG_SURF_BATTLE_OVERRIDE_PATH,
+    EGG_TRANSIENT_RETRY_OVERRIDE_MARKER,
     WILD_PID_RETRY_LIMIT_MARKER,
     EggRunRequest,
     _apply_egg_home_resample_fix_text,
@@ -27,6 +28,7 @@ from automation.easycon118 import (
     _apply_egg_summary_fix_text,
     _apply_egg_settings_runtime_override_text,
     _apply_egg_surf_battle_runtime_override_text,
+    _apply_egg_transient_retry_runtime_override_text,
     _apply_wild_pid_retry_limit_text,
     configure_egg_template_text,
     egg_request_to_user_values,
@@ -427,6 +429,33 @@ ENDFUNC
             configured.index("孵蛋测试_等待池塘野生战斗()"),
             configured.index("识别抓捕对象名称优先OCR"),
         )
+
+    def test_transient_egg_action_failures_restart_and_continue(self):
+        original = """\
+    ELIF $孵蛋测试结果 != 1
+        PRINT 孵蛋生成、领取或Seed复核野生抓捕失败
+        CALL 孵蛋流程_重开下一轮
+        RETURN 0
+    ENDIF
+
+    PRINT 领取后野生Seed反查失败
+    CALL 孵蛋流程_重开下一轮
+    RETURN 0
+
+    IF $孵蛋流程孵化结果 != 1
+        RETURN 0
+    ENDIF
+"""
+        configured = _apply_egg_transient_retry_runtime_override_text(original)
+        configured_again = _apply_egg_transient_retry_runtime_override_text(configured)
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(EGG_TRANSIENT_RETRY_OVERRIDE_MARKER, configured)
+        self.assertIn("抓捕失败，关闭游戏并继续下一轮", configured)
+        self.assertIn("反查失败，关闭游戏并重新预校准", configured)
+        self.assertIn("孵化动作失败，关闭游戏并继续下一轮", configured)
+        self.assertIn("$孵蛋流程Seed已预校准 = 0", configured)
+        self.assertEqual(configured.count("RETURN 2"), 3)
 
     def test_egg_seed_correction_reuses_formal_lock_controller(self):
         original = """\

@@ -170,6 +170,7 @@ EGG_HATCH_EXIT_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：孵化骑车前�
 EGG_HATCH_EXIT_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
 EGG_HATCH_EXIT_NEXT_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
 EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
+EGG_TRANSIENT_RETRY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：瞬时动作失败重启后继续下一轮"
 EGG_PREPARED_254_GLOBAL = "$孵蛋从已完成254步开始"
 EGG_PREPARED_254_GLOBAL_ANCHOR = "$孵蛋同Seed模式 = 1"
 EGG_PARTY_SLOT_CANDY_NEXT_SECTION = "# ============================================================\n# Seed启动与同Seed两次命中"
@@ -194,6 +195,52 @@ $孵蛋库_设置候选分数 = -1
 $孵蛋库_设置最佳分数 = -1
 $孵蛋库_设置状态 = -1
 """
+EGG_TRANSIENT_RETRY_REPLACEMENTS = (
+    (
+        """\
+    ELIF $孵蛋测试结果 != 1
+        PRINT 孵蛋生成、领取或Seed复核野生抓捕失败
+        CALL 孵蛋流程_重开下一轮
+        RETURN 0
+    ENDIF
+""",
+        f"""\
+    {EGG_TRANSIENT_RETRY_OVERRIDE_MARKER}
+    ELIF $孵蛋测试结果 != 1
+        PRINT 孵蛋生成、领取或Seed复核野生抓捕失败，关闭游戏并继续下一轮
+        CALL 孵蛋流程_重开下一轮
+        RETURN 2
+    ENDIF
+""",
+    ),
+    (
+        """\
+    PRINT 领取后野生Seed反查失败
+    CALL 孵蛋流程_重开下一轮
+    RETURN 0
+""",
+        """\
+    PRINT 领取后野生Seed反查失败，关闭游戏并重新预校准
+    $孵蛋流程Seed已预校准 = 0
+    CALL 孵蛋流程_重开下一轮
+    RETURN 2
+""",
+    ),
+    (
+        """\
+    IF $孵蛋流程孵化结果 != 1
+        RETURN 0
+    ENDIF
+""",
+        """\
+    IF $孵蛋流程孵化结果 != 1
+        PRINT 孵化动作失败，关闭游戏并继续下一轮
+        CALL 孵蛋流程_重开下一轮
+        RETURN 2
+    ENDIF
+""",
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -748,6 +795,18 @@ def _apply_egg_seed_controller_runtime_override_text(
     return template_text[:start] + replacement + template_text[end:]
 
 
+def _apply_egg_transient_retry_runtime_override_text(template_text: str) -> str:
+    """Keep transient egg-route failures inside the existing retry loop."""
+    if EGG_TRANSIENT_RETRY_OVERRIDE_MARKER in template_text:
+        return template_text
+    configured = template_text
+    for original, replacement in EGG_TRANSIENT_RETRY_REPLACEMENTS:
+        if configured.count(original) != 1:
+            raise ValueError("孵蛋模板缺少唯一的瞬时失败分支，拒绝应用自动重试修正")
+        configured = configured.replace(original, replacement, 1)
+    return configured
+
+
 def _apply_egg_hatch_exit_runtime_override_text(
     library_text: str,
     override_text: str,
@@ -1082,6 +1141,7 @@ def write_configured_egg_project(
         configured,
         seed_controller_override_text,
     )
+    configured = _apply_egg_transient_retry_runtime_override_text(configured)
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
     wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
@@ -1113,6 +1173,12 @@ def write_configured_egg_project(
     ).hexdigest()
     runtime_overrides["egg_seed_controller_sha256"] = hashlib.sha256(
         seed_controller_override_text.encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["egg_transient_retry_main_sha256"] = hashlib.sha256(
+        "\n".join(
+            replacement
+            for _, replacement in EGG_TRANSIENT_RETRY_REPLACEMENTS
+        ).encode("utf-8")
     ).hexdigest()
     runtime_overrides["egg_prepared_254_start_sha256"] = hashlib.sha256(
         _egg_prepared_254_override_text(request.start_from_prepared_254).encode(
