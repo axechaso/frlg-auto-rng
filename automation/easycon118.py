@@ -220,6 +220,7 @@ EGG_PARTY_SLOT_MAIN_NEXT_SECTION = "# -------------------- 野生Seed验证"
 EGG_PARTY_SLOT_MAIN_EGG_FUNCTION = "FUNC 孵蛋流程_执行蛋个体反查(): INT"
 EGG_PARTY_SLOT_MAIN_EGG_NEXT_SECTION = "# -------------------- 总控与重试"
 EGG_REVERSE_LOOKUP_POLICY_MARKER = "# GUI 孵蛋反查覆盖：Normal 优先，方法候选不跨算法累加"
+EGG_REVERSE_LOOKUP_WINDOW_MARKER = "# GUI 孵蛋反查覆盖：固定帧窗，不再扩展"
 EGG_REVERSE_LOOKUP_METHOD_COMMENT = "# FRLG常用Split优先；Split有候选时不再混入其他方法，避免扩大歧义。"
 EGG_PARTY_SLOT_CANDY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：神奇糖果按目标身份选择队伍末位或固定槽位"
 EGG_PARTY_SLOT_CANDY_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
@@ -874,10 +875,48 @@ def _apply_egg_party_slot_main_runtime_override_text(
     return template_text
 
 
+def _apply_egg_reverse_lookup_window_text(template_text: str) -> str:
+    """Keep egg candidate scans inside the configured frame tolerance."""
+    if EGG_REVERSE_LOOKUP_WINDOW_MARKER in template_text:
+        return template_text
+
+    egg_start = template_text.find(EGG_PARTY_SLOT_MAIN_EGG_FUNCTION)
+    if egg_start < 0:
+        return template_text
+    egg_end = template_text.find(EGG_PARTY_SLOT_MAIN_EGG_NEXT_SECTION, egg_start)
+    if egg_end < 0:
+        raise ValueError("孵蛋模板缺少总控与重试分区，拒绝应用固定帧窗修正")
+    egg_section = template_text[egg_start:egg_end]
+    original = """        FOR $孵蛋流程蛋扩窗层 = 0 TO 2
+            IF $孵蛋流程蛋扩窗层 == 0
+                $孵蛋流程蛋帧半宽 = $孵蛋个体反查帧容差
+            ELIF $孵蛋流程蛋扩窗层 == 1
+                $孵蛋流程蛋帧半宽 = 5000
+            ELSE
+                $孵蛋流程蛋帧半宽 = 10000
+            ENDIF
+"""
+    fixed = """        # GUI 孵蛋反查覆盖：固定帧窗，不再扩展
+        FOR $孵蛋流程蛋扩窗层 = 0 TO 0
+            $孵蛋流程蛋帧半宽 = $孵蛋个体反查帧容差
+"""
+    if original not in egg_section:
+        # Minimal unit fixtures may omit the full scan loop. The real template
+        # is still guarded by the exact replacement above.
+        return template_text
+    egg_section = egg_section.replace(original, fixed, 1)
+    expansion_log = "            PRINT 孵蛋蛋个体反查第 & $孵蛋流程蛋扩窗层 & \" 层无结果，自动扩窗\""
+    fixed_log = "            PRINT 孵蛋蛋个体反查固定帧窗无结果"
+    if egg_section.count(expansion_log) != 1:
+        raise ValueError("孵蛋模板缺少唯一的扩窗日志，拒绝应用固定帧窗修正")
+    egg_section = egg_section.replace(expansion_log, fixed_log, 1)
+    return template_text[:egg_start] + egg_section + template_text[egg_end:]
+
+
 def _apply_egg_reverse_lookup_policy_text(template_text: str) -> str:
     """Prefer Normal, then Split, without combining candidates across methods."""
     if EGG_REVERSE_LOOKUP_POLICY_MARKER in template_text:
-        return template_text
+        return _apply_egg_reverse_lookup_window_text(template_text)
 
     # This limit belongs to the egg reverse lookup only. The separate generic
     # wild reverse candy limit remains unchanged.
@@ -934,7 +973,8 @@ def _apply_egg_reverse_lookup_policy_text(template_text: str) -> str:
                 ENDIF
             NEXT
 """
-    return template_text[:method_start] + replacement + template_text[method_end:]
+    configured = template_text[:method_start] + replacement + template_text[method_end:]
+    return _apply_egg_reverse_lookup_window_text(configured)
 
 
 def _apply_egg_party_slot_candy_runtime_override_text(

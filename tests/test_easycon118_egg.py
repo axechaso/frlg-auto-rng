@@ -8,6 +8,7 @@ from automation.easycon118 import (
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
     EGG_REVERSE_LOOKUP_POLICY_MARKER,
+    EGG_REVERSE_LOOKUP_WINDOW_MARKER,
     EGG_POND_SETTLE_FIXED,
     EGG_POND_SETTLE_ORIGINAL,
     EGG_PREPARED_254_OVERRIDE_MARKER,
@@ -28,6 +29,7 @@ from automation.easycon118 import (
     _apply_egg_party_slot_candy_runtime_override_text,
     _apply_egg_party_slot_main_runtime_override_text,
     _apply_egg_reverse_lookup_policy_text,
+    _apply_egg_reverse_lookup_window_text,
     _apply_egg_pond_settle_delay_text,
     _apply_egg_prepared_254_runtime_override_text,
     _apply_egg_restart_runtime_override_text,
@@ -111,6 +113,37 @@ FUNC 孵蛋流程_执行蛋个体反查(): INT
         )
         self.assertNotIn("Split已有候选", configured)
         self.assertNotIn("$孵蛋流程候选总数 += $孵蛋流程当前方法候选数", configured)
+
+    def test_egg_reverse_lookup_does_not_expand_frame_window(self):
+        original = """\
+FUNC 孵蛋流程_执行蛋个体反查(): INT
+        FOR $孵蛋流程蛋扩窗层 = 0 TO 2
+            IF $孵蛋流程蛋扩窗层 == 0
+                $孵蛋流程蛋帧半宽 = $孵蛋个体反查帧容差
+            ELIF $孵蛋流程蛋扩窗层 == 1
+                $孵蛋流程蛋帧半宽 = 5000
+            ELSE
+                $孵蛋流程蛋帧半宽 = 10000
+            ENDIF
+            PRINT 孵蛋蛋个体反查第 & $孵蛋流程蛋扩窗层 & " 层无结果，自动扩窗"
+        NEXT
+ENDFUNC
+
+# -------------------- 总控与重试
+"""
+        configured = _apply_egg_reverse_lookup_window_text(original)
+
+        self.assertEqual(
+            _apply_egg_reverse_lookup_window_text(configured),
+            configured,
+        )
+        self.assertIn(EGG_REVERSE_LOOKUP_WINDOW_MARKER, configured)
+        self.assertIn("FOR $孵蛋流程蛋扩窗层 = 0 TO 0", configured)
+        self.assertIn("$孵蛋流程蛋帧半宽 = $孵蛋个体反查帧容差", configured)
+        self.assertNotIn("5000", configured)
+        self.assertNotIn("10000", configured)
+        self.assertNotIn("自动扩窗", configured)
+        self.assertIn("孵蛋蛋个体反查固定帧窗无结果", configured)
 
     def test_generated_projects_use_the_reviewed_wild_pid_retry_limit(self):
         imported = """\\
