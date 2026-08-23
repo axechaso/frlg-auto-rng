@@ -7,6 +7,7 @@ from automation.easycon118 import (
     EGG_HATCH_EXIT_OVERRIDE_PATH,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
+    EGG_REVERSE_LOOKUP_POLICY_MARKER,
     EGG_POND_SETTLE_FIXED,
     EGG_POND_SETTLE_ORIGINAL,
     EGG_PREPARED_254_OVERRIDE_MARKER,
@@ -26,6 +27,7 @@ from automation.easycon118 import (
     _apply_egg_hatch_exit_runtime_override_text,
     _apply_egg_party_slot_candy_runtime_override_text,
     _apply_egg_party_slot_main_runtime_override_text,
+    _apply_egg_reverse_lookup_policy_text,
     _apply_egg_pond_settle_delay_text,
     _apply_egg_prepared_254_runtime_override_text,
     _apply_egg_restart_runtime_override_text,
@@ -61,6 +63,55 @@ def egg_request(**changes):
 
 
 class EasyCon118EggTests(unittest.TestCase):
+    def test_egg_reverse_lookup_prefers_normal_then_split_without_mixing_methods(self):
+        original = """\
+$孵蛋蛋反查最多糖果 = 8
+FUNC 孵蛋流程_执行蛋个体反查(): INT
+            # FRLG常用Split优先；Split有候选时不再混入其他方法，避免扩大歧义。
+            FOR $孵蛋流程方法顺序 = 0 TO 3
+                IF $孵蛋流程方法顺序 == 0
+                    $孵蛋流程扫描方法 = 12
+                ELIF $孵蛋流程方法顺序 == 1
+                    $孵蛋流程扫描方法 = 11
+                ELIF $孵蛋流程方法顺序 == 2
+                    $孵蛋流程扫描方法 = 13
+                ELSE
+                    $孵蛋流程扫描方法 = 14
+                ENDIF
+                $孵蛋流程当前方法候选数 = 孵蛋反查_取总命中数()
+                IF $孵蛋流程当前方法候选数 > 0
+                    PRINT 孵蛋方法 & $孵蛋流程扫描方法
+                    IF $孵蛋流程候选总数 == 0 and $孵蛋流程当前方法候选数 == 1
+                        $孵蛋流程实际方法 = $孵蛋流程扫描方法
+                    ENDIF
+                    $孵蛋流程候选总数 += $孵蛋流程当前方法候选数
+                    IF $孵蛋流程扫描方法 == 12
+                        BREAK
+                    ENDIF
+                ENDIF
+            NEXT
+            IF $孵蛋流程候选总数 > 0
+                BREAK
+            ENDIF
+# -------------------- 总控与重试
+"""
+        configured = _apply_egg_reverse_lookup_policy_text(original)
+        configured_again = _apply_egg_reverse_lookup_policy_text(configured)
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(EGG_REVERSE_LOOKUP_POLICY_MARKER, configured)
+        self.assertIn("$孵蛋蛋反查最多糖果 = 20", configured)
+        self.assertLess(
+            configured.index("$孵蛋流程扫描方法 = 11"),
+            configured.index("$孵蛋流程扫描方法 = 12"),
+        )
+        self.assertIn(
+            "$孵蛋流程候选总数 = $孵蛋流程当前方法候选数",
+            configured,
+        )
+        self.assertNotIn("Split已有候选", configured)
+        self.assertNotIn("$孵蛋流程候选总数 += $孵蛋流程当前方法候选数", configured)
+
     def test_generated_projects_use_the_reviewed_wild_pid_retry_limit(self):
         imported = """\\
 $野生PID尝试上限 = 1000
@@ -313,8 +364,12 @@ ENDFUNC
 FUNC 孵蛋流程_执行蛋个体反查(): INT
     $孵蛋流程开页结果 = 孵蛋流程_打开指定槽能力页(5)
     $神奇糖果结果 = 孵蛋测试_使用神奇糖果指定槽(5)
+    $刚使用神奇糖果 = 1
+    CALL 打开能力值识图页面
     RETURN 1
 ENDFUNC
+
+# -------------------- 总控与重试
 """
         override = Path(EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH).read_text(encoding="utf-8")
         configured = _apply_egg_party_slot_main_runtime_override_text(original, override)
@@ -334,6 +389,21 @@ ENDFUNC
         )
         self.assertIn("孵蛋流程_打开指定槽能力页(5, 0)", configured)
         self.assertIn("孵蛋测试_使用神奇糖果指定槽(5, 0)", configured)
+
+        egg_section = configured.split(
+            "FUNC 孵蛋流程_执行蛋个体反查(): INT",
+            1,
+        )[1].split("# -------------------- 总控与重试", 1)[0]
+        self.assertIn(
+            "$孵蛋流程开页结果 = 孵蛋流程_喂糖后打开蛋能力页()",
+            egg_section,
+        )
+        self.assertNotIn("CALL 打开能力值识图页面", egg_section)
+        helper = configured.split(
+            "FUNC 孵蛋流程_喂糖后打开蛋能力页(): INT",
+            1,
+        )[1].split("ENDFUNC", 1)[0]
+        self.assertEqual(helper.count("    UP\n"), 4)
 
         tail_branch = configured.split("IF $目标为队伍末位 == 1", 1)[1].split(
             "ELIF $队伍位置 == 5",
@@ -443,6 +513,8 @@ ENDFUNC
 
         self.assertEqual(configured_again, configured)
         self.assertIn("WAIT 2000", configured)
+        self.assertIn("WAIT 2500", configured)
+        self.assertIn("ELSE\n            A\n        ENDIF", configured)
         self.assertIn("@冲浪", configured)
         self.assertNotIn("@三代菜单栏", configured)
         self.assertIn("@野生出现", configured)
@@ -587,7 +659,7 @@ ENDFUNC
             "FUNC 孵蛋测试_执行周期骑车与孵化收尾", 1
         )[1].split("ENDFUNC", 1)[0]
         self.assertNotIn("@蛋孵化", shared_hatch)
-        self.assertIn("WAIT 500\n    B\n    WAIT 12000\n    B\n    WAIT 500", shared_hatch)
+        self.assertIn("WAIT 500\n    B\n    WAIT 12000\n    B\n    WAIT 1500\n    B\n    WAIT 1500", shared_hatch)
         wrapper = configured.split("FUNC 孵蛋测试_执行骑车孵化", 1)[1].split(
             "ENDFUNC", 1
         )[0]

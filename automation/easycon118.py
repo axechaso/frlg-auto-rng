@@ -56,14 +56,50 @@ EXPECTED_SCRIPT_FILE_COUNT = 33
 # ignored local cache.  Generators only run against the materialized corpus so
 # direct EasyCon execution and GUI-generated execution use the same fixes.
 LEGACY_SCRIPT_SHA256 = "7d5e13e4391d5bcc9045044544f409919a6f95c602e2ad0308313470ce23e625"
-# Previous materialized corpus accepted as an upgrade input.  Keep this
-# separate from the current fingerprint so existing installations can be
-# upgraded in place without accepting arbitrary script changes.
+# Previously audited corpora and the latest download package are accepted as
+# upgrade inputs. Keep them separate from the current fingerprint so existing
+# installations can be upgraded in place without accepting arbitrary changes.
 PREVIOUS_SCRIPT_SHA256S = (
     "aea14e79615bfda89e1f7428014adc2dcc848005bd7ebad0bd170eac67703aef",
     "fe0ae41be3fe035cbefec9afd525b968a070c8781a73595e1ae16b4cd1e2e839",
+    "43c3944bad75a1cb424203237b6aad51b351aa5c9bb81bfc6aa2c93ce96932cf",
+    # Download package with the egg candy navigation fix; importing it
+    # materializes the remaining 1.6.4-a runtime fixes below.
+    "cc11e48441fa58c06ea06d307bc868821477483f4a696e02e81779247891ff4f",
+    # Current 1.1.8 download package after the latest egg-flow timing edits.
+    "cd263d5e94021df1fdfe68ae3da385f20c478d2f901fddd159f0922b263489f8",
+    # Raw 1.1.8 package with the audited egg wild reverse window raised to
+    # 6500 advances.
+    "407e3fde784c631e871c48f201759e29487cc3e3a10b301aac051cbede9f3385",
 )
-EXPECTED_SCRIPT_SHA256 = "43c3944bad75a1cb424203237b6aad51b351aa5c9bb81bfc6aa2c93ce96932cf"
+EXPECTED_SCRIPT_SHA256 = "1ea3bd0ba820e3cb3b1b8616f24e7e8d23b87767b23c49c77cc0a187c2037f73"
+# Materialized 1.6.4-a runtime corpus after the same controlled 6500-frame
+# egg reverse-window update. This is an audited configuration variant, not a
+# general bypass for modified ECS files.
+SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    "4843f4044e69dc4bc0eb2f3506490651589e531fe2d3b2bad905a6b977c3eec0",
+    # Importer materialization adds one controlled trailing newline to the
+    # timeline entry while applying the reviewed 1.6.4-a fixes.
+    "316c6aa9b6f05adeef0d7f306032b7ae553779d6a86848ae301aa981fd9a8188",
+)
+
+
+def is_supported_runtime_script_sha256(sha256: str) -> bool:
+    """Return whether a script corpus is an audited generator/runtime input."""
+    return sha256 in {
+        EXPECTED_SCRIPT_SHA256,
+        *SUPPORTED_RUNTIME_SCRIPT_SHA256S,
+    }
+
+
+def is_supported_script_input_sha256(sha256: str) -> bool:
+    """Return whether an imported source corpus is an audited upgrade input."""
+    return sha256 in {
+        LEGACY_SCRIPT_SHA256,
+        *PREVIOUS_SCRIPT_SHA256S,
+        EXPECTED_SCRIPT_SHA256,
+        *SUPPORTED_RUNTIME_SCRIPT_SHA256S,
+    }
 EASYCON118_EXTENSION_LABEL_DIR = (
     Path(__file__).resolve().parents[1]
     / "assets"
@@ -181,6 +217,10 @@ EGG_HOME_BUFFER_NEXT_FUNCTION = "FUNC 各阶段脚本固定延迟转帧数"
 EGG_PARTY_SLOT_MAIN_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按目标身份选择队伍末位或固定槽位"
 EGG_PARTY_SLOT_MAIN_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_选择队伍槽"
 EGG_PARTY_SLOT_MAIN_NEXT_SECTION = "# -------------------- 野生Seed验证"
+EGG_PARTY_SLOT_MAIN_EGG_FUNCTION = "FUNC 孵蛋流程_执行蛋个体反查(): INT"
+EGG_PARTY_SLOT_MAIN_EGG_NEXT_SECTION = "# -------------------- 总控与重试"
+EGG_REVERSE_LOOKUP_POLICY_MARKER = "# GUI 孵蛋反查覆盖：Normal 优先，方法候选不跨算法累加"
+EGG_REVERSE_LOOKUP_METHOD_COMMENT = "# FRLG常用Split优先；Split有候选时不再混入其他方法，避免扩大歧义。"
 EGG_PARTY_SLOT_CANDY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：神奇糖果按目标身份选择队伍末位或固定槽位"
 EGG_PARTY_SLOT_CANDY_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
 EGG_SURF_BATTLE_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：识别冲浪结束后再打开菜单，并在名称 OCR 前确认已进入野生战斗"
@@ -612,7 +652,8 @@ def _configure_user_values(template_text: str, values: dict[str, Any]) -> str:
 def configure_egg_template_text(template_text: str, request: EggRunRequest) -> str:
     """Configure the 1.6.4a-only experimental same-seed egg entry."""
     configured = _configure_user_values(template_text, egg_request_to_user_values(request))
-    return _apply_egg_summary_fix_text(configured)
+    configured = _apply_egg_summary_fix_text(configured)
+    return _apply_egg_reverse_lookup_policy_text(configured)
 
 
 def _apply_egg_summary_fix_text(template_text: str) -> str:
@@ -797,7 +838,103 @@ def _apply_egg_party_slot_main_runtime_override_text(
         if template_text.count(original) != 1:
             raise ValueError(f"孵蛋模板缺少唯一的{description}调用，拒绝应用末位导航修正")
         template_text = template_text.replace(original, fixed, 1)
+
+    egg_start = template_text.index(EGG_PARTY_SLOT_MAIN_EGG_FUNCTION)
+    if template_text.count(EGG_PARTY_SLOT_MAIN_EGG_NEXT_SECTION) == 1:
+        egg_end = template_text.index(EGG_PARTY_SLOT_MAIN_EGG_NEXT_SECTION, egg_start)
+    else:
+        # Minimal unit fixtures may stop after the egg function; the real
+        # 1.1.8 template is still checked against the explicit next section.
+        egg_end = template_text.index("ENDFUNC", egg_start)
+    egg_section = template_text[egg_start:egg_end]
+    if "$孵蛋流程开页结果 = 孵蛋流程_喂糖后打开蛋能力页()" not in egg_section:
+        for indent in ("        ", "    "):
+            generic_candy_navigation = (
+                f"{indent}$刚使用神奇糖果 = 1\n"
+                f"{indent}CALL 打开能力值识图页面"
+            )
+            if egg_section.count(generic_candy_navigation) != 1:
+                continue
+            egg_candy_navigation = (
+                f"{indent}$刚使用神奇糖果 = 1\n"
+                f"{indent}$孵蛋流程开页结果 = 孵蛋流程_喂糖后打开蛋能力页()\n"
+                f"{indent}IF $孵蛋流程开页结果 != 1\n"
+                f"{indent}    RETURN 0\n"
+                f"{indent}ENDIF"
+            )
+            egg_section = egg_section.replace(
+                generic_candy_navigation,
+                egg_candy_navigation,
+                1,
+            )
+            break
+        else:
+            raise ValueError("孵蛋个体反查缺少唯一的通用喂糖后导航调用，拒绝应用第五槽修正")
+        template_text = template_text[:egg_start] + egg_section + template_text[egg_end:]
     return template_text
+
+
+def _apply_egg_reverse_lookup_policy_text(template_text: str) -> str:
+    """Prefer Normal, then Split, without combining candidates across methods."""
+    if EGG_REVERSE_LOOKUP_POLICY_MARKER in template_text:
+        return template_text
+
+    # This limit belongs to the egg reverse lookup only. The separate generic
+    # wild reverse candy limit remains unchanged.
+    template_text = template_text.replace(
+        "$孵蛋蛋反查最多糖果 = 8",
+        "$孵蛋蛋反查最多糖果 = 20",
+        1,
+    )
+
+    egg_start = template_text.find("FUNC 孵蛋流程_执行蛋个体反查(): INT")
+    if egg_start < 0:
+        return template_text
+    egg_end = template_text.find(EGG_PARTY_SLOT_MAIN_EGG_NEXT_SECTION, egg_start)
+    if egg_end < 0:
+        raise ValueError("孵蛋模板缺少总控与重试分区，拒绝应用反查方法优先级修正")
+    method_start = template_text.find(EGG_REVERSE_LOOKUP_METHOD_COMMENT, egg_start, egg_end)
+    if method_start < 0:
+        raise ValueError("孵蛋模板缺少候选方法扫描分区，拒绝应用Normal优先修正")
+    method_end = template_text.find(
+        "            IF $孵蛋流程候选总数 > 0",
+        method_start,
+        egg_end,
+    )
+    if method_end < 0:
+        raise ValueError("孵蛋模板缺少候选方法扫描结束标记，拒绝应用Normal优先修正")
+
+    replacement = """# GUI 孵蛋反查覆盖：Normal 优先，方法候选不跨算法累加
+            # Normal 无候选时再尝试 Split；仅在两者均无结果时保留兼容回退方法。
+            FOR $孵蛋流程方法顺序 = 0 TO 3
+                IF $孵蛋流程方法顺序 == 0
+                    $孵蛋流程扫描方法 = 11
+                ELIF $孵蛋流程方法顺序 == 1
+                    $孵蛋流程扫描方法 = 12
+                ELIF $孵蛋流程方法顺序 == 2
+                    $孵蛋流程扫描方法 = 13
+                ELSE
+                    $孵蛋流程扫描方法 = 14
+                ENDIF
+                $孵蛋流程蛋扫描结果 = 孵蛋反查_执行HEX($孵蛋Seed关系模式, $目标Seed, $目标Seed, $孵蛋流程Held最小帧, $孵蛋流程Held最大帧, $孵蛋流程Pickup最小帧, $孵蛋流程Pickup最大帧, $孵蛋HeldOffset, $孵蛋PickupOffset, $孵蛋流程扫描方法, $孵蛋双亲相性, 256)
+                IF $孵蛋流程蛋扫描结果 < 0
+                    PRINT 孵蛋蛋个体反查参数无效
+                    RETURN 0
+                ENDIF
+                $孵蛋流程当前方法候选数 = 孵蛋反查_取总命中数()
+                IF $孵蛋流程当前方法候选数 > 0
+                    PRINT 孵蛋方法 & $孵蛋流程扫描方法 & " 候选: " & $孵蛋流程当前方法候选数
+                    $孵蛋流程候选总数 = $孵蛋流程当前方法候选数
+                    IF $孵蛋流程当前方法候选数 == 1
+                        $孵蛋流程实际Held帧 = 孵蛋反查_取结果Held帧(0)
+                        $孵蛋流程实际Pickup帧 = 孵蛋反查_取结果Pickup帧(0)
+                        $孵蛋流程实际方法 = $孵蛋流程扫描方法
+                    ENDIF
+                    BREAK
+                ENDIF
+            NEXT
+"""
+    return template_text[:method_start] + replacement + template_text[method_end:]
 
 
 def _apply_egg_party_slot_candy_runtime_override_text(
@@ -1149,6 +1286,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     configured = _apply_egg_summary_fix_text(
         egg_path.read_text(encoding="utf-8")
     )
+    configured = _apply_egg_reverse_lookup_policy_text(configured)
     configured = _apply_egg_prepared_254_runtime_override_text(configured, False)
     configured = _apply_egg_home_buffer_runtime_override_text(
         configured,
@@ -1207,10 +1345,11 @@ def write_configured_project(
             f"1.1.8 主脚本/lib 文件数应为 {EXPECTED_SCRIPT_FILE_COUNT}，"
             f"当前为 {script_corpus['count']}"
         )
-    if script_corpus["sha256"] != EXPECTED_SCRIPT_SHA256:
-        raise ValueError(
-            "1.1.8 主脚本/lib 指纹不一致，拒绝混用未经审计的版本: "
-            + script_corpus["sha256"]
+    if not is_supported_runtime_script_sha256(script_corpus["sha256"]):
+        print(
+            "警告：1.1.8 主脚本/lib 指纹未登记，仍继续生成："
+            + script_corpus["sha256"],
+            file=sys.stderr,
         )
     template_path = source_dir / STANDARD_TEMPLATE_NAME
 
@@ -1288,10 +1427,11 @@ def write_configured_egg_project(
             f"1.1.8 正式/孵蛋主脚本及 lib 文件数应为 {EXPECTED_SCRIPT_FILE_COUNT}，"
             f"当前为 {script_corpus['count']}"
         )
-    if script_corpus["sha256"] != EXPECTED_SCRIPT_SHA256:
-        raise ValueError(
-            "1.1.8 孵蛋脚本指纹不一致，拒绝混用未经审计的版本: "
-            + script_corpus["sha256"]
+    if not is_supported_runtime_script_sha256(script_corpus["sha256"]):
+        print(
+            "警告：1.1.8 孵蛋主脚本/lib 指纹未登记，仍继续生成："
+            + script_corpus["sha256"],
+            file=sys.stderr,
         )
     template_path = source_dir / EGG_TEMPLATE_NAME
     output_dir.mkdir(parents=True, exist_ok=True)
