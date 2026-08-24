@@ -8,6 +8,8 @@ from run_auto_rng_gui import (
     MODE_TAB_ORDER,
     _install_autocomplete_combo,
     build_egg_config_payload,
+    clean_terminal_log,
+    describe_sid_log_failure,
     filter_autocomplete_choices,
     iv_ranges_for_preset,
     parse_egg_config_payload,
@@ -20,6 +22,18 @@ from run_auto_rng_gui import (
 
 
 class GuiIvInputTests(unittest.TestCase):
+    def test_sid_terminal_log_is_cleaned_and_failure_is_explained(self):
+        raw = (
+            "\x1b[90m[18:25:45] \x1b[0m性格识别失败，最高匹配度:60\n"
+            "System.OperationCanceledException: The operation was canceled.\n"
+        )
+        cleaned = clean_terminal_log(raw)
+        self.assertNotIn("\x1b", cleaned)
+        self.assertIn("性格识别失败", cleaned)
+        explanation = describe_sid_log_failure(cleaned)
+        self.assertIn("没有生成任何 SID 观测", explanation)
+        self.assertIn("停止/取消请求", explanation)
+
     def test_unrestricted_ability_maps_to_ten_lines_any(self):
         self.assertEqual(ABILITY_ZH_TO_EN["不限"], "Any")
 

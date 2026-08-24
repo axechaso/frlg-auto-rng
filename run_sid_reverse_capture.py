@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from typing import Callable
 
 from automation.easycon118 import (
     DEFAULT_EZCON_PATH,
@@ -295,6 +296,7 @@ def _run_easycon(
     *,
     pokemon_index: int,
     game: str,
+    output_callback: Callable[[str], None] | None = None,
 ) -> tuple[int, str, bool]:
     process = subprocess.Popen(
         command,
@@ -313,6 +315,8 @@ def _run_easycon(
         for line in process.stdout:
             _safe_print(line, end="")
             lines.append(line)
+            if output_callback is not None:
+                output_callback(line)
             if "SIDREV|OBS|" not in line:
                 continue
             unique = _find_unique_pid(
@@ -329,6 +333,8 @@ def _run_easycon(
             )
             _safe_print(marker, end="")
             lines.append(marker)
+            if output_callback is not None:
+                output_callback(marker)
             stopped_for_unique_pid = True
             process.terminate()
             break
@@ -442,42 +448,47 @@ def main(argv: list[str] | None = None) -> int:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     all_output: list[str] = []
     try:
-        write_sid_reverse_plan(args.source, args.output, base_request)
-        for slot in range(1, count + 1):
-            _safe_print(f"\n=== 采集队伍第{slot}位 ===")
-            main_path = _write_slot_project(
-                args.source,
-                args.output,
-                base_request,
-                slot,
-            )
-            check = validate_runtime(args.ezcon, main_path)
-            if not check.ok:
-                raise RuntimeError("\n".join(check.errors))
-            command = build_run_command(
-                runner,
-                main_path,
-                port=port,
-                video_device=video,
-                video_type="DSHOW",
-            )
-            code, output, stopped_for_unique_pid = _run_easycon(
-                command,
-                main_path.parent,
-                pokemon_index=slot,
-                game=game,
-            )
-            all_output.append(output)
-            log_path.write_text("".join(all_output), encoding="utf-8")
-            if "SIDREV|ERROR|" in output or (
-                code != 0 and not stopped_for_unique_pid
-            ):
-                raise RuntimeError(f"队伍第{slot}位采集失败，EasyCon退出码{code}")
+        with log_path.open("w", encoding="utf-8", newline="") as log_file:
+            def persist_output(text: str) -> None:
+                log_file.write(text)
+                log_file.flush()
 
-            if stopped_for_unique_pid:
-                _safe_print(f"队伍第{slot}位PID已经唯一，停止继续喂糖。")
-            else:
-                _safe_print(f"队伍第{slot}位采集完成，继续处理用户指定的后续槽位。")
+            write_sid_reverse_plan(args.source, args.output, base_request)
+            for slot in range(1, count + 1):
+                _safe_print(f"\n=== 采集队伍第{slot}位 ===")
+                main_path = _write_slot_project(
+                    args.source,
+                    args.output,
+                    base_request,
+                    slot,
+                )
+                check = validate_runtime(args.ezcon, main_path)
+                if not check.ok:
+                    raise RuntimeError("\n".join(check.errors))
+                command = build_run_command(
+                    runner,
+                    main_path,
+                    port=port,
+                    video_device=video,
+                    video_type="DSHOW",
+                )
+                code, output, stopped_for_unique_pid = _run_easycon(
+                    command,
+                    main_path.parent,
+                    pokemon_index=slot,
+                    game=game,
+                    output_callback=persist_output,
+                )
+                all_output.append(output)
+                if "SIDREV|ERROR|" in output or (
+                    code != 0 and not stopped_for_unique_pid
+                ):
+                    raise RuntimeError(f"队伍第{slot}位采集失败，EasyCon退出码{code}")
+
+                if stopped_for_unique_pid:
+                    _safe_print(f"队伍第{slot}位PID已经唯一，停止继续喂糖。")
+                else:
+                    _safe_print(f"队伍第{slot}位采集完成，继续处理用户指定的后续槽位。")
 
         report = build_report("".join(all_output), tid_override=tid, game=game)
         report_path.write_text(report, encoding="utf-8")
@@ -485,8 +496,12 @@ def main(argv: list[str] | None = None) -> int:
         _safe_print(f"\n完整日志: {log_path}")
         _safe_print(f"结果报告: {report_path}")
     except (KeyboardInterrupt, OSError, RuntimeError, ValueError) as exc:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text("".join(all_output), encoding="utf-8")
+        diagnostic = f"\n[SID_DIAGNOSTIC] SID反查失败: {exc}\n"
+        try:
+            with log_path.open("a", encoding="utf-8", newline="") as log_file:
+                log_file.write(diagnostic)
+        except OSError:
+            pass
         _safe_print(f"SID反查失败: {exc}", file=sys.stderr)
         _safe_print(f"已保留日志: {log_path}", file=sys.stderr)
         return 1

@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import re
 import signal
 import subprocess
 import sys
@@ -87,6 +88,41 @@ ADVANCED_TAB_LABEL = "脚本测试（高级）"
 EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
 EGG_START_MODE_PREPARED = "从已完成254步准备开始"
 EGG_START_MODES = (EGG_START_MODE_FULL, EGG_START_MODE_PREPARED)
+ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def clean_terminal_log(text: str) -> str:
+    """Remove terminal color/control sequences before showing a saved log in Tk."""
+    cleaned = ANSI_ESCAPE_RE.sub("", text)
+    return cleaned.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def read_display_log_tail(path: Path | None, maximum_chars: int = 20000) -> str:
+    if path is None or not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return clean_terminal_log(text)[-maximum_chars:]
+
+
+def describe_sid_log_failure(log_text: str) -> str:
+    if not log_text.strip():
+        return "没有读到 SID 运行日志；流程可能在日志文件建立前被强制终止。"
+    messages = []
+    if "SIDREV|OBS|" not in log_text:
+        if "性格识别失败" in log_text or "闪光性别识别失败" in log_text:
+            messages.append(
+                "本次没有生成任何 SID 观测：摘要页的性格或闪光性别标签未可靠命中，"
+                "SID/PID 计算尚未开始。请确认脚本到达宝可梦摘要第一页、队伍位置正确，"
+                "并核对采集画面与标签包；不要只按约 60 分的错误画面盲目降低阈值。"
+            )
+        else:
+            messages.append("本次没有生成任何 SIDREV|OBS| 观测，SID/PID 计算尚未开始。")
+    if "OperationCanceledException" in log_text or "The operation was canceled" in log_text:
+        messages.append("EasyCon 收到了停止/取消请求；末尾调用栈是取消结果，不是 SID 算法崩溃。")
+    return "\n".join(messages) or "SID 采集未正常完成，请根据下面的日志尾部定位失败阶段。"
 
 
 def build_worker_command(worker: str, arguments: list[str]) -> list[str]:
@@ -420,6 +456,7 @@ class AutoRngApp:
         self.tid_flow_log_path: Path | None = None
         self.egg_log_path: Path | None = None
         self.script_test_log_path: Path | None = None
+        self.running_log_snapshot = ""
         self.busy = False
         self._updating = False
         self.manual_tools: ManualToolsManager | None = None
@@ -2806,6 +2843,7 @@ class AutoRngApp:
                 return
             self.sid_log_path = output_dir / f"sid-reverse-{timestamp}.log"
             self.sid_report_path = output_dir / f"sid-reverse-{timestamp}.txt"
+            self.running_log_snapshot = ""
             command = build_worker_command("sid-capture", [
                 "--request-json",
                 str(output_dir / "plan.json"),
@@ -2895,7 +2933,7 @@ class AutoRngApp:
         self.status_var.set(
             f"测试脚本正在直接运行；日志将保存到 {self.script_test_log_path}。"
             if self.running_mode == "script_test"
-            else "SID 正在逐只采集；详细日志见新打开的终端。"
+            else f"SID 正在逐只采集；日志实时保存到 {self.sid_log_path}。"
             if self.running_mode == "sid"
             else (
                 "TID/SID → 研究所 → 1.1.8 御三家流程正在运行；详细日志见新打开的终端。"
@@ -2914,6 +2952,11 @@ class AutoRngApp:
             return
         code = self.process.poll()
         if code is None:
+            if self.running_mode == "sid":
+                log_text = read_display_log_tail(self.sid_log_path)
+                if log_text and log_text != self.running_log_snapshot:
+                    self.running_log_snapshot = log_text
+                    self.set_result("SID 采集日志（运行中）：\n\n" + log_text)
             self.root.after(1000, self.poll_process)
             return
         completed_mode = self.running_mode
@@ -2948,6 +2991,12 @@ class AutoRngApp:
                 self.set_result(report_path.read_text(encoding="utf-8"))
                 self.status_var.set(f"SID 查找完成，报告已保存：{report_path}")
             else:
+                log_text = read_display_log_tail(log_path)
+                failure = describe_sid_log_failure(log_text)
+                result = "SID 查找未完成。\n\n" + failure
+                if log_text:
+                    result += "\n\n运行日志尾部：\n\n" + log_text
+                self.set_result(result)
                 detail = f"；日志：{log_path}" if log_path is not None else ""
                 self.status_var.set(f"SID 查找已退出，退出码 {code}{detail}")
         elif completed_mode == "tid_flow":

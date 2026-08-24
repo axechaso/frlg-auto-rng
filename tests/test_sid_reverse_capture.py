@@ -141,6 +141,48 @@ class SIDReverseCaptureTests(unittest.TestCase):
         self.assertIn("SIDREV|PID_UNIQUE|MON=1|PID=02B0100B|OBS=1", output)
         self.assertNotIn("SIDREV|CANDY_LABEL", output)
 
+    @patch("run_sid_reverse_capture.subprocess.Popen")
+    def test_easycon_output_is_streamed_before_a_cancel_interrupt(self, popen):
+        class InterruptingOutput:
+            def __init__(self):
+                self.read_count = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.read_count += 1
+                if self.read_count == 1:
+                    return "SIDREV|ATTEMPT_BEGIN|MON=1|ATTEMPT=1\n"
+                raise KeyboardInterrupt
+
+        class FakeProcess:
+            def __init__(self):
+                self.stdout = InterruptingOutput()
+                self.terminated = False
+
+            def terminate(self):
+                self.terminated = True
+
+        process = FakeProcess()
+        popen.return_value = process
+        streamed = []
+
+        with self.assertRaises(KeyboardInterrupt):
+            _run_easycon(
+                ["runner"],
+                Path("output"),
+                pokemon_index=1,
+                game="fr_nx",
+                output_callback=streamed.append,
+            )
+
+        self.assertTrue(process.terminated)
+        self.assertEqual(
+            streamed,
+            ["SIDREV|ATTEMPT_BEGIN|MON=1|ATTEMPT=1\n"],
+        )
+
     def test_main_collects_every_requested_slot_before_building_report(self):
         payload = {
             "mode": "sid_reverse_observation",
