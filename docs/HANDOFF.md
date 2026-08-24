@@ -67,7 +67,7 @@ git log -1 --oneline
 9. TID/SID 使用独立选项卡和独立 1.3.7 模板/标签包，不混入 1.1.8 主 ECS。
 10. SID 查找使用独立采集模板：EasyCon 负责逐只 OCR/喂糖，Python 负责 Method 1/2/4 PID、PSV 交集和 SID 候选分析。
 11. GUI 启动后静默执行一次设备检测；串口与采集卡都是只读下拉框，采集卡显示“`[序号] 设备名`”。当前索引仍在线时保留，否则按数字选择最小可用项；启动检测失败只写结果区。
-12. 公共设置中“高级模式”旁有 HOME_BUFFER 稳定低分自适应开关。它影响 1.1.8 普通/孵蛋和 TID 1.3.7 生成副本且默认关闭；原始 TID 1.3.7 模板不得改写。
+12. 公共设置中“高级模式”旁有 HOME_BUFFER 稳定低分自适应开关。它影响 1.1.8 普通/孵蛋、TID 1.3.7 和 SID 查找生成副本且默认关闭；原始 TID 1.3.7 模板不得改写。
 
 ## 当前运行链
 
@@ -95,7 +95,7 @@ flowchart LR
 
 页面使用完整纵向滚动容器，默认窗口 1100×880，最小 900×620。右侧滚动条滚动整页；鼠标位于结果文本框时只滚动结果。
 
-GUI 默认有四个选项卡，固定顺序为“SID 查找”“TID 乱数”“野生 / 静态”“孵蛋（测试）”。公共 EasyCon 设置中的串口/采集卡使用启动自动检测后填充的下拉框，采集卡同时显示序号和设备名。“高级模式”旁的 HOME_BUFFER 稳定低分自适应默认关闭；开启后生成器才为 1.1.8 普通/孵蛋及 TID 1.3.7 生成副本写入分类器。勾选“高级模式”后，才会显示第五个“脚本测试（高级）”页：
+GUI 默认有四个选项卡，固定顺序为“SID 查找”“TID 乱数”“野生 / 静态”“孵蛋（测试）”。公共 EasyCon 设置中的串口/采集卡使用启动自动检测后填充的下拉框，采集卡同时显示序号和设备名。“高级模式”旁的 HOME_BUFFER 稳定低分自适应默认关闭；开启后生成器才允许 1.1.8 普通/孵蛋、TID 1.3.7 及 SID 查找生成副本接受稳定低分。勾选“高级模式”后，才会显示第五个“脚本测试（高级）”页：
 
 ### 脚本测试（高级，默认隐藏）
 
@@ -109,11 +109,12 @@ GUI 默认有四个选项卡，固定顺序为“SID 查找”“TID 乱数”�
 
 ### SID 查找
 
-- 当前游戏和 TID、队内闪光数量、每只最多神奇糖果、识图阈值；
+- 当前游戏、主机和 TID、队内闪光数量、每只最多神奇糖果、识图阈值；
 - 闪光数量之外的队伍行整体禁用；活动槽位可填写中文名、英文名或全国图鉴编号，由 Python 统一解析成编号；每行还必须填写初始等级、定点/野生来源、野生相遇地点，以及 HP、攻击、防御、特攻、特防、速度六列努力值；摘要页名称和等级 OCR 已从正式判定移除；
 - “准备 SID 查找”生成并预检独立采集工程；“开始运行”逐槽采集，PSV 唯一后提前结束；
 - 报告回显到主界面，并保存到 `runtime/sid_reverse/`；
 - EasyCon 输出逐行实时刷新并落盘；取消发生在单槽采集途中时保留已输出内容，失败退出会在结果区显示去除 ANSI 控制码后的日志尾部。初始摘要识别自身最多重试 3 轮，`ATTEMPT_RETRY` 不是卡死；
+- 每轮关闭游戏后，用所选 Switch 机型的 HOME_BUFFER 替换旧固定 `A → 1200 ms → A` 启动；命中后仍按 `A` 回到游戏，并从原来的 `WAIT 8000` 开始继续跳 OP 动画和进档；
 - 只覆盖第三世代 Method 1/2/4，孵蛋来源及其他 PID 生成方式暂不支持。
 
 ### 野生 / 静态
@@ -148,7 +149,7 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 
 孵蛋页不负责搜索蛋目标。用户必须先从 Ten Lines Egg 页取得同一初始 Seed 下的 Held 和 Pickup。Pickup 至少比 Held 晚 1800 帧。
 
-正式版与时间轴版共享 `home_buffer_adaptive_classifier.ecs`。TID 日英生成副本使用 `assets/tid_rng137_extensions/home_buffer_adaptive.ecs`，并只按 `$NS机型` 读取对应标签。默认有效阈值为 95；只有用户开启开关、当前 HOME_BUFFER 状态是三类标签中的唯一最高、分数至少 90，并且连续 3 次状态与整数分数完全相同，才把本次运行的有效阈值降到该分数。1.1.8 日志输出 `HOME_BUFFER_ADAPTIVE|OLD=95|NEW=...`，TID 输出 `TID_HOME_BUFFER_ADAPTIVE|OLD=95|NEW=...`。不得把它扩展到普通 OCR、能力、冲浪或 TID 的其他识图阶段。
+正式版、时间轴版和 SID 生成副本共享 `home_buffer_adaptive_classifier.ecs`。TID 日英生成副本使用 `assets/tid_rng137_extensions/home_buffer_adaptive.ecs`。TID 与 SID 都只按用户选择的 `$NS机型` 读取对应标签。默认有效阈值为 95；只有用户开启开关、当前 HOME_BUFFER 状态是三类标签中的唯一最高、分数至少 90，并且连续 3 次状态与整数分数完全相同，才把本次运行的有效阈值降到该分数。1.1.8/SID 日志输出 `HOME_BUFFER_ADAPTIVE|OLD=95|NEW=...`，TID 输出 `TID_HOME_BUFFER_ADAPTIVE|OLD=95|NEW=...`。不得把它扩展到普通 OCR、能力、冲浪或 TID/SID 的其他识图阶段。
 
 孵蛋两次野生 Seed 反查都选择刚捕获的队伍末位，从队首向上按 2 次；正式轮的蛋先进入第 5 位，复核野生后进入第 6 位，所以之后蛋个体反查固定选择第 5 位并按 3 次。首次打开能力页与神奇糖果选择必须共用这一目标身份规则，不能再只根据槽号推断按键次数。
 
@@ -206,7 +207,7 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 | `automation/support.py` | 路线启动边界；狩猎区/碎岩等保守阻止 |
 | `automation/easycon118.py` | 1.1.8 参数替换、指纹、EasyCon 预检、设备枚举和运行命令 |
 | `automation/script_test.py` | 任意 ECS 原地预检、直接标签检查、原始/兼容运行器 A/B 与内置冲浪结束测试工程 |
-| `automation/sid_reverse118.py` | SID 采集请求校验、模板参数替换与工程生成 |
+| `automation/sid_reverse118.py` | SID 采集请求校验、模板参数替换、HOME_BUFFER 启动覆盖与工程生成 |
 | `automation/tid_rng137.py` | TID/SID 1.3.7 模板/标签锁定、参数替换、日版 1.6.4-a 兼容和预检 |
 | `automation/tid_starter_flow.py` | TID/SID 到御三家的分阶段计划、ID 重试脚本、研究所桥接和 1.1.8 Starter 工程 |
 | `rng/tenlines_utils.py` | Ten Lines 搜索、IV 分层、资源读取和 C++ 接口 |
@@ -311,11 +312,11 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 ```
 
-2026-08-24 的代码基线：项目 `.venv` 运行 182 项单元测试全部通过；更新后的本地资产正式版和时间轴版，以及开启 HOME_BUFFER 自适应的英日 TID 生成副本均通过真实 EasyCon 1.6.4-a `format`，下载包的 22 个 `Tools/check_*.py` 全部通过。当前下载包输入指纹为 `77bea49b62c909d105dd7b81529bbb3a8046d996781d68b2ebc479cd6096c841`，导入后物化的 33 文件固定 SHA-256 是 `74b4a3ecce59e3817699ee8dece2594d67f48bad08b33068358c45b74aaf6e9e`；标签审计仍为 1150 个标签、SHA-256 `00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e`。本轮还新增 TID 穷举实际身份到御三家的动态衔接和 TID HOME_BUFFER 可选稳定低分自适应；这些改动仍需 Switch 实机复测。确认：
+2026-08-24 的代码基线：项目 `.venv` 运行 185 项单元测试全部通过；更新后的本地资产正式版和时间轴版、开启 HOME_BUFFER 自适应的英日 TID 生成副本，以及 SID 的 NS1 严格模式和 NS2 自适应模式生成副本均通过真实 EasyCon 1.6.4-a `format`，下载包的 22 个 `Tools/check_*.py` 全部通过。当前下载包输入指纹为 `77bea49b62c909d105dd7b81529bbb3a8046d996781d68b2ebc479cd6096c841`，导入后物化的 33 文件固定 SHA-256 是 `74b4a3ecce59e3817699ee8dece2594d67f48bad08b33068358c45b74aaf6e9e`；标签审计仍为 1150 个标签、SHA-256 `00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e`。本轮还新增 TID 穷举实际身份到御三家的动态衔接，以及 TID/SID HOME_BUFFER 可选稳定低分自适应；这些改动仍需 Switch 实机复测。确认：
 
 - 页签顺序固定为 SID 查找、TID 乱数、野生/静态、孵蛋；
 - 设备枚举会自动回填可用串口和带名称采集卡，并保留仍在线的当前索引；
-- HOME_BUFFER 自适应写入 1.1.8 普通/孵蛋及 TID 生成副本，默认关闭；
+- HOME_BUFFER 自适应写入 1.1.8 普通/孵蛋、TID 及 SID 生成副本，默认关闭；
 - 领取后 Seed 未命中或野生反查失败保持 `$孵蛋流程Seed已预校准 = 1`，下一轮不得重复首次预校准；
 - 普通类型下拉框不再包含孵蛋；
 - 孵蛋参数可收集成 `EggRunRequest`；
@@ -346,7 +347,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 
 按风险从低到高：
 
-1. 在新设备重新跑安装、182 项测试、EasyCon `--check-only` 和设备枚举。
+1. 在新设备重新跑安装、185 项测试、EasyCon `--check-only` 和设备枚举。
 2. 用不会影响存档的短 ECS 验证单片机控制、停止和重新连接。
 3. 实机验收定点波克比：日志应显示周期 10、目标步数 2815、固定循环 76；过程中不得轮询 `蛋孵化` 标签，收尾两次 `B` 后应回到预期状态。
 4. 实机验收孵蛋完整轮：领取后 Seed 复核成功，再执行固定周期骑车；孵化后共享队伍导航必须向上 3 次并进入第 5 位蛋的能力页，不能误选第 6 位复核野生。
@@ -359,6 +360,8 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 ## 可直接粘贴到新对话的提示
 
 ```text
+最新补充（优先于下方历史快照数字）：当前测试基线为 185 项；SID 查找已增加 Switch 1/2，并用 HOME_BUFFER 替换固定 A → 1200 ms → A，公共稳定低分自适应开关也作用于 SID 生成副本；命中后仍继续原 WAIT 8000、跳 OP 和进档操作。
+
 请接手这个火红/叶绿全自动乱数项目。先完整阅读 README.md、docs/HANDOFF.md 和 docs/INITIAL_AUTO_RNG.md，然后运行 git status --short，确认不要覆盖或清理现有未提交改动。
 
 当前主入口是 run_auto_rng_gui.py：GUI 依次有“SID 查找”“TID 乱数”“野生 / 静态”“孵蛋（测试）”四个正式选项卡，整页可滚动。公共设置勾选高级模式后才显示“脚本测试（高级）”：它可把同一 ECS 原地交给正式兼容 runner 或原始 1.6.4-a CLI 做 A/B，不经过参数生成。SID 页逐只采集闪光宝可梦并由 Python 反查；TID 页使用锁定的英文/日文 1.3.7 脚本和独立标签包。普通流程由 Ten Lines 搜索，按最高 IV 总和、再按最小 Advance 选择方案，生成 1.1.8 ECS 后交给固定 EasyCon 1.6.4a。本流程不部署 AI。孵蛋只接收 Ten Lines Egg 页已经得到的同 Seed、Held 和 Pickup，尚未实机验收。

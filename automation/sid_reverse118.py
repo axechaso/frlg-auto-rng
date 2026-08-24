@@ -14,6 +14,8 @@ from rng.tenlines_utils import get_personal
 from .easycon118 import (
     EXPECTED_SCRIPT_FILE_COUNT,
     EXPECTED_SCRIPT_SHA256,
+    HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH,
+    HOME_BUFFER_ADAPTIVE_GLOBALS,
     copy_easycon118_extension_labels,
     inspect_script_corpus,
     is_supported_runtime_script_sha256,
@@ -21,6 +23,52 @@ from .easycon118 import (
 
 
 SID_REVERSE_TEMPLATE_NAME = "NS火叶SID反查-采集测试.ecs"
+SID_HOME_BUFFER_CONTROLLER_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "assets"
+    / "easycon118_extensions"
+    / "sid_home_buffer_adaptive.ecs"
+)
+SID_HOME_BUFFER_GLOBAL_ANCHOR = "$SID反查累计SPEIV最大 = -1\n"
+SID_HOME_BUFFER_GLOBALS = """\
+# SID HOME_BUFFER 只读取用户选择的主机标签；稳定低分自适应默认关闭。
+$NX机型 = 1
+$调试日志输出 = 1
+$HOME_BUFFER延迟 = 1200
+$HOME_BUFFER当前正确退出 = 0
+$HOME_BUFFER当前正确退出_NS2 = 0
+$HOME_BUFFER当前正确退出普通 = 0
+$HOME_BUFFER当前正确退出普通_NS2 = 0
+$HOME_BUFFER当前错误退出 = 0
+$HOME_BUFFER当前错误退出_NS2 = 0
+"""
+SID_HOME_BUFFER_CLASSIFIER_MARKER = "# 1.6.4-a HOME_BUFFER 稳定低分自适应"
+SID_HOME_BUFFER_CONTROLLER_MARKER = "# SID 反查 HOME_BUFFER"
+SID_CLOSE_FUNCTION = "FUNC SID反查关闭游戏"
+SID_START_FUNCTION = "FUNC SID反查普通启动并进入存档"
+SID_NEXT_FUNCTION = "FUNC SID反查选择队伍位置"
+SID_START_REPLACEMENT = """\
+FUNC SID反查普通启动并进入存档
+    # HOME_BUFFER 成功后仍在 Switch 主界面；按 A 回到游戏后继续原来的跳 OP/进档操作。
+    CALL SID反查HOME_BUFFER
+    A
+    WAIT 8000
+    A
+    WAIT 500
+    A
+    WAIT 500
+    A DOWN
+    WAIT 3000
+    A UP
+    WAIT 500
+    A DOWN
+    WAIT 1000
+    A UP
+    WAIT 500
+    B
+    WAIT 2500
+ENDFUNC
+"""
 
 
 @dataclass(frozen=True)
@@ -28,9 +76,11 @@ class SIDReverseRunRequest:
     tid: int
     party_count: int
     game: str = "fr_nx"
+    nx_model: int = 1
     start_slot: int = 1
     max_candies: int = 5
     recognition_threshold: int = 85
+    home_buffer_adaptive_threshold: bool = False
     dex_overrides: tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0)
     initial_levels: tuple[int, int, int, int, int, int] = (1, 1, 1, 1, 1, 1)
     source_types: tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0)
@@ -56,6 +106,10 @@ class SIDReverseRunRequest:
             raise ValueError("TID必须在0-65535之间")
         if self.game not in ("fr_nx", "lg_nx"):
             raise ValueError("游戏版本必须是fr_nx或lg_nx")
+        if self.nx_model not in (1, 2):
+            raise ValueError("SID查找主机必须是Switch 1或Switch 2")
+        if not isinstance(self.home_buffer_adaptive_threshold, bool):
+            raise ValueError("HOME_BUFFER稳定低分自适应开关必须是布尔值")
         if not 1 <= self.party_count <= 6:
             raise ValueError("队内闪光数量必须在1-6之间")
         if not 1 <= self.start_slot <= 6:
@@ -142,6 +196,70 @@ def configure_sid_reverse_template(template_text: str, request: SIDReverseRunReq
     return configured
 
 
+def _replace_ecs_function(
+    template_text: str,
+    function_name: str,
+    next_function_name: str,
+    replacement: str,
+) -> str:
+    if template_text.count(function_name) != 1:
+        raise ValueError(f"SID采集模板函数{function_name}应出现1次")
+    if template_text.count(next_function_name) != 1:
+        raise ValueError(f"SID采集模板后继函数{next_function_name}应出现1次")
+    start = template_text.index(function_name)
+    end = template_text.index(next_function_name, start)
+    return template_text[:start] + replacement.rstrip() + "\n\n" + template_text[end:]
+
+
+def apply_sid_home_buffer_runtime(
+    template_text: str,
+    request: SIDReverseRunRequest,
+) -> str:
+    """Install SID HOME_BUFFER calibration without changing its post-entry actions."""
+    request.validate()
+    if template_text.count(SID_HOME_BUFFER_GLOBAL_ANCHOR) != 1:
+        raise ValueError("SID采集模板缺少唯一的共享状态锚点")
+
+    globals_text = (
+        SID_HOME_BUFFER_GLOBALS.replace("$NX机型 = 1", f"$NX机型 = {request.nx_model}")
+        + HOME_BUFFER_ADAPTIVE_GLOBALS.replace(
+            "$HOME_BUFFER稳定低分自适应 = 0",
+            "$HOME_BUFFER稳定低分自适应 = "
+            + ("1" if request.home_buffer_adaptive_threshold else "0"),
+            1,
+        )
+    )
+    template_text = template_text.replace(
+        SID_HOME_BUFFER_GLOBAL_ANCHOR,
+        SID_HOME_BUFFER_GLOBAL_ANCHOR + globals_text,
+        1,
+    )
+
+    if template_text.count(SID_CLOSE_FUNCTION) != 1:
+        raise ValueError("SID采集模板缺少唯一的关闭游戏函数")
+    classifier_text = HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH.read_text(
+        encoding="utf-8"
+    ).rstrip()
+    controller_text = SID_HOME_BUFFER_CONTROLLER_PATH.read_text(
+        encoding="utf-8"
+    ).rstrip()
+    if SID_HOME_BUFFER_CLASSIFIER_MARKER not in classifier_text:
+        raise ValueError("SID HOME_BUFFER共享分类器缺少版本标记")
+    if SID_HOME_BUFFER_CONTROLLER_MARKER not in controller_text:
+        raise ValueError("SID HOME_BUFFER控制器缺少版本标记")
+    template_text = template_text.replace(
+        SID_CLOSE_FUNCTION,
+        classifier_text + "\n\n" + controller_text + "\n\n" + SID_CLOSE_FUNCTION,
+        1,
+    )
+    return _replace_ecs_function(
+        template_text,
+        SID_START_FUNCTION,
+        SID_NEXT_FUNCTION,
+        SID_START_REPLACEMENT,
+    )
+
+
 def write_sid_reverse_plan(
     source_dir: str | Path,
     output_dir: str | Path,
@@ -202,10 +320,11 @@ def write_sid_reverse_project(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     main_path = output_dir / "main.ecs"
-    main_path.write_text(
-        configure_sid_reverse_template(template.read_text(encoding="utf-8"), request),
-        encoding="utf-8",
+    configured = configure_sid_reverse_template(
+        template.read_text(encoding="utf-8"), request
     )
+    configured = apply_sid_home_buffer_runtime(configured, request)
+    main_path.write_text(configured, encoding="utf-8")
     if copy_assets:
         for directory in ("lib", "ImgLabel"):
             source = source_dir / directory

@@ -57,9 +57,11 @@ class SIDReverseCaptureTests(unittest.TestCase):
                 "tid": 54321,
                 "party_count": 2,
                 "game": "lg_nx",
+                "nx_model": 2,
                 "start_slot": 1,
                 "max_candies": 7,
                 "recognition_threshold": 88,
+                "home_buffer_adaptive_threshold": True,
                 "dex_overrides": [25, 148, 0, 0, 0, 0],
                 "initial_levels": [46, 55, 1, 1, 1, 1],
                 "source_types": [0, 1, 0, 0, 0, 0],
@@ -74,6 +76,8 @@ class SIDReverseCaptureTests(unittest.TestCase):
         self.assertEqual(request.tid, 54321)
         self.assertEqual(request.dex_overrides[:2], (25, 148))
         self.assertEqual(request.game, "lg_nx")
+        self.assertEqual(request.nx_model, 2)
+        self.assertTrue(request.home_buffer_adaptive_threshold)
         self.assertEqual(request.initial_levels[:2], (46, 55))
         self.assertEqual(request.source_types[:2], (0, 1))
         self.assertEqual(request.locations[1], "Safari Zone Center")

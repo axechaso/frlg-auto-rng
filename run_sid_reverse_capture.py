@@ -57,9 +57,13 @@ def load_sid_reverse_request(path: Path) -> SIDReverseRunRequest:
             tid=int(values["tid"]),
             party_count=int(values["party_count"]),
             game=str(values.get("game", "fr_nx")),
+            nx_model=int(values.get("nx_model", 1)),
             start_slot=int(values.get("start_slot", 1)),
             max_candies=int(values.get("max_candies", 5)),
             recognition_threshold=int(values.get("recognition_threshold", 85)),
+            home_buffer_adaptive_threshold=values.get(
+                "home_buffer_adaptive_threshold", False
+            ),
             dex_overrides=tuple(int(item) for item in values.get("dex_overrides", (0,) * 6)),
             initial_levels=tuple(int(item) for item in values["initial_levels"]),
             source_types=tuple(int(item) for item in values.get("source_types", (0,) * 6)),
@@ -375,6 +379,7 @@ def main(argv: list[str] | None = None) -> int:
         help="active party slots' initial levels, comma-separated and required",
     )
     parser.add_argument("--game", choices=("fr_nx", "lg_nx"))
+    parser.add_argument("--nx-model", type=int, choices=(1, 2), default=1)
     parser.add_argument(
         "--sources",
         help="one source per Pokemon, comma-separated: static/wild",
@@ -422,6 +427,7 @@ def main(argv: list[str] | None = None) -> int:
                 tid=tid,
                 party_count=count,
                 game=game,
+                nx_model=args.nx_model,
                 max_candies=args.candies,
                 recognition_threshold=args.threshold,
                 dex_overrides=overrides,

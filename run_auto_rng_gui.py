@@ -576,6 +576,7 @@ class AutoRngApp:
         sid_identity = ttk.LabelFrame(sid_tab, text="1. SID 查找条件", padding=10)
         sid_identity.pack(fill="x")
         self.sid_game_var = tk.StringVar(value="火红")
+        self.sid_nx_var = tk.StringVar(value="Switch 1")
         self.sid_tid_var = tk.StringVar(value="12345")
         self.sid_count_var = tk.StringVar(value="2")
         self.sid_candies_var = tk.StringVar(value="5")
@@ -584,26 +585,34 @@ class AutoRngApp:
         self._labeled_combo(
             sid_identity, "游戏", self.sid_game_var, ("火红", "叶绿"), 0, 0
         )
-        self._labeled_entry(sid_identity, "当前 TID", self.sid_tid_var, 0, 2, width=12)
+        self._labeled_combo(
+            sid_identity,
+            "主机",
+            self.sid_nx_var,
+            ("Switch 1", "Switch 2"),
+            0,
+            2,
+        )
+        self._labeled_entry(sid_identity, "当前 TID", self.sid_tid_var, 0, 4, width=12)
         self._labeled_combo(
             sid_identity,
             "队内闪光数量",
             self.sid_count_var,
             tuple(str(value) for value in range(1, 7)),
             0,
-            4,
+            6,
             width=8,
         )
         self._labeled_entry(
-            sid_identity, "每只最多糖果", self.sid_candies_var, 0, 6, width=8
+            sid_identity, "每只最多糖果", self.sid_candies_var, 1, 0, width=8
         )
         self._labeled_entry(
-            sid_identity, "识图阈值", self.sid_threshold_var, 1, 0, width=8
+            sid_identity, "识图阈值", self.sid_threshold_var, 1, 2, width=8
         )
         ttk.Label(
             sid_identity,
             text="支持第三世代 Method 1/2/4；闪光公式只能确定 8 个真实 SID 候选，建档链前10000 ADV有命中时再选最早值。",
-        ).grid(row=1, column=2, columnspan=6, sticky="w", padx=4, pady=4)
+        ).grid(row=1, column=4, columnspan=4, sticky="w", padx=4, pady=4)
         ttk.Checkbutton(
             sid_identity,
             text="已确认队伍顺序、宝可梦、初始等级、来源、努力值准确，且背包第一页第一格是神奇糖果",
@@ -1323,7 +1332,7 @@ class AutoRngApp:
         self.home_buffer_adaptive_var = tk.BooleanVar(value=False)
         self.home_buffer_adaptive_check = ttk.Checkbutton(
             manual_tools,
-            text="HOME_BUFFER 稳定低分自适应（1.1.8 + TID，默认关闭）",
+            text="HOME_BUFFER 稳定低分自适应（1.1.8 + TID + SID，默认关闭）",
             variable=self.home_buffer_adaptive_var,
         )
         self.home_buffer_adaptive_check.pack(side="left", padx=(14, 0))
@@ -1433,7 +1442,7 @@ class AutoRngApp:
             self.tid_starter_flow_var, self.tid_game_var, self.tid_starter_var,
             self.tid_starter_min_adv_var, self.tid_starter_max_adv_var,
             self.tid_sid_retry_radius_var,
-            self.sid_game_var, self.sid_tid_var, self.sid_count_var,
+            self.sid_game_var, self.sid_nx_var, self.sid_tid_var, self.sid_count_var,
             self.sid_candies_var, self.sid_threshold_var, self.sid_ack_var,
             *self.sid_species_vars, *self.sid_initial_level_vars,
             *self.sid_source_type_vars,
@@ -2069,8 +2078,10 @@ class AutoRngApp:
             tid=int(self.sid_tid_var.get()),
             party_count=party_count,
             game="fr_nx" if self.sid_game_var.get() == "火红" else "lg_nx",
+            nx_model=2 if self.sid_nx_var.get() == "Switch 2" else 1,
             max_candies=int(self.sid_candies_var.get()),
             recognition_threshold=int(self.sid_threshold_var.get()),
+            home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
             dex_overrides=dex_overrides,  # type: ignore[arg-type]
             initial_levels=initial_levels,  # type: ignore[arg-type]
             source_types=source_types,  # type: ignore[arg-type]
@@ -2372,8 +2383,14 @@ class AutoRngApp:
         lines = [
             "SID 查找：EasyCon 逐只采集 + Python Method 1/2/4 反查",
             f"游戏：{'火红' if self.sid_game_var.get() == '火红' else '叶绿'}",
+            f"主机：Switch {request.nx_model}",
             f"TID：{request.tid:05d}；队内闪光数量：{request.party_count}",
             f"每只最多糖果：{request.max_candies}；识图阈值：{request.recognition_threshold}",
+            (
+                "SID HOME_BUFFER稳定低分自适应：开启（稳定3次、最低90分）"
+                if request.home_buffer_adaptive_threshold
+                else "SID HOME_BUFFER稳定低分自适应：关闭（严格95分）"
+            ),
             "图鉴覆盖：" + ", ".join(str(request.dex_overrides[index]) for index in active_slots),
             "来源：" + ", ".join(
                 "野生" if request.source_types[index] else "定点"

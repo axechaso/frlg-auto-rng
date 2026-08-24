@@ -5,12 +5,87 @@ from pathlib import Path
 
 from automation.sid_reverse118 import (
     SIDReverseRunRequest,
+    apply_sid_home_buffer_runtime,
     configure_sid_reverse_template,
     write_sid_reverse_plan,
 )
 
 
 class SIDReverse118Tests(unittest.TestCase):
+    def test_sid_home_buffer_is_nx_specific_opt_in_and_keeps_op_skip(self):
+        root = Path(__file__).resolve().parents[1]
+        template = (
+            root
+            / "assets"
+            / "easycon118_extensions"
+            / "NS火叶SID反查-采集测试.ecs"
+        ).read_text(encoding="utf-8")
+        request = SIDReverseRunRequest(
+            tid=17500,
+            party_count=1,
+            nx_model=2,
+            home_buffer_adaptive_threshold=True,
+            dex_overrides=(18, 0, 0, 0, 0, 0),
+            initial_levels=(46, 1, 1, 1, 1, 1),
+        )
+
+        configured = apply_sid_home_buffer_runtime(template, request)
+
+        self.assertIn("$NX机型 = 2", configured)
+        self.assertIn("$HOME_BUFFER稳定低分自适应 = 1", configured)
+        self.assertIn("$HOME_BUFFER自适应最低阈值 = 90", configured)
+        self.assertIn("$HOME_BUFFER自适应稳定要求 = 3", configured)
+        self.assertIn(
+            "$HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态(1)",
+            configured,
+        )
+        self.assertIn("HOME_BUFFER_ADAPTIVE|OLD=95|NEW=", configured)
+        self.assertRegex(
+            configured,
+            r"FUNC SID反查普通启动并进入存档\n"
+            r"\s*# HOME_BUFFER 成功后仍在 Switch 主界面；按 A 回到游戏后继续原来的跳 OP/进档操作。\n"
+            r"\s*CALL SID反查HOME_BUFFER\n"
+            r"\s*A\n"
+            r"\s*WAIT 8000\n"
+            r"\s*A\n"
+            r"\s*WAIT 500\n"
+            r"\s*A\n"
+            r"\s*WAIT 500\n"
+            r"\s*A DOWN\n"
+            r"\s*WAIT 3000\n"
+            r"\s*A UP\n"
+            r"\s*WAIT 500\n"
+            r"\s*A DOWN\n"
+            r"\s*WAIT 1000\n"
+            r"\s*A UP\n"
+            r"\s*WAIT 500\n"
+            r"\s*B\n"
+            r"\s*WAIT 2500\n"
+            r"ENDFUNC",
+        )
+
+    def test_sid_home_buffer_default_remains_strict_95(self):
+        root = Path(__file__).resolve().parents[1]
+        template = (
+            root
+            / "assets"
+            / "easycon118_extensions"
+            / "NS火叶SID反查-采集测试.ecs"
+        ).read_text(encoding="utf-8")
+        request = SIDReverseRunRequest(
+            tid=17500,
+            party_count=1,
+            dex_overrides=(18, 0, 0, 0, 0, 0),
+            initial_levels=(46, 1, 1, 1, 1, 1),
+        )
+
+        configured = apply_sid_home_buffer_runtime(template, request)
+
+        self.assertIn("$NX机型 = 1", configured)
+        self.assertIn("$HOME_BUFFER稳定低分自适应 = 0", configured)
+        self.assertIn("$HOME_BUFFER有效识图阈值 = 95", configured)
+        self.assertIn("IF $HOME_BUFFER稳定低分自适应 == 0", configured)
+
     def test_template_uses_effort_aware_ranges_and_shiny_gender_label(self):
         root = Path(__file__).resolve().parents[1]
         template = (
@@ -118,6 +193,16 @@ $SID反查努力SPE = [0,0,0,0,0,0]
     def test_rejects_party_range_past_slot_six(self):
         with self.assertRaisesRegex(ValueError, "第六个"):
             SIDReverseRunRequest(tid=1, party_count=2, start_slot=6).validate()
+
+    def test_rejects_invalid_nx_model_and_non_boolean_adaptive_switch(self):
+        with self.assertRaisesRegex(ValueError, "主机"):
+            SIDReverseRunRequest(tid=1, party_count=1, nx_model=3).validate()
+        with self.assertRaisesRegex(ValueError, "布尔"):
+            SIDReverseRunRequest(
+                tid=1,
+                party_count=1,
+                home_buffer_adaptive_threshold=1,  # type: ignore[arg-type]
+            ).validate()
 
     def test_rejects_wild_slot_without_location(self):
         with self.assertRaisesRegex(ValueError, "相遇地点"):

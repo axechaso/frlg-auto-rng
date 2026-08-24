@@ -1,0 +1,43 @@
+# SID 反查 HOME_BUFFER：校准完成后回到原启动函数，继续跳 OP 动画和进入存档。
+FUNC SID反查HOME_BUFFER
+    FOR
+        A
+        WAIT 1500
+        A
+        WAIT $HOME_BUFFER延迟
+        PRINT 尝试HOME_BUFFER延迟: & $HOME_BUFFER延迟 & " ms"
+        HOME 100
+        WAIT 1500
+
+        # SID 页明确选择 Switch 1/2，只读取所选主机的三类标签。
+        $HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态(1)
+        IF $HOME_BUFFER识别状态 == 1
+            PRINT 可用HOME_BUFFER延迟: & $HOME_BUFFER延迟 & " ms"
+            RETURN
+        ELIF $HOME_BUFFER识别状态 == 3
+            PRINT 错误进入休眠菜单
+            B
+            WAIT 1500
+            CALL SID反查关闭游戏
+        ELIF $HOME_BUFFER识别状态 == 2
+            PRINT HOME_BUFFER延迟过长，减100继续尝试中
+            $HOME_BUFFER延迟 -= 100
+            X
+            WAIT 1500
+            A
+            WAIT 1500
+            FOR
+                IF @正在关闭 >= 95
+                    WAIT 100
+                ELSE
+                    BREAK
+                ENDIF
+            NEXT
+            CALL SID反查关闭游戏
+        ELSE
+            PRINT HOME_BUFFER延迟过短，加100继续尝试中
+            $HOME_BUFFER延迟 += 100
+            CALL SID反查关闭游戏
+        ENDIF
+    NEXT
+ENDFUNC
