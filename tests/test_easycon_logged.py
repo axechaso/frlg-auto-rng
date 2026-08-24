@@ -59,6 +59,41 @@ class EasyConLoggedTests(unittest.TestCase):
             self.assertEqual(result, [0])
             self.assertEqual(log_path.read_text(encoding="utf-8"), partial_line + "\n")
 
+    def test_missing_expected_marker_is_reported_as_abnormal_exit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_path = root / "runner.log"
+            child_code = "print('RUNNER_DONE')"
+            with mock.patch("run_easycon_logged._write_console"):
+                result = run_logged(
+                    [sys.executable, "-c", child_code],
+                    root,
+                    log_path,
+                    ("EGG_DONE", "EGG_FAILED"),
+                )
+            log_text = log_path.read_text(encoding="utf-8")
+            self.assertEqual(result, 2)
+            self.assertIn("RUNNER_DONE", log_text)
+            self.assertIn("[EASYCON_DIAGNOSTIC]", log_text)
+
+    def test_expected_marker_keeps_success_exit_code(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_path = root / "runner.log"
+            child_code = "print('EGG_FAILED'); print('RUNNER_DONE')"
+            with mock.patch("run_easycon_logged._write_console"):
+                result = run_logged(
+                    [sys.executable, "-c", child_code],
+                    root,
+                    log_path,
+                    ("EGG_DONE", "EGG_FAILED"),
+                )
+            self.assertEqual(result, 0)
+            self.assertNotIn(
+                "[EASYCON_DIAGNOSTIC]",
+                log_path.read_text(encoding="utf-8"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

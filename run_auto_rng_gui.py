@@ -2867,6 +2867,10 @@ class AutoRngApp:
                     str(self.egg_log_path),
                     "--cwd",
                     str(self.project_main.parent),
+                    "--expected-marker",
+                    "孵蛋流程测试完成",
+                    "--expected-marker",
+                    "孵蛋流程测试失败",
                     "--",
                     *easycon_command,
                 ])
@@ -2962,6 +2966,8 @@ class AutoRngApp:
                 self.status_var.set(f"孵蛋流程测试完成{detail}")
             elif "孵蛋流程测试失败" in log_text:
                 self.status_var.set(f"孵蛋流程在检查或执行阶段停止{detail}")
+            elif "[EASYCON_DIAGNOSTIC]" in log_text:
+                self.status_var.set(f"孵蛋流程被取消或异常提前退出，不能视为正常完成{detail}")
             else:
                 self.status_var.set(f"孵蛋流程已退出，退出码 {code}{detail}")
         else:

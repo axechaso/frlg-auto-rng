@@ -19,6 +19,7 @@ from automation.easycon118 import (
     EGG_SETTINGS_OVERRIDE_PATH,
     EGG_SURF_BATTLE_OVERRIDE_PATH,
     EGG_TRANSIENT_RETRY_OVERRIDE_MARKER,
+    EGG_TERMINAL_STOP_OVERRIDE_MARKER,
     PARTY_SUMMARY_NAVIGATION_PATH,
     TOGEPI_HATCH_CYCLE_OVERRIDE_PATH,
     WILD_PID_RETRY_LIMIT_MARKER,
@@ -38,6 +39,7 @@ from automation.easycon118 import (
     _apply_egg_settings_runtime_override_text,
     _apply_egg_surf_battle_runtime_override_text,
     _apply_egg_transient_retry_runtime_override_text,
+    _apply_egg_terminal_stop_policy_text,
     _apply_party_summary_navigation_text,
     _apply_togepi_hatch_cycle_override_text,
     _apply_wild_pid_retry_limit_text,
@@ -613,6 +615,37 @@ ENDFUNC
         self.assertIn("$孵蛋流程Seed已预校准 = 0", configured)
         self.assertEqual(configured.count("RETURN 2"), 3)
 
+    def test_terminal_egg_lookup_failure_keeps_the_current_game_screen(self):
+        original = """\
+FUNC 孵蛋流程_执行孵化与个体反查(): INT
+    IF $孵蛋流程蛋反查结果 == 3
+        CALL 孵蛋流程_重开下一轮
+        RETURN 2
+    ELIF $孵蛋流程蛋反查结果 == 2
+        PRINT 蛋个体在自动扩窗后仍无结果，停止以检查亲本或目标数据
+        CALL 孵蛋流程_重开下一轮
+        RETURN 0
+    ELIF $孵蛋流程蛋反查结果 != 1
+        PRINT 蛋个体反查失败，请检查双亲、相性、目标帧或识图配置
+        CALL 孵蛋流程_重开下一轮
+        RETURN 0
+    ENDIF
+    RETURN 1
+ENDFUNC
+"""
+        configured = _apply_egg_terminal_stop_policy_text(original)
+        configured_again = _apply_egg_terminal_stop_policy_text(configured)
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(EGG_TERMINAL_STOP_OVERRIDE_MARKER, configured)
+        self.assertEqual(configured.count("停止前保留当前游戏画面"), 2)
+        self.assertEqual(configured.count("CALL 孵蛋流程_重开下一轮"), 1)
+        retry_branch = configured.split("IF $孵蛋流程蛋反查结果 == 3", 1)[1].split(
+            "ELIF $孵蛋流程蛋反查结果 == 2",
+            1,
+        )[0]
+        self.assertIn("CALL 孵蛋流程_重开下一轮", retry_branch)
+
     def test_pond_route_waits_after_the_final_down_input(self):
         configured = _apply_egg_pond_settle_delay_text(EGG_POND_SETTLE_ORIGINAL)
 
@@ -743,8 +776,11 @@ ENDFUNC
         template = template_path.read_text(encoding="utf-8")
         self.assertIn("$调试日志输出 = 1", template)
         self.assertIn(EGG_TRANSIENT_RETRY_OVERRIDE_MARKER, template)
+        self.assertIn(EGG_TERMINAL_STOP_OVERRIDE_MARKER, template)
         self.assertIn("抓捕失败，关闭游戏并继续下一轮", template)
         self.assertIn("RETURN 2", template)
+        self.assertIn("$候选细分累计范围有效 = 0", template)
+        self.assertIn("$孵蛋流程IV范围合并结果 = 合并候选细分IV范围()", template)
         library = library_path.read_text(encoding="utf-8")
         self.assertIn("识别冲浪结束后再打开菜单", library)
         self.assertIn(EGG_POND_SETTLE_FIXED, library)

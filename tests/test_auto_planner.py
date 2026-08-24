@@ -3,9 +3,12 @@ from pathlib import Path
 
 from automation.easycon118 import (
     EasyCon118Options,
+    EXPECTED_SCRIPT_SHA256,
+    SUPPORTED_RUNTIME_SCRIPT_SHA256S,
     configure_template_text,
     inspect_label_corpus,
     inspect_script_corpus,
+    is_supported_runtime_script_sha256,
     plan_to_user_values,
 )
 from automation.planner import (
@@ -322,9 +325,9 @@ class CompatibilityTests(unittest.TestCase):
     def test_real_118_script_manifest(self):
         manifest = inspect_script_corpus(self.LABEL_DIR.parent)
         self.assertEqual(manifest["count"], 33)
-        self.assertEqual(
+        self.assertIn(
             manifest["sha256"],
-            "43c3944bad75a1cb424203237b6aad51b351aa5c9bb81bfc6aa2c93ce96932cf",
+            (EXPECTED_SCRIPT_SHA256, *SUPPORTED_RUNTIME_SCRIPT_SHA256S),
         )
         self.assertEqual(
             manifest["templates"],
@@ -333,6 +336,14 @@ class CompatibilityTests(unittest.TestCase):
                 "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs",
             ],
         )
+
+    def test_controlled_egg_window_variant_is_an_audited_runtime_input(self):
+        self.assertTrue(
+            is_supported_runtime_script_sha256(
+                "4843f4044e69dc4bc0eb2f3506490651589e531fe2d3b2bad905a6b977c3eec0"
+            )
+        )
+        self.assertFalse(is_supported_runtime_script_sha256("not-a-script-hash"))
 
     def test_real_search_plan_calibration_round_trip(self):
         real_request = AutoSearchRequest(

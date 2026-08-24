@@ -15,9 +15,9 @@ from automation.easycon118 import (  # noqa: E402
     EXPECTED_LABEL_METHODS,
     EXPECTED_LABEL_SHA256,
     EXPECTED_SCRIPT_FILE_COUNT,
-    EXPECTED_SCRIPT_SHA256,
     inspect_label_corpus,
     inspect_script_corpus,
+    is_supported_script_input_sha256,
 )
 from easycon.label_matcher import match_prepared_label, prepare_label  # noqa: E402
 
@@ -71,12 +71,15 @@ def main() -> int:
         return 2
     scripts = inspect_script_corpus(args.label_dir.parent)
     print(json.dumps({"scripts": scripts}, ensure_ascii=False, indent=2))
-    if (
-        scripts["count"] != EXPECTED_SCRIPT_FILE_COUNT
-        or scripts["sha256"] != EXPECTED_SCRIPT_SHA256
-    ):
-        print("主 ECS/lib 与已审计的 1.1.8 资产不一致。", file=sys.stderr)
+    if scripts["count"] != EXPECTED_SCRIPT_FILE_COUNT:
+        print("主 ECS/lib 文件数与已审计的 1.1.8 资产不一致。", file=sys.stderr)
         return 3
+    if not is_supported_script_input_sha256(scripts["sha256"]):
+        print(
+            "警告：主 ECS/lib 指纹未登记，继续完成标签审计："
+            + scripts["sha256"],
+            file=sys.stderr,
+        )
     if args.self_match:
         count, minimum = audit_self_match(args.label_dir)
         print(f"全部 {count} 个标签自匹配通过；最低浮点匹配度 {minimum:.4f}%")

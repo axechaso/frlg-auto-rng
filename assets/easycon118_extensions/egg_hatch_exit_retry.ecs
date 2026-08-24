@@ -30,7 +30,9 @@ FUNC 孵蛋测试_执行周期骑车与孵化收尾($全国图鉴编号: INT, $�
     B
     WAIT 12000
     B
-    WAIT 500
+    WAIT 1500
+    B
+    WAIT 1500
     RETURN 1
 ENDFUNC
 

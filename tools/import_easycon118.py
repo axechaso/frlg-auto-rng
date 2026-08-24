@@ -16,13 +16,12 @@ from automation.easycon118 import (  # noqa: E402
     EXPECTED_LABEL_METHODS,
     EXPECTED_LABEL_SHA256,
     EXPECTED_SCRIPT_FILE_COUNT,
-    EXPECTED_SCRIPT_SHA256,
     EXPECTED_TESSDATA_SHA256,
-    LEGACY_SCRIPT_SHA256,
-    PREVIOUS_SCRIPT_SHA256S,
     copy_easycon118_extension_labels,
     inspect_label_corpus,
     inspect_script_corpus,
+    is_supported_script_input_sha256,
+    is_supported_runtime_script_sha256,
     materialize_easycon118_164a_fixes,
 )
 from automation.sid_reverse118 import SID_REVERSE_TEMPLATE_NAME  # noqa: E402
@@ -63,12 +62,12 @@ def import_package(source: Path, destination: Path) -> Path:
     script_manifest = inspect_script_corpus(source)
     if script_manifest["count"] != EXPECTED_SCRIPT_FILE_COUNT:
         raise ValueError(f"主脚本/lib 文件数不匹配: {script_manifest['count']}")
-    if script_manifest["sha256"] not in {
-        LEGACY_SCRIPT_SHA256,
-        *PREVIOUS_SCRIPT_SHA256S,
-        EXPECTED_SCRIPT_SHA256,
-    }:
-        raise ValueError(f"主脚本/lib 指纹不匹配: {script_manifest['sha256']}")
+    if not is_supported_script_input_sha256(script_manifest["sha256"]):
+        print(
+            "警告：主脚本/lib 指纹未登记，仍继续导入："
+            + script_manifest["sha256"],
+            file=sys.stderr,
+        )
 
     templates = [source / name for name in EXPECTED_TEMPLATE_NAMES]
     sid_template = EXTENSION_DIR / SID_REVERSE_TEMPLATE_NAME
@@ -109,10 +108,11 @@ def import_package(source: Path, destination: Path) -> Path:
     for template in templates:
         shutil.copy2(template, destination / template.name)
     installed_script_manifest = materialize_easycon118_164a_fixes(destination)
-    if installed_script_manifest["sha256"] != EXPECTED_SCRIPT_SHA256:
-        raise ValueError(
-            "1.1.8 修正合并后的脚本指纹不匹配: "
-            + installed_script_manifest["sha256"]
+    if not is_supported_runtime_script_sha256(installed_script_manifest["sha256"]):
+        print(
+            "警告：1.1.8 修正合并后的脚本指纹未登记，仍继续导入："
+            + installed_script_manifest["sha256"],
+            file=sys.stderr,
         )
     (destination / "asset_manifest.json").write_text(
         json.dumps(

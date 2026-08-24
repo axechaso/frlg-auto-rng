@@ -30,3 +30,23 @@ FUNC 孵蛋流程_打开指定槽能力页($队伍位置: INT, $目标为队伍�
     $刚使用神奇糖果 = 0
     RETURN 1
 ENDFUNC
+
+# 孵蛋反查喂糖后仍在队伍菜单返回能力页；蛋固定在第5位，不能复用通用末位(第6位)导航。
+FUNC 孵蛋流程_喂糖后打开蛋能力页(): INT
+    UP
+    WAIT 500
+    A
+    WAIT 1500
+    UP
+    WAIT 500
+    UP
+    WAIT 500
+    UP
+    WAIT 500
+    A
+    WAIT 500
+    A
+    WAIT 1500
+    $刚使用神奇糖果 = 0
+    RETURN 1
+ENDFUNC

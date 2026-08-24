@@ -71,12 +71,16 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Raw 1.1.8 package with the audited egg wild reverse window raised to
     # 6500 advances.
     "407e3fde784c631e871c48f201759e29487cc3e3a10b301aac051cbede9f3385",
+    # Download package after adding cross-level IV-range intersection and
+    # preserving the current screen on terminal egg lookup failures.
+    "bf3601815339f253ca0ee0b354fdfb2c26c07a8840f01e7cc375843a14e353b7",
 )
-EXPECTED_SCRIPT_SHA256 = "1ea3bd0ba820e3cb3b1b8616f24e7e8d23b87767b23c49c77cc0a187c2037f73"
+EXPECTED_SCRIPT_SHA256 = "30fea007607c06d69efdefe256c4b4a639d865854ca94da8afe309eaf0272451"
 # Materialized 1.6.4-a runtime corpus after the same controlled 6500-frame
 # egg reverse-window update. This is an audited configuration variant, not a
 # general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    "1ea3bd0ba820e3cb3b1b8616f24e7e8d23b87767b23c49c77cc0a187c2037f73",
     "4843f4044e69dc4bc0eb2f3506490651589e531fe2d3b2bad905a6b977c3eec0",
     # Importer materialization adds one controlled trailing newline to the
     # timeline entry while applying the reviewed 1.6.4-a fixes.
@@ -258,6 +262,7 @@ PARTY_SUMMARY_SHARED_UP_BLOCK = """\
 """
 EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
 EGG_TRANSIENT_RETRY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：瞬时动作失败重启后继续下一轮"
+EGG_TERMINAL_STOP_OVERRIDE_MARKER = "# GUI 孵蛋终止策略：无精确结果时保留当前游戏画面"
 EGG_POND_SETTLE_ORIGINAL = """\
     LS RESET
     WAIT 500
@@ -338,6 +343,37 @@ EGG_TRANSIENT_RETRY_REPLACEMENTS = (
         CALL 孵蛋流程_重开下一轮
         RETURN 2
     ENDIF
+""",
+    ),
+)
+EGG_TERMINAL_STOP_REPLACEMENTS = (
+    (
+        """\
+    ELIF $孵蛋流程蛋反查结果 == 2
+        PRINT 蛋个体在自动扩窗后仍无结果，停止以检查亲本或目标数据
+        CALL 孵蛋流程_重开下一轮
+        RETURN 0
+""",
+        f"""\
+    {EGG_TERMINAL_STOP_OVERRIDE_MARKER}
+    ELIF $孵蛋流程蛋反查结果 == 2
+        PRINT 蛋个体在自动扩窗后仍无结果，停止以检查亲本或目标数据
+        PRINT 停止前保留当前游戏画面，不关闭或重启游戏
+        RETURN 0
+""",
+    ),
+    (
+        """\
+    ELIF $孵蛋流程蛋反查结果 != 1
+        PRINT 蛋个体反查失败，请检查双亲、相性、目标帧或识图配置
+        CALL 孵蛋流程_重开下一轮
+        RETURN 0
+""",
+        """\
+    ELIF $孵蛋流程蛋反查结果 != 1
+        PRINT 蛋个体反查失败，请检查双亲、相性、目标帧或识图配置
+        PRINT 停止前保留当前游戏画面，不关闭或重启游戏
+        RETURN 0
 """,
     ),
 )
@@ -1043,6 +1079,18 @@ def _apply_egg_transient_retry_runtime_override_text(template_text: str) -> str:
     return configured
 
 
+def _apply_egg_terminal_stop_policy_text(template_text: str) -> str:
+    """Stop terminal egg lookup failures without closing or restarting the game."""
+    if EGG_TERMINAL_STOP_OVERRIDE_MARKER in template_text:
+        return template_text
+    configured = template_text
+    for original, replacement in EGG_TERMINAL_STOP_REPLACEMENTS:
+        if configured.count(original) != 1:
+            raise ValueError("孵蛋模板缺少唯一的终止分支，拒绝应用保留画面策略")
+        configured = configured.replace(original, replacement, 1)
+    return configured
+
+
 def _apply_egg_pond_settle_delay_text(library_text: str) -> str:
     """Let the final pond-facing input settle before the surf sequence starts."""
     if EGG_POND_SETTLE_FIXED in library_text:
@@ -1341,6 +1389,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         EGG_SEED_CONTROLLER_OVERRIDE_PATH.read_text(encoding="utf-8"),
     )
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
+    configured = _apply_egg_terminal_stop_policy_text(configured)
     egg_path.write_text(configured, encoding="utf-8")
 
     party_summary_helper = PARTY_SUMMARY_NAVIGATION_PATH.read_text(
@@ -1504,6 +1553,7 @@ def write_configured_egg_project(
         seed_controller_override_text,
     )
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
+    configured = _apply_egg_terminal_stop_policy_text(configured)
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
     wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
@@ -1540,6 +1590,12 @@ def write_configured_egg_project(
         "\n".join(
             replacement
             for _, replacement in EGG_TRANSIENT_RETRY_REPLACEMENTS
+        ).encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["egg_terminal_stop_policy_sha256"] = hashlib.sha256(
+        "\n".join(
+            replacement
+            for _, replacement in EGG_TERMINAL_STOP_REPLACEMENTS
         ).encode("utf-8")
     ).hexdigest()
     runtime_overrides["egg_prepared_254_start_sha256"] = hashlib.sha256(

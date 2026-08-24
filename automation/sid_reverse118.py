@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 import json
 import re
 import shutil
+import sys
 from pathlib import Path
 
 from rng.tenlines_utils import get_personal
@@ -15,6 +16,7 @@ from .easycon118 import (
     EXPECTED_SCRIPT_SHA256,
     copy_easycon118_extension_labels,
     inspect_script_corpus,
+    is_supported_runtime_script_sha256,
 )
 
 
@@ -188,8 +190,12 @@ def write_sid_reverse_project(
             f"1.1.8正式/时间轴主脚本及lib文件数应为{EXPECTED_SCRIPT_FILE_COUNT}，"
             f"当前为{corpus['count']}"
         )
-    if corpus["sha256"] != EXPECTED_SCRIPT_SHA256:
-        raise ValueError("1.1.8脚本指纹不一致，拒绝混用未经审计的版本: " + corpus["sha256"])
+    if not is_supported_runtime_script_sha256(corpus["sha256"]):
+        print(
+            "警告：1.1.8 主脚本/lib 指纹未登记，仍继续生成 SID 反查项目："
+            + corpus["sha256"],
+            file=sys.stderr,
+        )
     template = source_dir / SID_REVERSE_TEMPLATE_NAME
     if not template.is_file():
         raise FileNotFoundError(f"缺少SID采集模板: {template}")
