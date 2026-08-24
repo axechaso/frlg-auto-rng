@@ -86,6 +86,23 @@ class TidRng137Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "最多按键 7 次"):
             TidRngRequest(player_name="ABCDEFGH").validate(self.english)
 
+    def test_removed_f3_random_mode_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "F3随机模式已移除"):
+            TidRngRequest(sid_random=True, f3_random_range=10).validate(self.english)
+
+    def test_flow_marker_reports_actual_tid_for_all_five_success_types(self):
+        configured = configure_tid_template_text(
+            self.english,
+            TidRngRequest(mode=0, sid_random=True),
+            include_flow_marker=True,
+        )
+        self.assertEqual(configured.count("TIDFLOW|ID|MATCH=1"), 5)
+        self.assertEqual(configured.count("TIDFLOW|ID|TID="), 5)
+        self.assertIn(
+            "TIDFLOW|ID|TID= & $curr1 & $curr2 & $curr3 & $curr4 & $curr5",
+            configured,
+        )
+
     def test_write_project_copies_full_pinned_label_package(self):
         with tempfile.TemporaryDirectory() as temp:
             main = write_configured_tid_project(

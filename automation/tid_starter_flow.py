@@ -7,13 +7,14 @@ small language-neutral route stage.  Starter target selection is shared.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, replace
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 
-from rng.sid_reverse import first_sid_advances
+from rng.sid_reverse import first_sid_advances, sid_at_advance
 from rng.tenlines import get_hidden_power, pokerng_jump
 from rng.starter_sid_verification import (
     StarterSearchRequest,
@@ -64,12 +65,12 @@ class TidStarterFlowRequest:
 
     def validate(self) -> None:
         self.tid_request.validate()
-        if self.tid_request.mode != 1:
-            raise ValueError("TID到御三家连续流程只支持目标TID乱数模式")
         if self.tid_request.calibration_check:
             raise ValueError("连续流程不能同时启用TID固定延迟检查")
-        if self.tid_request.sid_random:
-            raise ValueError("连续流程必须填写目标SID，不能使用随机SID")
+        if self.tid_request.mode == 1 and self.tid_request.sid_random:
+            raise ValueError("目标TID乱数连续流程必须使用目标SID")
+        if self.tid_request.mode == 0 and not self.tid_request.sid_random:
+            raise ValueError("穷举连续流程必须使用固定F3延迟取得实际SID")
         if self.tid_request.language != "英文":
             raise ValueError(
                 "连续御三家流程的第三阶段使用现有1.1.8；当前1.1.8只审计了英文版游戏，"
@@ -81,8 +82,19 @@ class TidStarterFlowRequest:
             raise ValueError("SID ADV扫描半径不能为负数")
         self.to_starter_search_request().validate()
 
-    def to_exact_tid_request(self) -> TidRngRequest:
-        """Disable unrelated lucky-number exits for the exact-TID flow."""
+    @property
+    def deferred_identity(self) -> bool:
+        """Whether starter search must wait for the TID produced by stage 1."""
+        return self.tid_request.mode == 0
+
+    def to_flow_tid_request(self) -> TidRngRequest:
+        """Return the stage-1 request appropriate for the selected flow."""
+        if self.deferred_identity:
+            return replace(
+                self.tid_request,
+                sid_random=True,
+                f3_random_range=0,
+            )
         return replace(
             self.tid_request,
             same_id=False,
@@ -90,16 +102,22 @@ class TidStarterFlowRequest:
             include_65535=False,
             single_digit_id=False,
             sid_random=False,
+            f3_random_range=0,
         )
 
-    def to_starter_search_request(self) -> StarterSearchRequest:
+    def to_starter_search_request(
+        self,
+        *,
+        tid: int | None = None,
+        sid: int | None = None,
+    ) -> StarterSearchRequest:
         request = self.tid_request
         return StarterSearchRequest(
             version=self.version,
             language=request.language,
             starter=self.starter,
-            tid=request.target_tid,
-            sid=request.target_sid,
+            tid=request.target_tid if tid is None else tid,
+            sid=request.target_sid if sid is None else sid,
             sound=request.sound,
             button_mode=request.button_mode,
             seed_button=request.seed_button,
@@ -108,15 +126,55 @@ class TidStarterFlowRequest:
         )
 
 
+def tid_starter_flow_request_from_dict(payload: dict[str, object]) -> TidStarterFlowRequest:
+    """Rebuild a flow request from ``flow_plan.json`` without UI state."""
+    raw_tid = payload.get("tid_request")
+    if not isinstance(raw_tid, dict):
+        raise ValueError("flow_plan.json缺少tid_request")
+    tid_names = {item.name for item in fields(TidRngRequest)}
+    tid_request = TidRngRequest(
+        **{name: value for name, value in raw_tid.items() if name in tid_names}
+    )
+    return TidStarterFlowRequest(
+        tid_request=tid_request,
+        version=str(payload["version"]),
+        starter=str(payload["starter"]),
+        starter_min_advances=int(payload.get("starter_min_advances", 1500)),
+        starter_max_advances=int(payload.get("starter_max_advances", 10_000)),
+        sid_chain_search_advances=int(payload.get("sid_chain_search_advances", 10_000)),
+        sid_retry_radius=int(payload.get("sid_retry_radius", 20)),
+    )
+
+
 @dataclass(frozen=True)
 class TidStarterFlowPlan:
     request: TidStarterFlowRequest
-    earliest_sid_chain_advance: int
-    starter_target: StarterTarget
-    starter_run_plan: RunPlan
+    earliest_sid_chain_advance: int | None
+    starter_target: StarterTarget | None
+    starter_run_plan: RunPlan | None
     sid_retry_corrections: tuple[int, ...]
 
     def to_dict(self) -> dict[str, object]:
+        if self.request.deferred_identity:
+            verification_rules = {
+                "wrong_pid": "continue the normal starter RNG calibration",
+                "target_pid_non_shiny": (
+                    "stop and preserve the log because the actual SID chain may differ"
+                ),
+                "target_pid_shiny": (
+                    "the dynamically resolved starter target was hit; finish the flow"
+                ),
+            }
+        else:
+            verification_rules = {
+                "wrong_pid": "continue the normal starter RNG calibration",
+                "target_pid_non_shiny": (
+                    "the starter target was hit but SID was missed; retry SID ADV"
+                ),
+                "target_pid_shiny": (
+                    "the starter target and SID were hit; finish the flow"
+                ),
+            }
         return {
             "mode": "tid_sid_starter_verification",
             "architecture": (
@@ -129,18 +187,19 @@ class TidStarterFlowPlan:
             },
             "earliest_sid_chain_advance": self.earliest_sid_chain_advance,
             "runtime_sid_advance_source": "TIDFLOW|ID|SID_ADV= marker",
-            "starter_target": self.starter_target.to_dict(),
-            "starter_118_plan": self.starter_run_plan.to_dict(),
+            "deferred_identity": self.request.deferred_identity,
+            "starter_target": (
+                self.starter_target.to_dict()
+                if self.starter_target is not None
+                else None
+            ),
+            "starter_118_plan": (
+                self.starter_run_plan.to_dict()
+                if self.starter_run_plan is not None
+                else None
+            ),
             "sid_retry_corrections": list(self.sid_retry_corrections),
-            "verification_rules": {
-                "wrong_pid": "continue the normal starter RNG calibration",
-                "target_pid_non_shiny": (
-                    "the starter target was hit but SID was missed; retry SID ADV"
-                ),
-                "target_pid_shiny": (
-                    "the starter target and SID were hit; finish the flow"
-                ),
-            },
+            "verification_rules": verification_rules,
         }
 
 
@@ -168,8 +227,8 @@ def build_starter_run_plan(
     species_en = target.species_en
     search_request = AutoSearchRequest(
         game=game,
-        tid=tid_request.target_tid,
-        sid=tid_request.target_sid,
+        tid=target.tid,
+        sid=target.sid,
         method="Static 1",
         category="Starter",
         location="",
@@ -229,6 +288,14 @@ def build_starter_run_plan(
 
 def build_tid_starter_flow_plan(request: TidStarterFlowRequest) -> TidStarterFlowPlan:
     request.validate()
+    if request.deferred_identity:
+        return TidStarterFlowPlan(
+            request=request,
+            earliest_sid_chain_advance=None,
+            starter_target=None,
+            starter_run_plan=None,
+            sid_retry_corrections=(request.tid_request.sid_advance_correction,),
+        )
     sid_hits = first_sid_advances(
         request.tid_request.target_tid,
         (request.tid_request.target_sid,),
@@ -251,6 +318,58 @@ def build_tid_starter_flow_plan(request: TidStarterFlowRequest) -> TidStarterFlo
         starter_target=starter_target,
         starter_run_plan=starter_run_plan,
         sid_retry_corrections=retry_corrections,
+    )
+
+
+@dataclass(frozen=True)
+class ResolvedTidStarterPlan:
+    """Starter target resolved from the identity produced by exhaustive mode."""
+
+    tid: int
+    sid_advance: int
+    sid: int
+    request: TidStarterFlowRequest
+    starter_target: StarterTarget
+    starter_run_plan: RunPlan
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "tid": self.tid,
+            "sid_advance": self.sid_advance,
+            "sid": self.sid,
+            "starter_target": self.starter_target.to_dict(),
+            "starter_118_plan": self.starter_run_plan.to_dict(),
+        }
+
+
+def resolve_exhaustive_starter_plan(
+    request: TidStarterFlowRequest,
+    *,
+    actual_tid: int,
+    sid_advance: int,
+) -> ResolvedTidStarterPlan:
+    """Resolve the real SID and starter target after exhaustive stage 1."""
+    request.validate()
+    if not request.deferred_identity:
+        raise ValueError("只有穷举连续流程需要运行时解析实际TID/SID")
+    actual_sid = sid_at_advance(actual_tid, sid_advance)
+    runtime_tid_request = replace(
+        request.tid_request,
+        target_tid=actual_tid,
+        target_sid=actual_sid,
+    )
+    runtime_request = replace(request, tid_request=runtime_tid_request)
+    starter_target = find_earliest_shiny_starter(
+        runtime_request.to_starter_search_request(tid=actual_tid, sid=actual_sid)
+    )
+    starter_run_plan = build_starter_run_plan(runtime_request, starter_target)
+    return ResolvedTidStarterPlan(
+        tid=actual_tid,
+        sid_advance=sid_advance,
+        sid=actual_sid,
+        request=runtime_request,
+        starter_target=starter_target,
+        starter_run_plan=starter_run_plan,
     )
 
 
@@ -384,7 +503,7 @@ def write_tid_starter_flow_bundle(
     write_configured_tid_project(
         source_dir,
         id_dir,
-        plan.request.to_exact_tid_request(),
+        plan.request.to_flow_tid_request(),
         include_flow_marker=True,
     )
     id_template = (id_dir / "main.ecs").read_text(encoding="utf-8")
@@ -410,36 +529,63 @@ def write_tid_starter_flow_bundle(
         render_lab_bridge_ecs(plan.request.starter),
         encoding="utf-8",
     )
-    write_configured_project(
-        starter_source_dir,
-        starter_dir,
-        plan.starter_run_plan,
-        EasyCon118Options(
-            nx_model=plan.request.tid_request.nx_model,
-            continue_capture_after_shiny=False,
-        ),
-    )
+    if plan.starter_run_plan is not None:
+        write_configured_project(
+            starter_source_dir,
+            starter_dir,
+            plan.starter_run_plan,
+            EasyCon118Options(
+                nx_model=plan.request.tid_request.nx_model,
+                continue_capture_after_shiny=False,
+            ),
+        )
+    elif starter_dir.exists():
+        shutil.rmtree(starter_dir)
     plan_path = output_dir / "flow_plan.json"
+    payload = plan.to_dict()
+    payload["starter_source_dir"] = str(starter_source_dir)
     plan_path.write_text(
-        json.dumps(plan.to_dict(), ensure_ascii=False, indent=2),
+        json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     return plan_path
+
+
+def write_resolved_exhaustive_starter_project(
+    starter_source_dir: str | Path,
+    starter_dir: str | Path,
+    resolved: ResolvedTidStarterPlan,
+) -> Path:
+    """Materialize the 1.1.8 starter stage after stage 1 reveals the IDs."""
+    starter_dir = Path(starter_dir).resolve()
+    main_path = write_configured_project(
+        Path(starter_source_dir).resolve(),
+        starter_dir,
+        resolved.starter_run_plan,
+        EasyCon118Options(
+            nx_model=resolved.request.tid_request.nx_model,
+            continue_capture_after_shiny=False,
+        ),
+    )
+    (starter_dir.parent / "resolved_identity.json").write_text(
+        json.dumps(resolved.to_dict(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return main_path
 
 
 def validate_tid_starter_flow_runtime(
     ezcon_path: str | Path,
     id_main: str | Path,
     bridge_main: str | Path,
-    starter_main: str | Path,
+    starter_main: str | Path | None,
 ) -> EasyConRuntimeCheck:
-    """Validate all three flow stages with pinned EasyCon 1.6.4-a."""
+    """Validate available flow stages with pinned EasyCon 1.6.4-a."""
     base = validate_tid_runtime(ezcon_path, id_main)
     errors = list(base.errors)
     warnings = list(base.warnings)
     ezcon_path = Path(ezcon_path).resolve()
     bridge_main = Path(bridge_main).resolve()
-    starter_main = Path(starter_main).resolve()
     if not bridge_main.is_file():
         errors.append(f"找不到研究所桥接脚本: {bridge_main}")
     elif not errors:
@@ -463,7 +609,12 @@ def validate_tid_starter_flow_runtime(
                 )
     if not errors:
         warnings.append("研究所桥接脚本已通过EasyCon 1.6.4-a格式检查。")
-    starter = validate_runtime(ezcon_path, starter_main)
-    errors.extend(starter.errors)
-    warnings.extend(starter.warnings)
+    if starter_main is None:
+        warnings.append(
+            "穷举模式将在取得实际TID和SID ADV后生成御三家工程，并在运行前立即预检。"
+        )
+    else:
+        starter = validate_runtime(ezcon_path, Path(starter_main).resolve())
+        errors.extend(starter.errors)
+        warnings.extend(starter.warnings)
     return EasyConRuntimeCheck(not errors, tuple(errors), tuple(warnings))

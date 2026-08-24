@@ -11,6 +11,7 @@ from automation.tid_starter_flow import (
     TidStarterFlowRequest,
     build_tid_starter_flow_plan,
     render_lab_bridge_ecs,
+    resolve_exhaustive_starter_plan,
     validate_tid_starter_flow_runtime,
     write_tid_starter_flow_bundle,
 )
@@ -40,7 +41,41 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertEqual(plan.starter_run_plan.species_id, 1)
         self.assertGreaterEqual(plan.earliest_sid_chain_advance, 0)
         self.assertEqual(plan.sid_retry_corrections[:5], (5, 6, 4, 7, 3))
-        self.assertFalse(plan.request.to_exact_tid_request().include_65535)
+        self.assertFalse(plan.request.to_flow_tid_request().include_65535)
+
+    def test_exhaustive_plan_defers_starter_search_until_actual_identity(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(
+                language="英文",
+                mode=0,
+                target_tid=99999 % 65536,
+                target_sid=0,
+                sid_random=True,
+                same_id=True,
+            ),
+            version="火红",
+            starter="妙蛙种子",
+            starter_max_advances=1600,
+        )
+        plan = build_tid_starter_flow_plan(request)
+
+        self.assertTrue(plan.request.deferred_identity)
+        self.assertIsNone(plan.starter_target)
+        self.assertIsNone(plan.starter_run_plan)
+        self.assertTrue(plan.request.to_flow_tid_request().same_id)
+        self.assertTrue(plan.request.to_flow_tid_request().sid_random)
+
+        resolved = resolve_exhaustive_starter_plan(
+            request,
+            actual_tid=12345,
+            sid_advance=199,
+        )
+        self.assertEqual(resolved.tid, 12345)
+        self.assertEqual(resolved.sid, 8832)
+        self.assertEqual(resolved.starter_target.tid, 12345)
+        self.assertEqual(resolved.starter_target.sid, 8832)
+        self.assertEqual(resolved.starter_run_plan.request.tid, 12345)
+        self.assertEqual(resolved.starter_run_plan.request.sid, 8832)
 
     def test_bridge_uses_only_selected_starter_horizontal_distance(self):
         bridge = render_lab_bridge_ecs("杰尼龟")
@@ -119,6 +154,34 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("找不到研究所桥接脚本", result.errors[0])
 
+    def test_runtime_validation_allows_deferred_starter_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            id_main = root / "01_id" / "main.ecs"
+            bridge_main = root / "02_lab_bridge" / "main.ecs"
+            id_main.parent.mkdir(parents=True)
+            bridge_main.parent.mkdir(parents=True)
+            id_main.write_text("RETURN 0\n", encoding="utf-8")
+            bridge_main.write_text("RETURN 0\n", encoding="utf-8")
+            with (
+                patch(
+                    "automation.tid_starter_flow.validate_tid_runtime",
+                    return_value=EasyConRuntimeCheck(True, (), ()),
+                ),
+                patch(
+                    "automation.tid_starter_flow.subprocess.run",
+                    return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+                ),
+                patch("automation.tid_starter_flow.validate_runtime") as validate_starter,
+            ):
+                result = validate_tid_starter_flow_runtime(
+                    root / "ezcon.exe", id_main, bridge_main, None
+                )
+
+        self.assertTrue(result.ok)
+        self.assertTrue(any("取得实际TID" in item for item in result.warnings))
+        validate_starter.assert_not_called()
+
     @unittest.skipUnless(
         (
             DEFAULT_TID_SOURCE_PATH
@@ -154,6 +217,7 @@ class TidStarterFlowTests(unittest.TestCase):
             payload = json.loads(plan_path.read_text(encoding="utf-8"))
 
         self.assertIn("TIDFLOW|ID|MATCH=1", id_text)
+        self.assertIn("TIDFLOW|ID|TID=", id_text)
         self.assertNotIn("FUNC JP_", id_text)
         self.assertIn("$SID_ADV修正 = 1", id_attempt_1)
         self.assertIn("TIDFLOW|BRIDGE|DONE=1", bridge_text)
@@ -162,6 +226,52 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertIn("$目标全国图鉴编号 = 1", starter_text)
         self.assertEqual(payload["starter_target"]["advances"], 1513)
         self.assertEqual(payload["starter_118_plan"]["request"]["category"], "Starter")
+
+    @unittest.skipUnless(
+        (
+            DEFAULT_TID_SOURCE_PATH
+            / "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7.txt"
+        ).is_file(),
+        "requires the external TID 1.3.7 package",
+    )
+    def test_exhaustive_bundle_preserves_filters_and_defers_starter_project(self):
+        plan = build_tid_starter_flow_plan(
+            TidStarterFlowRequest(
+                tid_request=TidRngRequest(
+                    language="英文",
+                    mode=0,
+                    sid_random=True,
+                    same_id=True,
+                    include_65535=True,
+                ),
+                version="火红",
+                starter="小火龙",
+                starter_max_advances=2000,
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            plan_path = write_tid_starter_flow_bundle(
+                DEFAULT_TID_SOURCE_PATH,
+                output,
+                plan,
+                starter_source_dir=SOURCE_118,
+            )
+            id_text = (output / "01_id" / "main_attempt_000.ecs").read_text(
+                encoding="utf-8"
+            )
+            payload = json.loads(plan_path.read_text(encoding="utf-8"))
+
+            self.assertFalse((output / "03_starter_118").exists())
+
+        self.assertIn("$ID_RNG = 0", id_text)
+        self.assertIn("$SID_RAND = 1", id_text)
+        self.assertIn("$F3_Max_Rand_Range = 0", id_text)
+        self.assertIn("$same_id_switch = 1", id_text)
+        self.assertIn("$65535开关 = 1", id_text)
+        self.assertTrue(payload["deferred_identity"])
+        self.assertIsNone(payload["starter_target"])
+        self.assertIsNone(payload["starter_118_plan"])
 
 
 if __name__ == "__main__":

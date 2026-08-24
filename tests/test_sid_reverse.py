@@ -10,6 +10,7 @@ from rng.sid_reverse import (
     pid_to_psv,
     recover_pid_candidates,
     reverse_sid,
+    sid_at_advance,
     sid_candidates_for_psv,
 )
 from rng.tenlines import METHOD_1, METHOD_2, METHOD_4
@@ -60,6 +61,12 @@ class SIDReverseTests(unittest.TestCase):
             [(8832, 199), (8839, 8461)],
         )
         self.assertEqual(first_sid_advances(12345, candidates, max_advances=10), ())
+
+    def test_sid_at_advance_uses_same_zero_based_convention_as_search(self):
+        self.assertEqual(sid_at_advance(12345, 199), 8832)
+        self.assertEqual(sid_at_advance(12345, 8461), 8839)
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            sid_at_advance(12345, -1)
 
     def test_multiple_pokemon_intersect_psv_not_pid(self):
         first = PIDCandidate(0x12345678, METHOD_1, 0, (0, 0, 0, 0, 0, 0))

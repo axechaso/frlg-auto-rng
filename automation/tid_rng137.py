@@ -174,6 +174,10 @@ class TidRngRequest:
         for label, value in nonnegative.items():
             if value < 0:
                 raise ValueError(f"{label}不能为负数")
+        if self.f3_random_range != 0:
+            raise ValueError(
+                "F3随机模式已移除；请使用目标SID自动计算ADV，或使用固定F3延迟"
+            )
         if not 1 <= self.denoise_need_hit <= 10:
             raise ValueError("去噪命中数必须在 1-10 之间")
         if not 1 <= self.denoise_try_window <= 10:
@@ -311,16 +315,20 @@ def configure_tid_template_text(
             1,
         )
     if include_flow_marker:
-        match_call = "            CALL 匹配"
-        if configured.count(match_call) != 1:
-            raise ValueError("TID 1.3.7模板的匹配调用结构与已审计版本不一致")
-        marker = """            CALL 匹配
-            IF $is_match == 1 and $denoise_hit_count >= $denoise_need_hit
-                PRINT TIDFLOW|ID|MATCH=1
-                PRINT TIDFLOW|ID|TID= & _TARGET_TID
-                PRINT TIDFLOW|ID|SID_ADV= & $adv
-            ENDIF"""
-        configured = configured.replace(match_call, marker, 1)
+        success_block = """                IF $denoise_hit_count >= $denoise_need_hit
+                    BREAK 2"""
+        success_count = configured.count(success_block)
+        if success_count != 5:
+            raise ValueError(
+                "TID 1.3.7模板的五种成功退出结构与已审计版本不一致："
+                f"{success_count}"
+            )
+        marker_block = """                IF $denoise_hit_count >= $denoise_need_hit
+                    PRINT TIDFLOW|ID|MATCH=1
+                    PRINT TIDFLOW|ID|TID= & $curr1 & $curr2 & $curr3 & $curr4 & $curr5
+                    PRINT TIDFLOW|ID|SID_ADV= & $adv
+                    BREAK 2"""
+        configured = configured.replace(success_block, marker_block)
     return configured
 
 

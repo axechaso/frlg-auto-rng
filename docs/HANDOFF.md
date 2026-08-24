@@ -173,23 +173,23 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 ### TID 乱数
 
 - 英文/日文 ROM、乱数/穷举、Switch 1/2、主角性别和名称；
-- 目标 TID/SID 与三种 SID 处理模式；
+- 目标 TID/SID；F3 只保留目标 SID 自动计算 ADV、固定 F3 延迟两种处理，随机 F3 已移除；
 - OP/F1/F2 中心帧、搜索半径、穷举起点和范围；
-- 固定延迟、游戏设置、去噪与特殊号码判定；
-- 英文连续流程开关，以及游戏版本、御三家、ADV 上下限和 SID ADV 重试半径；御三家 Seed 时间直接使用 Ten Lines 对应设置的 Seed 表，不接受人为时间下限；
+- 固定延迟、游戏设置、去噪与特殊号码判定；固定延迟检查完整输出四项后由 GUI 自动回填并关闭检查，手动输入开关默认关闭；
+- 英文连续流程开关，以及游戏版本、御三家和 ADV 上下限。目标 TID/SID 模式继续使用 SID ADV 重试半径；穷举模式在运行时使用实际 TID/SID ADV 计算实际 SID，不要求预先命中目标 TID/SID；御三家 Seed 时间直接使用 Ten Lines 对应设置的 Seed 表，不接受人为时间下限；
 - 独立脚本包路径，默认是 `%USERPROFILE%\Downloads\自定义TID SID 御三家乱数多功能包1.3`。
 
 适配器位于 `automation/tid_rng137.py`。它锁定英文/日文 1.3.7 脚本指纹和 328 个标签。日文原脚本 `FOR $InputLen` 在 1.6.4-a 会报三次只读 `_tmpL$0`；生成副本会按 ECS 约束改为先算有效末索引再使用显式索引 `FOR`。该修正不改 Seed/帧轴，不改用户原包。
 
 连续流程采用分阶段编排，不把英文、日文和旧御三家模块复制到一个 ECS：
 
-1. 根据 ROM 语言生成一份原版 1.3.7 ID 脚本，只增加 `TIDFLOW|ID|...` 成功标记；
+1. 根据 ROM 语言生成一份原版 1.3.7 ID 脚本，只在五种成功退出处增加 `TIDFLOW|ID|MATCH/TID/SID_ADV` 标记；
 2. 使用用户提供集合样本中已经实测的研究所路线，保存到所选御三家球前；
-3. 由共享 Python 搜索器从 ADV 1500 起找最早可达闪光 Method 1 御三家，并把 Seed、ADV、图鉴编号和 Seed 模式写入现有 1.1.8 `Starter` 工程；
+3. 目标 TID/SID 乱数在运行前搜索御三家；穷举模式则在第一阶段结束后读取实际 TID/SID ADV，按“第一次 LCG 结果为 ADV 0”计算实际 SID，再从 ADV 1500 起找最早可达闪光 Method 1 御三家；
 4. 第三阶段直接复用 1.1.8 的御三家领取、能力读取、反查和校准；输出“已识别到出闪，脚本停止”即完成；
-5. 若 1.1.8 精确命中目标 Seed/帧后输出“已命中目标，脚本停止”但没有出闪，编排器判定 SID 未命中，并按当前 `$SID_ADV修正`、`+1`、`-1`、`+2`、`-2` 的顺序重新执行全部三段。
+5. 目标 TID/SID 乱数若精确命中但不闪，按当前 `$SID_ADV修正`、`+1`、`-1`、`+2`、`-2` 重跑三段；穷举模式使用本轮实际身份，不执行这组目标 SID 重试，精确 PID 不闪时保留日志停止。
 
-实现位于 `automation/tid_starter_flow.py`、`rng/starter_sid_verification.py` 和 `run_tid_starter_flow.py`。GUI 的 TID 页会输出 `01_id`、`02_lab_bridge`、`03_starter_118` 和 `flow_plan.json`，对三份主脚本做 1.6.4-a 预检，并由 Python 按成功标记顺序启动。每个 SID ADV 修正都有独立的 ID 主脚本，共用同一套已审计标签。现有 1.1.8 的 Seed 表/OCR 只审计英文版，因此日文 1.3.7 仍可单独运行，但日文连续流程会被明确拒绝。集合样本中的旧 1.2.3 御三家 OP/F12 控制器没有导入。当前尚缺 Switch 实机三阶段与 SID 重试验收。
+实现位于 `automation/tid_starter_flow.py`、`rng/sid_reverse.py`、`rng/starter_sid_verification.py` 和 `run_tid_starter_flow.py`。目标 TID/SID 计划仍预生成并预检三份主脚本；穷举计划先预检 `01_id` 与 `02_lab_bridge`，实际身份确定后才生成 `03_starter_118` 并立即执行同一 1.6.4-a 预检。每个目标 SID ADV 修正有独立 ID 脚本；穷举固定 F3 只生成一次。现有 1.1.8 的 Seed 表/OCR 只审计英文版，因此日文 1.3.7 仍可单独运行，但日文连续流程会被明确拒绝。集合样本中的旧 1.2.3 御三家 OP/F12 控制器没有导入。当前尚缺 Switch 实机动态身份衔接、三阶段与 SID 重试验收。
 
 ## 代码导航
 
@@ -198,7 +198,7 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 | `run_auto_rng_gui.py` | 四个正式选项卡、默认隐藏的高级脚本测试页、设备下拉枚举、HOME_BUFFER 可选开关、输入校验、后台搜索/采集、方案展示、预检和启动/停止 |
 | `run_sid_reverse_capture.py` | SID 逐槽采集编排、提前收敛和报告落盘 |
 | `run_sid_reverse.py` | SID 采集日志分析与文本报告 |
-| `run_tid_starter_flow.py` | 按成功标记串行运行 TID、研究所桥接、1.1.8 御三家，并自动处理 SID ADV 重试 |
+| `run_tid_starter_flow.py` | 按成功标记串行运行 TID、研究所桥接、1.1.8 御三家；穷举时动态解析实际身份，目标 SID 模式处理 ADV 重试 |
 | `run_auto_planner.py` | 普通野生/静态命令行计划器；默认只生成，`--run` 才启动 |
 | `automation/planner.py` | `AutoSearchRequest`、分层搜索、最高 IV 总和、同分最小 Advance |
 | `automation/seed_modes.py` | 1.1.8 Seed 模式 0–9 与 Ten Lines 游戏设置映射 |
@@ -311,7 +311,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 ```
 
-2026-08-24 的代码基线：项目 `.venv` 运行 171 项单元测试全部通过；更新后的本地资产正式版和时间轴版均通过真实 EasyCon 1.6.4-a `format`，下载包的 22 个 `Tools/check_*.py` 全部通过。当前下载包输入指纹为 `77bea49b62c909d105dd7b81529bbb3a8046d996781d68b2ebc479cd6096c841`，导入后物化的 33 文件固定 SHA-256 是 `74b4a3ecce59e3817699ee8dece2594d67f48bad08b33068358c45b74aaf6e9e`；标签审计仍为 1150 个标签、SHA-256 `00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e`。本轮同步了领取后 Seed 失败保留首次预校准并直接重试生成领取的策略；这是代码、静态检查与语法验证，仍需 Switch 实机复测。确认：
+2026-08-24 的代码基线：项目 `.venv` 运行 180 项单元测试全部通过；更新后的本地资产正式版和时间轴版均通过真实 EasyCon 1.6.4-a `format`，下载包的 22 个 `Tools/check_*.py` 全部通过。当前下载包输入指纹为 `77bea49b62c909d105dd7b81529bbb3a8046d996781d68b2ebc479cd6096c841`，导入后物化的 33 文件固定 SHA-256 是 `74b4a3ecce59e3817699ee8dece2594d67f48bad08b33068358c45b74aaf6e9e`；标签审计仍为 1150 个标签、SHA-256 `00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e`。本轮还新增 TID 穷举实际身份到御三家的动态衔接；这些改动仍需 Switch 实机复测。确认：
 
 - 页签顺序固定为 SID 查找、TID 乱数、野生/静态、孵蛋；
 - 设备枚举会自动回填可用串口和带名称采集卡，并保留仍在线的当前索引；
@@ -322,7 +322,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 - 900×620 窗口可滚动到页面底部；
 - “隐藏属性”文案已经改为“觉醒力量”。
 - TID/SID 日英参数可收集，日文生成副本可通过真实 1.6.4-a `format`。
-- TID 连续流程已接入 GUI 生成和启动链；英文 ID 重试脚本、研究所桥接和现有 1.1.8 Starter 工程由 `run_tid_starter_flow.py` 按成功标记串行执行，SID 偏离时按计划重建存档。三阶段仍未完成 Switch 实机验收，日文连续流程也尚未开放。
+- TID 连续流程已接入 GUI 生成和启动链；目标 TID/SID 模式预生成三阶段并保留 SID ADV 重试，穷举模式读取实际 TID/SID ADV 后才计算 SID、搜索并生成 1.1.8 Starter。F3 随机模式已移除，固定延迟检查四项完整时自动回填。两种三阶段流程仍未完成 Switch 实机验收，日文连续流程也尚未开放。
 
 本机曾验证 1.6.4a 可以枚举串口和视频设备，并可用 `format` 解析当前 ECS。换设备后设备编号必然可能变化，必须重新检测。
 
@@ -346,7 +346,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 
 按风险从低到高：
 
-1. 在新设备重新跑安装、171 项测试、EasyCon `--check-only` 和设备枚举。
+1. 在新设备重新跑安装、180 项测试、EasyCon `--check-only` 和设备枚举。
 2. 用不会影响存档的短 ECS 验证单片机控制、停止和重新连接。
 3. 实机验收定点波克比：日志应显示周期 10、目标步数 2815、固定循环 76；过程中不得轮询 `蛋孵化` 标签，收尾两次 `B` 后应回到预期状态。
 4. 实机验收孵蛋完整轮：领取后 Seed 复核成功，再执行固定周期骑车；孵化后共享队伍导航必须向上 3 次并进入第 5 位蛋的能力页，不能误选第 6 位复核野生。
@@ -371,5 +371,5 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 
-测试基线是 171 项，下载包 22 个 ECS Tools 全部通过；更新后的本地正式版和时间轴版均通过真实 1.6.4-a `format`。1.1.8 语料会在导入本地快照时自动合并 1.6.4-a 修正，下载包输入指纹为 77bea49b62c909d105dd7b81529bbb3a8046d996781d68b2ebc479cd6096c841，当前固定语料为 33 个 ECS 文件、SHA-256 74b4a3ecce59e3817699ee8dece2594d67f48bad08b33068358c45b74aaf6e9e。用户会直接修改下载包，未知指纹只警告后继续，不要擅自恢复严格拒绝；缺文件、标签或 format 失败仍应阻止。当前工具工作区是 D:\Codex\火叶乱数\frlg-auto-rng。GUI 启动后自动枚举串口和采集卡；采集卡下拉项显示序号与设备名。高级模式旁的 HOME_BUFFER 稳定低分自适应只作用于 1.1.8 普通/孵蛋且默认关闭。领取后 Seed 未命中或野生反查失败时保持首次预校准完成状态，下一轮直接重新生成、领取和反查。孵蛋 Held/Pickup 固定预校准均为 230，反查窗分别为 ±100/±2000，多候选按相同 IV 和跨轮轨迹处理；最终无解保留游戏画面停止，已确定个体但目标帧未命中时重启校准。完成环境核对后，请根据我接下来的要求继续，不要自行扩大到修改 TID/EasyCon 原包。
+测试基线是 180 项，下载包 22 个 ECS Tools 全部通过；更新后的本地正式版和时间轴版均通过真实 1.6.4-a `format`。1.1.8 语料会在导入本地快照时自动合并 1.6.4-a 修正，下载包输入指纹为 77bea49b62c909d105dd7b81529bbb3a8046d996781d68b2ebc479cd6096c841，当前固定语料为 33 个 ECS 文件、SHA-256 74b4a3ecce59e3817699ee8dece2594d67f48bad08b33068358c45b74aaf6e9e。用户会直接修改下载包，未知指纹只警告后继续，不要擅自恢复严格拒绝；缺文件、标签或 format 失败仍应阻止。当前工具工作区是 D:\Codex\火叶乱数\frlg-auto-rng。GUI 启动后自动枚举串口和采集卡；采集卡下拉项显示序号与设备名。TID 页已移除随机 F3，固定延迟检查完整结束后自动回填四项；穷举连续流程按实际 TID/SID ADV 动态生成御三家阶段。高级模式旁的 HOME_BUFFER 稳定低分自适应只作用于 1.1.8 普通/孵蛋且默认关闭。领取后 Seed 未命中或野生反查失败时保持首次预校准完成状态，下一轮直接重新生成、领取和反查。孵蛋 Held/Pickup 固定预校准均为 230，反查窗分别为 ±100/±2000，多候选按相同 IV 和跨轮轨迹处理；最终无解保留游戏画面停止，已确定个体但目标帧未命中时重启校准。完成环境核对后，请根据我接下来的要求继续，不要自行扩大到修改 TID/EasyCon 原包。
 ```

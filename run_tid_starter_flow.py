@@ -7,18 +7,26 @@ import argparse
 from datetime import datetime
 import json
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
 from typing import TextIO
 
-from automation.easycon118 import build_run_command, prepare_compat_runner
+from automation.easycon118 import build_run_command, prepare_compat_runner, validate_runtime
+from automation.tid_starter_flow import (
+    resolve_exhaustive_starter_plan,
+    tid_starter_flow_request_from_dict,
+    write_resolved_exhaustive_starter_project,
+)
 
 
 ID_MARKER = "TIDFLOW|ID|MATCH=1"
 BRIDGE_MARKER = "TIDFLOW|BRIDGE|DONE=1"
 STARTER_SHINY_MARKER = "已识别到出闪，脚本停止"
 STARTER_SID_MISS_MARKER = "已命中目标，脚本停止"
+ID_TID_PATTERN = re.compile(r"TIDFLOW\|ID\|TID=(\d{1,5})")
+ID_SID_ADV_PATTERN = re.compile(r"TIDFLOW\|ID\|SID_ADV=(-?\d+)")
 
 
 def classify_starter_output(lines: list[str]) -> str:
@@ -28,6 +36,26 @@ def classify_starter_output(lines: list[str]) -> str:
     if any(STARTER_SID_MISS_MARKER in line for line in lines):
         return "sid_miss"
     return "unknown"
+
+
+def parse_id_identity(lines: list[str]) -> tuple[int, int]:
+    """Read the actual TID and SID ADV emitted by the completed ID stage."""
+    tid: int | None = None
+    sid_advance: int | None = None
+    for line in lines:
+        tid_match = ID_TID_PATTERN.search(line)
+        if tid_match is not None:
+            tid = int(tid_match.group(1))
+        advance_match = ID_SID_ADV_PATTERN.search(line)
+        if advance_match is not None:
+            sid_advance = int(advance_match.group(1))
+    if tid is None or sid_advance is None:
+        raise ValueError("TID阶段没有输出完整的实际TID和SID ADV")
+    if not 0 <= tid <= 65535:
+        raise ValueError(f"TID阶段输出了非法TID：{tid}")
+    if sid_advance < 0:
+        raise ValueError(f"TID阶段输出了非法SID ADV：{sid_advance}")
+    return tid, sid_advance
 
 
 def parse_args() -> argparse.Namespace:
@@ -187,6 +215,80 @@ def run_flow_attempts(flow: FlowRunner, flow_dir: Path, corrections: list[int]) 
     return 5
 
 
+def run_exhaustive_flow(
+    flow: FlowRunner,
+    flow_dir: Path,
+    payload: dict[str, object],
+    ezcon_path: Path,
+) -> int:
+    """Continue from an exhaustive TID hit using its real TID and SID ADV."""
+    id_main = flow_dir / "01_id" / "main_attempt_000.ecs"
+    bridge_main = flow_dir / "02_lab_bridge" / "main.ecs"
+    starter_main = flow_dir / "03_starter_118" / "main.ecs"
+
+    code = flow.run_stage(1, "TID 1.3.7穷举", id_main, required_marker=ID_MARKER)
+    if code != 0:
+        return code
+    try:
+        actual_tid, sid_advance = parse_id_identity(flow.stage_lines)
+        request_payload = payload["request"]
+        if not isinstance(request_payload, dict):
+            raise ValueError("flow_plan.json中的request格式无效")
+        request = tid_starter_flow_request_from_dict(request_payload)
+        resolved = resolve_exhaustive_starter_plan(
+            request,
+            actual_tid=actual_tid,
+            sid_advance=sid_advance,
+        )
+        starter_source_dir = Path(str(payload["starter_source_dir"])).resolve()
+        write_resolved_exhaustive_starter_project(
+            starter_source_dir,
+            starter_main.parent,
+            resolved,
+        )
+    except (KeyError, OSError, TypeError, ValueError, LookupError) as exc:
+        flow.output(f"[流程错误] 无法根据实际TID/SID ADV生成御三家目标：{exc}")
+        return 2
+
+    target = resolved.starter_target
+    flow.output(
+        f"[穷举衔接] 实际TID={resolved.tid:05d} / SID ADV={resolved.sid_advance} / "
+        f"计算SID={resolved.sid:05d}"
+    )
+    flow.output(
+        f"[穷举衔接] 御三家目标 Seed={target.seed_hex} / "
+        f"ADV={target.advances} / PID={target.pid_hex}"
+    )
+    try:
+        check = validate_runtime(ezcon_path, starter_main)
+    except (OSError, ValueError, RuntimeError) as exc:
+        flow.output(f"[流程错误] 动态御三家工程预检异常：{exc}")
+        return 2
+    if not check.ok:
+        for error in check.errors:
+            flow.output(f"[流程错误] 动态御三家工程预检失败：{error}")
+        return 2
+
+    code = flow.run_stage(2, "研究所桥接与存档", bridge_main, required_marker=BRIDGE_MARKER)
+    if code != 0:
+        return code
+    code = flow.run_stage(3, "1.1.8 御三家全自动乱数", starter_main)
+    if code != 0:
+        return code
+    starter_result = classify_starter_output(flow.stage_lines)
+    if starter_result == "shiny":
+        flow.output("[流程完成] 已按穷举获得的实际TID/SID确认闪光御三家。")
+        return 0
+    if starter_result == "sid_miss":
+        flow.output(
+            "[流程结束] 已精确命中御三家目标PID但没有出闪；"
+            "实际SID ADV与实机结果可能存在偏差，保留日志停止。"
+        )
+        return 5
+    flow.output("[流程错误] 御三家阶段没有看到闪光成功或精确目标非闪标记。")
+    return 4
+
+
 def main() -> int:
     args = parse_args()
     flow_dir = Path(args.flow_dir).resolve()
@@ -227,6 +329,8 @@ def main() -> int:
             flow.output("[流程错误] SID ADV重试计划为空。")
             return 2
 
+        if bool(payload.get("deferred_identity")):
+            return run_exhaustive_flow(flow, flow_dir, payload, Path(args.ezcon).resolve())
         return run_flow_attempts(flow, flow_dir, corrections)
 
 

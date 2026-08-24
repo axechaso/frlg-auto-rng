@@ -16,6 +16,7 @@ from .tenlines import (
     METHOD_2,
     METHOD_4,
     get_gender,
+    pokerng_jump,
     pokerng_next,
     pokerngr_next,
     recover_pokerng_iv_method12,
@@ -139,6 +140,20 @@ def first_sid_advances(
             if not remaining:
                 break
     return tuple(sorted(found, key=lambda item: (item.advance, item.sid)))
+
+
+def sid_at_advance(tid: int, advance: int) -> int:
+    """Return the SID produced at a TID/SID 1.3.7 ADV.
+
+    The script treats the first LCG result after ``seed = TID`` as ADV 0,
+    matching :func:`first_sid_advances`.
+    """
+    if not 0 <= tid <= 0xFFFF:
+        raise ValueError("TID must be in 0-65535")
+    if advance < 0:
+        raise ValueError("SID advance must be non-negative")
+    seed = pokerng_jump(tid, advance + 1)
+    return (seed >> 16) & 0xFFFF
 
 
 def is_shiny_for_ids(pid: int, tid: int, sid: int) -> bool:

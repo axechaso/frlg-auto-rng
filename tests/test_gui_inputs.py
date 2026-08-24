@@ -19,12 +19,27 @@ from run_auto_rng_gui import (
     parse_iv_ranges,
     parse_sid_effort_values,
     parse_sid_species,
+    parse_tid_fixed_delays,
     preferred_detected_port,
     preferred_detected_video,
 )
 
 
 class GuiIvInputTests(unittest.TestCase):
+    def test_tid_fixed_delay_log_requires_and_returns_all_four_values(self):
+        log = (
+            "\x1b[90mOP脚本固定延迟：30550\x1b[0m\n"
+            "F1脚本固定延迟: 22050\n"
+            "F2脚本固定延迟：4250\n"
+            "F3脚本固定延迟：14900\n"
+        )
+        self.assertEqual(
+            parse_tid_fixed_delays(log),
+            {"OP": 30550, "F1": 22050, "F2": 4250, "F3": 14900},
+        )
+        with self.assertRaisesRegex(ValueError, "F3"):
+            parse_tid_fixed_delays(log.replace("F3脚本固定延迟：14900\n", ""))
+
     def test_sid_terminal_log_is_cleaned_and_failure_is_explained(self):
         raw = (
             "\x1b[90m[18:25:45] \x1b[0m性格识别失败，最高匹配度:60\n"

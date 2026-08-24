@@ -88,13 +88,36 @@ ADVANCED_TAB_LABEL = "脚本测试（高级）"
 EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
 EGG_START_MODE_PREPARED = "从已完成254步准备开始"
 EGG_START_MODES = (EGG_START_MODE_FULL, EGG_START_MODE_PREPARED)
+TID_SID_MODE_TARGET = "目标 SID（自动计算 ADV）"
+TID_SID_MODE_FIXED_F3 = "固定 F3 延迟（采用实际 SID）"
+TID_SID_MODES = (TID_SID_MODE_TARGET, TID_SID_MODE_FIXED_F3)
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+TID_FIXED_DELAY_PATTERNS = {
+    "OP": re.compile(r"OP脚本固定延迟[：:]\s*(\d+)"),
+    "F1": re.compile(r"F1脚本固定延迟[：:]\s*(\d+)"),
+    "F2": re.compile(r"F2脚本固定延迟[：:]\s*(\d+)"),
+    "F3": re.compile(r"F3脚本固定延迟[：:]\s*(\d+)"),
+}
 
 
 def clean_terminal_log(text: str) -> str:
     """Remove terminal color/control sequences before showing a saved log in Tk."""
     cleaned = ANSI_ESCAPE_RE.sub("", text)
     return cleaned.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def parse_tid_fixed_delays(text: str) -> dict[str, int]:
+    """Parse one complete OP/F1/F2/F3 calibration result from an EasyCon log."""
+    cleaned = clean_terminal_log(text)
+    result: dict[str, int] = {}
+    for name, pattern in TID_FIXED_DELAY_PATTERNS.items():
+        matches = pattern.findall(cleaned)
+        if matches:
+            result[name] = int(matches[-1])
+    missing = [name for name in TID_FIXED_DELAY_PATTERNS if name not in result]
+    if missing:
+        raise ValueError("固定延迟日志缺少：" + "/".join(missing))
+    return result
 
 
 def read_display_log_tail(path: Path | None, maximum_chars: int = 20000) -> str:
@@ -474,6 +497,7 @@ class AutoRngApp:
         self.sid_report_path: Path | None = None
         self.sid_log_path: Path | None = None
         self.tid_flow_log_path: Path | None = None
+        self.tid_log_path: Path | None = None
         self.egg_log_path: Path | None = None
         self.script_test_log_path: Path | None = None
         self.running_log_snapshot = ""
@@ -954,8 +978,7 @@ class AutoRngApp:
         self.tid_target_var = tk.StringVar(value="0")
         self.tid_sid_var = tk.StringVar(value="38449")
         self.tid_name_var = tk.StringVar(value="Alxe")
-        self.tid_sid_mode_var = tk.StringVar(value="目标 SID")
-        self.tid_f3_random_range_var = tk.StringVar(value="0")
+        self.tid_sid_mode_var = tk.StringVar(value=TID_SID_MODE_TARGET)
         self.tid_calibration_var = tk.BooleanVar(value=False)
         self.tid_language_combo = self._labeled_combo(
             tid_identity, "ROM 语言", self.tid_language_var, ("英文", "日文"), 0, 0
@@ -973,14 +996,13 @@ class AutoRngApp:
             ("男性", "女性"), 0, 6,
         )
         self._labeled_entry(tid_identity, "目标 TID", self.tid_target_var, 1, 0, width=12)
-        self._labeled_entry(tid_identity, "目标 SID", self.tid_sid_var, 1, 2, width=12)
+        self.tid_sid_entry = self._labeled_entry(
+            tid_identity, "目标 SID", self.tid_sid_var, 1, 2, width=12
+        )
         self._labeled_entry(tid_identity, "主角名称", self.tid_name_var, 1, 4, width=18)
         self.tid_sid_mode_combo = self._labeled_combo(
             tid_identity, "SID 处理", self.tid_sid_mode_var,
-            ("目标 SID", "不做 SID 乱数", "随机 SID"), 1, 6,
-        )
-        self._labeled_entry(
-            tid_identity, "F3 随机范围", self.tid_f3_random_range_var, 2, 0, width=12
+            TID_SID_MODES, 1, 6,
         )
         self.tid_calibration_check = ttk.Checkbutton(
             tid_identity,
@@ -996,6 +1018,12 @@ class AutoRngApp:
         ).grid(row=3, column=0, columnspan=8, sticky="w", padx=4, pady=(3, 0))
         self.tid_language_combo.bind(
             "<<ComboboxSelected>>", lambda _: self._apply_tid_language_defaults()
+        )
+        self.tid_mode_combo.bind(
+            "<<ComboboxSelected>>", lambda _: self._update_tid_flow_controls()
+        )
+        self.tid_sid_mode_combo.bind(
+            "<<ComboboxSelected>>", lambda _: self._update_tid_flow_controls()
         )
 
         tid_frames = ttk.LabelFrame(
@@ -1046,6 +1074,7 @@ class AutoRngApp:
         self.tid_op_correction_var = tk.StringVar(value="0")
         self.tid_sid_adv_correction_var = tk.StringVar(value="0")
         self.tid_select_correction_var = tk.StringVar(value="0")
+        self.tid_manual_delay_var = tk.BooleanVar(value=False)
         self._labeled_combo(tid_settings, "Sound", self.tid_sound_var, ("MONO", "STEREO"), 0, 0)
         self._labeled_combo(
             tid_settings, "Button Mode", self.tid_button_mode_var,
@@ -1058,17 +1087,37 @@ class AutoRngApp:
         self._labeled_combo(
             tid_settings, "取名进入键", self.tid_name_entry_var, ("A", "B"), 0, 6
         )
-        self._labeled_entry(tid_settings, "OP 固定延迟", self.tid_op_delay_var, 1, 0, width=12)
-        self._labeled_entry(tid_settings, "F1 固定延迟", self.tid_f1_delay_var, 1, 2, width=12)
-        self._labeled_entry(tid_settings, "F2 固定延迟", self.tid_f2_delay_var, 1, 4, width=12)
-        self._labeled_entry(tid_settings, "F3 固定延迟", self.tid_f3_delay_var, 1, 6, width=12)
+        tid_op_delay_entry = self._labeled_entry(
+            tid_settings, "OP 固定延迟", self.tid_op_delay_var, 1, 0, width=12
+        )
+        tid_f1_delay_entry = self._labeled_entry(
+            tid_settings, "F1 固定延迟", self.tid_f1_delay_var, 1, 2, width=12
+        )
+        tid_f2_delay_entry = self._labeled_entry(
+            tid_settings, "F2 固定延迟", self.tid_f2_delay_var, 1, 4, width=12
+        )
+        tid_f3_delay_entry = self._labeled_entry(
+            tid_settings, "F3 固定延迟", self.tid_f3_delay_var, 1, 6, width=12
+        )
+        self.tid_delay_entries = (
+            tid_op_delay_entry,
+            tid_f1_delay_entry,
+            tid_f2_delay_entry,
+            tid_f3_delay_entry,
+        )
         self._labeled_entry(tid_settings, "关闭游戏延迟", self.tid_close_delay_var, 2, 0, width=12)
         self._labeled_entry(tid_settings, "HOME_BUFFER", self.tid_home_buffer_var, 2, 2, width=12)
         self._labeled_entry(tid_settings, "OP 修正", self.tid_op_correction_var, 2, 4, width=12)
         self._labeled_entry(tid_settings, "SID ADV 修正", self.tid_sid_adv_correction_var, 2, 6, width=12)
         self._labeled_entry(tid_settings, "select 补偿", self.tid_select_correction_var, 3, 0, width=12)
+        ttk.Checkbutton(
+            tid_settings,
+            text="手动编辑固定延迟（默认关闭；固定延迟检查完成后自动回填）",
+            variable=self.tid_manual_delay_var,
+            command=self._update_tid_delay_controls,
+        ).grid(row=3, column=2, columnspan=6, sticky="w", padx=4, pady=4)
 
-        tid_starter = ttk.LabelFrame(tid_tab, text="4. 御三家 SID 命中验证", padding=8)
+        tid_starter = ttk.LabelFrame(tid_tab, text="4. 御三家连续乱数", padding=8)
         tid_starter.pack(fill="x", pady=(8, 0))
         self.tid_starter_flow_var = tk.BooleanVar(value=True)
         self.tid_game_var = tk.StringVar(value="火红")
@@ -1078,7 +1127,7 @@ class AutoRngApp:
         self.tid_sid_retry_radius_var = tk.StringVar(value="20")
         ttk.Checkbutton(
             tid_starter,
-            text="命中 TID/SID 后继续御三家普通乱数并验证闪光",
+            text="TID 阶段完成后继续御三家；穷举模式使用实际 TID 与 SID ADV",
             variable=self.tid_starter_flow_var,
         ).grid(row=0, column=0, columnspan=8, sticky="w", padx=4, pady=4)
         self.tid_game_combo = self._labeled_combo(
@@ -1366,7 +1415,7 @@ class AutoRngApp:
             self.egg_ack_var,
             self.tid_language_var, self.tid_mode_var, self.tid_nx_var,
             self.tid_gender_var, self.tid_target_var, self.tid_sid_var,
-            self.tid_name_var, self.tid_sid_mode_var, self.tid_f3_random_range_var,
+            self.tid_name_var, self.tid_sid_mode_var,
             self.tid_calibration_var,
             self.tid_op_target_var, self.tid_f1_target_var, self.tid_f2_target_var,
             self.tid_op_rng_range_var, self.tid_f1_rng_range_var, self.tid_f2_rng_range_var,
@@ -1601,30 +1650,38 @@ class AutoRngApp:
         if self._is_tid_mode():
             self._on_mode_tab_change()
 
+    def _update_tid_delay_controls(self):
+        state = "normal" if self.tid_manual_delay_var.get() else "disabled"
+        for entry in self.tid_delay_entries:
+            entry.configure(state=state)
+
     def _update_tid_flow_controls(self):
         enabled = self.tid_starter_flow_var.get()
+        exhaustive = self.tid_mode_var.get() == "穷举模式"
         if enabled:
             self._updating = True
             try:
-                self.tid_mode_var.set("乱数模式")
-                self.tid_sid_mode_var.set("目标 SID")
                 self.tid_calibration_var.set(False)
-                self.tid_same_id_var.set(False)
-                self.tid_sequential_id_var.set(False)
-                self.tid_65535_var.set(False)
-                self.tid_single_digit_var.set(False)
+                self.tid_sid_mode_var.set(
+                    TID_SID_MODE_FIXED_F3 if exhaustive else TID_SID_MODE_TARGET
+                )
             finally:
                 self._updating = False
-        self.tid_mode_combo.configure(state="disabled" if enabled else "readonly")
+        fixed_f3 = self.tid_sid_mode_var.get() == TID_SID_MODE_FIXED_F3
+        self.tid_mode_combo.configure(state="readonly")
         self.tid_sid_mode_combo.configure(state="disabled" if enabled else "readonly")
+        self.tid_sid_entry.configure(state="disabled" if fixed_f3 else "normal")
         self.tid_calibration_check.configure(state="disabled" if enabled else "normal")
         for widget in self.tid_special_checks:
-            widget.configure(state="disabled" if enabled else "normal")
+            widget.configure(state="normal" if not enabled or exhaustive else "disabled")
         for widget in self.tid_starter_flow_controls:
             state = "readonly" if enabled and isinstance(widget, ttk.Combobox) else (
                 "normal" if enabled else "disabled"
             )
             widget.configure(state=state)
+        if enabled and exhaustive:
+            self.tid_sid_retry_radius_entry.configure(state="disabled")
+        self._update_tid_delay_controls()
 
     def _apply_tid_language_defaults(self):
         japanese = self.tid_language_var.get() == "日文"
@@ -1658,7 +1715,10 @@ class AutoRngApp:
             self.tid_sequential_id_var.set(japanese)
             self.tid_65535_var.set(True)
             self.tid_single_digit_var.set(japanese)
-            if self.tid_starter_flow_var.get():
+            if (
+                self.tid_starter_flow_var.get()
+                and self.tid_mode_var.get() != "穷举模式"
+            ):
                 self.tid_same_id_var.set(False)
                 self.tid_sequential_id_var.set(False)
                 self.tid_65535_var.set(False)
@@ -1924,10 +1984,8 @@ class AutoRngApp:
             button_mode={"HELP": 0, "LR": 1, "L=A": 2}[self.tid_button_mode_var.get()],
             seed_button={"A": 0, "START": 1, "L(L=A)": 2}[self.tid_seed_button_var.get()],
             name_entry_button=0 if self.tid_name_entry_var.get() == "A" else 1,
-            sid_random=sid_mode != "目标 SID",
-            f3_random_range=(
-                int(self.tid_f3_random_range_var.get()) if sid_mode == "随机 SID" else 0
-            ),
+            sid_random=sid_mode == TID_SID_MODE_FIXED_F3,
+            f3_random_range=0,
             op_rng_range=int(self.tid_op_rng_range_var.get()),
             f1_rng_range=int(self.tid_f1_rng_range_var.get()),
             f2_rng_range=int(self.tid_f2_rng_range_var.get()),
@@ -2349,17 +2407,28 @@ class AutoRngApp:
         self.project_main = None
         self.runtime_check = None
         status = (
-            "正在搜索御三家目标并生成 TID/SID 连续流程计划……"
+            (
+                "正在生成穷举TID阶段；御三家目标将在取得实际TID/SID后搜索……"
+                if flow_request is not None and flow_request.deferred_identity
+                else "正在搜索御三家目标并生成 TID/SID 连续流程计划……"
+            )
             if flow_request is not None
             else "正在生成 TID/SID 1.3.7 脚本并执行 1.6.4-a 预检……"
         )
         self.set_busy(True, status)
         self.set_result(
             (
-                "正在搜索 ADV "
-                f"{flow_request.starter_min_advances}-"
-                f"{flow_request.starter_max_advances} 内最早可达闪光御三家，"
-                "并生成英文TID、研究所桥接和1.1.8御三家三个阶段。"
+                (
+                    "穷举阶段将输出实际TID和SID ADV；运行时计算实际SID后，"
+                    "再搜索最早可达闪光御三家并生成1.1.8第三阶段。"
+                    if flow_request.deferred_identity
+                    else (
+                        "正在搜索 ADV "
+                        f"{flow_request.starter_min_advances}-"
+                        f"{flow_request.starter_max_advances} 内最早可达闪光御三家，"
+                        "并生成英文TID、研究所桥接和1.1.8御三家三个阶段。"
+                    )
+                )
             )
             if flow_request is not None
             else "正在校验英文/日文模板、328 个标签和 EasyCon 1.6.4-a。"
@@ -2387,7 +2456,11 @@ class AutoRngApp:
                         ezcon_path,
                         project_main,
                         bridge_main,
-                        output / "03_starter_118" / "main.ecs",
+                        (
+                            None
+                            if flow_plan.request.deferred_identity
+                            else output / "03_starter_118" / "main.ecs"
+                        ),
                     )
                 else:
                     check = validate_tid_runtime(ezcon_path, project_main)
@@ -2454,34 +2527,54 @@ class AutoRngApp:
             lines.append("兼容修正：已把日版 FOR $InputLen 改为 1.6.4-a 可编译的显式索引循环。")
         if flow_plan is not None:
             target = flow_plan.starter_target
-            iv_text = "/".join(str(value) for value in target.ivs)
-            retry_preview = ", ".join(
-                f"{value:+d}" for value in flow_plan.sid_retry_corrections[:9]
-            )
-            lines.extend(
-                (
-                    f"连续流程：{flow_plan.request.version} / {target.species_zh} ({target.species_en})",
+            if target is None:
+                lines.extend(
                     (
-                        "御三家搜索：ADV "
-                        f"{flow_plan.request.starter_min_advances}-"
-                        f"{flow_plan.request.starter_max_advances}；"
-                        "Seed 时间直接取 Ten Lines Seed 表"
-                    ),
-                    f"御三家目标：Seed {target.seed_hex} / {target.seed_time_ms} ms / ADV {target.advances}",
-                    f"目标 PID：{target.pid_hex}；IV：{iv_text}",
-                    f"TID 链首个目标 SID ADV：{flow_plan.earliest_sid_chain_advance}",
-                    f"SID ADV 重试顺序：{retry_preview} ...",
-                    f"ID 阶段：{project_main}",
-                    f"研究所桥接：{project_main.parents[1] / '02_lab_bridge' / 'main.ecs'}",
-                    f"1.1.8 御三家：{project_main.parents[1] / '03_starter_118' / 'main.ecs'}",
+                        f"连续流程：{flow_plan.request.version} / {flow_plan.request.starter} / 穷举动态衔接",
+                        (
+                            "御三家搜索：取得实际TID和SID ADV后计算实际SID，再在 ADV "
+                            f"{flow_plan.request.starter_min_advances}-"
+                            f"{flow_plan.request.starter_max_advances} 内搜索最早闪光目标"
+                        ),
+                        "F3：固定延迟；随机F3模式已移除",
+                        f"ID 阶段：{project_main}",
+                        f"研究所桥接：{project_main.parents[1] / '02_lab_bridge' / 'main.ecs'}",
+                        "1.1.8 御三家：运行时按实际TID/SID生成并立即预检",
+                    )
                 )
-            )
+            else:
+                iv_text = "/".join(str(value) for value in target.ivs)
+                retry_preview = ", ".join(
+                    f"{value:+d}" for value in flow_plan.sid_retry_corrections[:9]
+                )
+                lines.extend(
+                    (
+                        f"连续流程：{flow_plan.request.version} / {target.species_zh} ({target.species_en})",
+                        (
+                            "御三家搜索：ADV "
+                            f"{flow_plan.request.starter_min_advances}-"
+                            f"{flow_plan.request.starter_max_advances}；"
+                            "Seed 时间直接取 Ten Lines Seed 表"
+                        ),
+                        f"御三家目标：Seed {target.seed_hex} / {target.seed_time_ms} ms / ADV {target.advances}",
+                        f"目标 PID：{target.pid_hex}；IV：{iv_text}",
+                        f"TID 链首个目标 SID ADV：{flow_plan.earliest_sid_chain_advance}",
+                        f"SID ADV 重试顺序：{retry_preview} ...",
+                        f"ID 阶段：{project_main}",
+                        f"研究所桥接：{project_main.parents[1] / '02_lab_bridge' / 'main.ecs'}",
+                        f"1.1.8 御三家：{project_main.parents[1] / '03_starter_118' / 'main.ecs'}",
+                    )
+                )
         if check.ok and flow_plan is None:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
             status = "TID/SID 脚本已生成，可以在确认会新建存档后开始。"
         elif check.ok:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
-            status = "连续流程三阶段均已生成并通过预检，可以开始运行。"
+            status = (
+                "穷举连续流程前两阶段已通过预检；第三阶段将在取得实际TID/SID后生成并预检。"
+                if flow_plan.starter_target is None
+                else "连续流程三阶段均已生成并通过预检，可以开始运行。"
+            )
         else:
             lines.extend(f"预检失败：{error}" for error in check.errors)
             status = "TID/SID 脚本已生成，但预检不允许启动。"
@@ -2799,7 +2892,11 @@ class AutoRngApp:
                 Path(self.ezcon_var.get()),
                 self.project_main,
                 flow_dir / "02_lab_bridge" / "main.ecs",
-                flow_dir / "03_starter_118" / "main.ecs",
+                (
+                    None
+                    if self.tid_flow_plan.request.deferred_identity
+                    else flow_dir / "03_starter_118" / "main.ecs"
+                ),
             )
         elif self.tid_request is not None:
             check = validate_tid_runtime(Path(self.ezcon_var.get()), self.project_main)
@@ -2827,15 +2924,26 @@ class AutoRngApp:
             )
         elif self.tid_flow_plan is not None:
             target = self.tid_flow_plan.starter_target
-            confirmation = (
-                "将依次运行三个阶段：TID/SID 1.3.7 → 研究所桥接存档 → 现有1.1.8御三家流程。\n"
-                f"目标 TID/SID {self.tid_request.target_tid:05d} / {self.tid_request.target_sid:05d}\n"
-                f"{self.tid_flow_plan.request.version} / {target.species_zh} / "
-                f"Seed {target.seed_hex} / ADV {target.advances}\n"
-                "第一阶段会新建存档；第二阶段会自动走到御三家前并存档；"
-                "第三阶段由1.1.8负责领取、识别和校准。若精确命中但不闪，"
-                "程序会按SID ADV重试范围重新执行三段。是否继续？"
-            )
+            if target is None:
+                confirmation = (
+                    "将运行穷举TID → 动态计算实际SID → 研究所桥接 → 1.1.8御三家流程。\n"
+                    "第一阶段命中启用的TID条件后，工具读取实际TID和SID ADV，"
+                    "计算实际SID并搜索最早闪光御三家；第三阶段届时生成并预检。\n"
+                    f"{self.tid_flow_plan.request.version} / {self.tid_flow_plan.request.starter} / "
+                    f"ADV {self.tid_flow_plan.request.starter_min_advances}-"
+                    f"{self.tid_flow_plan.request.starter_max_advances}\n"
+                    "第一阶段会新建存档；确认当前存档可以被替代，是否继续？"
+                )
+            else:
+                confirmation = (
+                    "将依次运行三个阶段：TID/SID 1.3.7 → 研究所桥接存档 → 现有1.1.8御三家流程。\n"
+                    f"目标 TID/SID {self.tid_request.target_tid:05d} / {self.tid_request.target_sid:05d}\n"
+                    f"{self.tid_flow_plan.request.version} / {target.species_zh} / "
+                    f"Seed {target.seed_hex} / ADV {target.advances}\n"
+                    "第一阶段会新建存档；第二阶段会自动走到御三家前并存档；"
+                    "第三阶段由1.1.8负责领取、识别和校准。若精确命中但不闪，"
+                    "程序会按SID ADV重试范围重新执行三段。是否继续？"
+                )
         elif self.tid_request is not None:
             confirmation = (
                 "将启动 TID/SID 1.3.7 脚本并控制游戏新建存档。\n"
@@ -3013,6 +3121,19 @@ class AutoRngApp:
                 ])
                 command_cwd = ROOT
                 self.running_mode = "egg"
+            elif self.tid_request is not None:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.tid_log_path = self.project_main.parent / f"tid-{timestamp}.log"
+                command = build_worker_command("easycon-log", [
+                    "--log-path",
+                    str(self.tid_log_path),
+                    "--cwd",
+                    str(self.project_main.parent),
+                    "--",
+                    *easycon_command,
+                ])
+                command_cwd = ROOT
+                self.running_mode = "tid"
             else:
                 command = easycon_command
                 command_cwd = self.project_main.parent
@@ -3038,9 +3159,13 @@ class AutoRngApp:
                 "TID/SID → 研究所 → 1.1.8 御三家流程正在运行；详细日志见新打开的终端。"
                 if self.running_mode == "tid_flow"
                 else (
-                    f"孵蛋流程正在运行；日志将保存到 {self.egg_log_path}。"
-                    if self.running_mode == "egg"
-                    else "EasyCon 正在运行；详细日志见新打开的终端。"
+                    f"TID/SID 正在运行；日志将保存到 {self.tid_log_path}。"
+                    if self.running_mode == "tid"
+                    else (
+                        f"孵蛋流程正在运行；日志将保存到 {self.egg_log_path}。"
+                        if self.running_mode == "egg"
+                        else "EasyCon 正在运行；详细日志见新打开的终端。"
+                    )
                 )
             )
         )
@@ -3062,6 +3187,8 @@ class AutoRngApp:
         report_path = self.sid_report_path
         log_path = self.sid_log_path
         tid_flow_log_path = self.tid_flow_log_path
+        tid_log_path = self.tid_log_path
+        completed_tid_request = self.tid_request
         egg_log_path = self.egg_log_path
         script_test_log_path = self.script_test_log_path
         self.process = None
@@ -3098,6 +3225,41 @@ class AutoRngApp:
                 self.set_result(result)
                 detail = f"；日志：{log_path}" if log_path is not None else ""
                 self.status_var.set(f"SID 查找已退出，退出码 {code}{detail}")
+        elif completed_mode == "tid":
+            detail = f"；日志：{tid_log_path}" if tid_log_path is not None else ""
+            log_text = read_display_log_tail(tid_log_path, maximum_chars=30000)
+            if log_text:
+                self.set_result("TID/SID运行日志：\n\n" + log_text)
+            if completed_tid_request is not None and completed_tid_request.calibration_check:
+                try:
+                    delays = parse_tid_fixed_delays(log_text)
+                except ValueError as exc:
+                    self.status_var.set(
+                        f"固定延迟检查未得到完整四项结果：{exc}{detail}"
+                    )
+                else:
+                    self._updating = True
+                    try:
+                        self.tid_op_delay_var.set(str(delays["OP"]))
+                        self.tid_f1_delay_var.set(str(delays["F1"]))
+                        self.tid_f2_delay_var.set(str(delays["F2"]))
+                        self.tid_f3_delay_var.set(str(delays["F3"]))
+                        self.tid_calibration_var.set(False)
+                    finally:
+                        self._updating = False
+                    self.invalidate_plan()
+                    self.set_result(
+                        "固定延迟检查完成，已自动回填：\n"
+                        f"OP {delays['OP']} / F1 {delays['F1']} / "
+                        f"F2 {delays['F2']} / F3 {delays['F3']}\n\n"
+                        "固定延迟检查已自动关闭，请重新生成正式TID/御三家方案。\n\n"
+                        + log_text
+                    )
+                    self.status_var.set(
+                        "固定延迟已自动更新；请重新生成正式TID/御三家方案。"
+                    )
+            else:
+                self.status_var.set(f"TID/SID脚本已退出，退出码 {code}{detail}")
         elif completed_mode == "tid_flow":
             detail = f"；日志：{tid_flow_log_path}" if tid_flow_log_path is not None else ""
             if code == 0:
