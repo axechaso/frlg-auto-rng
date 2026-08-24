@@ -781,6 +781,21 @@ ENDFUNC
         self.assertIn("RETURN 2", template)
         self.assertIn("$候选细分累计范围有效 = 0", template)
         self.assertIn("$孵蛋流程IV范围合并结果 = 合并候选细分IV范围()", template)
+        self.assertIn("$孵蛋Held固定预校准帧 = 230", template)
+        self.assertIn("$孵蛋Pickup固定预校准帧 = 230", template)
+        self.assertIn("$孵蛋Held反查帧容差 = 100", template)
+        self.assertIn("$孵蛋Pickup反查帧容差 = 2000", template)
+        self.assertIn("FUNC 孵蛋流程_候选个体是否完全一致(): INT", template)
+        self.assertIn("FUNC 孵蛋流程_选择校准候选(): INT", template)
+        self.assertIn("已在孵化蛋能力页识别到闪光，目标命中并结束反查", template)
+        self.assertIn(
+            "$孵蛋流程请求Held帧 = $孵蛋生成目标帧 - $孵蛋Held固定预校准帧 + $孵蛋Held执行修正帧",
+            template,
+        )
+        self.assertIn(
+            "$孵蛋流程请求Pickup帧 = $孵蛋领取目标帧 - $孵蛋Pickup固定预校准帧 + $孵蛋Pickup执行修正帧",
+            template,
+        )
         library = library_path.read_text(encoding="utf-8")
         self.assertIn("识别冲浪结束后再打开菜单", library)
         self.assertIn(EGG_POND_SETTLE_FIXED, library)

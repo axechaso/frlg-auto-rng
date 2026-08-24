@@ -74,13 +74,16 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package after adding cross-level IV-range intersection and
     # preserving the current screen on terminal egg lookup failures.
     "bf3601815339f253ca0ee0b354fdfb2c26c07a8840f01e7cc375843a14e353b7",
+    # Download package after adding Held/Pickup fixed pre-calibration and
+    # cross-round multi-candidate trajectory selection.
+    "48cdfb839a81333e6115c72adc3ea40bf8642b091fbf55d7b49dac76cba4556f",
 )
-EXPECTED_SCRIPT_SHA256 = "30fea007607c06d69efdefe256c4b4a639d865854ca94da8afe309eaf0272451"
-# Materialized 1.6.4-a runtime corpus after the same controlled 6500-frame
-# egg reverse-window update. This is an audited configuration variant, not a
-# general bypass for modified ECS files.
+EXPECTED_SCRIPT_SHA256 = "da32012466a7349113ff166cf158c39dd721fc6e33c8d84355b9747cd7888f86"
+# Previously materialized 1.6.4-a corpora remain accepted as audited
+# compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "1ea3bd0ba820e3cb3b1b8616f24e7e8d23b87767b23c49c77cc0a187c2037f73",
+    "30fea007607c06d69efdefe256c4b4a639d865854ca94da8afe309eaf0272451",
     "4843f4044e69dc4bc0eb2f3506490651589e531fe2d3b2bad905a6b977c3eec0",
     # Importer materialization adds one controlled trailing newline to the
     # timeline entry while applying the reviewed 1.6.4-a fixes.
