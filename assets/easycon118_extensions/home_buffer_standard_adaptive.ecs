@@ -1,0 +1,47 @@
+# 1.6.4-a 正式版 HOME_BUFFER：可选稳定低分自适应，关闭时保持原 95 分逻辑。
+FUNC HOME_BUFFER
+    FOR
+        A
+        1500
+        A
+        WAIT $HOME_BUFFER延迟
+        IF $调试日志输出 == 1
+            PRINT 尝试HOME_BUFFER延迟: & $HOME_BUFFER延迟 & " ms"
+        ENDIF
+        HOME 100
+        1500
+        $HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态(0)
+        IF $HOME_BUFFER识别状态 == 1
+            PRINT 可用HOME_BUFFER延迟: & $HOME_BUFFER延迟 & " ms"
+            RETURN
+        ELIF $HOME_BUFFER识别状态 == 3
+            PRINT 错误进入休眠菜单
+            B
+            1500
+            CALL 关闭游戏
+        ELIF $HOME_BUFFER识别状态 == 2
+            IF $调试日志输出 == 1
+                PRINT HOME_BUFFER延迟过长，减100继续尝试中
+            ENDIF
+            $HOME_BUFFER延迟 -= 100
+            X
+            1500
+            A
+            1500
+            FOR
+                IF @正在关闭 >= 95
+                    WAIT 100
+                ELSE
+                    BREAK
+                ENDIF
+            NEXT
+            CALL 关闭游戏
+        ELSE
+            IF $调试日志输出 == 1
+                PRINT HOME_BUFFER延迟过短，加100继续尝试中
+            ENDIF
+            $HOME_BUFFER延迟 += 100
+            CALL 关闭游戏
+        ENDIF
+    NEXT
+ENDFUNC

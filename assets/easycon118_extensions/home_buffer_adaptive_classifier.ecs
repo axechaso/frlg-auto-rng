@@ -1,0 +1,92 @@
+# 1.6.4-a HOME_BUFFER 稳定低分自适应：默认关闭，仅在当前主机标签连续稳定时降低本次运行阈值。
+FUNC HOME_BUFFER识别稳定状态($只使用当前NX: INT): INT
+    $HOME_BUFFER自适应首次状态 = 0
+    $HOME_BUFFER自适应首次分数 = 0
+
+    FOR $HOME_BUFFER自适应采样 = 1 TO $HOME_BUFFER自适应稳定要求
+        IF $HOME_BUFFER自适应采样 > 1
+            WAIT 200
+        ENDIF
+
+        $HOME_BUFFER当前正确退出 = @HOME_BUFFER正确退出
+        $HOME_BUFFER当前正确退出_NS2 = @HOME_BUFFER正确退出_NS2
+        $HOME_BUFFER当前正确退出普通 = @正确退出
+        $HOME_BUFFER当前正确退出普通_NS2 = @正确退出_NS2
+        $HOME_BUFFER当前错误退出 = @错误退出
+        $HOME_BUFFER当前错误退出_NS2 = @错误退出_NS2
+
+        IF $只使用当前NX == 1
+            IF $NX机型 == 1
+                $HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出
+                $HOME_BUFFER选中普通 = $HOME_BUFFER当前正确退出普通
+                $HOME_BUFFER选中错误 = $HOME_BUFFER当前错误退出
+            ELSE
+                $HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出_NS2
+                $HOME_BUFFER选中普通 = $HOME_BUFFER当前正确退出普通_NS2
+                $HOME_BUFFER选中错误 = $HOME_BUFFER当前错误退出_NS2
+            ENDIF
+        ELSE
+            $HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出
+            IF $HOME_BUFFER当前正确退出_NS2 > $HOME_BUFFER选中正确
+                $HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出_NS2
+            ENDIF
+            $HOME_BUFFER选中普通 = $HOME_BUFFER当前正确退出普通
+            IF $HOME_BUFFER当前正确退出普通_NS2 > $HOME_BUFFER选中普通
+                $HOME_BUFFER选中普通 = $HOME_BUFFER当前正确退出普通_NS2
+            ENDIF
+            $HOME_BUFFER选中错误 = $HOME_BUFFER当前错误退出
+            IF $HOME_BUFFER当前错误退出_NS2 > $HOME_BUFFER选中错误
+                $HOME_BUFFER选中错误 = $HOME_BUFFER当前错误退出_NS2
+            ENDIF
+        ENDIF
+
+        IF $调试日志输出 == 1
+            PRINT "HOME_BUFFER_LABEL|NX_MODE=" & $只使用当前NX & "|NX=" & $NX机型 & "|BUFFER=" & $HOME_BUFFER选中正确 & "|NORMAL=" & $HOME_BUFFER选中普通 & "|ERROR=" & $HOME_BUFFER选中错误 & "|NS1_BUFFER=" & $HOME_BUFFER当前正确退出 & "|NS2_BUFFER=" & $HOME_BUFFER当前正确退出_NS2 & "|THRESHOLD=" & $HOME_BUFFER有效识图阈值 & "|ADAPTIVE=" & $HOME_BUFFER稳定低分自适应 & "|SAMPLE=" & $HOME_BUFFER自适应采样
+        ENDIF
+
+        # 95 分及以上保持原 1.1.8 的判断优先级：BUFFER、ERROR、NORMAL。
+        IF $HOME_BUFFER选中正确 >= $HOME_BUFFER有效识图阈值
+            RETURN 1
+        ELIF $HOME_BUFFER选中错误 >= $HOME_BUFFER有效识图阈值
+            RETURN 3
+        ELIF $HOME_BUFFER选中普通 >= $HOME_BUFFER有效识图阈值
+            RETURN 2
+        ENDIF
+
+        IF $HOME_BUFFER稳定低分自适应 == 0
+            RETURN 0
+        ENDIF
+
+        # 低分自适应只接受唯一最高标签；并列时不降低阈值。
+        $HOME_BUFFER自适应候选状态 = 0
+        $HOME_BUFFER自适应候选分数 = 0
+        IF $HOME_BUFFER选中正确 > $HOME_BUFFER选中普通 and $HOME_BUFFER选中正确 > $HOME_BUFFER选中错误
+            $HOME_BUFFER自适应候选状态 = 1
+            $HOME_BUFFER自适应候选分数 = $HOME_BUFFER选中正确
+        ELIF $HOME_BUFFER选中错误 > $HOME_BUFFER选中正确 and $HOME_BUFFER选中错误 > $HOME_BUFFER选中普通
+            $HOME_BUFFER自适应候选状态 = 3
+            $HOME_BUFFER自适应候选分数 = $HOME_BUFFER选中错误
+        ELIF $HOME_BUFFER选中普通 > $HOME_BUFFER选中正确 and $HOME_BUFFER选中普通 > $HOME_BUFFER选中错误
+            $HOME_BUFFER自适应候选状态 = 2
+            $HOME_BUFFER自适应候选分数 = $HOME_BUFFER选中普通
+        ELSE
+            RETURN 0
+        ENDIF
+
+        IF $HOME_BUFFER自适应候选分数 < $HOME_BUFFER自适应最低阈值
+            RETURN 0
+        ENDIF
+        IF $HOME_BUFFER自适应采样 == 1
+            $HOME_BUFFER自适应首次状态 = $HOME_BUFFER自适应候选状态
+            $HOME_BUFFER自适应首次分数 = $HOME_BUFFER自适应候选分数
+        ELIF $HOME_BUFFER自适应候选状态 != $HOME_BUFFER自适应首次状态 or $HOME_BUFFER自适应候选分数 != $HOME_BUFFER自适应首次分数
+            RETURN 0
+        ENDIF
+    NEXT
+
+    IF $HOME_BUFFER自适应首次分数 < $HOME_BUFFER有效识图阈值
+        $HOME_BUFFER有效识图阈值 = $HOME_BUFFER自适应首次分数
+    ENDIF
+    PRINT "HOME_BUFFER_ADAPTIVE|OLD=95|NEW=" & $HOME_BUFFER有效识图阈值 & "|STATE=" & $HOME_BUFFER自适应首次状态 & "|STABLE=" & $HOME_BUFFER自适应稳定要求
+    RETURN $HOME_BUFFER自适应首次状态
+ENDFUNC

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import threading
 import time
 import tkinter as tk
@@ -272,12 +273,13 @@ _DIRECTION_COMBINATIONS = {
 
 
 def parse_video_device(value: str) -> int:
+    display_match = re.match(r"^\s*\[(\d+)\]", value)
     try:
-        device = int(value.strip())
+        device = int(display_match.group(1)) if display_match else int(value.strip())
     except ValueError as exc:
-        raise ValueError("采集卡序号必须是大于或等于 0 的整数") from exc
+        raise ValueError("请选择有效的采集卡") from exc
     if device < 0:
-        raise ValueError("采集卡序号必须是大于或等于 0 的整数")
+        raise ValueError("请选择有效的采集卡")
     return device
 
 

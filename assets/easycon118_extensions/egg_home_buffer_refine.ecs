@@ -24,37 +24,18 @@ FUNC HOME_BUFFER
         HOME 100
         WAIT 1500
 
-        $HOME_BUFFER当前正确退出 = @HOME_BUFFER正确退出
-        $HOME_BUFFER当前正确退出_NS2 = @HOME_BUFFER正确退出_NS2
-        $HOME_BUFFER当前正确退出普通 = @正确退出
-        $HOME_BUFFER当前正确退出普通_NS2 = @正确退出_NS2
-        $HOME_BUFFER当前错误退出 = @错误退出
-        $HOME_BUFFER当前错误退出_NS2 = @错误退出_NS2
-
-        # 只使用用户选择的主机标签；NS1 和 NS2 的画面分数不互相兜底。
-        IF $NX机型 == 1
-            $孵蛋HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出
-            $孵蛋HOME_BUFFER选中普通 = $HOME_BUFFER当前正确退出普通
-            $孵蛋HOME_BUFFER选中错误 = $HOME_BUFFER当前错误退出
-        ELSE
-            $孵蛋HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出_NS2
-            $孵蛋HOME_BUFFER选中普通 = $HOME_BUFFER当前正确退出普通_NS2
-            $孵蛋HOME_BUFFER选中错误 = $HOME_BUFFER当前错误退出_NS2
-        ENDIF
-        IF $调试日志输出 == 1
-            PRINT "HOME_BUFFER_LABEL|NX=" & $NX机型 & "|BUFFER=" & $孵蛋HOME_BUFFER选中正确 & "|NORMAL=" & $孵蛋HOME_BUFFER选中普通 & "|ERROR=" & $孵蛋HOME_BUFFER选中错误 & "|NS1_BUFFER=" & $HOME_BUFFER当前正确退出 & "|NS2_BUFFER=" & $HOME_BUFFER当前正确退出_NS2
-        ENDIF
-
-        IF $孵蛋HOME_BUFFER选中正确 >= 95
+        # 只使用用户选择的主机标签；可选自适应也只在连续稳定低分时生效。
+        $HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态(1)
+        IF $HOME_BUFFER识别状态 == 1
             PRINT 可用HOME_BUFFER延迟: & $HOME_BUFFER延迟 & " ms"
             RETURN
-        ELIF $孵蛋HOME_BUFFER选中错误 >= 95
+        ELIF $HOME_BUFFER识别状态 == 3
             PRINT 错误进入休眠菜单
             B
             WAIT 1500
             CALL 关闭游戏
             CONTINUE
-        ELIF $孵蛋HOME_BUFFER选中普通 >= 95
+        ELIF $HOME_BUFFER识别状态 == 2
             # 已进入普通退出画面，当前延迟在可用窗口右侧。
             $孵蛋HOME_BUFFER长边界 = $HOME_BUFFER延迟
             $孵蛋HOME_BUFFER已有长边界 = 1
@@ -101,7 +82,7 @@ FUNC HOME_BUFFER
         ENDIF
         IF $孵蛋HOME_BUFFER已有短边界 == 1 and $孵蛋HOME_BUFFER已有长边界 == 1
             IF $孵蛋HOME_BUFFER下一延迟 <= $孵蛋HOME_BUFFER短边界 or $孵蛋HOME_BUFFER下一延迟 >= $孵蛋HOME_BUFFER长边界
-                PRINT HOME_BUFFER校准失败：短/长边界之间没有达到95分的整数延迟
+                PRINT HOME_BUFFER校准失败：短/长边界之间没有达到当前识图阈值的整数延迟
                 $孵蛋HOME_BUFFER失败 = 1
                 RETURN
             ENDIF

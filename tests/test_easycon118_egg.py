@@ -4,6 +4,9 @@ from pathlib import Path
 from automation.easycon118 import (
     EGG_HOME_BUFFER_GLOBALS,
     EGG_HOME_BUFFER_OVERRIDE_PATH,
+    HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH,
+    HOME_BUFFER_ADAPTIVE_GLOBALS,
+    STANDARD_HOME_BUFFER_OVERRIDE_PATH,
     EGG_HATCH_EXIT_OVERRIDE_PATH,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
@@ -41,6 +44,8 @@ from automation.easycon118 import (
     _apply_egg_transient_retry_runtime_override_text,
     _apply_egg_terminal_stop_policy_text,
     _apply_party_summary_navigation_text,
+    _apply_home_buffer_adaptive_classifier_text,
+    _apply_standard_home_buffer_runtime_override_text,
     _apply_togepi_hatch_cycle_override_text,
     _apply_wild_pid_retry_limit_text,
     configure_egg_template_text,
@@ -351,16 +356,10 @@ ENDFUNC
 
         self.assertEqual(configured_again, configured)
         self.assertIn(EGG_HOME_BUFFER_GLOBALS, configured)
-        self.assertIn("IF $NX机型 == 1", configured)
         self.assertIn(
-            "$孵蛋HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出\n",
+            "$HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态(1)",
             configured,
         )
-        self.assertIn(
-            "$孵蛋HOME_BUFFER选中正确 = $HOME_BUFFER当前正确退出_NS2\n",
-            configured,
-        )
-        self.assertIn("IF $孵蛋HOME_BUFFER选中正确 >= 95", configured)
         self.assertNotIn(
             "IF @HOME_BUFFER正确退出 >= 95 or @HOME_BUFFER正确退出_NS2 >= 95",
             configured,
@@ -378,6 +377,76 @@ ENDFUNC
             "CALL 孵蛋流程_重开下一轮\n    IF $孵蛋HOME_BUFFER失败 == 1",
             configured,
         )
+
+    def test_home_buffer_adaptive_classifier_is_shared_and_opt_in(self):
+        original = """\
+$HOME_BUFFER当前错误退出_NS2 = 0
+FUNC HOME_BUFFER
+    RETURN
+ENDFUNC
+
+FUNC 各阶段脚本固定延迟转帧数
+    RETURN
+ENDFUNC
+
+FUNC 孵蛋流程_执行(): INT
+    CALL 孵蛋流程_重开下一轮
+
+    $孵蛋流程尝试次数 = 0
+    FOR
+        $孵蛋流程尝试次数 += 1
+    NEXT
+    RETURN 1
+ENDFUNC
+"""
+        classifier = Path(HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH).read_text(
+            encoding="utf-8"
+        )
+        standard = _apply_standard_home_buffer_runtime_override_text(
+            original,
+            Path(STANDARD_HOME_BUFFER_OVERRIDE_PATH).read_text(encoding="utf-8"),
+        )
+        standard = _apply_home_buffer_adaptive_classifier_text(
+            standard,
+            classifier,
+            True,
+        )
+        standard_again = _apply_home_buffer_adaptive_classifier_text(
+            standard,
+            classifier,
+            True,
+        )
+
+        egg = _apply_egg_home_buffer_runtime_override_text(
+            original,
+            Path(EGG_HOME_BUFFER_OVERRIDE_PATH).read_text(encoding="utf-8"),
+        )
+        egg = _apply_home_buffer_adaptive_classifier_text(
+            egg,
+            classifier,
+            False,
+        )
+
+        self.assertEqual(standard_again, standard)
+        self.assertIn(HOME_BUFFER_ADAPTIVE_GLOBALS.replace(" = 0\n", " = 1\n", 1), standard)
+        self.assertIn("$HOME_BUFFER稳定低分自适应 = 0", egg)
+        self.assertEqual(standard.count(classifier.rstrip()), 1)
+        self.assertEqual(egg.count(classifier.rstrip()), 1)
+        self.assertIn("FOR $HOME_BUFFER自适应采样 = 1 TO $HOME_BUFFER自适应稳定要求", standard)
+        self.assertIn("$HOME_BUFFER自适应稳定要求 = 3", standard)
+        self.assertIn("$HOME_BUFFER自适应最低阈值 = 90", standard)
+        self.assertIn(
+            "$HOME_BUFFER选中正确 >= $HOME_BUFFER有效识图阈值",
+            standard,
+        )
+        self.assertIn(
+            "$HOME_BUFFER选中正确 > $HOME_BUFFER选中普通 and $HOME_BUFFER选中正确 > $HOME_BUFFER选中错误",
+            standard,
+        )
+
+    def test_home_buffer_adaptive_request_flag_must_be_boolean(self):
+        with self.assertRaisesRegex(ValueError, "HOME_BUFFER"):
+            egg_request(home_buffer_adaptive_threshold=1).validate()
 
     def test_wild_reverse_uses_party_tail_but_egg_keeps_fixed_fifth_slot(self):
         original = """\

@@ -42,6 +42,7 @@ class ManualToolsTests(unittest.TestCase):
 
     def test_video_device_requires_non_negative_integer(self):
         self.assertEqual(parse_video_device(" 2 "), 2)
+        self.assertEqual(parse_video_device("[3] OBS Virtual Camera"), 3)
         for value in ("", "x", "-1"):
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):

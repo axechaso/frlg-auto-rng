@@ -78,10 +78,13 @@ PREVIOUS_SCRIPT_SHA256S = (
     # cross-round multi-candidate trajectory selection.
     "48cdfb839a81333e6115c72adc3ea40bf8642b091fbf55d7b49dac76cba4556f",
 )
-EXPECTED_SCRIPT_SHA256 = "da32012466a7349113ff166cf158c39dd721fc6e33c8d84355b9747cd7888f86"
+EXPECTED_SCRIPT_SHA256 = "1700ba02cc60fdfd9857f14a2a8384c5736c06908a92e468d1dfd721a9be4865"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # Materialized corpus before the opt-in HOME_BUFFER stable-low-score
+    # classifier was added to both 1.1.8 entry scripts.
+    "da32012466a7349113ff166cf158c39dd721fc6e33c8d84355b9747cd7888f86",
     "1ea3bd0ba820e3cb3b1b8616f24e7e8d23b87767b23c49c77cc0a187c2037f73",
     "30fea007607c06d69efdefe256c4b4a639d865854ca94da8afe309eaf0272451",
     "4843f4044e69dc4bc0eb2f3506490651589e531fe2d3b2bad905a6b977c3eec0",
@@ -128,6 +131,12 @@ EGG_HOME_BUFFER_OVERRIDE_PATH = (
     / "assets"
     / "easycon118_extensions"
     / "egg_home_buffer_refine.ecs"
+)
+HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH = (
+    EASYCON118_EXTENSION_LABEL_DIR / "home_buffer_adaptive_classifier.ecs"
+)
+STANDARD_HOME_BUFFER_OVERRIDE_PATH = (
+    EASYCON118_EXTENSION_LABEL_DIR / "home_buffer_standard_adaptive.ecs"
 )
 EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -221,6 +230,9 @@ $孵蛋库_已请求主页 = 0
 EGG_HOME_BUFFER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按当前 NX 机型二分查找 HOME_BUFFER 窗口"
 EGG_HOME_BUFFER_ORIGINAL_FUNCTION = "FUNC HOME_BUFFER"
 EGG_HOME_BUFFER_NEXT_FUNCTION = "FUNC 各阶段脚本固定延迟转帧数"
+HOME_BUFFER_ADAPTIVE_CLASSIFIER_MARKER = "# 1.6.4-a HOME_BUFFER 稳定低分自适应"
+STANDARD_HOME_BUFFER_OVERRIDE_MARKER = "# 1.6.4-a 正式版 HOME_BUFFER"
+HOME_BUFFER_ADAPTIVE_SWITCH = "HOME_BUFFER稳定低分自适应"
 EGG_PARTY_SLOT_MAIN_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按目标身份选择队伍末位或固定槽位"
 EGG_PARTY_SLOT_MAIN_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_选择队伍槽"
 EGG_PARTY_SLOT_MAIN_NEXT_SECTION = "# -------------------- 野生Seed验证"
@@ -293,6 +305,22 @@ $孵蛋HOME_BUFFER选中正确 = 0
 $孵蛋HOME_BUFFER选中普通 = 0
 $孵蛋HOME_BUFFER选中错误 = 0
 $孵蛋HOME_BUFFER失败 = 0
+"""
+HOME_BUFFER_ADAPTIVE_GLOBALS = """\
+# HOME_BUFFER 稳定低分自适应默认关闭；开启后只接受连续3次相同且唯一最高的90-94分标签。
+$HOME_BUFFER稳定低分自适应 = 0
+$HOME_BUFFER自适应最低阈值 = 90
+$HOME_BUFFER有效识图阈值 = 95
+$HOME_BUFFER自适应稳定要求 = 3
+$HOME_BUFFER自适应采样 = 0
+$HOME_BUFFER选中正确 = 0
+$HOME_BUFFER选中普通 = 0
+$HOME_BUFFER选中错误 = 0
+$HOME_BUFFER自适应候选状态 = 0
+$HOME_BUFFER自适应候选分数 = 0
+$HOME_BUFFER自适应首次状态 = 0
+$HOME_BUFFER自适应首次分数 = 0
+$HOME_BUFFER识别状态 = 0
 """
 EGG_SETTINGS_GLOBALS = """\
 $孵蛋库_设置识别尝试 = 0
@@ -388,6 +416,7 @@ class EasyCon118Options:
     paralysis: bool = False
     false_swipe: bool = False
     continue_capture_after_shiny: bool = False
+    home_buffer_adaptive_threshold: bool = False
 
 
 @dataclass(frozen=True)
@@ -406,6 +435,7 @@ class EggRunRequest:
     parent_b_gender: str
     parent_b_ivs: tuple[int, int, int, int, int, int]
     start_from_prepared_254: bool = False
+    home_buffer_adaptive_threshold: bool = False
 
     @property
     def nx_model(self) -> int:
@@ -447,6 +477,8 @@ class EggRunRequest:
             raise ValueError("两只亲本不能同时填写无性别")
         if not isinstance(self.start_from_prepared_254, bool):
             raise ValueError("孵蛋254步启动模式必须是布尔值")
+        if not isinstance(self.home_buffer_adaptive_threshold, bool):
+            raise ValueError("HOME_BUFFER稳定低分自适应开关必须是布尔值")
         for label, ivs in (("A", self.parent_a_ivs), ("B", self.parent_b_ivs)):
             if len(ivs) != 6 or any(not 0 <= iv <= 31 for iv in ivs):
                 raise ValueError(f"亲本 {label} 的六项 IV 必须均在 0-31 之间")
@@ -467,8 +499,25 @@ class EasyConRuntimeCheck:
     warnings: tuple[str, ...]
 
 
-def probe_easycon_devices(ezcon_path: str | Path):
-    """Return currently enumerated serial ports, video indexes and raw output."""
+def parse_easycon_video_devices(output: str) -> dict[int, str]:
+    """Parse ``ezcon video --list`` into index-to-name mappings."""
+    devices: dict[int, str] = {}
+    for match in re.finditer(r"(?m)^\s*\[(\d+)\]\s*(.*?)\s*$", output):
+        index = int(match.group(1))
+        devices[index] = match.group(2).strip() or "未命名设备"
+    return devices
+
+
+def probe_easycon_devices(
+    ezcon_path: str | Path,
+    *,
+    include_video_names: bool = False,
+):
+    """Return currently enumerated ports, videos and raw EasyCon output.
+
+    Existing CLI callers receive a set of video indexes.  The GUI opts into a
+    mapping so its dropdown can show both the EasyCon index and device name.
+    """
     ezcon_path = Path(ezcon_path).resolve()
     run_options = dict(
         capture_output=True,
@@ -482,10 +531,8 @@ def probe_easycon_devices(ezcon_path: str | Path):
         details = "\n".join(filter(None, (port.stderr, video.stderr)))
         raise RuntimeError(f"设备检测命令失败：{details or '未知错误'}")
     ports = {item.upper() for item in re.findall(r"\bCOM\d+\b", port.stdout, re.IGNORECASE)}
-    videos = {
-        int(item)
-        for item in re.findall(r"(?m)^\s*\[(\d+)\]", video.stdout)
-    }
+    video_devices = parse_easycon_video_devices(video.stdout)
+    videos = video_devices if include_video_names else set(video_devices)
     output = "端口：\n" + port.stdout + "\n采集设备：\n" + video.stdout
     if not ports:
         output += "\n未检测到 EasyCon 单片机串口。"
@@ -1182,6 +1229,93 @@ def _apply_party_summary_navigation_text(
     )
 
 
+def _apply_standard_home_buffer_runtime_override_text(
+    template_text: str,
+    override_text: str,
+) -> str:
+    """Replace the standard 1.1.8 HOME_BUFFER controller idempotently."""
+    if STANDARD_HOME_BUFFER_OVERRIDE_MARKER in template_text:
+        start = template_text.index(STANDARD_HOME_BUFFER_OVERRIDE_MARKER)
+    else:
+        if template_text.count(EGG_HOME_BUFFER_ORIGINAL_FUNCTION) != 1:
+            raise ValueError("正式版模板缺少唯一的 HOME_BUFFER 函数，拒绝应用自适应覆盖")
+        start = template_text.index(EGG_HOME_BUFFER_ORIGINAL_FUNCTION)
+    if template_text.count(EGG_HOME_BUFFER_NEXT_FUNCTION) != 1:
+        raise ValueError("正式版模板缺少 HOME_BUFFER 后继函数，拒绝应用自适应覆盖")
+    end = template_text.index(EGG_HOME_BUFFER_NEXT_FUNCTION, start)
+    replacement = override_text.rstrip() + "\n\n"
+    return template_text[:start] + replacement + template_text[end:]
+
+
+def _apply_home_buffer_adaptive_classifier_text(
+    template_text: str,
+    classifier_text: str,
+    enabled: bool,
+) -> str:
+    """Install the shared classifier and set its opt-in switch."""
+    global_anchor = "$HOME_BUFFER当前错误退出_NS2 = 0\n"
+    if f"${HOME_BUFFER_ADAPTIVE_SWITCH} =" not in template_text:
+        if template_text.count(global_anchor) != 1:
+            raise ValueError("模板缺少唯一的 HOME_BUFFER 状态区，拒绝应用稳定低分自适应")
+        template_text = template_text.replace(
+            global_anchor,
+            global_anchor + HOME_BUFFER_ADAPTIVE_GLOBALS,
+            1,
+        )
+
+    classifier = classifier_text.rstrip() + "\n\n"
+    controller_markers = (
+        STANDARD_HOME_BUFFER_OVERRIDE_MARKER,
+        EGG_HOME_BUFFER_OVERRIDE_MARKER,
+    )
+    if HOME_BUFFER_ADAPTIVE_CLASSIFIER_MARKER in template_text:
+        start = template_text.index(HOME_BUFFER_ADAPTIVE_CLASSIFIER_MARKER)
+        following = [
+            template_text.index(marker, start)
+            for marker in controller_markers
+            if marker in template_text[start + 1 :]
+        ]
+        if not following:
+            original_controller = re.search(
+                r"(?m)^FUNC HOME_BUFFER\s*$",
+                template_text[start + 1 :],
+            )
+            if original_controller:
+                following.append(start + 1 + original_controller.start())
+        if not following:
+            raise ValueError("HOME_BUFFER 自适应分类器缺少后继控制器")
+        end = min(following)
+        template_text = template_text[:start] + classifier + template_text[end:]
+    else:
+        anchors = [
+            template_text.index(marker)
+            for marker in controller_markers
+            if marker in template_text
+        ]
+        if not anchors:
+            original_controller = re.search(
+                r"(?m)^FUNC HOME_BUFFER\s*$",
+                template_text,
+            )
+            if original_controller:
+                anchors.append(original_controller.start())
+        if not anchors:
+            raise ValueError("模板缺少 HOME_BUFFER 控制器，拒绝插入自适应分类器")
+        start = min(anchors)
+        template_text = template_text[:start] + classifier + template_text[start:]
+
+    switch_pattern = re.compile(
+        rf"(?m)^\${re.escape(HOME_BUFFER_ADAPTIVE_SWITCH)}\s*=\s*[^\r\n]*$"
+    )
+    template_text, count = switch_pattern.subn(
+        f"${HOME_BUFFER_ADAPTIVE_SWITCH} = {1 if enabled else 0}",
+        template_text,
+    )
+    if count != 1:
+        raise ValueError("HOME_BUFFER 稳定低分自适应开关应出现 1 次")
+    return template_text
+
+
 def _apply_egg_home_buffer_runtime_override_text(
     template_text: str,
     override_text: str,
@@ -1374,6 +1508,18 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     if not standard_path.is_file() or not egg_path.is_file():
         raise FileNotFoundError("1.1.8 包缺少正式版或时间轴版主脚本")
 
+    classifier_text = HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH.read_text(encoding="utf-8")
+    standard_configured = _apply_standard_home_buffer_runtime_override_text(
+        standard_path.read_text(encoding="utf-8"),
+        STANDARD_HOME_BUFFER_OVERRIDE_PATH.read_text(encoding="utf-8"),
+    )
+    standard_configured = _apply_home_buffer_adaptive_classifier_text(
+        standard_configured,
+        classifier_text,
+        False,
+    )
+    standard_path.write_text(standard_configured, encoding="utf-8")
+
     configured = _apply_egg_summary_fix_text(
         egg_path.read_text(encoding="utf-8")
     )
@@ -1382,6 +1528,11 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     configured = _apply_egg_home_buffer_runtime_override_text(
         configured,
         EGG_HOME_BUFFER_OVERRIDE_PATH.read_text(encoding="utf-8"),
+    )
+    configured = _apply_home_buffer_adaptive_classifier_text(
+        configured,
+        classifier_text,
+        False,
     )
     configured = _apply_egg_party_slot_main_runtime_override_text(
         configured,
@@ -1451,6 +1602,18 @@ def write_configured_project(
         plan,
         options,
     )
+    configured = _apply_standard_home_buffer_runtime_override_text(
+        configured,
+        STANDARD_HOME_BUFFER_OVERRIDE_PATH.read_text(encoding="utf-8"),
+    )
+    classifier_text = HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH.read_text(
+        encoding="utf-8"
+    )
+    configured = _apply_home_buffer_adaptive_classifier_text(
+        configured,
+        classifier_text,
+        (options or EasyCon118Options()).home_buffer_adaptive_threshold,
+    )
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
     wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
@@ -1488,6 +1651,9 @@ def write_configured_project(
         "runtime_overrides": {
             "ocr_unavailable_fallback_sha256": ocr_fallback_sha256,
             "wild_pid_retry_limit_sha256": wild_pid_retry_limit_sha256,
+            "home_buffer_adaptive_classifier_sha256": hashlib.sha256(
+                classifier_text.encode("utf-8")
+            ).hexdigest(),
         },
         "backend": {
             "name": EASYCON_BACKEND_NAME,
@@ -1541,6 +1707,14 @@ def write_configured_egg_project(
         configured,
         home_buffer_override_text,
     )
+    classifier_text = HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH.read_text(
+        encoding="utf-8"
+    )
+    configured = _apply_home_buffer_adaptive_classifier_text(
+        configured,
+        classifier_text,
+        request.home_buffer_adaptive_threshold,
+    )
     party_slot_main_override_text = EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH.read_text(
         encoding="utf-8"
     )
@@ -1582,6 +1756,9 @@ def write_configured_egg_project(
     runtime_overrides["ocr_unavailable_fallback_sha256"] = ocr_fallback_sha256
     runtime_overrides["egg_home_buffer_refine_sha256"] = hashlib.sha256(
         home_buffer_override_text.encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["home_buffer_adaptive_classifier_sha256"] = hashlib.sha256(
+        classifier_text.encode("utf-8")
     ).hexdigest()
     runtime_overrides["egg_party_slot_main_sha256"] = hashlib.sha256(
         party_slot_main_override_text.encode("utf-8")

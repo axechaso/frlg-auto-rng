@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from assets.game_text import ABILITY_ZH_TO_EN
+from automation.easycon118 import parse_easycon_video_devices
 from run_auto_rng_gui import (
     ADVANCED_TAB_LABEL,
     AutoRngApp,
@@ -11,6 +12,7 @@ from run_auto_rng_gui import (
     clean_terminal_log,
     describe_sid_log_failure,
     filter_autocomplete_choices,
+    format_video_device_choice,
     iv_ranges_for_preset,
     parse_egg_config_payload,
     parse_egg_species,
@@ -18,6 +20,7 @@ from run_auto_rng_gui import (
     parse_sid_effort_values,
     parse_sid_species,
     preferred_detected_port,
+    preferred_detected_video,
 )
 
 
@@ -232,6 +235,18 @@ class GuiIvInputTests(unittest.TestCase):
         self.assertEqual(preferred_detected_port({"COM12", "COM4"}, "COM12"), "COM12")
         self.assertEqual(preferred_detected_port({"COM12", "COM4"}, "COM22"), "COM4")
         self.assertIsNone(preferred_detected_port(set(), "COM22"))
+
+    def test_detected_video_lists_names_and_keeps_valid_index(self):
+        output = "[0] Hagibis\n[3] OBS Virtual Camera\n[7]\n"
+        devices = parse_easycon_video_devices(output)
+        self.assertEqual(devices, {0: "Hagibis", 3: "OBS Virtual Camera", 7: "未命名设备"})
+        self.assertEqual(format_video_device_choice(3, devices[3]), "[3] OBS Virtual Camera")
+        self.assertEqual(
+            preferred_detected_video(devices, "[3] 旧设备名"),
+            "[3] OBS Virtual Camera",
+        )
+        self.assertEqual(preferred_detected_video(devices, "5"), "[0] Hagibis")
+        self.assertIsNone(preferred_detected_video({}, "0"))
 
     def test_sid_effort_values_require_six_valid_stats(self):
         self.assertEqual(

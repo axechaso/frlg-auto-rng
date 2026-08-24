@@ -71,7 +71,7 @@ from rng.tenlines_utils import (
     get_species_name,
     load_frlg_encounters,
 )
-from manual_tools import ManualToolsManager
+from manual_tools import ManualToolsManager, parse_video_device
 
 
 ROOT = RESOURCE_ROOT
@@ -434,6 +434,26 @@ def preferred_detected_port(ports, current: str = "") -> str | None:
     return min(normalized, key=sort_key) if normalized else None
 
 
+def format_video_device_choice(index: int, name: str) -> str:
+    """Build the user-facing capture-device dropdown label."""
+    return f"[{index}] {name.strip() or '未命名设备'}"
+
+
+def preferred_detected_video(
+    devices: dict[int, str],
+    current: str = "",
+) -> str | None:
+    """Keep the selected EasyCon index, otherwise choose the lowest index."""
+    if not devices:
+        return None
+    try:
+        current_index = parse_video_device(current)
+    except ValueError:
+        current_index = -1
+    selected_index = current_index if current_index in devices else min(devices)
+    return format_video_device_choice(selected_index, devices[selected_index])
+
+
 class AutoRngApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -477,6 +497,7 @@ class AutoRngApp:
         self._populate_egg_pokemon()
         self._install_invalidation()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.root.after(250, lambda: self.check_devices(initial=True))
 
     @staticmethod
     def _load_locations() -> dict[str, list[str]]:
@@ -1206,10 +1227,28 @@ class AutoRngApp:
         ttk.Button(runtime, text="选择", command=self.choose_source).grid(row=0, column=6, padx=4)
         self.ezcon_entry = self._labeled_entry(runtime, "ezcon.exe", self.ezcon_var, 1, 0, width=68, span=5)
         ttk.Button(runtime, text="选择", command=self.choose_ezcon).grid(row=1, column=6, padx=4)
-        self._labeled_entry(runtime, "串口", self.port_var, 2, 0, width=12)
-        self._labeled_entry(runtime, "采集卡序号", self.video_var, 2, 2, width=8)
+        ttk.Label(runtime, text="串口").grid(row=2, column=0, sticky="e", padx=4, pady=4)
+        self.port_combo = ttk.Combobox(
+            runtime,
+            textvariable=self.port_var,
+            values=(self.port_var.get(),),
+            width=12,
+            state="readonly",
+        )
+        self.port_combo.grid(row=2, column=1, sticky="w", padx=4, pady=4)
+        ttk.Label(runtime, text="采集卡").grid(row=2, column=2, sticky="e", padx=4, pady=4)
+        self.video_combo = ttk.Combobox(
+            runtime,
+            textvariable=self.video_var,
+            values=(self.video_var.get(),),
+            width=34,
+            state="readonly",
+        )
+        self.video_combo.grid(
+            row=2, column=3, columnspan=3, sticky="w", padx=4, pady=4
+        )
         self.device_button = ttk.Button(runtime, text="检测端口/采集卡", command=self.check_devices)
-        self.device_button.grid(row=2, column=4, columnspan=2, padx=8)
+        self.device_button.grid(row=2, column=6, padx=8)
         manual_tools = ttk.Frame(runtime)
         manual_tools.grid(row=3, column=0, columnspan=7, sticky="w", padx=4, pady=(6, 0))
         self.virtual_controller_button = ttk.Button(
@@ -1232,6 +1271,13 @@ class AutoRngApp:
             command=self._toggle_advanced_mode,
         )
         self.advanced_mode_check.pack(side="left", padx=(18, 0))
+        self.home_buffer_adaptive_var = tk.BooleanVar(value=False)
+        self.home_buffer_adaptive_check = ttk.Checkbutton(
+            manual_tools,
+            text="HOME_BUFFER 稳定低分自适应（1.1.8，默认关闭）",
+            variable=self.home_buffer_adaptive_var,
+        )
+        self.home_buffer_adaptive_check.pack(side="left", padx=(14, 0))
 
         actions = ttk.Frame(container)
         actions.pack(fill="x", pady=10)
@@ -1310,6 +1356,7 @@ class AutoRngApp:
             self.min_adv_var, self.max_adv_var, self.shiny_var, self.nature_var,
             self.gender_var, self.ability_var, self.hidden_type_var, self.seed_mode_var,
             self.auto_capture_var, self.paralysis_var, self.false_swipe_var,
+            self.home_buffer_adaptive_var,
             self.source_var, self.ezcon_var,
             self.egg_seed_var, self.egg_held_var, self.egg_pickup_var,
             self.egg_seed_mode_var, self.egg_pokemon_var, self.egg_compatibility_var,
@@ -1844,6 +1891,7 @@ class AutoRngApp:
             start_from_prepared_254=(
                 self.egg_start_mode_var.get() == EGG_START_MODE_PREPARED
             ),
+            home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
         )
 
     def collect_tid_request(self) -> TidRngRequest:
@@ -2000,6 +2048,9 @@ class AutoRngApp:
         self.virtual_controller_button.configure(state=state)
         self.monitor_button.configure(state=state)
         self.advanced_mode_check.configure(state=state)
+        self.home_buffer_adaptive_check.configure(state=state)
+        self.port_combo.configure(state="readonly" if enabled else "disabled")
+        self.video_combo.configure(state="readonly" if enabled else "disabled")
 
     def open_virtual_controller(self) -> None:
         if self.manual_tools is not None:
@@ -2072,6 +2123,7 @@ class AutoRngApp:
             paralysis=self.paralysis_var.get(),
             false_swipe=self.false_swipe_var.get(),
             continue_capture_after_shiny=self.auto_capture_var.get(),
+            home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
         )
         input_fingerprint = self.input_fingerprint()
         self.plan_result = None
@@ -2605,41 +2657,90 @@ class AutoRngApp:
             self.cancel_button.configure(state="disabled")
             self.status_var.set("正在取消搜索……")
 
-    def check_devices(self):
+    def check_devices(self, initial=False):
         if self.busy:
             return
         if self.process is not None and self.process.poll() is None:
-            messagebox.showerror("正在运行", "EasyCon 正在运行，停止后才能重新检测设备。")
+            if not initial:
+                messagebox.showerror("正在运行", "EasyCon 正在运行，停止后才能重新检测设备。")
             return
         self._close_manual_tools()
         ezcon = Path(self.ezcon_var.get())
         if not ezcon.is_file():
-            messagebox.showerror("找不到程序", f"找不到 {ezcon}")
+            if initial:
+                self.fail_device_check(FileNotFoundError(f"找不到 {ezcon}"))
+            else:
+                messagebox.showerror("找不到程序", f"找不到 {ezcon}")
             return
         current_port = self.port_var.get()
+        current_video = self.video_var.get()
         self.set_busy(True, "正在读取端口和采集设备……")
 
         def worker():
             try:
-                ports, _, output = probe_easycon_devices(ezcon)
+                ports, videos, output = probe_easycon_devices(
+                    ezcon,
+                    include_video_names=True,
+                )
                 selected_port = preferred_detected_port(ports, current_port)
+                selected_video = preferred_detected_video(videos, current_video)
                 self.root.after(
                     0,
-                    lambda: self.finish_device_check(output, selected_port),
+                    lambda: self.finish_device_check(
+                        output,
+                        ports,
+                        videos,
+                        selected_port,
+                        selected_video,
+                    ),
                 )
             except Exception as exc:
                 self.root.after(0, lambda error=exc: self.fail_device_check(error))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def finish_device_check(self, output, selected_port):
+    def finish_device_check(
+        self,
+        output,
+        ports,
+        videos,
+        selected_port,
+        selected_video,
+    ):
+        port_choices = sorted(
+            ports,
+            key=lambda port: (
+                0,
+                int(port[3:]),
+            ) if port.startswith("COM") and port[3:].isdigit() else (1, port),
+        )
+        video_choices = [
+            format_video_device_choice(index, videos[index])
+            for index in sorted(videos)
+        ]
+        self.port_combo.configure(values=port_choices)
+        self.video_combo.configure(values=video_choices)
         if selected_port:
             self.port_var.set(selected_port)
-            output = f"已自动填写串口：{selected_port}\n\n{output}"
-            status = f"设备检测完成，串口已填写为 {selected_port}。"
         else:
-            output = "没有检测到可用串口。\n\n" + output
-            status = "设备检测完成，但没有发现可用串口。"
+            self.port_var.set("")
+        if selected_video:
+            self.video_var.set(selected_video)
+        else:
+            self.video_var.set("")
+
+        selections = []
+        if selected_port:
+            selections.append(f"串口 {selected_port}")
+        if selected_video:
+            selections.append(f"采集卡 {selected_video}")
+        if selections:
+            summary = "；".join(selections)
+            output = f"当前选择：{summary}\n\n{output}"
+            status = f"设备检测完成：{summary}。"
+        else:
+            output = "没有检测到可用串口或采集设备。\n\n" + output
+            status = "设备检测完成，但没有发现可用设备。"
         self.set_result(output)
         self.set_busy(False, status)
 
@@ -2657,11 +2758,9 @@ class AutoRngApp:
         ) or not self.project_main:
             return
         try:
-            video_device = int(self.video_var.get())
-            if video_device < 0:
-                raise ValueError
+            video_device = parse_video_device(self.video_var.get())
         except ValueError:
-            messagebox.showerror("输入错误", "采集卡序号必须是大于或等于 0 的整数。")
+            messagebox.showerror("输入错误", "请选择有效的采集卡。")
             return
         if not self.port_var.get().strip():
             messagebox.showerror("输入错误", "串口不能为空。")
