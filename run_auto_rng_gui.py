@@ -1323,7 +1323,7 @@ class AutoRngApp:
         self.home_buffer_adaptive_var = tk.BooleanVar(value=False)
         self.home_buffer_adaptive_check = ttk.Checkbutton(
             manual_tools,
-            text="HOME_BUFFER 稳定低分自适应（1.1.8，默认关闭）",
+            text="HOME_BUFFER 稳定低分自适应（1.1.8 + TID，默认关闭）",
             variable=self.home_buffer_adaptive_var,
         )
         self.home_buffer_adaptive_check.pack(side="left", padx=(14, 0))
@@ -2001,6 +2001,7 @@ class AutoRngApp:
             include_65535=self.tid_65535_var.get(),
             single_digit_id=self.tid_single_digit_var.get(),
             image_threshold=int(self.tid_threshold_var.get()),
+            home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
         )
         source_path = Path(self.tid_source_var.get())
         template_path = source_path / {
@@ -2520,6 +2521,11 @@ class AutoRngApp:
             f"乱数半径 OP/F1/F2：{request.op_rng_range}/{request.f1_rng_range}/{request.f2_rng_range}",
             f"固定延迟 OP/F1/F2/F3：{request.op_fixed_delay}/{request.f1_fixed_delay}/{request.f2_fixed_delay}/{request.f3_fixed_delay}",
             f"固定延迟检查：{'开启' if request.calibration_check else '关闭'}",
+            (
+                "TID HOME_BUFFER稳定低分自适应：开启（稳定3次、最低90分）"
+                if request.home_buffer_adaptive_threshold
+                else "TID HOME_BUFFER稳定低分自适应：关闭（严格95分）"
+            ),
             f"计划文件：{plan_path}",
             f"生成脚本：{project_main}",
         ]

@@ -90,6 +90,37 @@ class TidRng137Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "F3随机模式已移除"):
             TidRngRequest(sid_random=True, f3_random_range=10).validate(self.english)
 
+    def test_home_buffer_adaptive_is_opt_in_for_both_languages(self):
+        for language, template in (("英文", self.english), ("日文", self.japanese)):
+            disabled = configure_tid_template_text(
+                template,
+                TidRngRequest(
+                    language=language,
+                    gender=0 if language == "日文" else 1,
+                    player_name="レット゛" if language == "日文" else "RED",
+                ),
+            )
+            self.assertNotIn("TID_HOME_BUFFER_ADAPTIVE", disabled, language)
+
+            enabled = configure_tid_template_text(
+                template,
+                TidRngRequest(
+                    language=language,
+                    gender=0 if language == "日文" else 1,
+                    player_name="レット゛" if language == "日文" else "RED",
+                    home_buffer_adaptive_threshold=True,
+                ),
+            )
+            self.assertIn("FUNC TID_HOME_BUFFER识别稳定状态(): INT", enabled, language)
+            self.assertIn("$HOME_BUFFER自适应稳定要求 = 3", enabled, language)
+            self.assertIn("$HOME_BUFFER自适应最低阈值 = 90", enabled, language)
+            self.assertIn("$NS机型 == 1", enabled, language)
+            self.assertEqual(enabled.count("FUNC HOME_BUFFER"), 1, language)
+
+    def test_home_buffer_adaptive_flag_must_be_boolean(self):
+        with self.assertRaisesRegex(ValueError, "必须是布尔值"):
+            TidRngRequest(home_buffer_adaptive_threshold=1).validate(self.english)
+
     def test_flow_marker_reports_actual_tid_for_all_five_success_types(self):
         configured = configure_tid_template_text(
             self.english,

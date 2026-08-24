@@ -21,6 +21,9 @@ from .easycon118 import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TID_HOME_BUFFER_ADAPTIVE_PATH = (
+    ROOT / "assets" / "tid_rng137_extensions" / "home_buffer_adaptive.ecs"
+)
 DOWNLOADED_TID_SOURCE = (
     Path.home() / "Downloads" / "自定义TID SID 御三家乱数多功能包1.3"
 )
@@ -44,6 +47,52 @@ EXPECTED_TID_LABEL_SHA256 = (
 )
 
 _USER_SECTION_END = "# ======================== 用户自定义区结束"
+_TID_HOME_BUFFER_GLOBAL_ANCHOR = "$识图判断阈值 = 95\n"
+_TID_HOME_BUFFER_ADAPTIVE_MARKER = (
+    "# TID 1.3.7 HOME_BUFFER 稳定低分自适应：仅由工具显式开启。"
+)
+_TID_HOME_BUFFER_ORIGINAL = """FUNC HOME_BUFFER
+    FOR
+        A
+        1500
+        A
+        WAIT $HOME_BUFFER延迟
+        PRINT 尝试HOME_BUFFER延迟: & $HOME_BUFFER延迟 & " ms"
+        HOME 100
+        1500
+        IF @HOME_BUFFER正确退出 >= 95 and @错误退出 < 95 and @错误退出_NS2 < 95 or @HOME_BUFFER正确退出_NS2 >= 95 and @错误退出 < 95 and @错误退出_NS2 < 95
+            PRINT HOME_BUFFER正确
+            PRINT 可用HOME_BUFFER延迟: & $HOME_BUFFER延迟 & " ms"
+            RETURN
+        ELIF @错误退出 >= 95 or @错误退出_NS2 >= 95
+            PRINT 错误进入休眠菜单
+            B
+            1000
+            CALL 关闭游戏
+        ELIF @正确退出 >= 95 or @正确退出_NS2 >= 95
+            PRINT HOME_BUFFER延迟过长，减100继续尝试中
+            CALL 关闭游戏
+            $HOME_BUFFER延迟 -= 100
+        ELSE
+            PRINT HOME_BUFFER延迟过短，加100继续尝试中
+            $HOME_BUFFER延迟 += 100
+        ENDIF
+    NEXT
+ENDFUNC"""
+_TID_HOME_BUFFER_ADAPTIVE_GLOBALS = """# TID HOME_BUFFER 自适应只作用于生成副本，默认由工具关闭。
+$HOME_BUFFER自适应最低阈值 = 90
+$HOME_BUFFER有效识图阈值 = 95
+$HOME_BUFFER自适应稳定要求 = 3
+$HOME_BUFFER自适应采样 = 0
+$HOME_BUFFER选中正确 = 0
+$HOME_BUFFER选中普通 = 0
+$HOME_BUFFER选中错误 = 0
+$HOME_BUFFER自适应候选状态 = 0
+$HOME_BUFFER自适应候选分数 = 0
+$HOME_BUFFER自适应首次状态 = 0
+$HOME_BUFFER自适应首次分数 = 0
+$HOME_BUFFER识别状态 = 0
+"""
 _JAPANESE_LOOP_164A_SOURCE = """    $NameIndex = 0
 
     FOR $InputLen
@@ -125,6 +174,7 @@ class TidRngRequest:
     include_65535: bool = True
     single_digit_id: bool = False
     image_threshold: int = 95
+    home_buffer_adaptive_threshold: bool = False
 
     def validate(self, template_text: str | None = None) -> None:
         if self.language not in TID_SCRIPT_NAMES:
@@ -186,6 +236,8 @@ class TidRngRequest:
             raise ValueError("去噪命中数不能大于去噪窗口")
         if not 1 <= self.image_threshold <= 100:
             raise ValueError("识图阈值必须在 1-100 之间")
+        if not isinstance(self.home_buffer_adaptive_threshold, bool):
+            raise ValueError("HOME_BUFFER稳定低分自适应开关必须是布尔值")
         if not self.player_name:
             raise ValueError("主角名称不能为空")
         name_limit = 7 if self.language == "英文" else 10
@@ -329,7 +381,26 @@ def configure_tid_template_text(
                     PRINT TIDFLOW|ID|SID_ADV= & $adv
                     BREAK 2"""
         configured = configured.replace(success_block, marker_block)
+    if request.home_buffer_adaptive_threshold:
+        configured = _apply_tid_home_buffer_adaptive(configured)
     return configured
+
+
+def _apply_tid_home_buffer_adaptive(template_text: str) -> str:
+    """Install the opt-in TID HOME_BUFFER classifier in a generated copy."""
+    if _TID_HOME_BUFFER_ADAPTIVE_MARKER in template_text:
+        return template_text
+    if template_text.count(_TID_HOME_BUFFER_GLOBAL_ANCHOR) != 1:
+        raise ValueError("TID 1.3.7模板缺少唯一的识图阈值锚点")
+    if template_text.count(_TID_HOME_BUFFER_ORIGINAL) != 1:
+        raise ValueError("TID 1.3.7模板的HOME_BUFFER函数与已审计版本不一致")
+    extension = TID_HOME_BUFFER_ADAPTIVE_PATH.read_text(encoding="utf-8").rstrip()
+    template_text = template_text.replace(
+        _TID_HOME_BUFFER_GLOBAL_ANCHOR,
+        _TID_HOME_BUFFER_GLOBAL_ANCHOR + _TID_HOME_BUFFER_ADAPTIVE_GLOBALS,
+        1,
+    )
+    return template_text.replace(_TID_HOME_BUFFER_ORIGINAL, extension, 1)
 
 
 def referenced_image_labels(template_text: str) -> tuple[str, ...]:
