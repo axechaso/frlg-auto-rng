@@ -77,11 +77,17 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package after adding Held/Pickup fixed pre-calibration and
     # cross-round multi-candidate trajectory selection.
     "48cdfb839a81333e6115c72adc3ea40bf8642b091fbf55d7b49dac76cba4556f",
+    # Download package that keeps the completed no-egg pre-calibration after
+    # a post-pickup Seed miss and retries generation/pickup directly.
+    "77bea49b62c909d105dd7b81529bbb3a8046d996781d68b2ebc479cd6096c841",
 )
-EXPECTED_SCRIPT_SHA256 = "1700ba02cc60fdfd9857f14a2a8384c5736c06908a92e468d1dfd721a9be4865"
+EXPECTED_SCRIPT_SHA256 = "74b4a3ecce59e3817699ee8dece2594d67f48bad08b33068358c45b74aaf6e9e"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # Materialized corpus before post-pickup Seed failures began preserving
+    # the completed no-egg pre-calibration.
+    "1700ba02cc60fdfd9857f14a2a8384c5736c06908a92e468d1dfd721a9be4865",
     # Materialized corpus before the opt-in HOME_BUFFER stable-low-score
     # classifier was added to both 1.1.8 entry scripts.
     "da32012466a7349113ff166cf158c39dd721fc6e33c8d84355b9747cd7888f86",
@@ -278,6 +284,7 @@ PARTY_SUMMARY_SHARED_UP_BLOCK = """\
 EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
 EGG_TRANSIENT_RETRY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：瞬时动作失败重启后继续下一轮"
 EGG_TERMINAL_STOP_OVERRIDE_MARKER = "# GUI 孵蛋终止策略：无精确结果时保留当前游戏画面"
+EGG_POST_PICKUP_RETRY_POLICY_MARKER = "# GUI 孵蛋领取后Seed失败：保留首次预校准，直接重试生成领取"
 EGG_POND_SETTLE_ORIGINAL = """\
     LS RESET
     WAIT 500
@@ -356,8 +363,8 @@ EGG_TRANSIENT_RETRY_REPLACEMENTS = (
     RETURN 0
 """,
         """\
-    PRINT 领取后野生Seed反查失败，关闭游戏并重新预校准
-    $孵蛋流程Seed已预校准 = 0
+    PRINT 领取后野生Seed反查失败，关闭游戏并直接重试生成领取
+    $孵蛋流程Seed已预校准 = 1
     CALL 孵蛋流程_重开下一轮
     RETURN 2
 """,
@@ -377,6 +384,45 @@ EGG_TRANSIENT_RETRY_REPLACEMENTS = (
 """,
     ),
 )
+EGG_POST_PICKUP_MISS_OLD = """\
+    ELIF $孵蛋流程Seed验证结果 == 2
+        PRINT 领取后未命中目标Seed，本轮丢弃并重新预校准
+        $孵蛋流程Seed已预校准 = 0
+        $孵蛋流程Seed校正结果 = 孵蛋流程_按观测Seed校正等待($候选同一Seed值)
+        IF $孵蛋流程Seed校正结果 != 1
+            CALL 孵蛋流程_重开下一轮
+            RETURN 0
+        ENDIF
+        CALL 孵蛋流程_重开下一轮
+        RETURN 2
+    ENDIF
+"""
+EGG_POST_PICKUP_MISS_CURRENT = """\
+    ELIF $孵蛋流程Seed验证结果 == 2
+        PRINT 领取后未命中目标Seed，本轮丢弃并校正Seed等待
+        PRINT 首次不领蛋预校准已经完成，下一轮直接重新生成、领取并反查
+        $孵蛋流程Seed已预校准 = 1
+        $孵蛋流程Seed校正结果 = 孵蛋流程_按观测Seed校正等待($候选同一Seed值)
+        IF $孵蛋流程Seed校正结果 != 1
+            CALL 孵蛋流程_重开下一轮
+            RETURN 0
+        ENDIF
+        CALL 孵蛋流程_重开下一轮
+        RETURN 2
+    ENDIF
+"""
+EGG_POST_PICKUP_FAILURE_OLD = """\
+    PRINT 领取后野生Seed反查失败，关闭游戏并重新预校准
+    $孵蛋流程Seed已预校准 = 0
+    CALL 孵蛋流程_重开下一轮
+    RETURN 2
+"""
+EGG_POST_PICKUP_FAILURE_CURRENT = """\
+    PRINT 领取后野生Seed反查失败，关闭游戏并直接重试生成领取
+    $孵蛋流程Seed已预校准 = 1
+    CALL 孵蛋流程_重开下一轮
+    RETURN 2
+"""
 EGG_TERMINAL_STOP_REPLACEMENTS = (
     (
         """\
@@ -1129,6 +1175,38 @@ def _apply_egg_transient_retry_runtime_override_text(template_text: str) -> str:
     return configured
 
 
+def _apply_egg_post_pickup_retry_policy_text(template_text: str) -> str:
+    """Keep the completed no-egg Seed pre-calibration across pickup retries."""
+    if EGG_POST_PICKUP_RETRY_POLICY_MARKER in template_text:
+        return template_text
+
+    configured = template_text
+    if EGG_POST_PICKUP_MISS_OLD in configured:
+        configured = configured.replace(
+            EGG_POST_PICKUP_MISS_OLD,
+            EGG_POST_PICKUP_MISS_CURRENT,
+            1,
+        )
+    elif EGG_POST_PICKUP_MISS_CURRENT not in configured:
+        raise ValueError("孵蛋模板缺少领取后Seed未命中分支，拒绝应用直接重试策略")
+
+    if EGG_POST_PICKUP_FAILURE_OLD in configured:
+        configured = configured.replace(
+            EGG_POST_PICKUP_FAILURE_OLD,
+            EGG_POST_PICKUP_FAILURE_CURRENT,
+            1,
+        )
+    elif EGG_POST_PICKUP_FAILURE_CURRENT not in configured:
+        raise ValueError("孵蛋模板缺少领取后Seed反查失败分支，拒绝应用直接重试策略")
+
+    return configured.replace(
+        EGG_POST_PICKUP_MISS_CURRENT,
+        f"    {EGG_POST_PICKUP_RETRY_POLICY_MARKER}\n"
+        + EGG_POST_PICKUP_MISS_CURRENT,
+        1,
+    )
+
+
 def _apply_egg_terminal_stop_policy_text(template_text: str) -> str:
     """Stop terminal egg lookup failures without closing or restarting the game."""
     if EGG_TERMINAL_STOP_OVERRIDE_MARKER in template_text:
@@ -1543,6 +1621,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         EGG_SEED_CONTROLLER_OVERRIDE_PATH.read_text(encoding="utf-8"),
     )
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
+    configured = _apply_egg_post_pickup_retry_policy_text(configured)
     configured = _apply_egg_terminal_stop_policy_text(configured)
     egg_path.write_text(configured, encoding="utf-8")
 
@@ -1730,6 +1809,7 @@ def write_configured_egg_project(
         seed_controller_override_text,
     )
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
+    configured = _apply_egg_post_pickup_retry_policy_text(configured)
     configured = _apply_egg_terminal_stop_policy_text(configured)
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
@@ -1770,6 +1850,12 @@ def write_configured_egg_project(
         "\n".join(
             replacement
             for _, replacement in EGG_TRANSIENT_RETRY_REPLACEMENTS
+        ).encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["egg_post_pickup_retry_policy_sha256"] = hashlib.sha256(
+        (
+            EGG_POST_PICKUP_MISS_CURRENT
+            + EGG_POST_PICKUP_FAILURE_CURRENT
         ).encode("utf-8")
     ).hexdigest()
     runtime_overrides["egg_terminal_stop_policy_sha256"] = hashlib.sha256(

@@ -10,6 +10,7 @@ from automation.easycon118 import (
     EGG_HATCH_EXIT_OVERRIDE_PATH,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
+    EGG_POST_PICKUP_RETRY_POLICY_MARKER,
     EGG_REVERSE_LOOKUP_POLICY_MARKER,
     EGG_REVERSE_LOOKUP_WINDOW_MARKER,
     EGG_POND_SETTLE_FIXED,
@@ -44,6 +45,7 @@ from automation.easycon118 import (
     _apply_egg_transient_retry_runtime_override_text,
     _apply_egg_terminal_stop_policy_text,
     _apply_party_summary_navigation_text,
+    _apply_egg_post_pickup_retry_policy_text,
     _apply_home_buffer_adaptive_classifier_text,
     _apply_standard_home_buffer_runtime_override_text,
     _apply_togepi_hatch_cycle_override_text,
@@ -679,10 +681,38 @@ ENDFUNC
         self.assertEqual(configured_again, configured)
         self.assertIn(EGG_TRANSIENT_RETRY_OVERRIDE_MARKER, configured)
         self.assertIn("抓捕失败，关闭游戏并继续下一轮", configured)
-        self.assertIn("反查失败，关闭游戏并重新预校准", configured)
+        self.assertIn("反查失败，关闭游戏并直接重试生成领取", configured)
         self.assertIn("孵化动作失败，关闭游戏并继续下一轮", configured)
-        self.assertIn("$孵蛋流程Seed已预校准 = 0", configured)
+        self.assertIn("$孵蛋流程Seed已预校准 = 1", configured)
         self.assertEqual(configured.count("RETURN 2"), 3)
+
+    def test_post_pickup_seed_retry_keeps_completed_precalibration(self):
+        original = """\
+    ELIF $孵蛋流程Seed验证结果 == 2
+        PRINT 领取后未命中目标Seed，本轮丢弃并重新预校准
+        $孵蛋流程Seed已预校准 = 0
+        $孵蛋流程Seed校正结果 = 孵蛋流程_按观测Seed校正等待($候选同一Seed值)
+        IF $孵蛋流程Seed校正结果 != 1
+            CALL 孵蛋流程_重开下一轮
+            RETURN 0
+        ENDIF
+        CALL 孵蛋流程_重开下一轮
+        RETURN 2
+    ENDIF
+    PRINT 领取后野生Seed反查失败，关闭游戏并重新预校准
+    $孵蛋流程Seed已预校准 = 0
+    CALL 孵蛋流程_重开下一轮
+    RETURN 2
+"""
+        configured = _apply_egg_post_pickup_retry_policy_text(original)
+        configured_again = _apply_egg_post_pickup_retry_policy_text(configured)
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(EGG_POST_PICKUP_RETRY_POLICY_MARKER, configured)
+        self.assertIn("首次不领蛋预校准已经完成", configured)
+        self.assertIn("直接重试生成领取", configured)
+        self.assertEqual(configured.count("$孵蛋流程Seed已预校准 = 1"), 2)
+        self.assertNotIn("重新预校准", configured)
 
     def test_terminal_egg_lookup_failure_keeps_the_current_game_screen(self):
         original = """\
