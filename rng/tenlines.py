@@ -3,6 +3,13 @@
 from itertools import product
 from typing import List, Tuple, Optional, Dict
 
+from app_paths import DATA_ROOT, RESOURCE_ROOT
+from tenlines_seed_updater import (
+    FR_BINARY_NAME,
+    LG_BINARY_NAME,
+    active_seed_binary_path,
+)
+
 # Method enum values (matching C++ enum class Method)
 METHOD_1 = 1
 METHOD_1_REVERSE = 2
@@ -540,6 +547,11 @@ SEED_BASE_URL = "https://lincoln-lm.github.io/ten-lines/generated"
 _FRLG_SEED_CACHE = {}
 
 
+def clear_frlg_seed_cache():
+    """Discard parsed tables after the GUI atomically activates an update."""
+    _FRLG_SEED_CACHE.clear()
+
+
 def download_seed_file(filename, local_path):
     import os
     import urllib.request
@@ -557,12 +569,13 @@ def download_seed_file(filename, local_path):
 
 
 def load_frlg_seed_data(game: str = "fr_nx", refresh: bool = False):
-    """Load bundled FRLG seed data, with networking only on explicit refresh.
+    """Load validated user-updated FRLG data before the bundled fallback.
 
-    The automatic planner must remain reproducible and usable offline.  Passing
-    ``refresh=True`` explicitly downloads and replaces the bundled file.
+    The automatic planner remains reproducible and usable offline.  The GUI
+    updater activates both NX binaries and both EasyCon tables together; a
+    legacy ``refresh=True`` call only downloads a temporary one-file copy and
+    never mutates that validated active set.
     """
-    import os
     seed_files = {
         "fr": "fr_eng.bin", "fr_eu": "fr_eng.bin", "fr_nx": "fr_eng_nx.bin",
         "lg": "lg_eng.bin", "lg_eu": "lg_eng.bin", "lg_nx": "lg_eng_nx.bin",
@@ -576,13 +589,23 @@ def load_frlg_seed_data(game: str = "fr_nx", refresh: bool = False):
     if not refresh and game in _FRLG_SEED_CACHE:
         return _FRLG_SEED_CACHE[game]
     filename = seed_files[game]
-    local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", filename)
-    data = download_seed_file(filename, local_path) if refresh else None
-    if data is None and os.path.exists(local_path):
-        with open(local_path, 'rb') as f:
-            data = f.read()
+    bundled_path = RESOURCE_ROOT / "rng" / "resources" / filename
+    if refresh:
+        refresh_path = DATA_ROOT / "seed_tables" / "manual_refresh" / filename
+        data = download_seed_file(filename, refresh_path)
+        local_path = refresh_path
+    else:
+        override_path = (
+            active_seed_binary_path(filename)
+            if filename in (FR_BINARY_NAME, LG_BINARY_NAME)
+            else None
+        )
+        local_path = override_path or bundled_path
+        data = local_path.read_bytes() if local_path.is_file() else None
     if data is None:
-        data = download_seed_file(filename, local_path)
+        fallback_path = DATA_ROOT / "seed_tables" / "manual_refresh" / filename
+        data = download_seed_file(filename, fallback_path)
+        local_path = fallback_path
     if data is None:
         raise FileNotFoundError(f"Unable to load FRLG seed data: {local_path}")
     parsed = parse_frlg_seed_data(data, game.endswith("nx") or game.endswith("nx2"))

@@ -7,6 +7,7 @@ from run_auto_rng_gui import (
     ADVANCED_TAB_LABEL,
     AutoRngApp,
     MODE_TAB_ORDER,
+    RUN_LOG_TAB_LABEL,
     _install_autocomplete_combo,
     build_egg_config_payload,
     build_egg_full_config_payload,
@@ -278,6 +279,21 @@ class GuiIvInputTests(unittest.TestCase):
             ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）"),
         )
         self.assertEqual(ADVANCED_TAB_LABEL, "脚本测试（高级）")
+        self.assertEqual(RUN_LOG_TAB_LABEL, "运行日志")
+
+    def test_running_log_path_follows_active_mode(self):
+        app = SimpleNamespace(
+            running_mode="egg",
+            script_test_log_path=None,
+            sid_log_path=None,
+            tid_flow_log_path=None,
+            tid_log_path=None,
+            egg_log_path="egg.log",
+            easycon_log_path="normal.log",
+        )
+        self.assertEqual(AutoRngApp._current_running_log_path(app), "egg.log")
+        app.running_mode = "easycon"
+        self.assertEqual(AutoRngApp._current_running_log_path(app), "normal.log")
 
     def test_manual_ranges_are_parsed_in_stat_order(self):
         minimums, maximums = parse_iv_ranges(

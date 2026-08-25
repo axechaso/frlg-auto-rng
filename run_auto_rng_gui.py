@@ -71,7 +71,9 @@ from rng.tenlines_utils import (
     get_species_name,
     load_frlg_encounters,
 )
+from rng.tenlines import clear_frlg_seed_cache
 from manual_tools import ManualToolsManager, parse_video_device
+from tenlines_seed_updater import update_seed_tables as run_seed_table_update
 
 
 ROOT = RESOURCE_ROOT
@@ -85,6 +87,7 @@ IV_PRESETS = ("不限", "6V", "0A", "0S", "0A0S")
 SID_SOURCE_LABELS = ("定点", "野生")
 MODE_TAB_ORDER = ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）")
 ADVANCED_TAB_LABEL = "脚本测试（高级）"
+RUN_LOG_TAB_LABEL = "运行日志"
 EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
 EGG_START_MODE_PREPARED = "从已完成254步准备开始"
 EGG_START_MODES = (EGG_START_MODE_FULL, EGG_START_MODE_PREPARED)
@@ -699,6 +702,7 @@ class AutoRngApp:
         self.tid_log_path: Path | None = None
         self.egg_log_path: Path | None = None
         self.script_test_log_path: Path | None = None
+        self.easycon_log_path: Path | None = None
         self.running_log_snapshot = ""
         self.busy = False
         self._updating = False
@@ -757,6 +761,7 @@ class AutoRngApp:
         normal_tab = ttk.Frame(self.mode_notebook, padding=6)
         egg_tab = ttk.Frame(self.mode_notebook, padding=6)
         self.script_test_tab = ttk.Frame(self.mode_notebook, padding=6)
+        self.run_log_tab = ttk.Frame(self.mode_notebook, padding=6)
         for tab, label in zip(
             (sid_tab, tid_tab, normal_tab, egg_tab), MODE_TAB_ORDER
         ):
@@ -767,10 +772,45 @@ class AutoRngApp:
             str(normal_tab): "normal",
             str(egg_tab): "egg",
             str(self.script_test_tab): "script_test",
+            str(self.run_log_tab): "log",
         }
         self.mode_notebook.add(self.script_test_tab, text=ADVANCED_TAB_LABEL)
         self.mode_notebook.hide(self.script_test_tab)
+        self.mode_notebook.add(self.run_log_tab, text=RUN_LOG_TAB_LABEL)
         self.mode_notebook.pack(fill="x")
+
+        log_frame = ttk.LabelFrame(
+            self.run_log_tab,
+            text="当前/最近一次运行输出",
+            padding=8,
+        )
+        log_frame.pack(fill="both", expand=True)
+        self.run_log_text = tk.Text(
+            log_frame,
+            height=28,
+            wrap="none",
+            state="disabled",
+        )
+        log_y_scrollbar = ttk.Scrollbar(
+            log_frame,
+            orient="vertical",
+            command=self.run_log_text.yview,
+        )
+        log_x_scrollbar = ttk.Scrollbar(
+            log_frame,
+            orient="horizontal",
+            command=self.run_log_text.xview,
+        )
+        self.run_log_text.configure(
+            yscrollcommand=log_y_scrollbar.set,
+            xscrollcommand=log_x_scrollbar.set,
+        )
+        self.run_log_text.grid(row=0, column=0, sticky="nsew")
+        log_y_scrollbar.grid(row=0, column=1, sticky="ns")
+        log_x_scrollbar.grid(row=1, column=0, sticky="ew")
+        log_frame.rowconfigure(0, weight=1)
+        log_frame.columnconfigure(0, weight=1)
+        self.set_run_log("尚未开始运行。点击“开始运行”后会自动切换到本页。")
 
         sid_identity = ttk.LabelFrame(sid_tab, text="1. SID 查找条件", padding=10)
         sid_identity.pack(fill="x")
@@ -1545,6 +1585,12 @@ class AutoRngApp:
             variable=self.home_buffer_adaptive_var,
         )
         self.home_buffer_adaptive_check.pack(side="left", padx=(14, 0))
+        self.seed_update_button = ttk.Button(
+            manual_tools,
+            text="检查/更新 Seed 表",
+            command=self.update_seed_tables,
+        )
+        self.seed_update_button.pack(side="left", padx=(14, 0))
 
         actions = ttk.Frame(container)
         actions.pack(fill="x", pady=10)
@@ -1581,7 +1627,7 @@ class AutoRngApp:
     def _on_page_mousewheel(self, event):
         # The result box has its own scrollbar; keep the wheel local while the
         # pointer is over it. Everywhere else, scroll the complete form.
-        if event.widget is self.result_text:
+        if event.widget in (self.result_text, self.run_log_text):
             return None
         steps = int(-event.delta / 120)
         if steps == 0:
@@ -1813,7 +1859,11 @@ class AutoRngApp:
                 self._updating = False
             return
         if self.advanced_mode_var.get():
-            self.mode_notebook.add(self.script_test_tab, text=ADVANCED_TAB_LABEL)
+            self.mode_notebook.insert(
+                self.run_log_tab,
+                self.script_test_tab,
+                text=ADVANCED_TAB_LABEL,
+            )
             self.mode_notebook.select(self.script_test_tab)
         else:
             if self._is_script_test_mode():
@@ -1826,6 +1876,11 @@ class AutoRngApp:
 
     def _on_mode_tab_change(self, _event=None):
         mode = self.tab_modes.get(self.mode_notebook.select(), "normal")
+        if mode == "log":
+            if not self.busy and not self._process_running():
+                self.status_var.set("运行日志页会保留当前或最近一次自动流程输出。")
+            self.root.after_idle(self._update_page_scrollregion)
+            return
         if self.mode_var.get() != mode:
             self.mode_var.set(mode)
         is_egg = mode == "egg"
@@ -2400,6 +2455,29 @@ class AutoRngApp:
         self.result_text.insert("1.0", text)
         self.result_text.configure(state="disabled")
 
+    def set_run_log(self, text: str) -> None:
+        self.run_log_text.configure(state="normal")
+        self.run_log_text.delete("1.0", "end")
+        self.run_log_text.insert("1.0", text)
+        self.run_log_text.see("end")
+        self.run_log_text.configure(state="disabled")
+
+    def append_run_log(self, text: str) -> None:
+        line = text.rstrip("\r\n")
+        if not line:
+            return
+        self.run_log_text.configure(state="normal")
+        if self.run_log_text.index("end-1c") != "1.0":
+            self.run_log_text.insert("end", "\n")
+        self.run_log_text.insert("end", line)
+        self.run_log_text.see("end")
+        self.run_log_text.configure(state="disabled")
+
+    def show_run_log_tab(self) -> None:
+        self.mode_notebook.select(self.run_log_tab)
+        self.page_canvas.yview_moveto(0.0)
+        self.root.after_idle(self._update_page_scrollregion)
+
     def set_busy(self, busy, status):
         self.busy = busy
         self.status_var.set(status)
@@ -2411,6 +2489,16 @@ class AutoRngApp:
     def _process_running(self) -> bool:
         return self.process is not None and self.process.poll() is None
 
+    def _current_running_log_path(self) -> Path | None:
+        return {
+            "script_test": self.script_test_log_path,
+            "sid": self.sid_log_path,
+            "tid_flow": self.tid_flow_log_path,
+            "tid": self.tid_log_path,
+            "egg": self.egg_log_path,
+            "easycon": self.easycon_log_path,
+        }.get(self.running_mode)
+
     def _refresh_manual_tools_buttons(self) -> None:
         enabled = not self.busy and not self._process_running()
         state = "normal" if enabled else "disabled"
@@ -2419,8 +2507,60 @@ class AutoRngApp:
         self.monitor_button.configure(state="normal")
         self.advanced_mode_check.configure(state=state)
         self.home_buffer_adaptive_check.configure(state=state)
+        self.seed_update_button.configure(state=state)
         self.port_combo.configure(state="readonly" if enabled else "disabled")
         self.video_combo.configure(state="readonly" if enabled else "disabled")
+
+    def update_seed_tables(self) -> None:
+        if self.busy or self._process_running():
+            messagebox.showerror("正在运行", "请先等待当前操作结束或停止 EasyCon。")
+            return
+        if not messagebox.askyesno(
+            "检查/更新 Seed 表",
+            "将联网读取 Ten Lines 官方火红/叶绿 NX Seed 表，"
+            "同时生成 Python 搜索表和 EasyCon 表，并用 1.6.4-a 校验两份主脚本。\n\n"
+            "校验全部通过后才会切换，是否继续？",
+        ):
+            return
+        source_directory = Path(self.source_var.get()).resolve()
+        ezcon_path = Path(self.ezcon_var.get()).resolve()
+        self.set_run_log("Seed 表更新日志")
+        self.show_run_log_tab()
+        self.set_busy(True, "正在检查 Ten Lines 官方 Seed 表……")
+
+        def progress(message: str) -> None:
+            self.root.after(0, lambda value=message: self.append_run_log(value))
+
+        def worker() -> None:
+            try:
+                result = run_seed_table_update(
+                    source_directory=source_directory,
+                    ezcon_path=ezcon_path,
+                    progress=progress,
+                )
+            except Exception as exc:
+                self.root.after(0, lambda error=exc: self.finish_seed_table_update(error=error))
+            else:
+                self.root.after(0, lambda value=result: self.finish_seed_table_update(result=value))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_seed_table_update(self, result=None, error=None) -> None:
+        if error is not None:
+            self.append_run_log(f"更新失败：{error}")
+            self.set_busy(False, "Seed 表检查/更新失败；现有表未切换。")
+            messagebox.showerror("Seed 表更新失败", str(error))
+            return
+        if result.updated:
+            clear_frlg_seed_cache()
+            self.invalidate_plan()
+        self.set_result(
+            result.message
+            + f"\n\n生效目录：{result.active_directory}"
+            + ("\n现有方案已失效，请重新生成。" if result.updated else "")
+        )
+        self.set_busy(False, result.message)
+        messagebox.showinfo("Seed 表", result.message)
 
     def open_virtual_controller(self) -> None:
         if self.manual_tools is not None:
@@ -3458,8 +3598,19 @@ class AutoRngApp:
                 command_cwd = ROOT
                 self.running_mode = "tid"
             else:
-                command = easycon_command
-                command_cwd = self.project_main.parent
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                self.easycon_log_path = (
+                    self.project_main.parent / f"easycon-{timestamp}.log"
+                )
+                command = build_worker_command("easycon-log", [
+                    "--log-path",
+                    str(self.easycon_log_path),
+                    "--cwd",
+                    str(self.project_main.parent),
+                    "--",
+                    *easycon_command,
+                ])
+                command_cwd = ROOT
                 self.running_mode = "easycon"
         flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         try:
@@ -3473,6 +3624,13 @@ class AutoRngApp:
         self.device_button.configure(state="disabled")
         self._refresh_manual_tools_buttons()
         self.stop_button.configure(state="normal")
+        self.running_log_snapshot = ""
+        running_log_path = self._current_running_log_path()
+        self.set_run_log(
+            "自动流程已启动，正在等待运行输出……"
+            + (f"\n日志文件：{running_log_path}" if running_log_path else "")
+        )
+        self.show_run_log_tab()
         self.status_var.set(
             f"测试脚本正在直接运行；日志将保存到 {self.script_test_log_path}。"
             if self.running_mode == "script_test"
@@ -3487,7 +3645,7 @@ class AutoRngApp:
                     else (
                         f"孵蛋流程正在运行；日志将保存到 {self.egg_log_path}。"
                         if self.running_mode == "egg"
-                        else "EasyCon 正在运行；详细日志见新打开的终端。"
+                        else f"EasyCon 正在运行；日志将保存到 {self.easycon_log_path}。"
                     )
                 )
             )
@@ -3499,11 +3657,13 @@ class AutoRngApp:
             return
         code = self.process.poll()
         if code is None:
-            if self.running_mode == "sid":
-                log_text = read_display_log_tail(self.sid_log_path)
-                if log_text and log_text != self.running_log_snapshot:
-                    self.running_log_snapshot = log_text
-                    self.set_result("SID 采集日志（运行中）：\n\n" + log_text)
+            log_text = read_display_log_tail(
+                self._current_running_log_path(),
+                maximum_chars=50000,
+            )
+            if log_text and log_text != self.running_log_snapshot:
+                self.running_log_snapshot = log_text
+                self.set_run_log(log_text)
             self.root.after(1000, self.poll_process)
             return
         completed_mode = self.running_mode
@@ -3514,6 +3674,14 @@ class AutoRngApp:
         completed_tid_request = self.tid_request
         egg_log_path = self.egg_log_path
         script_test_log_path = self.script_test_log_path
+        easycon_log_path = self.easycon_log_path
+        completed_log_path = self._current_running_log_path()
+        completed_log_text = read_display_log_tail(
+            completed_log_path,
+            maximum_chars=50000,
+        )
+        if completed_log_text:
+            self.set_run_log(completed_log_text)
         self.process = None
         self.running_mode = None
         self.stop_button.configure(state="disabled")
@@ -3604,7 +3772,8 @@ class AutoRngApp:
             else:
                 self.status_var.set(f"孵蛋流程已退出，退出码 {code}{detail}")
         else:
-            self.status_var.set(f"EasyCon 已退出，退出码 {code}。")
+            detail = f"；日志：{easycon_log_path}" if easycon_log_path is not None else ""
+            self.status_var.set(f"EasyCon 已退出，退出码 {code}{detail}")
 
     def stop_run(self):
         if self.process is None or self.process.poll() is not None:

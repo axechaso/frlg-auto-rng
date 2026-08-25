@@ -33,6 +33,7 @@ rng/dev/
 .tools/
 local_assets/
 runtime/
+seed_tables/
 runtime_backend/**/EasyCon2.CLI*.exe
 runtime_backend/**/Tessdata/
 runtime_backend/**/x64/

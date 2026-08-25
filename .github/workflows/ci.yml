@@ -41,6 +41,7 @@ jobs:
           run_sid_reverse.py
           run_sid_reverse_capture.py
           run_tid_starter_flow.py
+          tenlines_seed_updater.py
           automation/easycon118.py
           automation/script_test.py
           automation/sid_reverse118.py
@@ -67,6 +68,7 @@ jobs:
           tests.test_sid_reverse_workflow
           tests.test_starter_sid_verification
           tests.test_script_test
+          tests.test_seed_table_updater
           tests.test_tenlines_fixes
           tests.test_tid_starter_flow
           tests.test_tid_starter_runner

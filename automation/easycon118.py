@@ -13,6 +13,7 @@ from typing import Any
 
 from assets.game_text import CATEGORY_EN_TO_ZH, location_to_zh
 from app_paths import RESOURCE_ROOT
+from tenlines_seed_updater import apply_easycon_seed_table_overrides
 
 from .planner import RunPlan
 
@@ -1815,6 +1816,7 @@ def write_configured_project(
             if directory == "ImgLabel":
                 copy_easycon118_extension_labels(target)
 
+    seed_table_override = apply_easycon_seed_table_overrides(output_dir / "lib")
     ocr_fallback_sha256 = apply_ocr_runtime_fallback(
         output_dir / "lib" / OCR_NAME_LIBRARY_NAME
     )
@@ -1839,6 +1841,7 @@ def write_configured_project(
             "home_buffer_adaptive_classifier_sha256": hashlib.sha256(
                 classifier_text.encode("utf-8")
             ).hexdigest(),
+            "seed_tables": seed_table_override,
         },
         "backend": {
             "name": EASYCON_BACKEND_NAME,
@@ -1933,6 +1936,7 @@ def write_configured_egg_project(
             if directory == "ImgLabel":
                 copy_easycon118_extension_labels(target)
 
+    seed_table_override = apply_easycon_seed_table_overrides(output_dir / "lib")
     ocr_fallback_sha256 = apply_ocr_runtime_fallback(
         output_dir / "lib" / OCR_NAME_LIBRARY_NAME
     )
@@ -1976,6 +1980,7 @@ def write_configured_egg_project(
         )
     ).hexdigest()
     runtime_overrides["wild_pid_retry_limit_sha256"] = wild_pid_retry_limit_sha256
+    runtime_overrides["seed_tables"] = seed_table_override
     manifest = {
         "source": str(source_dir),
         "template": template_path.name,
