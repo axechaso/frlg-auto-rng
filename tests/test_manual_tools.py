@@ -257,8 +257,9 @@ class ManualToolsTests(unittest.TestCase):
         window_type.assert_not_called()
         showerror.assert_called_once()
 
+    @patch("manual_tools.messagebox.showerror")
     @patch("manual_tools.CaptureMonitorWindow")
-    def test_monitor_can_open_while_easycon_is_running(self, window_type):
+    def test_monitor_does_not_open_while_easycon_is_running(self, window_type, showerror):
         manager = ManualToolsManager(
             object(),
             port_provider=lambda: "COM4",
@@ -268,7 +269,25 @@ class ManualToolsTests(unittest.TestCase):
 
         manager.open_monitor()
 
-        window_type.assert_called_once()
+        window_type.assert_not_called()
+        showerror.assert_called_once()
+
+    @patch("manual_tools.CaptureMonitorWindow")
+    def test_close_monitor_releases_only_the_monitor(self, window_type):
+        monitor = window_type.return_value
+        monitor.is_open = True
+        manager = ManualToolsManager(
+            object(),
+            port_provider=lambda: "COM4",
+            video_provider=lambda: "0",
+            process_running=lambda: False,
+        )
+
+        manager.open_monitor()
+        manager.close_monitor()
+
+        monitor.close.assert_called_once()
+        self.assertIsNone(manager.monitor_window)
 
     @patch("manual_tools.CaptureMonitorWindow")
     @patch("manual_tools.VirtualControllerWindow")

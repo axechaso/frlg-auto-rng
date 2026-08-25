@@ -1046,6 +1046,8 @@ class ManualToolsManager:
         )
 
     def open_monitor(self) -> None:
+        if not self._monitor_available():
+            return
         if self.monitor_window is not None and self.monitor_window.is_open:
             self.monitor_window.show()
             return
@@ -1055,18 +1057,31 @@ class ManualToolsManager:
             self._monitor_closed,
         )
 
+    def _monitor_available(self) -> bool:
+        if self.process_running():
+            messagebox.showerror(
+                "EasyCon 正在运行",
+                "自动流程会独占采集卡，请先停止当前自动流程，再打开监视窗口。",
+                parent=self.root,
+            )
+            return False
+        return True
+
     def _controller_closed(self) -> None:
         self.controller_window = None
 
     def _monitor_closed(self) -> None:
         self.monitor_window = None
 
-    def close_all(self) -> None:
-        controller_window = self.controller_window
+    def close_monitor(self) -> None:
         monitor_window = self.monitor_window
-        self.controller_window = None
         self.monitor_window = None
-        if controller_window is not None:
-            controller_window.close()
         if monitor_window is not None:
             monitor_window.close()
+
+    def close_all(self) -> None:
+        controller_window = self.controller_window
+        self.controller_window = None
+        if controller_window is not None:
+            controller_window.close()
+        self.close_monitor()

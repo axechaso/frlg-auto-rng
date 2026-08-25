@@ -101,7 +101,7 @@ GUI 默认有四个输入选项卡，固定顺序为“SID 查找”“TID 乱�
 
 公共工具区还有“检查/更新 Seed 表”。`tenlines_seed_updater.py` 直接下载 Ten Lines 官方 `fr_eng_nx.bin`/`lg_eng_nx.bin`，保留这两份二进制供 Python 搜索，并从同一数据派生 `02_Seed表_火红_NX.ecs`/`03_Seed表_叶绿_NX.ecs`。四个文件先写入 staging、逐个校验指纹，再把两份 ECS 分别覆盖到临时正式/孵蛋 1.1.8 工程并用固定 1.6.4-a `format`；全部通过才把目录切换到 `%LOCALAPPDATA%\FRLG-Auto-RNG\seed_tables\current`，旧 current 移为 previous。`rng/tenlines.py` 优先读取验证过的 current 二进制，`automation/easycon118.py` 生成工程时同时覆盖两份 ECS。打包版静态包含更新器，不依赖系统 Python 或外部 updater；更新成功后清空 Seed 缓存并使已有方案失效。
 
-监视窗口是只读工具，自动脚本运行期间按钮保持可用，也可以重新显示已打开的窗口；虚拟手柄、设备下拉和高级模式仍锁定。监视器与兼容 runner 分别打开同一个 DSHOW 设备，能否并发取决于采集卡驱动；监视器打开失败不应修改或重启正式流程。
+监视窗口只在自动流程空闲时可用。启动自动流程前，GUI 会关闭已经打开的监视窗口；运行期间监视窗口按钮和虚拟手柄、设备下拉及高级模式一并锁定，流程结束后恢复。监视器与兼容 runner 不能并发打开同一个 DSHOW 设备，否则部分采集卡驱动会使脚本侧读取画面失败。
 
 ### 脚本测试（高级，默认隐藏）
 

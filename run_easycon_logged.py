@@ -8,13 +8,16 @@ from pathlib import Path
 
 
 def _write_console(text: str) -> None:
+    stream = sys.stdout
+    if stream is None:
+        return
     try:
-        sys.stdout.write(text)
+        stream.write(text)
     except UnicodeEncodeError:
-        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        encoding = getattr(stream, "encoding", None) or "ascii"
         safe_text = text.encode(encoding, errors="replace").decode(encoding)
-        sys.stdout.write(safe_text)
-    sys.stdout.flush()
+        stream.write(safe_text)
+    stream.flush()
 
 
 def run_logged(

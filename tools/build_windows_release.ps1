@@ -107,6 +107,14 @@ Set-Content -LiteralPath (Join-Path $ReleaseRoot "使用说明.txt") -Encoding U
 )
 
 $ZipPath = Join-Path $BuildRoot "$OutputName.zip"
+# The release folder is self-contained. Remove PyInstaller's temporary copy
+# before compression so the archive does not require another full package's
+# worth of free disk space.
+foreach ($IntermediatePath in @($PyInstallerDist, $PyInstallerWork, (Join-Path $BuildRoot "FRLG-Auto-RNG.spec"))) {
+    if (Test-Path -LiteralPath $IntermediatePath) {
+        Remove-Item -Force -Recurse -LiteralPath $IntermediatePath
+    }
+}
 Compress-Archive -Force -Path (Join-Path $ReleaseRoot "*") -DestinationPath $ZipPath
 Write-Host "发布目录：$ReleaseRoot"
 Write-Host "发布压缩包：$ZipPath"

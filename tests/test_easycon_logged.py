@@ -94,6 +94,20 @@ class EasyConLoggedTests(unittest.TestCase):
                 log_path.read_text(encoding="utf-8"),
             )
 
+    def test_headless_package_logs_when_stdout_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_path = root / "runner.log"
+            with mock.patch("run_easycon_logged.sys.stdout", None):
+                result = run_logged(
+                    [sys.executable, "-c", "print('TID_FLOW_DONE')"],
+                    root,
+                    log_path,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertIn("TID_FLOW_DONE", log_path.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2503,8 +2503,7 @@ class AutoRngApp:
         enabled = not self.busy and not self._process_running()
         state = "normal" if enabled else "disabled"
         self.virtual_controller_button.configure(state=state)
-        # The monitor is read-only and remains available while EasyCon runs.
-        self.monitor_button.configure(state="normal")
+        self.monitor_button.configure(state=state)
         self.advanced_mode_check.configure(state=state)
         self.home_buffer_adaptive_check.configure(state=state)
         self.seed_update_button.configure(state=state)
@@ -3613,6 +3612,7 @@ class AutoRngApp:
                 command_cwd = ROOT
                 self.running_mode = "easycon"
         flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        self.manual_tools.close_monitor()
         try:
             self.process = subprocess.Popen(command, cwd=str(command_cwd), creationflags=flags)
         except OSError as exc:
