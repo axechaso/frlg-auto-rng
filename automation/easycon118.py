@@ -743,12 +743,90 @@ def egg_request_to_user_values(request: EggRunRequest) -> dict[str, Any]:
     return values
 
 
+def build_egg_held_availability(
+    request: EggRunRequest,
+    *,
+    held_offset: int = 0,
+    before: int = 100,
+    after: int = 100,
+) -> dict[str, Any]:
+    """Build Ten Lines-compatible FRLG Held no-egg intervals."""
+    request.validate()
+    if held_offset < 0:
+        raise ValueError("Held Offset 不能为负数")
+    if before < 0 or after < 0:
+        raise ValueError("Held无蛋表前后窗口不能为负数")
+    range_start = max(0, request.held_advances - before)
+    range_end = request.held_advances + after
+    seed = int(request.normalized_seed, 16)
+
+    # Ten Lines Egg Held判定：目标帧先加Offset，再前进1次取高16位。
+    state = seed
+    for _ in range(range_start + held_offset + 1):
+        state = (state * 0x41C64E6D + 0x6073) & 0xFFFFFFFF
+
+    intervals: list[tuple[int, int]] = []
+    interval_start: int | None = None
+    for frame in range(range_start, range_end + 1):
+        produces_egg = (((state >> 16) * 100) // 65535) < request.compatibility
+        if not produces_egg and interval_start is None:
+            interval_start = frame
+        elif produces_egg and interval_start is not None:
+            intervals.append((interval_start, frame - 1))
+            interval_start = None
+        state = (state * 0x41C64E6D + 0x6073) & 0xFFFFFFFF
+    if interval_start is not None:
+        intervals.append((interval_start, range_end))
+
+    return {
+        "schema": "frlg-held-availability/v1",
+        "heldSeed": request.normalized_seed,
+        "targetHeld": request.held_advances,
+        "compatibility": request.compatibility,
+        "heldOffset": held_offset,
+        "rangeStart": range_start,
+        "rangeEnd": range_end,
+        "targetProducesEgg": not any(
+            start <= request.held_advances <= end for start, end in intervals
+        ),
+        "noEggIntervals": intervals,
+    }
+
+
+def egg_held_availability_to_ecs_values(
+    availability: dict[str, Any],
+) -> dict[str, Any]:
+    intervals = availability["noEggIntervals"]
+    return {
+        "孵蛋Held无蛋表Seed": availability["heldSeed"],
+        "孵蛋Held无蛋表目标帧": availability["targetHeld"],
+        "孵蛋Held无蛋表相性": availability["compatibility"],
+        "孵蛋Held无蛋表Offset": availability["heldOffset"],
+        "孵蛋Held无蛋表最小帧": availability["rangeStart"],
+        "孵蛋Held无蛋表最大帧": availability["rangeEnd"],
+        "孵蛋Held无蛋区间起点表": [start for start, _ in intervals],
+        "孵蛋Held无蛋区间终点表": [end for _, end in intervals],
+    }
+
+
 def _ecs_literal(value: Any) -> str:
     if isinstance(value, str):
         return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
     if isinstance(value, bool):
         return "1" if value else "0"
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_ecs_literal(item) for item in value) + "]"
     return str(value)
+
+
+def _configure_all_values(template_text: str, values: dict[str, Any]) -> str:
+    configured = template_text
+    for name, value in values.items():
+        pattern = re.compile(rf"(?m)^\s*\${re.escape(name)}\s*=\s*[^\r\n]*$")
+        configured, count = pattern.subn(f"${name} = {_ecs_literal(value)}", configured)
+        if count != 1:
+            raise ValueError(f"1.1.8 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
+    return configured
 
 
 def configure_template_text(
@@ -785,6 +863,11 @@ def _configure_user_values(template_text: str, values: dict[str, Any]) -> str:
 def configure_egg_template_text(template_text: str, request: EggRunRequest) -> str:
     """Configure the 1.6.4a-only experimental same-seed egg entry."""
     configured = _configure_user_values(template_text, egg_request_to_user_values(request))
+    availability = build_egg_held_availability(request)
+    configured = _configure_all_values(
+        configured,
+        egg_held_availability_to_ecs_values(availability),
+    )
     configured = _apply_egg_summary_fix_text(configured)
     return _apply_egg_reverse_lookup_policy_text(configured)
 

@@ -28,6 +28,7 @@ from automation.easycon118 import (
     TOGEPI_HATCH_CYCLE_OVERRIDE_PATH,
     WILD_PID_RETRY_LIMIT_MARKER,
     EggRunRequest,
+    build_egg_held_availability,
     _apply_egg_home_resample_fix_text,
     _apply_egg_home_buffer_runtime_override_text,
     _apply_egg_hatch_exit_runtime_override_text,
@@ -51,6 +52,7 @@ from automation.easycon118 import (
     _apply_togepi_hatch_cycle_override_text,
     _apply_wild_pid_retry_limit_text,
     configure_egg_template_text,
+    egg_held_availability_to_ecs_values,
     egg_request_to_user_values,
 )
 
@@ -180,6 +182,35 @@ ENDFUNC
         self.assertEqual(values["孵蛋双亲B_SPE"], 5)
         self.assertFalse(egg_request().to_dict()["start_from_prepared_254"])
 
+    def test_held_availability_matches_ten_lines_vector(self):
+        request = egg_request(
+            target_seed="EDDE",
+            held_advances=1115,
+            pickup_advances=3405,
+            compatibility=50,
+        )
+        availability = build_egg_held_availability(
+            request,
+            before=7,
+            after=17,
+        )
+        self.assertTrue(availability["targetProducesEgg"])
+        self.assertEqual(
+            availability["noEggIntervals"],
+            [
+                (1108, 1109),
+                (1111, 1112),
+                (1116, 1120),
+                (1122, 1123),
+                (1125, 1125),
+                (1127, 1127),
+            ],
+        )
+        values = egg_held_availability_to_ecs_values(availability)
+        self.assertEqual(values["孵蛋Held无蛋表Seed"], "EDDE")
+        self.assertEqual(values["孵蛋Held无蛋区间起点表"][2], 1116)
+        self.assertEqual(values["孵蛋Held无蛋区间终点表"][2], 1120)
+
     def test_prepared_254_mode_skips_only_one_time_preparation(self):
         original = """\
 $孵蛋同Seed模式 = 1
@@ -229,11 +260,21 @@ ENDFUNC
             " & $孵蛋亲本B性别 & \"，相性 \" & $孵蛋双亲相性"
         )
         template += "\n# ============================进阶设置\n$内部参数 = 1"
+        for name in (
+            "孵蛋Held无蛋表Seed", "孵蛋Held无蛋表目标帧", "孵蛋Held无蛋表相性",
+            "孵蛋Held无蛋表Offset", "孵蛋Held无蛋表最小帧", "孵蛋Held无蛋表最大帧",
+            "孵蛋Held无蛋区间起点表", "孵蛋Held无蛋区间终点表",
+        ):
+            template += f"\n${name} = 0"
         configured = configure_egg_template_text(template, egg_request())
         self.assertIn('$静态或野生 = "孵蛋"', configured)
         self.assertIn('$目标Seed = "75D1"', configured)
         self.assertIn('$孵蛋双亲A_DEF = 29', configured)
         self.assertIn('$孵蛋双亲B_SPA = 3', configured)
+        self.assertIn('$孵蛋Held无蛋表Seed = "75D1"', configured)
+        self.assertIn('$孵蛋Held无蛋表目标帧 = 8021', configured)
+        self.assertIn('$孵蛋Held无蛋表相性 = 70', configured)
+        self.assertRegex(configured, r"\$孵蛋Held无蛋区间起点表 = \[\d")
         self.assertIn(
             "$孵蛋蛋种名称文本 = 目标中文名称($游戏版本, $孵蛋蛋种族全国图鉴编号)",
             configured,
