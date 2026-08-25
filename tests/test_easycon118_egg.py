@@ -211,6 +211,16 @@ ENDFUNC
         self.assertEqual(values["孵蛋Held无蛋区间起点表"][2], 1116)
         self.assertEqual(values["孵蛋Held无蛋区间终点表"][2], 1120)
 
+    def test_old_cached_template_reports_how_to_refresh_held_table_fields(self):
+        old_template = "\n".join(
+            f"${name} = 0" for name in egg_request_to_user_values(egg_request())
+        ) + "\n# ============================进阶设置\n"
+        with self.assertRaisesRegex(ValueError, "local_assets仍为旧缓存"):
+            configure_egg_template_text(
+                old_template,
+                egg_request(),
+            )
+
     def test_prepared_254_mode_skips_only_one_time_preparation(self):
         original = """\
 $孵蛋同Seed模式 = 1

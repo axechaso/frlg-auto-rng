@@ -1023,18 +1023,18 @@ class ManualToolsManager:
         self.controller_window: VirtualControllerWindow | None = None
         self.monitor_window: CaptureMonitorWindow | None = None
 
-    def _available(self) -> bool:
+    def _controller_available(self) -> bool:
         if self.process_running():
             messagebox.showerror(
                 "EasyCon 正在运行",
-                "请先停止当前自动流程，再打开手动工具。",
+                "请先停止当前自动流程，再打开虚拟手柄。",
                 parent=self.root,
             )
             return False
         return True
 
     def open_virtual_controller(self) -> None:
-        if not self._available():
+        if not self._controller_available():
             return
         if self.controller_window is not None and self.controller_window.is_open:
             self.controller_window.show()
@@ -1046,8 +1046,6 @@ class ManualToolsManager:
         )
 
     def open_monitor(self) -> None:
-        if not self._available():
-            return
         if self.monitor_window is not None and self.monitor_window.is_open:
             self.monitor_window.show()
             return

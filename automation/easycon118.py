@@ -80,11 +80,16 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package that keeps the completed no-egg pre-calibration after
     # a post-pickup Seed miss and retries generation/pickup directly.
     "77bea49b62c909d105dd7b81529bbb3a8046d996781d68b2ebc479cd6096c841",
+    # Download package with the Ten Lines Held no-egg interval table used to
+    # leave stable no-egg regions during fine calibration.
+    "bdd0ecbb9644555dd9adad4834ce61fa2ab343fe90df9d429de4be5fb8da6dbc",
 )
-EXPECTED_SCRIPT_SHA256 = "74b4a3ecce59e3817699ee8dece2594d67f48bad08b33068358c45b74aaf6e9e"
+EXPECTED_SCRIPT_SHA256 = "b0941989541991148e075926775f35bac301b524587048ba741a52f7f01da1b4"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # Materialized corpus before the Held no-egg interval table was added.
+    "74b4a3ecce59e3817699ee8dece2594d67f48bad08b33068358c45b74aaf6e9e",
     # Materialized corpus before post-pickup Seed failures began preserving
     # the completed no-egg pre-calibration.
     "1700ba02cc60fdfd9857f14a2a8384c5736c06908a92e468d1dfd721a9be4865",
@@ -864,9 +869,27 @@ def configure_egg_template_text(template_text: str, request: EggRunRequest) -> s
     """Configure the 1.6.4a-only experimental same-seed egg entry."""
     configured = _configure_user_values(template_text, egg_request_to_user_values(request))
     availability = build_egg_held_availability(request)
+    availability_values = egg_held_availability_to_ecs_values(availability)
+    missing_fields = tuple(
+        name
+        for name in availability_values
+        if len(
+            re.findall(
+                rf"(?m)^\s*\${re.escape(name)}\s*=\s*[^\r\n]*$",
+                configured,
+            )
+        )
+        != 1
+    )
+    if missing_fields:
+        raise ValueError(
+            "当前1.1.8孵蛋模板未包含Held无蛋区间字段，通常是local_assets仍为旧缓存。"
+            "请重新运行安装脚本刷新1.1.8缓存，或在GUI选择更新后的1.1.8包。"
+            "缺少字段：" + "、".join(f"${name}" for name in missing_fields)
+        )
     configured = _configure_all_values(
         configured,
-        egg_held_availability_to_ecs_values(availability),
+        availability_values,
     )
     configured = _apply_egg_summary_fix_text(configured)
     return _apply_egg_reverse_lookup_policy_text(configured)

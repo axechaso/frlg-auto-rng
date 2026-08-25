@@ -244,7 +244,7 @@ class ManualToolsTests(unittest.TestCase):
 
     @patch("manual_tools.messagebox.showerror")
     @patch("manual_tools.VirtualControllerWindow")
-    def test_tools_do_not_open_while_easycon_is_running(self, window_type, showerror):
+    def test_controller_does_not_open_while_easycon_is_running(self, window_type, showerror):
         manager = ManualToolsManager(
             object(),
             port_provider=lambda: "COM4",
@@ -256,6 +256,19 @@ class ManualToolsTests(unittest.TestCase):
 
         window_type.assert_not_called()
         showerror.assert_called_once()
+
+    @patch("manual_tools.CaptureMonitorWindow")
+    def test_monitor_can_open_while_easycon_is_running(self, window_type):
+        manager = ManualToolsManager(
+            object(),
+            port_provider=lambda: "COM4",
+            video_provider=lambda: "[3] Capture Card",
+            process_running=lambda: True,
+        )
+
+        manager.open_monitor()
+
+        window_type.assert_called_once()
 
     @patch("manual_tools.CaptureMonitorWindow")
     @patch("manual_tools.VirtualControllerWindow")

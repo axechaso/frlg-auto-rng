@@ -222,6 +222,8 @@ def parse_exact_ivs(values, label: str) -> tuple[int, int, int, int, int, int]:
 
 
 EGG_CONFIG_VERSION = 1
+EGG_PARENT_CONFIG_KIND = "egg_parent"
+EGG_FULL_CONFIG_KIND = "egg_full"
 
 
 def build_egg_config_payload(
@@ -296,6 +298,203 @@ def parse_egg_config_payload(payload) -> dict:
         payload.get("parent_a_ivs"),
         payload.get("parent_b_ivs"),
         payload.get("start_from_prepared_254", False),
+    )
+
+
+def build_egg_parent_config_payload(
+    species_id,
+    compatibility,
+    parent_a_gender,
+    parent_a_ivs,
+    parent_b_gender,
+    parent_b_ivs,
+) -> dict:
+    """Build a portable parent-only egg configuration."""
+    try:
+        species_id = int(species_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("蛋种全国图鉴编号必须是整数") from exc
+    if not 1 <= species_id <= 386:
+        raise ValueError("蛋种全国图鉴编号必须在 1-386 之间")
+    try:
+        compatibility = int(compatibility)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("双亲相性只能填写 20、50 或 70") from exc
+    if compatibility not in {20, 50, 70}:
+        raise ValueError("双亲相性只能填写 20、50 或 70")
+    parent_a_gender = str(parent_a_gender).strip()
+    parent_b_gender = str(parent_b_gender).strip()
+    if parent_a_gender not in {"雌", "无性别"}:
+        raise ValueError("孵蛋亲本 A 必须是雌或无性别")
+    if parent_b_gender not in {"雄", "无性别"}:
+        raise ValueError("孵蛋亲本 B 必须是雄或无性别")
+    if parent_a_gender == parent_b_gender == "无性别":
+        raise ValueError("两只亲本不能同时填写无性别")
+    for values, label in ((parent_a_ivs, "亲本A"), (parent_b_ivs, "亲本B")):
+        if isinstance(values, (str, bytes)):
+            raise ValueError(f"{label}必须包含六项 IV")
+        try:
+            len(values)
+        except TypeError as exc:
+            raise ValueError(f"{label}必须包含六项 IV") from exc
+    parent_a_ivs = parse_exact_ivs(parent_a_ivs, "亲本A")
+    parent_b_ivs = parse_exact_ivs(parent_b_ivs, "亲本B")
+    return {
+        "kind": EGG_PARENT_CONFIG_KIND,
+        "version": EGG_CONFIG_VERSION,
+        "egg_species_id": species_id,
+        "compatibility": compatibility,
+        "parent_a_gender": parent_a_gender,
+        "parent_a_ivs": list(parent_a_ivs),
+        "parent_b_gender": parent_b_gender,
+        "parent_b_ivs": list(parent_b_ivs),
+    }
+
+
+def parse_egg_parent_config_payload(payload) -> dict:
+    """Read a parent configuration, including legacy whole-page version 1 files."""
+    if not isinstance(payload, dict):
+        raise ValueError("配置文件顶层必须是 JSON 对象")
+    kind = payload.get("kind")
+    if kind is None:
+        legacy = parse_egg_config_payload(payload)
+        return build_egg_parent_config_payload(
+            legacy["egg_species_id"],
+            legacy["compatibility"],
+            payload.get("parent_a_gender", "雌"),
+            legacy["parent_a_ivs"],
+            payload.get("parent_b_gender", "雄"),
+            legacy["parent_b_ivs"],
+        )
+    if kind != EGG_PARENT_CONFIG_KIND:
+        raise ValueError("所选文件不是孵蛋亲本配置")
+    try:
+        version = int(payload.get("version", EGG_CONFIG_VERSION))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("配置文件版本无效") from exc
+    if version != EGG_CONFIG_VERSION:
+        raise ValueError(f"不支持的孵蛋亲本配置版本: {version}")
+    return build_egg_parent_config_payload(
+        payload.get("egg_species_id"),
+        payload.get("compatibility"),
+        payload.get("parent_a_gender"),
+        payload.get("parent_a_ivs"),
+        payload.get("parent_b_gender"),
+        payload.get("parent_b_ivs"),
+    )
+
+
+def build_egg_full_config_payload(
+    game,
+    nx_model,
+    seed_mode,
+    target_seed,
+    held_advances,
+    pickup_advances,
+    species_id,
+    compatibility,
+    parent_a_gender,
+    parent_a_ivs,
+    parent_b_gender,
+    parent_b_ivs,
+    start_from_prepared_254=False,
+    home_buffer_adaptive_threshold=False,
+) -> dict:
+    """Validate and build a complete egg-page configuration."""
+    parent = build_egg_parent_config_payload(
+        species_id,
+        compatibility,
+        parent_a_gender,
+        parent_a_ivs,
+        parent_b_gender,
+        parent_b_ivs,
+    )
+    game = str(game).strip()
+    if game not in {"火红", "叶绿"}:
+        raise ValueError("游戏版本只能是火红或叶绿")
+    try:
+        nx_model = int(nx_model)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("机型必须是 Switch 1 或 Switch 2") from exc
+    if nx_model not in {1, 2}:
+        raise ValueError("机型必须是 Switch 1 或 Switch 2")
+    try:
+        seed_mode = int(seed_mode)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("孵蛋 Seed 模式必须在 0-9 之间") from exc
+    try:
+        held_advances = int(held_advances)
+        pickup_advances = int(pickup_advances)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Held/生成帧和 Pickup/领取帧必须是整数") from exc
+    if not isinstance(start_from_prepared_254, bool):
+        raise ValueError("254步启动模式必须是布尔值")
+    if not isinstance(home_buffer_adaptive_threshold, bool):
+        raise ValueError("HOME_BUFFER稳定低分自适应开关必须是布尔值")
+    game_code = ("fr" if game == "火红" else "lg") + ("_nx2" if nx_model == 2 else "_nx")
+    request = EggRunRequest(
+        game=game_code,
+        seed_mode=seed_mode,
+        target_seed=str(target_seed),
+        held_advances=held_advances,
+        pickup_advances=pickup_advances,
+        species_id=parent["egg_species_id"],
+        compatibility=parent["compatibility"],
+        parent_a_gender=parent["parent_a_gender"],
+        parent_a_ivs=tuple(parent["parent_a_ivs"]),
+        parent_b_gender=parent["parent_b_gender"],
+        parent_b_ivs=tuple(parent["parent_b_ivs"]),
+        start_from_prepared_254=start_from_prepared_254,
+        home_buffer_adaptive_threshold=home_buffer_adaptive_threshold,
+    )
+    request.validate()
+    return {
+        "kind": EGG_FULL_CONFIG_KIND,
+        "version": EGG_CONFIG_VERSION,
+        "game": game,
+        "nx_model": nx_model,
+        "seed_mode": seed_mode,
+        "target_seed": request.normalized_seed,
+        "held_advances": held_advances,
+        "pickup_advances": pickup_advances,
+        "egg_species_id": parent["egg_species_id"],
+        "compatibility": parent["compatibility"],
+        "parent_a_gender": parent["parent_a_gender"],
+        "parent_a_ivs": parent["parent_a_ivs"],
+        "parent_b_gender": parent["parent_b_gender"],
+        "parent_b_ivs": parent["parent_b_ivs"],
+        "start_from_prepared_254": start_from_prepared_254,
+        "home_buffer_adaptive_threshold": home_buffer_adaptive_threshold,
+    }
+
+
+def parse_egg_full_config_payload(payload) -> dict:
+    """Validate a saved complete egg-page configuration."""
+    if not isinstance(payload, dict):
+        raise ValueError("配置文件顶层必须是 JSON 对象")
+    if payload.get("kind") != EGG_FULL_CONFIG_KIND:
+        raise ValueError("所选文件不是孵蛋全部配置")
+    try:
+        version = int(payload.get("version", EGG_CONFIG_VERSION))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("配置文件版本无效") from exc
+    if version != EGG_CONFIG_VERSION:
+        raise ValueError(f"不支持的孵蛋全部配置版本: {version}")
+    return build_egg_full_config_payload(
+        payload.get("game"),
+        payload.get("nx_model"),
+        payload.get("seed_mode"),
+        payload.get("target_seed"),
+        payload.get("held_advances"),
+        payload.get("pickup_advances"),
+        payload.get("egg_species_id"),
+        payload.get("compatibility"),
+        payload.get("parent_a_gender"),
+        payload.get("parent_a_ivs"),
+        payload.get("parent_b_gender"),
+        payload.get("parent_b_ivs"),
+        payload.get("start_from_prepared_254", False),
+        payload.get("home_buffer_adaptive_threshold", False),
     )
 
 
@@ -969,13 +1168,23 @@ class AutoRngApp:
         egg_config_actions.grid(row=5, column=0, columnspan=8, sticky="w", padx=6, pady=(7, 0))
         ttk.Button(
             egg_config_actions,
-            text="保存孵蛋配置",
-            command=self.save_egg_config,
+            text="保存亲本配置",
+            command=self.save_egg_parent_config,
         ).pack(side="left")
         ttk.Button(
             egg_config_actions,
-            text="载入孵蛋配置",
-            command=self.load_egg_config,
+            text="载入亲本配置",
+            command=self.load_egg_parent_config,
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            egg_config_actions,
+            text="保存全部配置",
+            command=self.save_egg_full_config,
+        ).pack(side="left", padx=(16, 0))
+        ttk.Button(
+            egg_config_actions,
+            text="载入全部配置",
+            command=self.load_egg_full_config,
         ).pack(side="left", padx=(8, 0))
 
         tid_identity = ttk.LabelFrame(tid_tab, text="1. TID / SID 基本条件", padding=8)
@@ -1842,46 +2051,112 @@ class AutoRngApp:
             direct_advances=int(self.direct_adv_var.get()),
         )
 
-    def _egg_config_payload(self) -> dict:
+    def _egg_parent_config_payload(self) -> dict:
         species_id = parse_egg_species(self.egg_pokemon_var.get())
-        return build_egg_config_payload(
-            self.game_var.get(),
-            {"Switch 1": 1, "Switch 2": 2}.get(self.nx_var.get()),
+        return build_egg_parent_config_payload(
             species_id,
             self.egg_compatibility_var.get(),
+            self.egg_parent_a_gender_var.get(),
             [variable.get() for variable in self.egg_parent_a_iv_vars],
+            self.egg_parent_b_gender_var.get(),
             [variable.get() for variable in self.egg_parent_b_iv_vars],
-            self.egg_start_mode_var.get() == EGG_START_MODE_PREPARED,
         )
 
-    def save_egg_config(self):
-        try:
-            payload = self._egg_config_payload()
-        except (TypeError, ValueError) as exc:
-            messagebox.showerror("保存孵蛋配置失败", str(exc))
-            return
+    def _egg_full_config_payload(self) -> dict:
+        if self.egg_seed_mode_var.get() == "请选择":
+            raise ValueError("保存全部配置前必须选择孵蛋 Seed 模式")
+        species_id = parse_egg_species(self.egg_pokemon_var.get())
+        return build_egg_full_config_payload(
+            self.game_var.get(),
+            {"Switch 1": 1, "Switch 2": 2}.get(self.nx_var.get()),
+            self.egg_seed_mode_var.get().split(":", 1)[0],
+            self.egg_seed_var.get(),
+            self.egg_held_var.get(),
+            self.egg_pickup_var.get(),
+            species_id,
+            self.egg_compatibility_var.get(),
+            self.egg_parent_a_gender_var.get(),
+            [variable.get() for variable in self.egg_parent_a_iv_vars],
+            self.egg_parent_b_gender_var.get(),
+            [variable.get() for variable in self.egg_parent_b_iv_vars],
+            self.egg_start_mode_var.get() == EGG_START_MODE_PREPARED,
+            self.home_buffer_adaptive_var.get(),
+        )
+
+    def _save_egg_json(self, payload: dict, title: str, initialfile: str) -> str | None:
         path = filedialog.asksaveasfilename(
-            title="保存孵蛋配置",
+            title=title,
             initialdir=str(ROOT),
-            initialfile="孵蛋配置.json",
+            initialfile=initialfile,
             defaultextension=".json",
             filetypes=(("JSON 配置", "*.json"), ("所有文件", "*.*")),
         )
         if not path:
-            return
-        try:
-            Path(path).write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            messagebox.showerror("保存孵蛋配置失败", str(exc))
-            return
-        self.status_var.set(f"孵蛋配置已保存：{path}")
+            return None
+        Path(path).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return path
 
-    def load_egg_config(self):
+    def save_egg_parent_config(self):
+        try:
+            path = self._save_egg_json(
+                self._egg_parent_config_payload(),
+                "保存孵蛋亲本配置",
+                "孵蛋亲本配置.json",
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            messagebox.showerror("保存孵蛋亲本配置失败", str(exc))
+            return
+        if path:
+            self.status_var.set(f"孵蛋亲本配置已保存：{path}")
+
+    def save_egg_full_config(self):
+        try:
+            path = self._save_egg_json(
+                self._egg_full_config_payload(),
+                "保存孵蛋全部配置",
+                "孵蛋全部配置.json",
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            messagebox.showerror("保存孵蛋全部配置失败", str(exc))
+            return
+        if path:
+            self.status_var.set(f"孵蛋全部配置已保存：{path}")
+
+    def _apply_egg_parent_config(self, config: dict) -> None:
+        species_id = config["egg_species_id"]
+        display = next(
+            (
+                key
+                for key, value in self.egg_pokemon_map.items()
+                if get_species_id(value) == species_id
+            ),
+            None,
+        )
+        if display is None:
+            raise ValueError(f"无法在当前蛋种列表中找到图鉴编号 {species_id}")
+        self._updating = True
+        try:
+            self.egg_pokemon_var.set(display)
+            self.egg_compatibility_var.set(str(config["compatibility"]))
+            self.egg_parent_a_gender_var.set(config["parent_a_gender"])
+            self.egg_parent_b_gender_var.set(config["parent_b_gender"])
+            for variable, value in zip(
+                self.egg_parent_a_iv_vars, config["parent_a_ivs"]
+            ):
+                variable.set(str(value))
+            for variable, value in zip(
+                self.egg_parent_b_iv_vars, config["parent_b_ivs"]
+            ):
+                variable.set(str(value))
+        finally:
+            self._updating = False
+
+    def load_egg_parent_config(self):
         path = filedialog.askopenfilename(
-            title="载入孵蛋配置",
+            title="载入孵蛋亲本配置",
             initialdir=str(ROOT),
             filetypes=(("JSON 配置", "*.json"), ("所有文件", "*.*")),
         )
@@ -1889,10 +2164,27 @@ class AutoRngApp:
             return
         try:
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
-            config = parse_egg_config_payload(payload)
+            config = parse_egg_parent_config_payload(payload)
+            self._apply_egg_parent_config(config)
+            self.invalidate_plan()
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            messagebox.showerror("载入孵蛋亲本配置失败", str(exc))
+            return
+        self.status_var.set(f"孵蛋亲本配置已载入：{path}")
+
+    def load_egg_full_config(self):
+        path = filedialog.askopenfilename(
+            title="载入孵蛋全部配置",
+            initialdir=str(ROOT),
+            filetypes=(("JSON 配置", "*.json"), ("所有文件", "*.*")),
+        )
+        if not path:
+            return
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+            config = parse_egg_full_config_payload(payload)
             game = config["game"]
             nx_model = config["nx_model"]
-            species_id = config["egg_species_id"]
             self._updating = True
             try:
                 self.game_var.set(game)
@@ -1900,40 +2192,47 @@ class AutoRngApp:
             finally:
                 self._updating = False
             self._on_game_change()
-            display = next(
+            seed_mode = next(
                 (
-                    key
-                    for key, value in self.egg_pokemon_map.items()
-                    if get_species_id(value) == species_id
+                    choice
+                    for choice in self.egg_seed_mode_combo.cget("values")
+                    if str(choice).startswith(f'{config["seed_mode"]}:')
                 ),
                 None,
             )
-            if display is None:
-                raise ValueError(f"无法在当前蛋种列表中找到图鉴编号 {species_id}")
+            if seed_mode is None:
+                raise ValueError(
+                    f'当前游戏不支持孵蛋 Seed 模式 {config["seed_mode"]}'
+                )
+            self._apply_egg_parent_config(config)
             self._updating = True
             try:
-                self.egg_pokemon_var.set(display)
-                self.egg_compatibility_var.set(str(config["compatibility"]))
+                self.egg_seed_mode_var.set(seed_mode)
+                self.egg_seed_var.set(config["target_seed"])
+                self.egg_held_var.set(str(config["held_advances"]))
+                self.egg_pickup_var.set(str(config["pickup_advances"]))
                 self.egg_start_mode_var.set(
                     EGG_START_MODE_PREPARED
                     if config["start_from_prepared_254"]
                     else EGG_START_MODE_FULL
                 )
-                for variable, value in zip(
-                    self.egg_parent_a_iv_vars, config["parent_a_ivs"]
-                ):
-                    variable.set(str(value))
-                for variable, value in zip(
-                    self.egg_parent_b_iv_vars, config["parent_b_ivs"]
-                ):
-                    variable.set(str(value))
+                self.home_buffer_adaptive_var.set(
+                    config["home_buffer_adaptive_threshold"]
+                )
             finally:
                 self._updating = False
             self.invalidate_plan()
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            messagebox.showerror("载入孵蛋配置失败", str(exc))
+            messagebox.showerror("载入孵蛋全部配置失败", str(exc))
             return
-        self.status_var.set(f"孵蛋配置已载入：{path}")
+        self.status_var.set(f"孵蛋全部配置已载入：{path}")
+
+    # Keep the old method names for callers that used the first GUI version.
+    def save_egg_config(self):
+        self.save_egg_parent_config()
+
+    def load_egg_config(self):
+        self.load_egg_parent_config()
 
     def collect_egg_request(self) -> EggRunRequest:
         species_id = parse_egg_species(self.egg_pokemon_var.get())
@@ -2116,7 +2415,8 @@ class AutoRngApp:
         enabled = not self.busy and not self._process_running()
         state = "normal" if enabled else "disabled"
         self.virtual_controller_button.configure(state=state)
-        self.monitor_button.configure(state=state)
+        # The monitor is read-only and remains available while EasyCon runs.
+        self.monitor_button.configure(state="normal")
         self.advanced_mode_check.configure(state=state)
         self.home_buffer_adaptive_check.configure(state=state)
         self.port_combo.configure(state="readonly" if enabled else "disabled")

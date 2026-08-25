@@ -9,12 +9,16 @@ from run_auto_rng_gui import (
     MODE_TAB_ORDER,
     _install_autocomplete_combo,
     build_egg_config_payload,
+    build_egg_full_config_payload,
+    build_egg_parent_config_payload,
     clean_terminal_log,
     describe_sid_log_failure,
     filter_autocomplete_choices,
     format_video_device_choice,
     iv_ranges_for_preset,
     parse_egg_config_payload,
+    parse_egg_full_config_payload,
+    parse_egg_parent_config_payload,
     parse_egg_species,
     parse_iv_ranges,
     parse_sid_effort_values,
@@ -105,6 +109,81 @@ class GuiIvInputTests(unittest.TestCase):
                     "parent_b_ivs": [31] * 6,
                     "start_from_prepared_254": 1,
                 }
+            )
+
+    def test_egg_parent_config_round_trips_genders_and_ivs(self):
+        payload = build_egg_parent_config_payload(
+            46,
+            50,
+            "雌",
+            [31, 0, 30, 29, 28, 27],
+            "无性别",
+            [1, 2, 3, 4, 5, 6],
+        )
+        self.assertEqual(payload["kind"], "egg_parent")
+        self.assertEqual(payload["egg_species_id"], 46)
+        self.assertEqual(payload["parent_a_gender"], "雌")
+        self.assertEqual(payload["parent_b_gender"], "无性别")
+        self.assertEqual(parse_egg_parent_config_payload(payload), payload)
+
+    def test_egg_parent_config_loads_legacy_whole_page_file(self):
+        legacy = build_egg_config_payload(
+            "火红", 1, 46, 70, [31] * 6, [30] * 6, True
+        )
+        parent = parse_egg_parent_config_payload(legacy)
+        self.assertEqual(parent["kind"], "egg_parent")
+        self.assertEqual(parent["egg_species_id"], 46)
+        self.assertEqual(parent["parent_a_gender"], "雌")
+        self.assertEqual(parent["parent_b_gender"], "雄")
+        self.assertNotIn("game", parent)
+        self.assertNotIn("start_from_prepared_254", parent)
+
+    def test_egg_full_config_round_trips_all_runtime_inputs(self):
+        payload = build_egg_full_config_payload(
+            "叶绿",
+            2,
+            3,
+            "0xedde",
+            1115,
+            3405,
+            46,
+            50,
+            "雌",
+            [31, 30, 29, 28, 27, 26],
+            "雄",
+            [1, 2, 3, 4, 5, 6],
+            True,
+            True,
+        )
+        self.assertEqual(payload["kind"], "egg_full")
+        self.assertEqual(payload["target_seed"], "EDDE")
+        self.assertEqual(payload["seed_mode"], 3)
+        self.assertEqual(payload["held_advances"], 1115)
+        self.assertEqual(payload["pickup_advances"], 3405)
+        self.assertTrue(payload["start_from_prepared_254"])
+        self.assertTrue(payload["home_buffer_adaptive_threshold"])
+        self.assertEqual(parse_egg_full_config_payload(payload), payload)
+
+    def test_egg_full_config_rejects_wrong_kind_and_invalid_game_mode(self):
+        parent = build_egg_parent_config_payload(
+            46, 50, "雌", [31] * 6, "雄", [31] * 6
+        )
+        with self.assertRaisesRegex(ValueError, "不是孵蛋全部配置"):
+            parse_egg_full_config_payload(parent)
+        with self.assertRaisesRegex(ValueError, "火红 NX Seed 表不包含模式 3"):
+            build_egg_full_config_payload(
+                "火红",
+                1,
+                3,
+                "EDDE",
+                1115,
+                3405,
+                46,
+                50,
+                "雌",
+                [31] * 6,
+                "雄",
+                [31] * 6,
             )
 
     def test_autocomplete_filters_chinese_english_and_location_fragments(self):
