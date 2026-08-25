@@ -84,6 +84,8 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package with the Ten Lines Held no-egg interval table used to
     # leave stable no-egg regions during fine calibration.
     "bdd0ecbb9644555dd9adad4834ce61fa2ab343fe90df9d429de4be5fb8da6dbc",
+    # Download package with the latest egg-flow updates imported on 2026-08-25.
+    "79c543b4b65cc85c3bced3e2bd15dedb26abcf4bff380d7c7c4e8b2f5cee7842",
 )
 EXPECTED_SCRIPT_SHA256 = "b0941989541991148e075926775f35bac301b524587048ba741a52f7f01da1b4"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -103,6 +105,8 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # Importer materialization adds one controlled trailing newline to the
     # timeline entry while applying the reviewed 1.6.4-a fixes.
     "316c6aa9b6f05adeef0d7f306032b7ae553779d6a86848ae301aa981fd9a8188",
+    # Materialized corpus for the latest imported egg-flow package.
+    "96882c1d918d9996fc7893051941729f8bdf0a9babc3cab3d8a9eda2ebde3aac",
 )
 
 
