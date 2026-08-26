@@ -747,14 +747,17 @@ class CaptureMonitorWindow:
         root: tk.Misc,
         video_provider: Callable[[], str],
         on_closed: Callable[[], None],
+        preview_url_provider: Callable[[], str | None] | None = None,
     ):
         self.root = root
         self.video_provider = video_provider
+        self.preview_url_provider = preview_url_provider
         self.on_closed = on_closed
         self._closed = False
         self._generation = 0
         self._stop_event = threading.Event()
         self._capture = None
+        self._stream_response = None
         self._capture_thread: threading.Thread | None = None
         self._frame_lock = threading.Lock()
         self._latest_frame: tuple[int, str, int, int] | None = None
@@ -872,6 +875,12 @@ class CaptureMonitorWindow:
         return None
 
     def restart(self) -> None:
+        preview_url = (
+            self.preview_url_provider() if self.preview_url_provider is not None else None
+        )
+        if preview_url:
+            self._restart_preview_stream(preview_url)
+            return
         try:
             device = parse_video_device(self.video_provider())
         except ValueError as exc:
@@ -888,6 +897,111 @@ class CaptureMonitorWindow:
             daemon=True,
         )
         self._capture_thread.start()
+
+    def _restart_preview_stream(self, preview_url: str) -> None:
+        self._stop_capture()
+        self._generation += 1
+        generation = self._generation
+        self._stop_event = threading.Event()
+        self.status_var.set("正在连接运行中的 EasyCon 预览…")
+        self._capture_thread = threading.Thread(
+            target=self._preview_loop,
+            args=(preview_url, generation, self._stop_event),
+            daemon=True,
+        )
+        self._capture_thread.start()
+
+    def _preview_loop(
+        self,
+        preview_url: str,
+        generation: int,
+        stop_event: threading.Event,
+    ) -> None:
+        import cv2
+        from urllib.request import urlopen
+
+        sequence = 0
+        retry_reported = False
+        while not stop_event.is_set() and generation == self._generation:
+            response = None
+            connected = False
+            try:
+                # The runner starts the HTTP listener after opening the capture
+                # device, so the first connection can legitimately race startup.
+                response = urlopen(preview_url, timeout=2)
+                self._stream_response = response
+                connected = True
+                retry_reported = False
+                self._post_status("已连接 EasyCon 回环预览")
+                buffer = bytearray()
+                first_frame = True
+                while not stop_event.is_set() and generation == self._generation:
+                    read_chunk = getattr(response, "read1", response.read)
+                    chunk = read_chunk(65536)
+                    if not chunk:
+                        break
+                    buffer.extend(chunk)
+                    while not stop_event.is_set():
+                        start = buffer.find(b"\xff\xd8")
+                        if start < 0:
+                            if len(buffer) > 2:
+                                del buffer[:-2]
+                            break
+                        end = buffer.find(b"\xff\xd9", start + 2)
+                        if end < 0:
+                            if start > 0:
+                                del buffer[:start]
+                            break
+                        jpeg = bytes(buffer[start : end + 2])
+                        del buffer[: end + 2]
+                        array = __import__("numpy").frombuffer(jpeg, dtype="uint8")
+                        frame = cv2.imdecode(array, cv2.IMREAD_COLOR)
+                        if frame is None or frame.size == 0:
+                            continue
+                        with self._frame_lock:
+                            target_width, target_height = self._target_size
+                        shrinking = (
+                            target_width <= frame.shape[1]
+                            and target_height <= frame.shape[0]
+                        )
+                        resized = cv2.resize(
+                            frame,
+                            (target_width, target_height),
+                            interpolation=(
+                                cv2.INTER_AREA if shrinking else cv2.INTER_LINEAR
+                            ),
+                        )
+                        encoded = encode_tk_png(resized, cv2)
+                        sequence += 1
+                        with self._frame_lock:
+                            self._latest_frame = (
+                                sequence,
+                                encoded,
+                                target_width,
+                                target_height,
+                            )
+                        if first_frame:
+                            first_frame = False
+                            self._post_status("EasyCon 回环画面已连接")
+            except Exception as exc:
+                if not stop_event.is_set() and not retry_reported:
+                    self._post_status(f"回环预览连接失败，正在重试：{exc}")
+                    retry_reported = True
+            finally:
+                if response is not None:
+                    try:
+                        response.close()
+                    except Exception:
+                        pass
+                if self._stream_response is response:
+                    self._stream_response = None
+            if stop_event.is_set() or generation != self._generation:
+                break
+            if connected:
+                self._post_status("回环预览流已断开，正在重试…")
+                retry_reported = True
+            if stop_event.wait(0.5):
+                break
 
     def _capture_loop(
         self,
@@ -990,6 +1104,12 @@ class CaptureMonitorWindow:
                 capture.release()
             except Exception:
                 pass
+        response = self._stream_response
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
         thread = self._capture_thread
         if thread is not None and thread.is_alive():
             thread.join(timeout=1.0)
@@ -1015,11 +1135,13 @@ class ManualToolsManager:
         port_provider: Callable[[], str],
         video_provider: Callable[[], str],
         process_running: Callable[[], bool],
+        preview_url_provider: Callable[[], str | None] | None = None,
     ):
         self.root = root
         self.port_provider = port_provider
         self.video_provider = video_provider
         self.process_running = process_running
+        self.preview_url_provider = preview_url_provider
         self.controller_window: VirtualControllerWindow | None = None
         self.monitor_window: CaptureMonitorWindow | None = None
 
@@ -1055,13 +1177,16 @@ class ManualToolsManager:
             self.root,
             self.video_provider,
             self._monitor_closed,
+            self.preview_url_provider,
         )
 
     def _monitor_available(self) -> bool:
-        if self.process_running():
+        if self.process_running() and not (
+            self.preview_url_provider is not None and self.preview_url_provider()
+        ):
             messagebox.showerror(
                 "EasyCon 正在运行",
-                "自动流程会独占采集卡，请先停止当前自动流程，再打开监视窗口。",
+                "当前运行后端没有共享预览，请先停止自动流程，再打开监视窗口。",
                 parent=self.root,
             )
             return False

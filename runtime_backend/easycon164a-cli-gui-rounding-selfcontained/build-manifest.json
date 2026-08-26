@@ -2,10 +2,10 @@
   "source_repository": "https://github.com/EasyConNS/EasyCon.git",
   "source_commit": "9c86137c7e63bff842175470895727a5fa9bab52",
   "source_version": "1.6.4-a",
-  "patch_id": "cli-latest-frame-ceiling-ocr-onedir-v4",
-  "description": "Continuously capture the newest DSHOW frame, share it with local OCR, log its dimensions, and use the EasyCon 1.6.4-a GUI's Math.Ceiling confidence rounding.",
+  "patch_id": "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v5",
+  "description": "Continuously capture the newest DSHOW frame, share it with local OCR, and optionally expose the newest frame through a loopback-only MJPEG preview without a second capture-device owner.",
   "build_target": "net9.0/win-x64 self-contained onedir",
-  "filename": "EasyCon2.CLI-ocr-v4.exe",
-  "bytes": 156160,
-  "sha256": "258b9a6ffeb6fe0eedefb38f91210e48943c1205ce967c2f5d6b72124c4f8eb1"
+  "filename": "EasyCon2.CLI.PreviewV5.exe",
+  "bytes": 156672,
+  "sha256": "00487aeb32f9cda74173e924ce3c19c895b36e092314b65326a7dacaa68d1771"
 }

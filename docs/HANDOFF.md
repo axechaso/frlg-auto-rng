@@ -259,7 +259,7 @@ ezcon.exe SHA-256: 559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1
 default path: %USERPROFILE%\Downloads\伊机控-EasyCon-v1.6.4alpha测试版-260518\publish\ezcon.exe
 ```
 
-自动执行兼容 runner 同样来自 commit `9c86137c7e63bff842175470895727a5fa9bab52`，功能补丁标识为 `cli-latest-frame-ceiling-ocr-onedir-v4`。入口为 `EasyCon2.CLI-ocr-v4.exe`，当前入口 SHA-256 为 `258b9a6ffeb6fe0eedefb38f91210e48943c1205ce967c2f5d6b72124c4f8eb1`。它让 ImgLabel 与本地 OCR 共用持续采集的最新帧，并使用 GUI 的向上取整。必须保留完整自包含文件夹；Tesseract 5.2 在单文件发布中无法取得原生库目录。运行文件因体积较大被 Git 忽略，只用 Git 迁移时须运行 `tools\build_easycon164a_compat_runner.ps1` 重建。
+自动执行兼容 runner 同样来自 commit `9c86137c7e63bff842175470895727a5fa9bab52`，功能补丁标识为 `cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v5`。入口为 `EasyCon2.CLI.PreviewV5.exe`，当前入口 SHA-256 为 `00487aeb32f9cda74173e924ce3c19c895b36e092314b65326a7dacaa68d1771`。它让 ImgLabel 与本地 OCR 共用持续采集的最新帧，并使用 GUI 的向上取整；运行期间通过 `127.0.0.1` 回环 MJPEG 共享最新帧，监视窗不再第二次打开 DSHOW。必须保留完整自包含文件夹；Tesseract 5.2 在单文件发布中无法取得原生库目录。运行文件因体积较大被 Git 忽略，只用 Git 迁移时须运行 `tools\build_easycon164a_compat_runner.ps1` 重建。
 
 ### 1.1.8 正式/孵蛋脚本
 

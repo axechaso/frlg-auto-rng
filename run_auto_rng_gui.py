@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -101,6 +102,13 @@ TID_FIXED_DELAY_PATTERNS = {
     "F2": re.compile(r"F2脚本固定延迟[：:]\s*(\d+)"),
     "F3": re.compile(r"F3脚本固定延迟[：:]\s*(\d+)"),
 }
+
+
+def allocate_preview_port() -> int:
+    """Reserve a loopback TCP port for the compat runner's MJPEG stream."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
 
 
 def clean_terminal_log(text: str) -> str:
@@ -707,6 +715,7 @@ class AutoRngApp:
         self.busy = False
         self._updating = False
         self.manual_tools: ManualToolsManager | None = None
+        self.preview_url: str | None = None
         self.all_locations = self._load_locations()
         self.category_map = {}
         self.location_map = {}
@@ -718,6 +727,7 @@ class AutoRngApp:
             port_provider=self.port_var.get,
             video_provider=self.video_var.get,
             process_running=self._process_running,
+            preview_url_provider=lambda: self.preview_url,
         )
         self._populate_seed_modes()
         self._populate_categories()
@@ -2501,9 +2511,10 @@ class AutoRngApp:
 
     def _refresh_manual_tools_buttons(self) -> None:
         enabled = not self.busy and not self._process_running()
+        monitor_enabled = not self.busy and (enabled or bool(self.preview_url))
         state = "normal" if enabled else "disabled"
         self.virtual_controller_button.configure(state=state)
-        self.monitor_button.configure(state=state)
+        self.monitor_button.configure(state="normal" if monitor_enabled else "disabled")
         self.advanced_mode_check.configure(state=state)
         self.home_buffer_adaptive_check.configure(state=state)
         self.seed_update_button.configure(state=state)
@@ -3439,6 +3450,8 @@ class AutoRngApp:
             confirmation,
         ):
             return
+        self.preview_url = None
+        preview_url: str | None = None
         if self.script_test_preparation is not None:
             runner_path = self.script_test_preparation.runner_path
             if runner_path is None:
@@ -3454,6 +3467,10 @@ class AutoRngApp:
             self.script_test_log_path = (
                 log_dir / f"script-test-{backend_tag}-{timestamp}.log"
             )
+            preview_port = allocate_preview_port() if backend_tag == "compat" else 0
+            preview_url = (
+                f"http://127.0.0.1:{preview_port}/mjpeg" if preview_port else None
+            )
             easycon_command = build_run_command(
                 runner_path,
                 self.project_main,
@@ -3461,6 +3478,7 @@ class AutoRngApp:
                 video_device=video_device,
                 video_type="DSHOW",
                 verbose=self.script_test_verbose_var.get(),
+                preview_port=preview_port,
             )
             metadata_path = self.script_test_log_path.with_suffix(".json")
             try:
@@ -3478,6 +3496,7 @@ class AutoRngApp:
                             "video_device": video_device,
                             "video_type": "DSHOW",
                             "verbose": self.script_test_verbose_var.get(),
+                            "preview_port": preview_port,
                             "command": easycon_command,
                         },
                         ensure_ascii=False,
@@ -3559,12 +3578,15 @@ class AutoRngApp:
             except (OSError, ValueError, RuntimeError) as exc:
                 messagebox.showerror("启动后端检查失败", str(exc))
                 return
+            preview_port = allocate_preview_port()
+            preview_url = f"http://127.0.0.1:{preview_port}/mjpeg"
             easycon_command = build_run_command(
                 runner_path,
                 self.project_main,
                 port=selected_port,
                 video_device=video_device,
                 video_type="DSHOW",
+                preview_port=preview_port,
             )
             if self.egg_request is not None:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -3619,6 +3641,7 @@ class AutoRngApp:
             self.running_mode = None
             messagebox.showerror("启动失败", str(exc))
             return
+        self.preview_url = preview_url
         self.start_button.configure(state="disabled")
         self.search_button.configure(state="disabled")
         self.device_button.configure(state="disabled")
@@ -3684,6 +3707,7 @@ class AutoRngApp:
             self.set_run_log(completed_log_text)
         self.process = None
         self.running_mode = None
+        self.preview_url = None
         self.stop_button.configure(state="disabled")
         self.search_button.configure(state="normal")
         self.device_button.configure(state="normal")

@@ -1,0 +1,570 @@
+diff --git a/src/EasyCon.Script/Binding/Binder.cs b/src/EasyCon.Script/Binding/Binder.cs
+index c5d6413..ae6a6eb 100644
+--- a/src/EasyCon.Script/Binding/Binder.cs
++++ b/src/EasyCon.Script/Binding/Binder.cs
+@@ -238,7 +238,13 @@ internal sealed partial class Binder
+ 
+     private static BoundProgram ErrorProgram(DiagnosticBag diagnostics)
+     {
+-        return new BoundProgram(new("$error", [], [], ScriptType.Void), [.. diagnostics], [], [], [], []);
++        return new BoundProgram(
++            new("$error", [], [], ScriptType.Void),
++            [.. diagnostics],
++            ImmutableDictionary<FunctionSymbol, BoundBlockStatement>.Empty,
++            [],
++            [],
++            ImmutableDictionary<string, EcsStructDef>.Empty);
+     }
+ 
+     private FunctionSymbol BindFuncDeclaration(FuncDeclBlock syntax)
+diff --git a/src/EasyCon.Script/Compilation.cs b/src/EasyCon.Script/Compilation.cs
+index b03acbb..c091a3e 100644
+--- a/src/EasyCon.Script/Compilation.cs
++++ b/src/EasyCon.Script/Compilation.cs
+@@ -85,7 +85,10 @@ public sealed class Compilation
+         var program = GetProgram([.. externalGetters.Select(v => v.Key)]);
+         if (program.Diagnostics.HasErrors())
+             return new EvaluationResult(program.Diagnostics, Value.Void);
+-        using var evaluator = new Evaluator(program, externalGetters ?? [], token)
++        using var evaluator = new Evaluator(
++            program,
++            externalGetters ?? ImmutableDictionary<string, Func<int>>.Empty,
++            token)
+         {
+             GamePad = pad,
+             Output = output,
+diff --git a/src/EasyCon.Script/Evaluator.cs b/src/EasyCon.Script/Evaluator.cs
+index bfef73d..d6b7cfa 100644
+--- a/src/EasyCon.Script/Evaluator.cs
++++ b/src/EasyCon.Script/Evaluator.cs
+@@ -21,7 +21,8 @@ internal sealed class Evaluator : IEvalContext, IDisposable
+     private readonly Dictionary<VariableSymbol, int> _globalIndex;
+     private readonly Stack<Value[]> _localFrames = new();
+     private readonly Dictionary<FunctionSymbol, BoundBlockStatement> _functions = [];
+-    private readonly ImmutableDictionary<string, Func<int>> _externalGetters = [];
++    private readonly ImmutableDictionary<string, Func<int>> _externalGetters =
++        ImmutableDictionary<string, Func<int>>.Empty;
+ 
+     private readonly long _TIME = DateTime.Now.Ticks;
+     private readonly Random _rand = new();
+diff --git a/src/EasyCon2.CLI/MjpegPreviewServer.cs b/src/EasyCon2.CLI/MjpegPreviewServer.cs
+new file mode 100644
+index 0000000..a824994
+--- /dev/null
++++ b/src/EasyCon2.CLI/MjpegPreviewServer.cs
+@@ -0,0 +1,209 @@
++using System.Collections.Concurrent;
++using System.Net;
++using System.Net.Sockets;
++using System.Text;
++
++internal readonly record struct MjpegPreviewFrame(long Sequence, byte[] Jpeg);
++
++internal sealed class MjpegPreviewServer : IAsyncDisposable
++{
++    private const string Boundary = "easycon-frame";
++    private readonly int _port;
++    private readonly Func<MjpegPreviewFrame?> _frameProvider;
++    private readonly CancellationTokenSource _stop = new();
++    private readonly ConcurrentDictionary<int, Task> _clients = new();
++    private TcpListener? _listener;
++    private Task? _listenTask;
++    private int _nextClientId;
++
++    public MjpegPreviewServer(int port, Func<MjpegPreviewFrame?> frameProvider)
++    {
++        if (port is < 1 or > 65535)
++            throw new ArgumentOutOfRangeException(nameof(port));
++        _port = port;
++        _frameProvider = frameProvider;
++    }
++
++    public void Start()
++    {
++        if (_listener is not null)
++            return;
++
++        var listener = new TcpListener(IPAddress.Loopback, _port);
++        listener.Start();
++        _listener = listener;
++        _listenTask = Task.Run(() => ListenAsync(listener, _stop.Token));
++    }
++
++    private async Task ListenAsync(TcpListener listener, CancellationToken token)
++    {
++        while (!token.IsCancellationRequested)
++        {
++            TcpClient client;
++            try
++            {
++                client = await listener.AcceptTcpClientAsync(token);
++            }
++            catch (OperationCanceledException)
++            {
++                break;
++            }
++            catch (SocketException) when (token.IsCancellationRequested)
++            {
++                break;
++            }
++            catch (ObjectDisposedException) when (token.IsCancellationRequested)
++            {
++                break;
++            }
++
++            var clientId = Interlocked.Increment(ref _nextClientId);
++            var task = HandleAsync(client, token);
++            _clients[clientId] = task;
++            _ = task.ContinueWith(
++                completedTask =>
++                {
++                    _ = completedTask;
++                    _clients.TryRemove(clientId, out _);
++                },
++                CancellationToken.None,
++                TaskContinuationOptions.ExecuteSynchronously,
++                TaskScheduler.Default);
++        }
++    }
++
++    private static async Task<string?> ReadPathAsync(
++        NetworkStream stream,
++        CancellationToken token)
++    {
++        var request = new byte[8192];
++        var length = 0;
++        while (length < request.Length)
++        {
++            var read = await stream.ReadAsync(request.AsMemory(length), token);
++            if (read == 0)
++                return null;
++            length += read;
++            var text = Encoding.ASCII.GetString(request, 0, length);
++            if (!text.Contains("\r\n\r\n", StringComparison.Ordinal))
++                continue;
++            var firstLineEnd = text.IndexOf("\r\n", StringComparison.Ordinal);
++            var firstLine = firstLineEnd >= 0 ? text[..firstLineEnd] : text;
++            var parts = firstLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
++            return parts.Length >= 2 && parts[0] == "GET" ? parts[1] : null;
++        }
++        return null;
++    }
++
++    private async Task HandleAsync(TcpClient client, CancellationToken token)
++    {
++        using (client)
++        {
++            client.NoDelay = true;
++            try
++            {
++                var stream = client.GetStream();
++                var path = await ReadPathAsync(stream, token);
++                if (path == "/health")
++                {
++                    await WriteTextResponseAsync(stream, "200 OK", "ok\n", token);
++                    return;
++                }
++                if (path != "/mjpeg")
++                {
++                    await WriteTextResponseAsync(stream, "404 Not Found", "not found\n", token);
++                    return;
++                }
++
++                var responseHeaders = Encoding.ASCII.GetBytes(
++                    "HTTP/1.1 200 OK\r\n" +
++                    "Connection: close\r\n" +
++                    "Cache-Control: no-store, no-cache, must-revalidate\r\n" +
++                    "Pragma: no-cache\r\n" +
++                    $"Content-Type: multipart/x-mixed-replace; boundary={Boundary}\r\n\r\n");
++                await stream.WriteAsync(responseHeaders, token);
++
++                var boundary = Encoding.ASCII.GetBytes($"--{Boundary}\r\n");
++                var frameEnding = Encoding.ASCII.GetBytes("\r\n");
++                long sentSequence = 0;
++                while (!token.IsCancellationRequested)
++                {
++                    MjpegPreviewFrame? frame;
++                    try
++                    {
++                        frame = _frameProvider();
++                    }
++                    catch
++                    {
++                        frame = null;
++                    }
++                    if (frame is null || frame.Value.Sequence == sentSequence)
++                    {
++                        await Task.Delay(20, token);
++                        continue;
++                    }
++
++                    var jpeg = frame.Value.Jpeg;
++                    var frameHeaders = Encoding.ASCII.GetBytes(
++                        $"Content-Type: image/jpeg\r\nContent-Length: {jpeg.Length}\r\n\r\n");
++                    await stream.WriteAsync(boundary, token);
++                    await stream.WriteAsync(frameHeaders, token);
++                    await stream.WriteAsync(jpeg, token);
++                    await stream.WriteAsync(frameEnding, token);
++                    await stream.FlushAsync(token);
++                    sentSequence = frame.Value.Sequence;
++                    await Task.Delay(66, token);
++                }
++            }
++            catch (OperationCanceledException) when (token.IsCancellationRequested)
++            {
++            }
++            catch (IOException)
++            {
++            }
++            catch (SocketException)
++            {
++            }
++            catch (ObjectDisposedException)
++            {
++            }
++        }
++    }
++
++    private static async Task WriteTextResponseAsync(
++        NetworkStream stream,
++        string status,
++        string body,
++        CancellationToken token)
++    {
++        var payload = Encoding.UTF8.GetBytes(body);
++        var headers = Encoding.ASCII.GetBytes(
++            $"HTTP/1.1 {status}\r\nConnection: close\r\n" +
++            $"Content-Type: text/plain; charset=utf-8\r\nContent-Length: {payload.Length}\r\n\r\n");
++        await stream.WriteAsync(headers, token);
++        await stream.WriteAsync(payload, token);
++    }
++
++    public async ValueTask DisposeAsync()
++    {
++        _stop.Cancel();
++        var listener = _listener;
++        listener?.Stop();
++
++        if (_listenTask is not null)
++        {
++            try
++            {
++                await _listenTask;
++            }
++            catch (OperationCanceledException)
++            {
++            }
++        }
++
++        var clients = _clients.Values.ToArray();
++        if (clients.Length > 0)
++            await Task.WhenAll(clients);
++        _stop.Dispose();
++    }
++}
+diff --git a/src/EasyCon2.CLI/EasyCon2.CLI.csproj b/src/EasyCon2.CLI/EasyCon2.CLI.csproj
+--- a/src/EasyCon2.CLI/EasyCon2.CLI.csproj
++++ b/src/EasyCon2.CLI/EasyCon2.CLI.csproj
+@@ -2,6 +2,8 @@
+ 
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
++    <AssemblyName>EasyCon2.CLI.PreviewV5</AssemblyName>
++    <InformationalVersion>1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52</InformationalVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PublishAot>false</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+diff --git a/src/EasyCon2.CLI/MockGamePad.cs b/src/EasyCon2.CLI/MockGamePad.cs
+index cc3629f..6a1430c 100644
+--- a/src/EasyCon2.CLI/MockGamePad.cs
++++ b/src/EasyCon2.CLI/MockGamePad.cs
+@@ -4,6 +4,11 @@ class MockGamePad : ICGamePad
+ {
+     public DelayType DelayMethod => DelayType.Normal;
+ 
++    public void Reset()
++    {
++        Console.WriteLine("[MOCK] RESET");
++    }
++
+     public void ClickButtons(GamePadKey key, int duration, CancellationToken token)
+     {
+         Console.WriteLine($"[MOCK] Button {key} CLICK {duration}ms");
+diff --git a/src/EasyCon2.CLI/Program.cs b/src/EasyCon2.CLI/Program.cs
+index 087f503..b200362 100644
+--- a/src/EasyCon2.CLI/Program.cs
++++ b/src/EasyCon2.CLI/Program.cs
+@@ -72,6 +72,11 @@ var portOption = new Option<string>("--port", "-p")
+     Description = "联机设备端口",
+     DefaultValueFactory = _ => defaultCOMPort
+ };
++var previewPortOption = new Option<int>("--preview-port")
++{
++    Description = "本机回环 MJPEG 预览端口（0 表示关闭）",
++    DefaultValueFactory = _ => 0
++};
+ 
+ deviceIdOption.Validators.Add(result =>
+ {
+@@ -80,12 +85,19 @@ deviceIdOption.Validators.Add(result =>
+         result.AddError("采集卡序号不能是负数");
+     }
+ });
++previewPortOption.Validators.Add(result =>
++{
++    var value = result.GetValueOrDefault<int>();
++    if (value is < 0 or > 65535)
++        result.AddError("预览端口必须为 0 或 1-65535");
++});
+ 
+ runScriptCommand.Arguments.Add(scriptOption);
+ runScriptCommand.Options.Add(deviceIdOption);
+ runScriptCommand.Options.Add(deviceTypeOption);
+ runScriptCommand.Options.Add(portOption);
+ runScriptCommand.Options.Add(verboseOption);
++runScriptCommand.Options.Add(previewPortOption);
+ #endregion
+ 
+ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+@@ -95,6 +107,7 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+     var refs = parseResult.GetValue(deviceTypeOption);
+     string COM = parseResult.GetValue(portOption) ?? defaultCOMPort;
+     bool verbose = parseResult.GetValue(verboseOption);
++    int previewPort = parseResult.GetValue(previewPortOption);
+ 
+     // 输出接口
+     var outdap = new ConsoleOutAdapter();
+@@ -110,6 +123,15 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+ 
+ 
+     OpenCVCapture? cvcap = null;
++    var latestFrameLock = new object();
++    Mat? latestFrame = null;
++    Exception? captureFailure = null;
++    CancellationTokenSource? captureCts = null;
++    Task? captureTask = null;
++    MjpegPreviewServer? previewServer = null;
++    long latestFrameSequence = 0;
++    long previewSequence = 0;
++    byte[]? previewJpeg = null;
+     outdap.Log("正在解析脚本...");
+     var diag = runner.Load(file, [.. label.Select(il => il.name)]);
+ 
+@@ -160,32 +182,148 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+         }
+     }
+ 
+-    if (runner.NeedILLoad)
++    try
+     {
+-        cvcap = new();
+-        outdap.Log("准备打开采集卡...");
+-        if (!cvcap.Open(vId, (int)refs))
++        if (runner.NeedILLoad)
+         {
+-            outdap.Error("采集卡打开失败！！");
+-            return;
++            cvcap = new();
++            outdap.Log("准备打开采集卡...");
++            if (!cvcap.Open(vId, (int)refs))
++            {
++                outdap.Error("采集卡打开失败！！");
++                return;
++            }
++            outdap.Info("采集卡打开成功.");
++
++            // Match the GUI request, then continuously drain the DSHOW queue.
++            // Label getters consume a clone of the newest frame instead of
++            // triggering one potentially buffered capture per label.
++            cvcap.SetProperties(1920, 1080);
++            var firstFrame = new TaskCompletionSource<(int Width, int Height)>(
++                TaskCreationOptions.RunContinuationsAsynchronously);
++            captureCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
++            var captureToken = captureCts.Token;
++            captureTask = Task.Run(() =>
++            {
++                try
++                {
++                    while (!captureToken.IsCancellationRequested)
++                    {
++                        using var frame = cvcap.GetMatFrame();
++                        if (frame.Empty())
++                        {
++                            Thread.Sleep(5);
++                            continue;
++                        }
++                        lock (latestFrameLock)
++                        {
++                            latestFrame?.Dispose();
++                            latestFrame = frame.Clone();
++                            latestFrameSequence++;
++                        }
++                        firstFrame.TrySetResult((frame.Width, frame.Height));
++                    }
++                }
++                catch (Exception) when (captureToken.IsCancellationRequested)
++                {
++                    firstFrame.TrySetCanceled(captureToken);
++                }
++                catch (Exception ex)
++                {
++                    lock (latestFrameLock)
++                    {
++                        captureFailure = ex;
++                    }
++                    firstFrame.TrySetException(ex);
++                    throw;
++                }
++            }, captureToken);
++
++            var completed = await Task.WhenAny(
++                firstFrame.Task,
++                Task.Delay(TimeSpan.FromSeconds(5), cancellationToken));
++            if (completed != firstFrame.Task)
++            {
++                cancellationToken.ThrowIfCancellationRequested();
++                throw new TimeoutException("采集卡在 5 秒内未返回画面");
++            }
++            var actualFrame = await firstFrame.Task;
++            outdap.Info(
++                $"采集卡实际画面：{actualFrame.Width}x{actualFrame.Height}（请求 1920x1080）");
++            if (previewPort > 0)
++            {
++                MjpegPreviewFrame? CapturePreviewFrame()
++                {
++                    Mat snapshot;
++                    long sequence;
++                    lock (latestFrameLock)
++                    {
++                        if (latestFrame is null || latestFrame.Empty())
++                            return null;
++                        if (previewJpeg is not null && previewSequence == latestFrameSequence)
++                            return new MjpegPreviewFrame(previewSequence, previewJpeg);
++                        snapshot = latestFrame.Clone();
++                        sequence = latestFrameSequence;
++                    }
++                    using (snapshot)
++                    using (var previewFrame = new Mat())
++                    {
++                        Cv2.Resize(
++                            snapshot,
++                            previewFrame,
++                            new Size(640, 360),
++                            0,
++                            0,
++                            InterpolationFlags.Area);
++                        Cv2.ImEncode(".jpg", previewFrame, out var jpeg);
++                        var bytes = jpeg.ToArray();
++                        lock (latestFrameLock)
++                        {
++                            previewSequence = sequence;
++                            previewJpeg = bytes;
++                        }
++                        return new MjpegPreviewFrame(sequence, bytes);
++                    }
++                }
++
++                try
++                {
++                    previewServer = new MjpegPreviewServer(previewPort, CapturePreviewFrame);
++                    previewServer.Start();
++                    outdap.Info($"监视回环已启动：http://127.0.0.1:{previewPort}/mjpeg");
++                }
++                catch (Exception ex)
++                {
++                    previewServer = null;
++                    outdap.Warn($"监视回环启动失败，脚本继续运行：{ex.Message}");
++                }
++            }
+         }
+-        outdap.Info("采集卡打开成功.");
+ 
+-        // 设置采集卡分辨率为1080p
+-        cvcap.SetProperties(1920, 1080);
+-    }
+-    var externalGetters = label.ToDictionary(il => il.name, il => (Func<int>)(() =>
+-    {
+-        if (cvcap == null) throw new Exception("采集卡初始化异常");
+-        il.Search(cvcap!.GetMatFrame(), out var md);
+-        return (int)md;
+-    }));
+-    outdap.Info($"==>开始执行脚本：{file}");
++        var externalGetters = label.ToDictionary(il => il.name, il => (Func<int>)(() =>
++        {
++            if (cvcap == null) throw new Exception("采集卡初始化异常");
++            using var snapshot = CloneLatestFrame();
++            il.Search(snapshot, out var md);
++            return (int)Math.Ceiling(md);
++        }));
++
++        Mat CloneLatestFrame()
++        {
++            lock (latestFrameLock)
++            {
++                if (captureFailure != null)
++                    throw new Exception("采集卡持续采帧异常", captureFailure);
++                if (latestFrame == null || latestFrame.Empty())
++                    throw new Exception("采集卡尚未取得有效画面");
++                return latestFrame.Clone();
++            }
++        }
++        outdap.Info($"==>开始执行脚本：{file}");
+ 
+-    try
+-    {
+         ICGamePad pad = isMock ? new MockGamePad() : new GamePadAdapter(NS);
+-        runner.Run(outdap, pad, null, externalGetters, cancellationToken);
++        var ocr = cvcap == null ? null : OcrDelegateFactory.Create(CloneLatestFrame);
++        runner.Run(outdap, pad, ocr, externalGetters, cancellationToken);
+         outdap.Info("脚本运行完成");
+     }
+     catch (ScriptException ex)
+@@ -195,8 +333,46 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+     catch (Exception exx)
+     {
+         Console.Error.WriteLine();
+-        Console.Error.WriteLine(exx.StackTrace);
+-        outdap.Error($"!!意外错误!!{exx.Message}");
++        Console.Error.WriteLine(exx);
++        outdap.Error($"!!意外错误!!{exx.GetBaseException().Message}");
++    }
++    finally
++    {
++        if (previewServer is not null)
++        {
++            try
++            {
++                await previewServer.DisposeAsync();
++            }
++            catch (Exception ex)
++            {
++                if (verbose)
++                    outdap.Warn($"监视回环停止失败：{ex.Message}");
++            }
++        }
++        captureCts?.Cancel();
++        if (captureTask != null)
++        {
++            try
++            {
++                await captureTask;
++            }
++            catch (OperationCanceledException)
++            {
++            }
++            catch (Exception ex)
++            {
++                if (verbose)
++                    outdap.Warn($"持续采帧线程已停止：{ex.Message}");
++            }
++        }
++        lock (latestFrameLock)
++        {
++            latestFrame?.Dispose();
++            latestFrame = null;
++        }
++        cvcap?.Release();
++        captureCts?.Dispose();
+     }
+ });
+ 

@@ -25,7 +25,7 @@ EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
 EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
-EXPECTED_COMPAT_PATCH_ID = "cli-latest-frame-ceiling-ocr-onedir-v4"
+EXPECTED_COMPAT_PATCH_ID = "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v5"
 EXPECTED_TESSDATA_SHA256 = {
     "frlg_battle.traineddata": "7abcaef4936727b33717656b38fd5b5027823e1cafec21abb06cc8ef1f7ff758",
     "FRLG_EN_ALL.traineddata": "3272f23a6f259518813025d89be77d706574ccdf163132ccf6f5be15ca19cfa0",
@@ -47,7 +47,7 @@ DEFAULT_COMPAT_RUNNER_PATH = (
     Path(__file__).resolve().parents[1]
     / "runtime_backend"
     / "easycon164a-cli-gui-rounding-selfcontained"
-    / "EasyCon2.CLI-ocr-v4.exe"
+    / "EasyCon2.CLI.PreviewV5.exe"
 )
 STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8.ecs"
 EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
@@ -2134,6 +2134,7 @@ def build_run_command(
     video_device: int,
     video_type: str = "DSHOW",
     verbose: bool = False,
+    preview_port: int = 0,
 ) -> list[str]:
     if video_device < 0:
         raise ValueError("采集卡序号不能为负数")
@@ -2141,6 +2142,8 @@ def build_run_command(
         raise ValueError("串口不能为空")
     if video_type not in {"ANY", "DSHOW", "MSMF"}:
         raise ValueError(f"不支持的视频类型: {video_type}")
+    if preview_port < 0 or preview_port > 65535:
+        raise ValueError("预览端口必须为 0 或 1-65535")
     ezcon_path = Path(ezcon_path).resolve()
     project_main = Path(project_main).resolve()
     command = [
@@ -2156,6 +2159,8 @@ def build_run_command(
     ]
     if verbose:
         command.append("--verbose")
+    if preview_port:
+        command.extend(["--preview-port", str(preview_port)])
     return command
 
 

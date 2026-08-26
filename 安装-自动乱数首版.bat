@@ -63,7 +63,7 @@ if errorlevel 1 goto error
 
 :tid_assets_ready
 
-if not exist "runtime_backend\easycon164a-cli-gui-rounding-selfcontained\EasyCon2.CLI.exe" (
+if not exist "runtime_backend\easycon164a-cli-gui-rounding-selfcontained\EasyCon2.CLI.PreviewV5.exe" (
     powershell -NoProfile -ExecutionPolicy Bypass -File "tools\build_easycon164a_compat_runner.ps1"
     if errorlevel 1 goto error
 )

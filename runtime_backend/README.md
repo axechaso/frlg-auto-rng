@@ -17,12 +17,17 @@ dimensions, and uses `Math.Ceiling`. The
 remaining source changes are compile-only compatibility for the locally
 available .NET 9 SDK.
 
-The OCR-enabled v4 executable uses a versioned filename so it can be installed
+The OCR-enabled PreviewV5 executable uses a versioned assembly name so it can be installed
 while an older automation process still has the previous runner open. New runs
-select `EasyCon2.CLI-ocr-v4.exe`; an already-running older process is left alone.
+select `EasyCon2.CLI.PreviewV5.exe`; an already-running older process is left alone.
 It is intentionally published as a self-contained folder rather than a single
 file: Tesseract 5.2's InteropDotNet loader requires a real assembly directory to
 locate its `x64` native libraries.
+
+The PreviewV5 runner accepts `--preview-port <port>` and serves `/mjpeg` only on
+`127.0.0.1`. The GUI monitor reads that stream while the script is running, so
+it never opens a second `VideoCapture`. Without this option the runner behaves
+like the prior v4 compatibility runner.
 
 The original `ezcon.exe` remains authoritative for version/hash checks, device
 enumeration, Tessdata verification, and ECS `format` preflight. Before launch,

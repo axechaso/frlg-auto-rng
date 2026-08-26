@@ -273,6 +273,22 @@ class ManualToolsTests(unittest.TestCase):
         showerror.assert_called_once()
 
     @patch("manual_tools.CaptureMonitorWindow")
+    def test_monitor_can_open_while_compat_runner_shares_a_preview(self, window_type):
+        preview_url = "http://127.0.0.1:43123/mjpeg"
+        manager = ManualToolsManager(
+            object(),
+            port_provider=lambda: "COM4",
+            video_provider=lambda: "[3] Capture Card",
+            process_running=lambda: True,
+            preview_url_provider=lambda: preview_url,
+        )
+
+        manager.open_monitor()
+
+        window_type.assert_called_once()
+        self.assertIs(window_type.call_args.args[-1], manager.preview_url_provider)
+
+    @patch("manual_tools.CaptureMonitorWindow")
     def test_close_monitor_releases_only_the_monitor(self, window_type):
         monitor = window_type.return_value
         monitor.is_open = True

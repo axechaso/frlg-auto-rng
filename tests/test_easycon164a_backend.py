@@ -37,7 +37,7 @@ ENDFUNC
     def test_compat_patch_uses_a_continuous_latest_frame_capture(self):
         root = Path(__file__).resolve().parents[1]
         patch_text = (
-            root / "tools" / "patches" / "easycon164a-cli-gui-rounding.patch"
+            root / "tools" / "patches" / "easycon164a-cli-gui-rounding-next.patch"
         ).read_text(encoding="utf-8")
         additions = "\n".join(
             line[1:]
@@ -47,7 +47,7 @@ ENDFUNC
 
         self.assertEqual(
             backend.EXPECTED_COMPAT_PATCH_ID,
-            "cli-latest-frame-ceiling-ocr-onedir-v4",
+            "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v5",
         )
         self.assertIn("captureTask = Task.Run", additions)
         self.assertIn("latestFrame = frame.Clone()", additions)
@@ -67,6 +67,12 @@ ENDFUNC
             additions,
         )
         self.assertIn("采集卡实际画面", additions)
+        self.assertIn("--preview-port", additions)
+        self.assertIn("MjpegPreviewServer", additions)
+        self.assertIn("127.0.0.1", additions)
+        self.assertIn(
+            "<AssemblyName>EasyCon2.CLI.PreviewV5</AssemblyName>", additions
+        )
 
         build_script = (
             root / "tools" / "build_easycon164a_compat_runner.ps1"
@@ -84,7 +90,7 @@ ENDFUNC
         self.assertIn("v1.6.4alpha", str(backend.DEFAULT_EZCON_PATH))
         self.assertEqual(
             backend.DEFAULT_COMPAT_RUNNER_PATH.name,
-            "EasyCon2.CLI-ocr-v4.exe",
+            "EasyCon2.CLI.PreviewV5.exe",
         )
 
     def test_runtime_preflight_uses_format_instead_of_170_ir(self):
@@ -154,9 +160,23 @@ ENDFUNC
             "main.ecs",
             port="COM22",
             video_device=0,
+            preview_port=43123,
         )
 
         self.assertEqual(command[command.index("--videotype") + 1], "DSHOW")
+        self.assertEqual(
+            command[command.index("--preview-port") + 1],
+            "43123",
+        )
+
+        with self.assertRaises(ValueError):
+            backend.build_run_command(
+                "ezcon.exe",
+                "main.ecs",
+                port="COM22",
+                video_device=0,
+                preview_port=65536,
+            )
 
     def test_compat_runner_is_pinned_and_receives_audited_ocr_models(self):
         with tempfile.TemporaryDirectory() as temp:
