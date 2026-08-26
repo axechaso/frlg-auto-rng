@@ -8,6 +8,8 @@ from automation.easycon118 import (
     HOME_BUFFER_ADAPTIVE_GLOBALS,
     STANDARD_HOME_BUFFER_OVERRIDE_PATH,
     EGG_HATCH_EXIT_OVERRIDE_PATH,
+    EGG_FORMAL_PARITY_OVERRIDE_MARKER,
+    EGG_FORMAL_PARITY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
     EGG_POST_PICKUP_RETRY_POLICY_MARKER,
@@ -33,6 +35,7 @@ from automation.easycon118 import (
     _apply_egg_home_resample_fix_text,
     _apply_egg_home_buffer_runtime_override_text,
     _apply_egg_hatch_exit_runtime_override_text,
+    _apply_egg_formal_parity_runtime_override_text,
     _apply_egg_party_slot_candy_runtime_override_text,
     _apply_egg_party_slot_main_runtime_override_text,
     _apply_egg_reverse_lookup_policy_text,
@@ -868,6 +871,52 @@ ENDFUNC
         self.assertIn("正式版±1五次多数、固定半步与命中后10次保持", configured)
         self.assertNotIn("$孵蛋Seed等待MS = $孵蛋Seed等待MS -", configured)
 
+    def test_egg_timeline_reuses_formal_parity_phase_once_for_both_deadlines(self):
+        original = """\
+$孵蛋流程请求Held帧 = 0
+FUNC 孵蛋流程_计算两次命中时间(): INT
+    RETURN 0
+ENDFUNC
+
+FUNC 孵蛋流程_执行Seed预校准轮(): INT
+    RETURN 1
+ENDFUNC
+
+$孵蛋测试结果 = 孵蛋测试_执行同Seed两次命中($Seed模式, $孵蛋Seed等待MS, $时间轴精确尾段MS, $孵蛋奇偶等待MS, $孵蛋封面长按MS, $孵蛋流程TV过帧开关, $孵蛋流程TV等待MS, $孵蛋流程生成目标截止MS, $孵蛋流程领取目标截止MS, $孵蛋出蛋检测阈值, $识图阈值, 1, $孵蛋流程无蛋复核Seed开关)
+"""
+        override = Path(EGG_FORMAL_PARITY_OVERRIDE_PATH).read_text(
+            encoding="utf-8"
+        )
+        configured = _apply_egg_formal_parity_runtime_override_text(
+            original,
+            override,
+        )
+        configured_again = _apply_egg_formal_parity_runtime_override_text(
+            configured,
+            override,
+        )
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(EGG_FORMAL_PARITY_OVERRIDE_MARKER, configured)
+        self.assertIn(
+            "$孵蛋流程奇偶F1修正帧 = 奇偶修正后F1帧(0, $孵蛋流程请求Held帧)",
+            configured,
+        )
+        self.assertIn(
+            "$孵蛋流程执行Held帧 = 奇偶修正后F2帧($孵蛋流程请求Held帧)",
+            configured,
+        )
+        self.assertIn(
+            "$孵蛋流程执行Pickup帧 = $孵蛋流程请求Pickup帧 - $孵蛋流程奇偶F2扣除帧",
+            configured,
+        )
+        self.assertEqual(
+            configured.count("$孵蛋流程奇偶F2扣除帧 = $孵蛋流程请求Held帧 - $孵蛋流程执行Held帧"),
+            1,
+        )
+        self.assertIn("$孵蛋流程本轮奇偶等待MS, $孵蛋封面长按MS", configured)
+        self.assertNotIn("$孵蛋奇偶等待MS, $孵蛋封面长按MS", configured)
+
     def test_hatch_waits_between_all_menu_exit_layers_before_walking(self):
         original = """\
 FUNC 孵蛋测试_执行骑车孵化($全国图鉴编号: INT, $周期覆盖: INT, $每循环步数: INT, $安全循环数: INT): INT
@@ -963,6 +1012,7 @@ ENDFUNC
         self.assertIn("$调试日志输出 = 1", template)
         self.assertIn(EGG_TRANSIENT_RETRY_OVERRIDE_MARKER, template)
         self.assertIn(EGG_TERMINAL_STOP_OVERRIDE_MARKER, template)
+        self.assertIn(EGG_FORMAL_PARITY_OVERRIDE_MARKER, template)
         self.assertIn("抓捕失败，关闭游戏并继续下一轮", template)
         self.assertIn("RETURN 2", template)
         self.assertIn("$候选细分累计范围有效 = 0", template)
@@ -1011,6 +1061,12 @@ ENDFUNC
             "$孵蛋流程请求Pickup帧 = $孵蛋领取目标帧 - $孵蛋Pickup固定预校准帧 + $孵蛋Pickup执行修正帧",
             template,
         )
+        self.assertIn(
+            "$孵蛋流程执行Pickup帧 = $孵蛋流程请求Pickup帧 - $孵蛋流程奇偶F2扣除帧",
+            template,
+        )
+        self.assertIn("孵蛋正式版奇偶校准: F1增加", template)
+        self.assertIn("$孵蛋流程本轮奇偶等待MS, $孵蛋封面长按MS", template)
         library = library_path.read_text(encoding="utf-8")
         self.assertIn("识别冲浪结束后再打开菜单", library)
         self.assertIn(EGG_POND_SETTLE_FIXED, library)

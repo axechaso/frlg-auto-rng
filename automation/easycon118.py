@@ -92,6 +92,9 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package that preserves confirmed no-egg interval evidence across
     # intervening non-target Seed rounds while the Held request is unchanged.
     "4e00e389381ae92cf040ac1c620334b808758241e82fd50138ab3c5cb7e0c2f0",
+    # Download package where the egg timeline reuses the formal F1+1/F2-1
+    # parity phase for the normally parity-matched Held/Pickup deadlines.
+    "355c79d87d8272524cbbda0680f30d6de0d77d61b57046458c295e12f1275ac6",
 )
 EXPECTED_SCRIPT_SHA256 = "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -117,6 +120,8 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "96882c1d918d9996fc7893051941729f8bdf0a9babc3cab3d8a9eda2ebde3aac",
     # Materialized corpus with same-Held no-egg evidence retention.
     "961e7eb688ae10479a8335ae71771c3462bb3adf2ed3b8d2e27102a886e050fd",
+    # Materialized corpus with the formal parity overlay in the egg timeline.
+    "4a706951d032ed806c665889720cb235f72320d695dd60de3a782b23297bbd7d",
 )
 
 
@@ -187,6 +192,9 @@ EGG_SEED_CONTROLLER_OVERRIDE_PATH = (
     / "assets"
     / "easycon118_extensions"
     / "egg_seed_controller_main.ecs"
+)
+EGG_FORMAL_PARITY_OVERRIDE_PATH = (
+    EASYCON118_EXTENSION_LABEL_DIR / "egg_formal_parity_main.ecs"
 )
 EGG_HATCH_EXIT_OVERRIDE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -275,6 +283,9 @@ EGG_SURF_BATTLE_NEXT_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
 EGG_SEED_CONTROLLER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：复用正式版 Seed 锁定与相邻毫秒细调控制器"
 EGG_SEED_CONTROLLER_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_按观测Seed校正等待"
 EGG_SEED_CONTROLLER_NEXT_SECTION = "# -------------------- 蛋个体反查"
+EGG_FORMAL_PARITY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：生成与领取复用正式版F1/F2奇偶校准"
+EGG_FORMAL_PARITY_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_计算两次命中时间(): INT"
+EGG_FORMAL_PARITY_NEXT_FUNCTION = "FUNC 孵蛋流程_执行Seed预校准轮(): INT"
 EGG_HATCH_EXIT_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：孵化骑车前可靠退出能力页、队伍菜单和主菜单"
 EGG_HATCH_EXIT_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
 EGG_HATCH_EXIT_NEXT_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
@@ -306,6 +317,22 @@ EGG_TRANSIENT_RETRY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：瞬时动�
 EGG_TERMINAL_STOP_OVERRIDE_MARKER = "# GUI 孵蛋终止策略：无精确结果时保留当前游戏画面"
 EGG_POST_PICKUP_RETRY_POLICY_MARKER = "# GUI 孵蛋领取后Seed失败：保留首次预校准，直接重试生成领取"
 EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER = "# GUI 孵蛋无蛋区间：同一Held请求跨非目标Seed轮保留证据"
+EGG_FORMAL_PARITY_GLOBAL_ANCHOR = "$孵蛋流程请求Held帧 = 0"
+EGG_FORMAL_PARITY_GLOBALS = """\
+$孵蛋流程请求Pickup帧 = 0
+$孵蛋流程执行Held帧 = 0
+$孵蛋流程执行Pickup帧 = 0
+$孵蛋流程奇偶F1修正帧 = 0
+$孵蛋流程奇偶F2扣除帧 = 0
+$孵蛋流程奇偶增加MS = 0
+$孵蛋流程本轮奇偶等待MS = 0
+"""
+EGG_FORMAL_PARITY_REAL_CALL_OLD = "$孵蛋测试结果 = 孵蛋测试_执行同Seed两次命中($Seed模式, $孵蛋Seed等待MS, $时间轴精确尾段MS, $孵蛋奇偶等待MS, $孵蛋封面长按MS, $孵蛋流程TV过帧开关, $孵蛋流程TV等待MS, $孵蛋流程生成目标截止MS, $孵蛋流程领取目标截止MS, $孵蛋出蛋检测阈值, $识图阈值, 1, $孵蛋流程无蛋复核Seed开关)"
+EGG_FORMAL_PARITY_REAL_CALL_CURRENT = EGG_FORMAL_PARITY_REAL_CALL_OLD.replace(
+    "$孵蛋奇偶等待MS",
+    "$孵蛋流程本轮奇偶等待MS",
+    1,
+)
 EGG_POND_SETTLE_ORIGINAL = """\
     LS RESET
     WAIT 500
@@ -1324,6 +1351,49 @@ def _apply_egg_seed_controller_runtime_override_text(
     return template_text[:start] + replacement + template_text[end:]
 
 
+def _apply_egg_formal_parity_runtime_override_text(
+    template_text: str,
+    override_text: str,
+) -> str:
+    """Apply the formal F1+1/F2-1 parity phase once to Held and Pickup."""
+    configured = template_text
+    required_globals = tuple(
+        line for line in EGG_FORMAL_PARITY_GLOBALS.splitlines() if line
+    )
+    present_globals = tuple(line in configured for line in required_globals)
+    if any(present_globals) and not all(present_globals):
+        raise ValueError("孵蛋模板只包含部分正式版奇偶校准全局变量，拒绝生成")
+    if not all(present_globals):
+        if configured.count(EGG_FORMAL_PARITY_GLOBAL_ANCHOR) != 1:
+            raise ValueError("孵蛋模板缺少唯一的Held请求全局变量，拒绝应用奇偶校准")
+        configured = configured.replace(
+            EGG_FORMAL_PARITY_GLOBAL_ANCHOR,
+            EGG_FORMAL_PARITY_GLOBAL_ANCHOR + "\n" + EGG_FORMAL_PARITY_GLOBALS.rstrip(),
+            1,
+        )
+
+    if EGG_FORMAL_PARITY_OVERRIDE_MARKER in configured:
+        start = configured.index(EGG_FORMAL_PARITY_OVERRIDE_MARKER)
+    else:
+        if configured.count(EGG_FORMAL_PARITY_ORIGINAL_FUNCTION) != 1:
+            raise ValueError("孵蛋模板缺少唯一的两次命中时间计算函数，拒绝应用奇偶校准")
+        start = configured.index(EGG_FORMAL_PARITY_ORIGINAL_FUNCTION)
+    if configured.count(EGG_FORMAL_PARITY_NEXT_FUNCTION) != 1:
+        raise ValueError("孵蛋模板缺少Seed预校准后继函数，拒绝应用奇偶校准")
+    end = configured.index(EGG_FORMAL_PARITY_NEXT_FUNCTION, start)
+    configured = configured[:start] + override_text.rstrip() + "\n\n" + configured[end:]
+
+    if EGG_FORMAL_PARITY_REAL_CALL_CURRENT not in configured:
+        if configured.count(EGG_FORMAL_PARITY_REAL_CALL_OLD) != 1:
+            raise ValueError("孵蛋模板缺少唯一的生成领取执行调用，拒绝应用奇偶校准")
+        configured = configured.replace(
+            EGG_FORMAL_PARITY_REAL_CALL_OLD,
+            EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
+            1,
+        )
+    return configured
+
+
 def _apply_egg_transient_retry_runtime_override_text(template_text: str) -> str:
     """Keep transient egg-route failures inside the existing retry loop."""
     if EGG_TRANSIENT_RETRY_OVERRIDE_MARKER in template_text:
@@ -1813,6 +1883,10 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         configured,
         EGG_SEED_CONTROLLER_OVERRIDE_PATH.read_text(encoding="utf-8"),
     )
+    configured = _apply_egg_formal_parity_runtime_override_text(
+        configured,
+        EGG_FORMAL_PARITY_OVERRIDE_PATH.read_text(encoding="utf-8"),
+    )
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
     configured = _apply_egg_post_pickup_retry_policy_text(configured)
     configured = _apply_egg_no_egg_evidence_policy_text(configured)
@@ -2004,6 +2078,13 @@ def write_configured_egg_project(
         configured,
         seed_controller_override_text,
     )
+    formal_parity_override_text = EGG_FORMAL_PARITY_OVERRIDE_PATH.read_text(
+        encoding="utf-8"
+    )
+    configured = _apply_egg_formal_parity_runtime_override_text(
+        configured,
+        formal_parity_override_text,
+    )
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
     configured = _apply_egg_post_pickup_retry_policy_text(configured)
     configured = _apply_egg_no_egg_evidence_policy_text(configured)
@@ -2043,6 +2124,9 @@ def write_configured_egg_project(
     ).hexdigest()
     runtime_overrides["egg_seed_controller_sha256"] = hashlib.sha256(
         seed_controller_override_text.encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["egg_formal_parity_main_sha256"] = hashlib.sha256(
+        formal_parity_override_text.encode("utf-8")
     ).hexdigest()
     runtime_overrides["egg_transient_retry_main_sha256"] = hashlib.sha256(
         "\n".join(
