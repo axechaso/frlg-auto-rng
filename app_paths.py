@@ -23,5 +23,13 @@ def data_root() -> Path:
     return base / "FRLG-Auto-RNG"
 
 
+def user_data_root() -> Path:
+    """Return persistent user data shared by source and frozen builds."""
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+    return base / "FRLG-Auto-RNG"
+
+
 RESOURCE_ROOT = resource_root()
 DATA_ROOT = data_root()
+USER_DATA_ROOT = user_data_root()

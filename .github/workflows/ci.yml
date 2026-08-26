@@ -35,6 +35,8 @@ jobs:
       - name: Compile Python sources
         run: >-
           python -m py_compile
+          app_paths.py
+          save_profiles.py
           run_auto_rng_gui.py
           run_auto_planner.py
           run_easycon_logged.py
@@ -68,6 +70,7 @@ jobs:
           tests.test_sid_reverse_workflow
           tests.test_starter_sid_verification
           tests.test_script_test
+          tests.test_save_profiles
           tests.test_seed_table_updater
           tests.test_tenlines_fixes
           tests.test_tid_starter_flow

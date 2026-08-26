@@ -28,9 +28,56 @@ from run_auto_rng_gui import (
     preferred_detected_port,
     preferred_detected_video,
 )
+from save_profiles import SaveProfile
 
 
 class GuiIvInputTests(unittest.TestCase):
+    def test_save_profile_applies_to_all_relevant_pages(self):
+        class FakeVariable:
+            def __init__(self, value=""):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        variable_names = (
+            "sid_game_var",
+            "sid_nx_var",
+            "sid_tid_var",
+            "game_var",
+            "nx_var",
+            "tid_var",
+            "sid_var",
+            "tid_game_var",
+            "tid_nx_var",
+            "tid_target_var",
+            "tid_sid_var",
+        )
+        app = SimpleNamespace(
+            **{name: FakeVariable() for name in variable_names},
+            _updating=False,
+            _on_game_change=lambda: None,
+            _refresh_save_profile_selector=lambda _profile_id: None,
+            invalidate_plan=lambda: None,
+        )
+        profile = SaveProfile.create("叶绿档", "叶绿", 123, 456, 2)
+        AutoRngApp._apply_save_profile(app, profile, persist=False)
+
+        self.assertEqual(app.sid_game_var.get(), "叶绿")
+        self.assertEqual(app.sid_nx_var.get(), "Switch 2")
+        self.assertEqual(app.sid_tid_var.get(), "123")
+        self.assertEqual(app.game_var.get(), "叶绿")
+        self.assertEqual(app.nx_var.get(), "Switch 2")
+        self.assertEqual(app.tid_var.get(), "123")
+        self.assertEqual(app.sid_var.get(), "456")
+        self.assertEqual(app.tid_game_var.get(), "叶绿")
+        self.assertEqual(app.tid_nx_var.get(), "Switch 2")
+        self.assertEqual(app.tid_target_var.get(), "123")
+        self.assertEqual(app.tid_sid_var.get(), "456")
+
     def test_tid_fixed_delay_log_requires_and_returns_all_four_values(self):
         log = (
             "\x1b[90mOP脚本固定延迟：30550\x1b[0m\n"

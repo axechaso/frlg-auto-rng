@@ -97,6 +97,8 @@ flowchart LR
 
 GUI 默认有四个输入选项卡，固定顺序为“SID 查找”“TID 乱数”“野生 / 静态”“孵蛋（测试）”，并常驻最后一个“运行日志”页。公共 EasyCon 设置中的串口/采集卡使用启动自动检测后填充的下拉框，采集卡同时显示序号和设备名。“高级模式”旁的 HOME_BUFFER 稳定低分自适应默认关闭；开启后生成器才允许 1.1.8 普通/孵蛋、TID 1.3.7 及 SID 查找生成副本接受稳定低分。勾选“高级模式”后，才会在输入页和日志页之间显示“脚本测试（高级）”页。
 
+Notebook 上方常驻“存档信息”栏。实现参考 PokeFinder Gen 3 Profile 的名称、版本、TID、SID，并增加自动工具需要的 Switch 1/2；FRLG 没有电池时钟状态，因此不保存 dead battery。管理器支持新建、编辑、复制、删除和设为当前，下拉框选择后同步 SID 页的版本/主机/TID、TID 页的版本/主机/目标身份、普通页的版本/主机/TID/SID，以及孵蛋共用的版本/主机。“未选择（手动输入）”只取消自动套用，不清空页面。持久化文件固定为 `%LOCALAPPDATA%\FRLG-Auto-RNG\save_profiles.json`，源码/打包入口共享；`save_profiles.py` 负责校验、唯一名称、稳定 ID、当前选择和原子 JSON 替换。
+
 “开始运行”只有在进程成功创建后才自动选择“运行日志”页。普通 1.1.8 也改为经过现有 `easycon-log` 包装器保存日志；孵蛋、TID、SID、TID 到御三家连续流程和高级测试沿用各自日志文件。轮询只更新日志页，不覆盖下方“方案与预检结果”；SID 报告、固定延迟回填等结束结果仍写回结果区。
 
 公共工具区还有“检查/更新 Seed 表”。`tenlines_seed_updater.py` 直接下载 Ten Lines 官方 `fr_eng_nx.bin`/`lg_eng_nx.bin`，保留这两份二进制供 Python 搜索，并从同一数据派生 `02_Seed表_火红_NX.ecs`/`03_Seed表_叶绿_NX.ecs`。四个文件先写入 staging、逐个校验指纹，再把两份 ECS 分别覆盖到临时正式/孵蛋 1.1.8 工程并用固定 1.6.4-a `format`；全部通过才把目录切换到 `%LOCALAPPDATA%\FRLG-Auto-RNG\seed_tables\current`，旧 current 移为 previous。`rng/tenlines.py` 优先读取验证过的 current 二进制，`automation/easycon118.py` 生成工程时同时覆盖两份 ECS。打包版静态包含更新器，不依赖系统 Python 或外部 updater；更新成功后清空 Seed 缓存并使已有方案失效。
@@ -208,6 +210,7 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 | 文件 | 作用 |
 |---|---|
 | `run_auto_rng_gui.py` | 四个输入选项卡、常驻运行日志页、默认隐藏的高级脚本测试页、设备下拉枚举、Seed 表更新、HOME_BUFFER 可选开关、输入校验、后台搜索/采集、方案展示、预检和启动/停止 |
+| `save_profiles.py` | PokeFinder 风格存档资料、0–65535 身份校验、复制/编辑/删除、当前选择和用户目录 JSON 持久化 |
 | `tenlines_seed_updater.py` | 内置下载官方 NX 二进制表、派生两份 ECS、1.6.4-a 双入口校验、清单校验和 current/previous 原子切换 |
 | `run_sid_reverse_capture.py` | SID 逐槽采集编排、提前收敛和报告落盘 |
 | `run_sid_reverse.py` | SID 采集日志分析与文本报告 |
@@ -326,9 +329,10 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 ```
 
-2026-08-26 的代码基线：项目 `.venv` 运行 203 项单元测试全部通过；内置 Seed 更新器已经用 Ten Lines 官方当前火红 2311 条、叶绿 2438 条数据完成真实联网验证。更新后的本地资产正式版、时间轴版和实际生成的孵蛋运行副本均通过真实 EasyCon 1.6.4-a `format`，下载包的 22 个 `Tools/check_*.py` 全部通过。当前下载包输入指纹为 `92f5870f09c28b55a583a9ea5ddf4d23a55af4e847220c0aade35d7e66bb52f5`，导入后物化的 33 文件固定 SHA-256 是 `b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57`；标签审计仍为 1150 个标签、SHA-256 `00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e`。本轮同步 Pickup 稳定前的目标 Seed 无蛋证据与临时 Held 跳区逻辑；内置 Seed 表更新、常驻运行日志页、Held 无蛋区间表写入、旧缓存明确诊断、亲本/全部两种孵蛋配置保存及运行中共享采集预览继续保留。确认：
+2026-08-26 的代码基线：项目 `.venv` 运行 209 项单元测试全部通过；内置 Seed 更新器已经用 Ten Lines 官方当前火红 2311 条、叶绿 2438 条数据完成真实联网验证。更新后的本地资产正式版、时间轴版和实际生成的孵蛋运行副本均通过真实 EasyCon 1.6.4-a `format`，下载包的 22 个 `Tools/check_*.py` 全部通过。当前下载包输入指纹为 `92f5870f09c28b55a583a9ea5ddf4d23a55af4e847220c0aade35d7e66bb52f5`，导入后物化的 33 文件固定 SHA-256 是 `b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57`；标签审计仍为 1150 个标签、SHA-256 `00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e`。本轮新增 PokeFinder 风格存档信息管理；孵蛋 Pickup 稳定前的目标 Seed 无蛋证据与临时 Held 跳区逻辑、内置 Seed 表更新、常驻运行日志页、Held 无蛋区间表写入、旧缓存明确诊断、亲本/全部两种孵蛋配置保存及运行中共享采集预览继续保留。确认：
 
 - 页签顺序固定为 SID 查找、TID 乱数、野生/静态、孵蛋；
+- 顶部存档下拉与管理器保存名称/版本/TID/SID/Switch 机型，选择后同步四页相关输入，手动模式不覆盖现值；
 - 运行日志页常驻末尾；进程启动成功后自动跳转，所有运行模式从各自日志文件实时刷新；
 - 内置 Seed 更新器的二进制表与 ECS 表来自同一官方数据，四文件和两入口 `format` 全部通过后才切换；
 - 设备枚举会自动回填可用串口和带名称采集卡，并保留仍在线的当前索引；
@@ -364,7 +368,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 
 按风险从低到高：
 
-1. 在新设备重新跑安装、203 项测试、EasyCon `--check-only` 和设备枚举。
+1. 在新设备重新跑安装、209 项测试、EasyCon `--check-only` 和设备枚举。
 2. 用不会影响存档的短 ECS 验证单片机控制、停止和重新连接。
 3. 实机验收定点波克比：日志应显示周期 10、目标步数 2815、固定循环 76；过程中不得轮询 `蛋孵化` 标签，收尾两次 `B` 后应回到预期状态。
 4. 实机验收孵蛋完整轮：领取后 Seed 复核成功，再执行固定周期骑车；孵化后共享队伍导航必须向上 3 次并进入第 5 位蛋的能力页，不能误选第 6 位复核野生。
@@ -377,7 +381,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 ## 可直接粘贴到新对话的提示
 
 ```text
-最新补充（优先于下方历史快照数字）：当前测试基线为 203 项；最新 1.1.8 输入/物化指纹分别为 `92f5870f...`/`b7d3cf56...`。孵蛋在 Pickup 尚未稳定时也累计目标 Seed 无蛋证据，只临时跳出 Held 无蛋区间，不改正式 Held 累计修正；孵蛋页已有亲本配置与全部配置两套保存入口，运行脚本时共享采集预览仍可打开；SID 查找已增加 Switch 1/2，并用 HOME_BUFFER 替换固定 A → 1200 ms → A，公共稳定低分自适应开关也作用于 SID 生成副本；命中后仍继续原 WAIT 8000、跳 OP 和进档操作。
+最新补充（优先于下方历史快照数字）：GUI 顶部已有 PokeFinder 风格存档信息管理，保存名称/火叶版本/TID/SID/Switch 机型到 `%LOCALAPPDATA%\FRLG-Auto-RNG\save_profiles.json`，选择后同步四页相关字段，手动模式不覆盖输入。当前测试基线见上方最新验证结果；最新 1.1.8 输入/物化指纹分别为 `92f5870f...`/`b7d3cf56...`。孵蛋在 Pickup 尚未稳定时也累计目标 Seed 无蛋证据，只临时跳出 Held 无蛋区间，不改正式 Held 累计修正；孵蛋页已有亲本配置与全部配置两套保存入口，运行脚本时共享采集预览仍可打开；SID 查找已增加 Switch 1/2，并用 HOME_BUFFER 替换固定 A → 1200 ms → A，公共稳定低分自适应开关也作用于 SID 生成副本；命中后仍继续原 WAIT 8000、跳 OP 和进档操作。
 
 请接手这个火红/叶绿全自动乱数项目。先完整阅读 README.md、docs/HANDOFF.md 和 docs/INITIAL_AUTO_RNG.md，然后运行 git status --short，确认不要覆盖或清理现有未提交改动。
 

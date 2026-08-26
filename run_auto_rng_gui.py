@@ -15,7 +15,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from app_paths import DATA_ROOT, RESOURCE_ROOT
+from app_paths import DATA_ROOT, RESOURCE_ROOT, USER_DATA_ROOT
+from save_profiles import SaveProfile, SaveProfileStore
 
 from assets.game_text import (
     ABILITY_EN_TO_ZH,
@@ -89,6 +90,8 @@ SID_SOURCE_LABELS = ("定点", "野生")
 MODE_TAB_ORDER = ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）")
 ADVANCED_TAB_LABEL = "脚本测试（高级）"
 RUN_LOG_TAB_LABEL = "运行日志"
+MANUAL_PROFILE_LABEL = "未选择（手动输入）"
+SAVE_PROFILE_PATH = USER_DATA_ROOT / "save_profiles.json"
 EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
 EGG_START_MODE_PREPARED = "从已完成254步准备开始"
 EGG_START_MODES = (EGG_START_MODE_FULL, EGG_START_MODE_PREPARED)
@@ -716,6 +719,12 @@ class AutoRngApp:
         self._updating = False
         self.manual_tools: ManualToolsManager | None = None
         self.preview_url: str | None = None
+        self.profile_store = SaveProfileStore(SAVE_PROFILE_PATH)
+        self.profile_load_error: str | None = None
+        try:
+            self.profile_store.load()
+        except ValueError as exc:
+            self.profile_load_error = str(exc)
         self.all_locations = self._load_locations()
         self.category_map = {}
         self.location_map = {}
@@ -733,6 +742,22 @@ class AutoRngApp:
         self._populate_categories()
         self._populate_egg_pokemon()
         self._install_invalidation()
+        self._refresh_save_profile_selector()
+        selected_profile = self.profile_store.get(
+            self.profile_store.selected_profile_id
+        )
+        if selected_profile is not None:
+            self._apply_save_profile(selected_profile, persist=False)
+        if self.profile_load_error:
+            self.root.after(
+                0,
+                lambda: messagebox.showwarning(
+                    "存档信息读取失败",
+                    self.profile_load_error
+                    + "\n\n现有文件不会被静默采用；请在“管理存档”中确认后再保存。",
+                    parent=self.root,
+                ),
+            )
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(250, lambda: self.check_devices(initial=True))
 
@@ -763,6 +788,34 @@ class AutoRngApp:
         container.bind("<Configure>", self._update_page_scrollregion)
         self.page_canvas.bind("<Configure>", self._resize_page_content)
         self.root.bind("<MouseWheel>", self._on_page_mousewheel, add="+")
+
+        profile_frame = ttk.LabelFrame(container, text="存档信息", padding=8)
+        profile_frame.pack(fill="x", pady=(0, 8))
+        ttk.Label(profile_frame, text="当前存档").pack(side="left")
+        self.save_profile_var = tk.StringVar(value=MANUAL_PROFILE_LABEL)
+        self.save_profile_combo = ttk.Combobox(
+            profile_frame,
+            textvariable=self.save_profile_var,
+            values=(MANUAL_PROFILE_LABEL,),
+            width=50,
+            state="readonly",
+        )
+        self.save_profile_combo.pack(side="left", padx=(6, 8))
+        self.save_profile_combo.bind(
+            "<<ComboboxSelected>>", self._on_save_profile_selected
+        )
+        ttk.Button(
+            profile_frame,
+            text="管理存档",
+            command=self.open_save_profile_manager,
+        ).pack(side="left")
+        self.save_profile_summary_var = tk.StringVar(
+            value="手动输入模式：不会自动覆盖各页面参数。"
+        )
+        ttk.Label(
+            profile_frame,
+            textvariable=self.save_profile_summary_var,
+        ).pack(side="left", padx=(12, 0))
 
         self.mode_var = tk.StringVar(value="sid")
         self.mode_notebook = ttk.Notebook(container)
@@ -1644,6 +1697,340 @@ class AutoRngApp:
             steps = -1 if event.delta > 0 else 1
         self.page_canvas.yview_scroll(steps * 3, "units")
         return "break"
+
+    @staticmethod
+    def _save_profile_display(profile: SaveProfile) -> str:
+        return (
+            f"{profile.name}  ·  {profile.game}  ·  "
+            f"TID {profile.tid:05d} / SID {profile.sid:05d}  ·  {profile.switch_name}"
+        )
+
+    def _refresh_save_profile_selector(self, selected_id: str | None = None) -> None:
+        if selected_id is None:
+            selected_id = self.profile_store.selected_profile_id
+        self.profile_display_to_id = {
+            self._save_profile_display(profile): profile.profile_id
+            for profile in self.profile_store.profiles
+        }
+        values = (MANUAL_PROFILE_LABEL, *self.profile_display_to_id)
+        self.save_profile_combo.configure(values=values)
+        selected = self.profile_store.get(selected_id)
+        if selected is None:
+            self.save_profile_var.set(MANUAL_PROFILE_LABEL)
+            self.save_profile_summary_var.set(
+                "手动输入模式：不会自动覆盖各页面参数。"
+            )
+        else:
+            self.save_profile_var.set(self._save_profile_display(selected))
+            self.save_profile_summary_var.set(
+                f"{selected.game}｜TID {selected.tid:05d}｜SID {selected.sid:05d}｜{selected.switch_name}"
+            )
+
+    def _on_save_profile_selected(self, _event=None) -> None:
+        selected_id = self.profile_display_to_id.get(self.save_profile_var.get())
+        try:
+            profile = self.profile_store.select(selected_id)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("无法保存当前存档", str(exc), parent=self.root)
+            self._refresh_save_profile_selector()
+            return
+        if profile is None:
+            self.save_profile_summary_var.set(
+                "手动输入模式：不会自动覆盖各页面参数。"
+            )
+            return
+        self._apply_save_profile(profile, persist=False)
+
+    def _apply_save_profile(
+        self,
+        profile: SaveProfile,
+        *,
+        persist: bool = True,
+    ) -> None:
+        if persist:
+            try:
+                self.profile_store.select(profile.profile_id)
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("无法保存当前存档", str(exc), parent=self.root)
+                return
+        switch_name = profile.switch_name
+        self._updating = True
+        try:
+            # SID 查找页使用当前存档的 TID；SID 正是该页要反查的目标。
+            self.sid_game_var.set(profile.game)
+            self.sid_nx_var.set(switch_name)
+            self.sid_tid_var.set(str(profile.tid))
+
+            # 野生/静态与孵蛋页共用这两个版本/主机变量。
+            self.game_var.set(profile.game)
+            self.nx_var.set(switch_name)
+            self.tid_var.set(str(profile.tid))
+            self.sid_var.set(str(profile.sid))
+
+            # TID 页的目标身份可以直接来自已登记或计划创建的存档。
+            self.tid_game_var.set(profile.game)
+            self.tid_nx_var.set(switch_name)
+            self.tid_target_var.set(str(profile.tid))
+            self.tid_sid_var.set(str(profile.sid))
+            self._on_game_change()
+        finally:
+            self._updating = False
+        self._refresh_save_profile_selector(profile.profile_id)
+        self.invalidate_plan()
+
+    def _current_save_profile_defaults(self) -> dict:
+        mode = self.mode_var.get()
+        if mode == "sid":
+            game = self.sid_game_var.get()
+            nx_model = 2 if self.sid_nx_var.get() == "Switch 2" else 1
+            tid = self.sid_tid_var.get()
+            sid = self.sid_var.get()
+        elif mode == "tid":
+            game = self.tid_game_var.get()
+            nx_model = 2 if self.tid_nx_var.get() == "Switch 2" else 1
+            tid = self.tid_target_var.get()
+            sid = self.tid_sid_var.get()
+        else:
+            game = self.game_var.get()
+            nx_model = 2 if self.nx_var.get() == "Switch 2" else 1
+            tid = self.tid_var.get()
+            sid = self.sid_var.get()
+        return {
+            "name": "新存档",
+            "game": game,
+            "tid": tid,
+            "sid": sid,
+            "nx_model": nx_model,
+        }
+
+    def _show_save_profile_editor(
+        self,
+        parent,
+        title: str,
+        initial: dict,
+    ) -> dict | None:
+        dialog = tk.Toplevel(parent)
+        dialog.title(title)
+        dialog.resizable(False, False)
+        dialog.transient(parent)
+
+        body = ttk.Frame(dialog, padding=14)
+        body.pack(fill="both", expand=True)
+        name_var = tk.StringVar(value=str(initial.get("name", "")))
+        game_var = tk.StringVar(value=str(initial.get("game", "火红")))
+        tid_var = tk.StringVar(value=str(initial.get("tid", "0")))
+        sid_var = tk.StringVar(value=str(initial.get("sid", "0")))
+        nx_var = tk.StringVar(
+            value=f"Switch {int(initial.get('nx_model', 1))}"
+        )
+
+        name_entry = self._labeled_entry(body, "存档名称", name_var, 0, 0, width=28)
+        self._labeled_combo(body, "游戏版本", game_var, ("火红", "叶绿"), 1, 0, width=26)
+        self._labeled_entry(body, "TID", tid_var, 2, 0, width=28)
+        self._labeled_entry(body, "SID", sid_var, 3, 0, width=28)
+        self._labeled_combo(
+            body,
+            "主机",
+            nx_var,
+            ("Switch 1", "Switch 2"),
+            4,
+            0,
+            width=26,
+        )
+        ttk.Label(
+            body,
+            text="火红/叶绿没有时钟电池参数；主机字段用于选择对应 NX Seed 表。",
+        ).grid(row=5, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 2))
+
+        result: dict = {}
+
+        def accept() -> None:
+            try:
+                validated = SaveProfile.create(
+                    name_var.get(),
+                    game_var.get(),
+                    tid_var.get(),
+                    sid_var.get(),
+                    2 if nx_var.get() == "Switch 2" else 1,
+                )
+            except ValueError as exc:
+                messagebox.showerror("存档信息无效", str(exc), parent=dialog)
+                return
+            result.update(
+                name=validated.name,
+                game=validated.game,
+                tid=validated.tid,
+                sid=validated.sid,
+                nx_model=validated.nx_model,
+            )
+            dialog.destroy()
+
+        buttons = ttk.Frame(body)
+        buttons.grid(row=6, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(buttons, text="保存", command=accept).pack(side="left")
+        ttk.Button(buttons, text="取消", command=dialog.destroy).pack(
+            side="left", padx=(8, 0)
+        )
+        dialog.bind("<Return>", lambda _event: accept())
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        name_entry.focus_set()
+        dialog.grab_set()
+        parent.wait_window(dialog)
+        return result or None
+
+    def open_save_profile_manager(self) -> None:
+        manager = tk.Toplevel(self.root)
+        manager.title("管理存档信息")
+        manager.geometry("820x390")
+        manager.minsize(700, 330)
+        manager.transient(self.root)
+
+        body = ttk.Frame(manager, padding=12)
+        body.pack(fill="both", expand=True)
+        tree = ttk.Treeview(
+            body,
+            columns=("name", "game", "tid", "sid", "switch"),
+            show="headings",
+            selectmode="browse",
+            height=10,
+        )
+        headings = (
+            ("name", "存档名称", 220),
+            ("game", "游戏版本", 90),
+            ("tid", "TID", 90),
+            ("sid", "SID", 90),
+            ("switch", "主机", 100),
+        )
+        for column, label, width in headings:
+            tree.heading(column, text=label)
+            tree.column(column, width=width, anchor="center" if column != "name" else "w")
+        scrollbar = ttk.Scrollbar(body, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        body.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
+
+        def selected_profile() -> SaveProfile | None:
+            selection = tree.selection()
+            return self.profile_store.get(selection[0]) if selection else None
+
+        def refresh_tree(select_id: str | None = None) -> None:
+            for item in tree.get_children():
+                tree.delete(item)
+            for profile in self.profile_store.profiles:
+                tree.insert(
+                    "",
+                    "end",
+                    iid=profile.profile_id,
+                    values=(
+                        profile.name,
+                        profile.game,
+                        f"{profile.tid:05d}",
+                        f"{profile.sid:05d}",
+                        profile.switch_name,
+                    ),
+                )
+            desired = select_id or self.profile_store.selected_profile_id
+            if desired and tree.exists(desired):
+                tree.selection_set(desired)
+                tree.focus(desired)
+                tree.see(desired)
+
+        def add_profile() -> None:
+            initial = self._current_save_profile_defaults()
+            while True:
+                values = self._show_save_profile_editor(manager, "新建存档", initial)
+                if values is None:
+                    return
+                try:
+                    profile = self.profile_store.add(**values)
+                except (OSError, ValueError) as exc:
+                    messagebox.showerror("无法新建存档", str(exc), parent=manager)
+                    initial = values
+                    continue
+                self._apply_save_profile(profile, persist=False)
+                refresh_tree(profile.profile_id)
+                return
+
+        def edit_profile() -> None:
+            current = selected_profile()
+            if current is None:
+                messagebox.showinfo("编辑存档", "请先选择一个存档。", parent=manager)
+                return
+            initial = current.to_dict()
+            while True:
+                values = self._show_save_profile_editor(manager, "编辑存档", initial)
+                if values is None:
+                    return
+                try:
+                    updated = self.profile_store.update(current.profile_id, **values)
+                except (OSError, ValueError) as exc:
+                    messagebox.showerror("无法编辑存档", str(exc), parent=manager)
+                    initial = values
+                    continue
+                self._refresh_save_profile_selector()
+                if self.profile_store.selected_profile_id == updated.profile_id:
+                    self._apply_save_profile(updated, persist=False)
+                refresh_tree(updated.profile_id)
+                return
+
+        def duplicate_profile() -> None:
+            current = selected_profile()
+            if current is None:
+                messagebox.showinfo("复制存档", "请先选择一个存档。", parent=manager)
+                return
+            try:
+                duplicate = self.profile_store.duplicate(current.profile_id)
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("无法复制存档", str(exc), parent=manager)
+                return
+            self._apply_save_profile(duplicate, persist=False)
+            refresh_tree(duplicate.profile_id)
+
+        def delete_profile() -> None:
+            current = selected_profile()
+            if current is None:
+                messagebox.showinfo("删除存档", "请先选择一个存档。", parent=manager)
+                return
+            if not messagebox.askyesno(
+                "删除存档",
+                f"确定删除“{current.name}”吗？\n不会删除或修改游戏存档本身。",
+                parent=manager,
+            ):
+                return
+            try:
+                self.profile_store.delete(current.profile_id)
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("无法删除存档", str(exc), parent=manager)
+                return
+            self._refresh_save_profile_selector()
+            refresh_tree()
+
+        def select_current() -> None:
+            current = selected_profile()
+            if current is None:
+                messagebox.showinfo("设为当前", "请先选择一个存档。", parent=manager)
+                return
+            self._apply_save_profile(current)
+            refresh_tree(current.profile_id)
+
+        controls = ttk.Frame(body)
+        controls.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        ttk.Button(controls, text="新建", command=add_profile).pack(side="left")
+        ttk.Button(controls, text="编辑", command=edit_profile).pack(side="left", padx=(8, 0))
+        ttk.Button(controls, text="复制", command=duplicate_profile).pack(side="left", padx=(8, 0))
+        ttk.Button(controls, text="删除", command=delete_profile).pack(side="left", padx=(8, 0))
+        ttk.Button(controls, text="设为当前", command=select_current).pack(side="left", padx=(18, 0))
+        ttk.Button(controls, text="完成", command=manager.destroy).pack(side="right")
+        ttk.Label(
+            controls,
+            text="选择存档只填写工具参数，不会读写模拟器或游戏存档。",
+        ).pack(side="right", padx=(0, 14))
+        tree.bind("<Double-1>", lambda _event: edit_profile())
+        manager.protocol("WM_DELETE_WINDOW", manager.destroy)
+        refresh_tree()
 
     @staticmethod
     def _labeled_entry(parent, label, variable, row, column, width=14, span=1):
