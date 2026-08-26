@@ -11,6 +11,7 @@ from automation.easycon118 import (
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
     EGG_POST_PICKUP_RETRY_POLICY_MARKER,
+    EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER,
     EGG_REVERSE_LOOKUP_POLICY_MARKER,
     EGG_REVERSE_LOOKUP_WINDOW_MARKER,
     EGG_POND_SETTLE_FIXED,
@@ -47,6 +48,7 @@ from automation.easycon118 import (
     _apply_egg_terminal_stop_policy_text,
     _apply_party_summary_navigation_text,
     _apply_egg_post_pickup_retry_policy_text,
+    _apply_egg_no_egg_evidence_policy_text,
     _apply_home_buffer_adaptive_classifier_text,
     _apply_standard_home_buffer_runtime_override_text,
     _apply_togepi_hatch_cycle_override_text,
@@ -770,6 +772,32 @@ ENDFUNC
         self.assertEqual(configured.count("$孵蛋流程Seed已预校准 = 1"), 2)
         self.assertNotIn("重新预校准", configured)
 
+    def test_no_egg_evidence_survives_non_target_seed_for_same_held_request(self):
+        original = """\
+    IF $孵蛋流程上次无蛋请求Held帧 != $孵蛋流程请求Held帧
+        $孵蛋流程无蛋连续次数 = 0
+        $孵蛋流程上次无蛋请求Held帧 = $孵蛋流程请求Held帧
+    ENDIF
+        ELIF $孵蛋流程Seed验证结果 == 2
+            PRINT 无蛋后未命中目标Seed：本轮只校正Seed等待，不累计Held无蛋区间证据
+            $孵蛋流程目标Seed无蛋次数 = 0
+            $孵蛋流程目标Seed无蛋区间索引 = -1
+            $孵蛋流程目标Seed无蛋区间确认次数 = 0
+            $孵蛋流程无蛋连续次数 = 0
+"""
+        configured = _apply_egg_no_egg_evidence_policy_text(original)
+        configured_again = _apply_egg_no_egg_evidence_policy_text(configured)
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER, configured)
+        request_change, non_target = configured.split(
+            "ELIF $孵蛋流程Seed验证结果 == 2",
+            1,
+        )
+        self.assertIn("$孵蛋流程目标Seed无蛋区间确认次数 = 0", request_change)
+        self.assertNotIn("$孵蛋流程目标Seed无蛋区间确认次数 = 0", non_target)
+        self.assertIn("保留同一Held请求已有无蛋区间证据", non_target)
+
     def test_terminal_egg_lookup_failure_keeps_the_current_game_screen(self):
         original = """\
 FUNC 孵蛋流程_执行孵化与个体反查(): INT
@@ -947,6 +975,30 @@ ENDFUNC
             "Pickup尚未稳定：仍登记本轮Held无蛋区间证据，仅使用临时跳区，不修改正式Held修正",
             template,
         )
+        self.assertIn(
+            "无蛋后未命中目标Seed：本轮只校正Seed等待；保留同一Held请求已有无蛋区间证据",
+            template,
+        )
+        request_change = template.split(
+            "IF $孵蛋流程上次无蛋请求Held帧 != $孵蛋流程请求Held帧",
+            1,
+        )[1].split("ENDIF", 1)[0]
+        for reset in (
+            "$孵蛋流程目标Seed无蛋次数 = 0",
+            "$孵蛋流程目标Seed无蛋区间索引 = -1",
+            "$孵蛋流程目标Seed无蛋区间确认次数 = 0",
+        ):
+            self.assertIn(reset, request_change)
+        non_target_no_egg = template.split(
+            "PRINT 无蛋后未命中目标Seed：本轮只校正Seed等待；保留同一Held请求已有无蛋区间证据",
+            1,
+        )[1].split("CALL 孵蛋流程_重开下一轮", 1)[0]
+        for forbidden_reset in (
+            "$孵蛋流程目标Seed无蛋次数 = 0",
+            "$孵蛋流程目标Seed无蛋区间索引 = -1",
+            "$孵蛋流程目标Seed无蛋区间确认次数 = 0",
+        ):
+            self.assertNotIn(forbidden_reset, non_target_no_egg)
         self.assertIn("连续命中目标Seed且无蛋超过处理上限，停止以避免死循环", template)
         self.assertIn("FUNC 孵蛋流程_候选个体是否完全一致(): INT", template)
         self.assertIn("FUNC 孵蛋流程_选择校准候选(): INT", template)

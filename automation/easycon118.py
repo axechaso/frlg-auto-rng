@@ -89,6 +89,9 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package where target-Seed no-egg evidence is accumulated even
     # before Pickup stabilizes, allowing temporary Held no-egg interval exits.
     "92f5870f09c28b55a583a9ea5ddf4d23a55af4e847220c0aade35d7e66bb52f5",
+    # Download package that preserves confirmed no-egg interval evidence across
+    # intervening non-target Seed rounds while the Held request is unchanged.
+    "4e00e389381ae92cf040ac1c620334b808758241e82fd50138ab3c5cb7e0c2f0",
 )
 EXPECTED_SCRIPT_SHA256 = "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -112,6 +115,8 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "316c6aa9b6f05adeef0d7f306032b7ae553779d6a86848ae301aa981fd9a8188",
     # Materialized corpus for the latest imported egg-flow package.
     "96882c1d918d9996fc7893051941729f8bdf0a9babc3cab3d8a9eda2ebde3aac",
+    # Materialized corpus with same-Held no-egg evidence retention.
+    "961e7eb688ae10479a8335ae71771c3462bb3adf2ed3b8d2e27102a886e050fd",
 )
 
 
@@ -300,6 +305,7 @@ EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完�
 EGG_TRANSIENT_RETRY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：瞬时动作失败重启后继续下一轮"
 EGG_TERMINAL_STOP_OVERRIDE_MARKER = "# GUI 孵蛋终止策略：无精确结果时保留当前游戏画面"
 EGG_POST_PICKUP_RETRY_POLICY_MARKER = "# GUI 孵蛋领取后Seed失败：保留首次预校准，直接重试生成领取"
+EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER = "# GUI 孵蛋无蛋区间：同一Held请求跨非目标Seed轮保留证据"
 EGG_POND_SETTLE_ORIGINAL = """\
     LS RESET
     WAIT 500
@@ -437,6 +443,40 @@ EGG_POST_PICKUP_FAILURE_CURRENT = """\
     $孵蛋流程Seed已预校准 = 1
     CALL 孵蛋流程_重开下一轮
     RETURN 2
+"""
+EGG_NO_EGG_REQUEST_CHANGE_OLD = """\
+    IF $孵蛋流程上次无蛋请求Held帧 != $孵蛋流程请求Held帧
+        $孵蛋流程无蛋连续次数 = 0
+        $孵蛋流程上次无蛋请求Held帧 = $孵蛋流程请求Held帧
+    ENDIF
+"""
+EGG_NO_EGG_REQUEST_CHANGE_CURRENT = f"""\
+    {EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER}
+    IF $孵蛋流程上次无蛋请求Held帧 != $孵蛋流程请求Held帧
+        $孵蛋流程无蛋连续次数 = 0
+        $孵蛋流程目标Seed无蛋次数 = 0
+        $孵蛋流程目标Seed无蛋区间索引 = -1
+        $孵蛋流程目标Seed无蛋区间确认次数 = 0
+        $孵蛋流程上次无蛋请求Held帧 = $孵蛋流程请求Held帧
+    ENDIF
+"""
+EGG_NO_EGG_REQUEST_CHANGE_FIXED_UNMARKED = EGG_NO_EGG_REQUEST_CHANGE_CURRENT.replace(
+    f"    {EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER}\n",
+    "",
+    1,
+)
+EGG_NO_EGG_NON_TARGET_OLD = """\
+        ELIF $孵蛋流程Seed验证结果 == 2
+            PRINT 无蛋后未命中目标Seed：本轮只校正Seed等待，不累计Held无蛋区间证据
+            $孵蛋流程目标Seed无蛋次数 = 0
+            $孵蛋流程目标Seed无蛋区间索引 = -1
+            $孵蛋流程目标Seed无蛋区间确认次数 = 0
+            $孵蛋流程无蛋连续次数 = 0
+"""
+EGG_NO_EGG_NON_TARGET_CURRENT = """\
+        ELIF $孵蛋流程Seed验证结果 == 2
+            PRINT 无蛋后未命中目标Seed：本轮只校正Seed等待；保留同一Held请求已有无蛋区间证据
+            $孵蛋流程无蛋连续次数 = 0
 """
 EGG_TERMINAL_STOP_REPLACEMENTS = (
     (
@@ -1328,6 +1368,38 @@ def _apply_egg_post_pickup_retry_policy_text(template_text: str) -> str:
     )
 
 
+def _apply_egg_no_egg_evidence_policy_text(template_text: str) -> str:
+    """Retain target-Seed no-egg evidence while the Held request is unchanged."""
+    if EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER in template_text:
+        return template_text
+
+    configured = template_text
+    if EGG_NO_EGG_REQUEST_CHANGE_OLD in configured:
+        configured = configured.replace(
+            EGG_NO_EGG_REQUEST_CHANGE_OLD,
+            EGG_NO_EGG_REQUEST_CHANGE_CURRENT,
+            1,
+        )
+    elif EGG_NO_EGG_REQUEST_CHANGE_FIXED_UNMARKED in configured:
+        configured = configured.replace(
+            EGG_NO_EGG_REQUEST_CHANGE_FIXED_UNMARKED,
+            EGG_NO_EGG_REQUEST_CHANGE_CURRENT,
+            1,
+        )
+    else:
+        raise ValueError("孵蛋模板缺少Held请求变化分支，拒绝应用无蛋证据策略")
+
+    if EGG_NO_EGG_NON_TARGET_OLD in configured:
+        configured = configured.replace(
+            EGG_NO_EGG_NON_TARGET_OLD,
+            EGG_NO_EGG_NON_TARGET_CURRENT,
+            1,
+        )
+    elif EGG_NO_EGG_NON_TARGET_CURRENT not in configured:
+        raise ValueError("孵蛋模板缺少无蛋后的非目标Seed分支，拒绝应用无蛋证据策略")
+    return configured
+
+
 def _apply_egg_terminal_stop_policy_text(template_text: str) -> str:
     """Stop terminal egg lookup failures without closing or restarting the game."""
     if EGG_TERMINAL_STOP_OVERRIDE_MARKER in template_text:
@@ -1743,6 +1815,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     )
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
     configured = _apply_egg_post_pickup_retry_policy_text(configured)
+    configured = _apply_egg_no_egg_evidence_policy_text(configured)
     configured = _apply_egg_terminal_stop_policy_text(configured)
     egg_path.write_text(configured, encoding="utf-8")
 
@@ -1933,6 +2006,7 @@ def write_configured_egg_project(
     )
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
     configured = _apply_egg_post_pickup_retry_policy_text(configured)
+    configured = _apply_egg_no_egg_evidence_policy_text(configured)
     configured = _apply_egg_terminal_stop_policy_text(configured)
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
@@ -1980,6 +2054,12 @@ def write_configured_egg_project(
         (
             EGG_POST_PICKUP_MISS_CURRENT
             + EGG_POST_PICKUP_FAILURE_CURRENT
+        ).encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["egg_no_egg_evidence_policy_sha256"] = hashlib.sha256(
+        (
+            EGG_NO_EGG_REQUEST_CHANGE_CURRENT
+            + EGG_NO_EGG_NON_TARGET_CURRENT
         ).encode("utf-8")
     ).hexdigest()
     runtime_overrides["egg_terminal_stop_policy_sha256"] = hashlib.sha256(
