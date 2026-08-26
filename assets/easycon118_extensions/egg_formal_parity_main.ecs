@@ -8,12 +8,19 @@ FUNC 孵蛋流程_计算两次命中时间(): INT
     ENDIF
 
     # 与正式版相同：F2为奇数时，F1增加1个60Hz帧、F2减少1个120Hz advance。
-    # Held与Pickup共享同一个进存档原点；正常情况下二者奇偶一致，因此只按Held决定一次，
-    # 并把同一个F2扣减量同时应用到两个绝对截止，不能分别切换两次相位。
+    # Held与Pickup共享同一个进存档原点，先让Pickup继承Held的同一次F2扣减。
+    # 如果继承后的Pickup计时帧仍为奇数，则在出培育屋后开关一次菜单增加7 advance，
+    # 同时从Pickup计时截止预扣7；不再额外改动F1，也不要求Held/Pickup同时为奇数。
     $孵蛋流程奇偶F1修正帧 = 奇偶修正后F1帧(0, $孵蛋流程请求Held帧)
     $孵蛋流程执行Held帧 = 奇偶修正后F2帧($孵蛋流程请求Held帧)
     $孵蛋流程奇偶F2扣除帧 = $孵蛋流程请求Held帧 - $孵蛋流程执行Held帧
-    $孵蛋流程执行Pickup帧 = $孵蛋流程请求Pickup帧 - $孵蛋流程奇偶F2扣除帧
+    $孵蛋流程Pickup奇偶基准帧 = $孵蛋流程请求Pickup帧 - $孵蛋流程奇偶F2扣除帧
+    $孵蛋流程Pickup菜单奇偶开关 = 0
+    IF $孵蛋流程Pickup奇偶基准帧 % 2 != 0
+        $孵蛋流程Pickup菜单奇偶开关 = 1
+    ENDIF
+    $孵蛋流程Pickup菜单推进帧 = $孵蛋流程Pickup菜单奇偶开关 * 7
+    $孵蛋流程执行Pickup帧 = $孵蛋流程Pickup奇偶基准帧 - $孵蛋流程Pickup菜单推进帧
     $孵蛋流程奇偶增加MS = 帧转60FPS毫秒($孵蛋流程奇偶F1修正帧)
     $孵蛋流程本轮奇偶等待MS = $孵蛋奇偶等待MS + $孵蛋流程奇偶增加MS
     IF $孵蛋流程执行Held帧 <= 0 or $孵蛋流程执行Pickup帧 <= $孵蛋流程执行Held帧
@@ -43,7 +50,7 @@ FUNC 孵蛋流程_计算两次命中时间(): INT
         RETURN 0
     ENDIF
     PRINT 孵蛋时间轴: Held请求 & $孵蛋流程请求Held帧 & "，Pickup请求 " & $孵蛋流程请求Pickup帧
-    PRINT 孵蛋正式版奇偶校准: F1增加 & $孵蛋流程奇偶F1修正帧 & " 帧，Held执行 " & $孵蛋流程执行Held帧 & "，Pickup执行 " & $孵蛋流程执行Pickup帧 & "，奇偶等待 " & $孵蛋流程本轮奇偶等待MS & " ms"
+    PRINT 孵蛋正式版奇偶校准: F1增加 & $孵蛋流程奇偶F1修正帧 & " 帧，Held执行 " & $孵蛋流程执行Held帧 & "，Pickup计时执行 " & $孵蛋流程执行Pickup帧 & "，Pickup菜单 " & $孵蛋流程Pickup菜单奇偶开关 & "（+" & $孵蛋流程Pickup菜单推进帧 & " advance），奇偶等待 " & $孵蛋流程本轮奇偶等待MS & " ms"
     IF $孵蛋Held临时跳出偏移帧 != 0
         PRINT 孵蛋时间轴: 本轮Held临时跳出偏移 & $孵蛋Held临时跳出偏移帧 & " 帧（不写入正式累计修正）"
     ENDIF

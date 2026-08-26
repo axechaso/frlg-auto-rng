@@ -12,6 +12,7 @@ from automation.easycon118 import (
     EGG_FORMAL_PARITY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
+    EGG_PICKUP_PARITY_MENU_MARKER,
     EGG_POST_PICKUP_RETRY_POLICY_MARKER,
     EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER,
     EGG_REVERSE_LOOKUP_POLICY_MARKER,
@@ -38,6 +39,7 @@ from automation.easycon118 import (
     _apply_egg_formal_parity_runtime_override_text,
     _apply_egg_party_slot_candy_runtime_override_text,
     _apply_egg_party_slot_main_runtime_override_text,
+    _apply_egg_pickup_parity_menu_text,
     _apply_egg_reverse_lookup_policy_text,
     _apply_egg_reverse_lookup_window_text,
     _apply_egg_pond_settle_delay_text,
@@ -871,7 +873,7 @@ ENDFUNC
         self.assertIn("正式版±1五次多数、固定半步与命中后10次保持", configured)
         self.assertNotIn("$孵蛋Seed等待MS = $孵蛋Seed等待MS -", configured)
 
-    def test_egg_timeline_reuses_formal_parity_phase_once_for_both_deadlines(self):
+    def test_egg_timeline_uses_formal_held_parity_and_pickup_menu_phase(self):
         original = """\
 $孵蛋流程请求Held帧 = 0
 FUNC 孵蛋流程_计算两次命中时间(): INT
@@ -907,7 +909,11 @@ $孵蛋测试结果 = 孵蛋测试_执行同Seed两次命中($Seed模式, $孵�
             configured,
         )
         self.assertIn(
-            "$孵蛋流程执行Pickup帧 = $孵蛋流程请求Pickup帧 - $孵蛋流程奇偶F2扣除帧",
+            "$孵蛋流程Pickup奇偶基准帧 = $孵蛋流程请求Pickup帧 - $孵蛋流程奇偶F2扣除帧",
+            configured,
+        )
+        self.assertIn(
+            "$孵蛋流程执行Pickup帧 = $孵蛋流程Pickup奇偶基准帧 - $孵蛋流程Pickup菜单推进帧",
             configured,
         )
         self.assertEqual(
@@ -915,7 +921,48 @@ $孵蛋测试结果 = 孵蛋测试_执行同Seed两次命中($Seed模式, $孵�
             1,
         )
         self.assertIn("$孵蛋流程本轮奇偶等待MS, $孵蛋封面长按MS", configured)
+        self.assertIn(
+            "$孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",
+            configured,
+        )
         self.assertNotIn("$孵蛋奇偶等待MS, $孵蛋封面长按MS", configured)
+
+    def test_pickup_parity_menu_is_after_confirmed_egg_and_idempotent(self):
+        original = """\
+FUNC 孵蛋测试_执行同Seed两次命中($Seed模式: INT, $Seed等待MS: INT, $精确尾段MS: INT, $奇偶等待MS: INT, $封面长按MS: INT, $TV开关: INT, $TV等待MS: INT, $出蛋目标MS: INT, $领蛋目标MS: INT, $出蛋识图阈值: INT, $抓捕识图阈值: INT, $出闪后继续抓捕: INT, $无蛋后复核Seed: INT): INT
+    IF $无蛋后复核Seed != 0 and $无蛋后复核Seed != 1
+        PRINT 孵蛋无蛋后Seed复核开关无效: & $无蛋后复核Seed
+        RETURN 0
+    ENDIF
+    $孵蛋库_启动结果 = 孵蛋测试_启动并进入存档($Seed模式, $Seed等待MS, $精确尾段MS, $奇偶等待MS, $封面长按MS)
+    IF $孵蛋库_出蛋检测结果 != 1
+        RETURN 2
+    ENDIF
+    LS RIGHT
+    RETURN 1
+ENDFUNC
+
+FUNC 孵蛋测试_执行前置准备($Seed模式: INT, $识图阈值: INT): INT
+    RETURN 1
+ENDFUNC
+"""
+        configured = _apply_egg_pickup_parity_menu_text(original)
+        configured_again = _apply_egg_pickup_parity_menu_text(configured)
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(EGG_PICKUP_PARITY_MENU_MARKER, configured)
+        self.assertIn("$Pickup菜单奇偶开关: INT", configured)
+        self.assertIn("孵蛋Pickup菜单奇偶开关无效", configured)
+        action = configured.split(EGG_PICKUP_PARITY_MENU_MARKER, 1)[1].split(
+            "LS RIGHT",
+            1,
+        )[0]
+        self.assertIn("IF $Pickup菜单奇偶开关 == 1", action)
+        self.assertIn("X\n        WAIT 500\n        B\n        WAIT 500", action)
+        self.assertLess(
+            configured.index("RETURN 2"),
+            configured.index(EGG_PICKUP_PARITY_MENU_MARKER),
+        )
 
     def test_hatch_waits_between_all_menu_exit_layers_before_walking(self):
         original = """\
@@ -1062,12 +1109,18 @@ ENDFUNC
             template,
         )
         self.assertIn(
-            "$孵蛋流程执行Pickup帧 = $孵蛋流程请求Pickup帧 - $孵蛋流程奇偶F2扣除帧",
+            "$孵蛋流程执行Pickup帧 = $孵蛋流程Pickup奇偶基准帧 - $孵蛋流程Pickup菜单推进帧",
             template,
         )
         self.assertIn("孵蛋正式版奇偶校准: F1增加", template)
         self.assertIn("$孵蛋流程本轮奇偶等待MS, $孵蛋封面长按MS", template)
+        self.assertIn(
+            "$孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",
+            template,
+        )
         library = library_path.read_text(encoding="utf-8")
+        self.assertIn(EGG_PICKUP_PARITY_MENU_MARKER, library)
+        self.assertIn("出培育屋后开关一次菜单，物理增加7 advance", library)
         self.assertIn("识别冲浪结束后再打开菜单", library)
         self.assertIn(EGG_POND_SETTLE_FIXED, library)
         self.assertIn("FUNC 孵蛋测试_软重启并跳过回忆", library)

@@ -95,6 +95,9 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package where the egg timeline reuses the formal F1+1/F2-1
     # parity phase for the normally parity-matched Held/Pickup deadlines.
     "355c79d87d8272524cbbda0680f30d6de0d77d61b57046458c295e12f1275ac6",
+    # Download package where a residual odd Pickup phase uses the measured
+    # post-daycare X/B menu action and pre-deducts its 7 advances.
+    "e5a7c8312282070efe5bee72c0b3c5572c46c7ba4205a90188b39b792e228d95",
 )
 EXPECTED_SCRIPT_SHA256 = "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -122,6 +125,8 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "961e7eb688ae10479a8335ae71771c3462bb3adf2ed3b8d2e27102a886e050fd",
     # Materialized corpus with the formal parity overlay in the egg timeline.
     "4a706951d032ed806c665889720cb235f72320d695dd60de3a782b23297bbd7d",
+    # Materialized corpus with the Pickup 7-advance menu parity overlay.
+    "4290019dc8c28deed87f647f72b0f65b56f8564cd9faf89688ec7955d41f4dc4",
 )
 
 
@@ -326,11 +331,67 @@ $孵蛋流程奇偶F1修正帧 = 0
 $孵蛋流程奇偶F2扣除帧 = 0
 $孵蛋流程奇偶增加MS = 0
 $孵蛋流程本轮奇偶等待MS = 0
+$孵蛋流程Pickup奇偶基准帧 = 0
+$孵蛋流程Pickup菜单奇偶开关 = 0
+$孵蛋流程Pickup菜单推进帧 = 0
 """
 EGG_FORMAL_PARITY_REAL_CALL_OLD = "$孵蛋测试结果 = 孵蛋测试_执行同Seed两次命中($Seed模式, $孵蛋Seed等待MS, $时间轴精确尾段MS, $孵蛋奇偶等待MS, $孵蛋封面长按MS, $孵蛋流程TV过帧开关, $孵蛋流程TV等待MS, $孵蛋流程生成目标截止MS, $孵蛋流程领取目标截止MS, $孵蛋出蛋检测阈值, $识图阈值, 1, $孵蛋流程无蛋复核Seed开关)"
-EGG_FORMAL_PARITY_REAL_CALL_CURRENT = EGG_FORMAL_PARITY_REAL_CALL_OLD.replace(
+EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU = EGG_FORMAL_PARITY_REAL_CALL_OLD.replace(
     "$孵蛋奇偶等待MS",
     "$孵蛋流程本轮奇偶等待MS",
+    1,
+)
+EGG_FORMAL_PARITY_REAL_CALL_CURRENT = EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU.replace(
+    "$孵蛋流程领取目标截止MS, $孵蛋出蛋检测阈值",
+    "$孵蛋流程领取目标截止MS, $孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",
+    1,
+)
+EGG_PICKUP_PARITY_MENU_MARKER = "# GUI 孵蛋领取奇偶：确认出蛋后开关菜单增加7 advance"
+EGG_PICKUP_PARITY_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_执行同Seed两次命中"
+EGG_PICKUP_PARITY_SIGNATURE_OLD = "FUNC 孵蛋测试_执行同Seed两次命中($Seed模式: INT, $Seed等待MS: INT, $精确尾段MS: INT, $奇偶等待MS: INT, $封面长按MS: INT, $TV开关: INT, $TV等待MS: INT, $出蛋目标MS: INT, $领蛋目标MS: INT, $出蛋识图阈值: INT, $抓捕识图阈值: INT, $出闪后继续抓捕: INT, $无蛋后复核Seed: INT): INT"
+EGG_PICKUP_PARITY_SIGNATURE_CURRENT = EGG_PICKUP_PARITY_SIGNATURE_OLD.replace(
+    "$领蛋目标MS: INT, $出蛋识图阈值",
+    "$领蛋目标MS: INT, $Pickup菜单奇偶开关: INT, $出蛋识图阈值",
+    1,
+)
+EGG_PICKUP_PARITY_VALIDATION_OLD = """\
+    IF $无蛋后复核Seed != 0 and $无蛋后复核Seed != 1
+        PRINT 孵蛋无蛋后Seed复核开关无效: & $无蛋后复核Seed
+        RETURN 0
+    ENDIF
+    $孵蛋库_启动结果 = 孵蛋测试_启动并进入存档($Seed模式, $Seed等待MS, $精确尾段MS, $奇偶等待MS, $封面长按MS)
+"""
+EGG_PICKUP_PARITY_VALIDATION_CURRENT = """\
+    IF $无蛋后复核Seed != 0 and $无蛋后复核Seed != 1
+        PRINT 孵蛋无蛋后Seed复核开关无效: & $无蛋后复核Seed
+        RETURN 0
+    ENDIF
+    IF $Pickup菜单奇偶开关 != 0 and $Pickup菜单奇偶开关 != 1
+        PRINT 孵蛋Pickup菜单奇偶开关无效: & $Pickup菜单奇偶开关
+        RETURN 0
+    ENDIF
+    $孵蛋库_启动结果 = 孵蛋测试_启动并进入存档($Seed模式, $Seed等待MS, $精确尾段MS, $奇偶等待MS, $封面长按MS)
+"""
+EGG_PICKUP_PARITY_ACTION_OLD = """\
+        RETURN 2
+    ENDIF
+    LS RIGHT
+"""
+EGG_PICKUP_PARITY_ACTION_UNMARKED = """\
+        RETURN 2
+    ENDIF
+    IF $Pickup菜单奇偶开关 == 1
+        PRINT 孵蛋领取奇偶校准: 出培育屋后开关一次菜单，物理增加7 advance
+        X
+        WAIT 500
+        B
+        WAIT 500
+    ENDIF
+    LS RIGHT
+"""
+EGG_PICKUP_PARITY_ACTION_CURRENT = EGG_PICKUP_PARITY_ACTION_UNMARKED.replace(
+    "    IF $Pickup菜单奇偶开关 == 1\n",
+    f"    {EGG_PICKUP_PARITY_MENU_MARKER}\n    IF $Pickup菜单奇偶开关 == 1\n",
     1,
 )
 EGG_POND_SETTLE_ORIGINAL = """\
@@ -1355,20 +1416,18 @@ def _apply_egg_formal_parity_runtime_override_text(
     template_text: str,
     override_text: str,
 ) -> str:
-    """Apply the formal F1+1/F2-1 parity phase once to Held and Pickup."""
+    """Apply formal Held parity, then schedule Pickup's optional 7-advance menu."""
     configured = template_text
     required_globals = tuple(
         line for line in EGG_FORMAL_PARITY_GLOBALS.splitlines() if line
     )
-    present_globals = tuple(line in configured for line in required_globals)
-    if any(present_globals) and not all(present_globals):
-        raise ValueError("孵蛋模板只包含部分正式版奇偶校准全局变量，拒绝生成")
-    if not all(present_globals):
+    missing_globals = tuple(line for line in required_globals if line not in configured)
+    if missing_globals:
         if configured.count(EGG_FORMAL_PARITY_GLOBAL_ANCHOR) != 1:
             raise ValueError("孵蛋模板缺少唯一的Held请求全局变量，拒绝应用奇偶校准")
         configured = configured.replace(
             EGG_FORMAL_PARITY_GLOBAL_ANCHOR,
-            EGG_FORMAL_PARITY_GLOBAL_ANCHOR + "\n" + EGG_FORMAL_PARITY_GLOBALS.rstrip(),
+            EGG_FORMAL_PARITY_GLOBAL_ANCHOR + "\n" + "\n".join(missing_globals),
             1,
         )
 
@@ -1384,14 +1443,66 @@ def _apply_egg_formal_parity_runtime_override_text(
     configured = configured[:start] + override_text.rstrip() + "\n\n" + configured[end:]
 
     if EGG_FORMAL_PARITY_REAL_CALL_CURRENT not in configured:
-        if configured.count(EGG_FORMAL_PARITY_REAL_CALL_OLD) != 1:
+        if configured.count(EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU) == 1:
+            configured = configured.replace(
+                EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU,
+                EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
+                1,
+            )
+        elif configured.count(EGG_FORMAL_PARITY_REAL_CALL_OLD) == 1:
+            configured = configured.replace(
+                EGG_FORMAL_PARITY_REAL_CALL_OLD,
+                EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
+                1,
+            )
+        else:
             raise ValueError("孵蛋模板缺少唯一的生成领取执行调用，拒绝应用奇偶校准")
-        configured = configured.replace(
-            EGG_FORMAL_PARITY_REAL_CALL_OLD,
-            EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
+    return configured
+
+
+def _apply_egg_pickup_parity_menu_text(library_text: str) -> str:
+    """Flip only the Pickup timing phase with the measured 7-advance menu action."""
+    if library_text.count(EGG_PICKUP_PARITY_ORIGINAL_FUNCTION) != 1:
+        raise ValueError("孵蛋流程库缺少唯一的同Seed两次命中函数，拒绝应用Pickup奇偶菜单")
+    start = library_text.index(EGG_PICKUP_PARITY_ORIGINAL_FUNCTION)
+    end = library_text.index("ENDFUNC", start) + len("ENDFUNC")
+    section = library_text[start:end]
+    if EGG_PICKUP_PARITY_MENU_MARKER in section:
+        return library_text
+
+    if EGG_PICKUP_PARITY_SIGNATURE_OLD in section:
+        section = section.replace(
+            EGG_PICKUP_PARITY_SIGNATURE_OLD,
+            EGG_PICKUP_PARITY_SIGNATURE_CURRENT,
             1,
         )
-    return configured
+    elif EGG_PICKUP_PARITY_SIGNATURE_CURRENT not in section:
+        raise ValueError("孵蛋流程库的同Seed两次命中参数签名不受支持")
+
+    if EGG_PICKUP_PARITY_VALIDATION_OLD in section:
+        section = section.replace(
+            EGG_PICKUP_PARITY_VALIDATION_OLD,
+            EGG_PICKUP_PARITY_VALIDATION_CURRENT,
+            1,
+        )
+    elif EGG_PICKUP_PARITY_VALIDATION_CURRENT not in section:
+        raise ValueError("孵蛋流程库缺少Pickup菜单奇偶开关校验位置")
+
+    if EGG_PICKUP_PARITY_ACTION_OLD in section:
+        section = section.replace(
+            EGG_PICKUP_PARITY_ACTION_OLD,
+            EGG_PICKUP_PARITY_ACTION_CURRENT,
+            1,
+        )
+    elif EGG_PICKUP_PARITY_ACTION_UNMARKED in section:
+        section = section.replace(
+            EGG_PICKUP_PARITY_ACTION_UNMARKED,
+            EGG_PICKUP_PARITY_ACTION_CURRENT,
+            1,
+        )
+    else:
+        raise ValueError("孵蛋流程库缺少确认出蛋后的Pickup菜单插入位置")
+    return library_text[:start] + section + library_text[end:]
 
 
 def _apply_egg_transient_retry_runtime_override_text(template_text: str) -> str:
@@ -1820,6 +1931,7 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
         configured,
         hatch_exit_override_text,
     )
+    configured = _apply_egg_pickup_parity_menu_text(configured)
     configured = _apply_egg_pond_settle_delay_text(configured)
     library_path.write_text(configured, encoding="utf-8")
     return {
@@ -1837,6 +1949,13 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
         ).hexdigest(),
         "egg_hatch_exit_retry_sha256": hashlib.sha256(
             hatch_exit_override_text.encode("utf-8")
+        ).hexdigest(),
+        "egg_pickup_parity_menu_sha256": hashlib.sha256(
+            (
+                EGG_PICKUP_PARITY_SIGNATURE_CURRENT
+                + EGG_PICKUP_PARITY_VALIDATION_CURRENT
+                + EGG_PICKUP_PARITY_ACTION_CURRENT
+            ).encode("utf-8")
         ).hexdigest(),
     }
 
