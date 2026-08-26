@@ -8,6 +8,7 @@ from automation.easycon118 import (
     configure_template_text,
     inspect_label_corpus,
     inspect_script_corpus,
+    is_supported_script_input_sha256,
     is_supported_runtime_script_sha256,
     plan_to_user_values,
 )
@@ -344,6 +345,18 @@ class CompatibilityTests(unittest.TestCase):
             )
         )
         self.assertFalse(is_supported_runtime_script_sha256("not-a-script-hash"))
+
+    def test_latest_egg_no_egg_escape_corpus_is_audited(self):
+        self.assertTrue(
+            is_supported_script_input_sha256(
+                "92f5870f09c28b55a583a9ea5ddf4d23a55af4e847220c0aade35d7e66bb52f5"
+            )
+        )
+        self.assertTrue(
+            is_supported_runtime_script_sha256(
+                "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57"
+            )
+        )
 
     def test_real_search_plan_calibration_round_trip(self):
         real_request = AutoSearchRequest(

@@ -86,11 +86,16 @@ PREVIOUS_SCRIPT_SHA256S = (
     "bdd0ecbb9644555dd9adad4834ce61fa2ab343fe90df9d429de4be5fb8da6dbc",
     # Download package with the latest egg-flow updates imported on 2026-08-25.
     "79c543b4b65cc85c3bced3e2bd15dedb26abcf4bff380d7c7c4e8b2f5cee7842",
+    # Download package where target-Seed no-egg evidence is accumulated even
+    # before Pickup stabilizes, allowing temporary Held no-egg interval exits.
+    "92f5870f09c28b55a583a9ea5ddf4d23a55af4e847220c0aade35d7e66bb52f5",
 )
-EXPECTED_SCRIPT_SHA256 = "b0941989541991148e075926775f35bac301b524587048ba741a52f7f01da1b4"
+EXPECTED_SCRIPT_SHA256 = "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # Previous canonical corpus before later upstream egg-flow updates.
+    "b0941989541991148e075926775f35bac301b524587048ba741a52f7f01da1b4",
     # Materialized corpus before the Held no-egg interval table was added.
     "74b4a3ecce59e3817699ee8dece2594d67f48bad08b33068358c45b74aaf6e9e",
     # Materialized corpus before post-pickup Seed failures began preserving
@@ -741,6 +746,11 @@ def egg_request_to_user_values(request: EggRunRequest) -> dict[str, Any]:
         "目标宝可梦名称": "",
         "目标全国图鉴编号": request.species_id,
         "静态或野生": "孵蛋",
+        # The timeline template is also used for item-RNG experiments and may
+        # retain the author's last value. Egg generation must always disable
+        # that mutually exclusive mode or runtime validation rejects the run.
+        "道具乱数模式": 0,
+        "队伍空位数量": 1,
         "孵蛋同Seed模式": 1,
         "孵蛋领取目标帧": request.pickup_advances,
         "孵蛋双亲相性": request.compatibility,

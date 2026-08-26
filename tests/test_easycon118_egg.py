@@ -175,6 +175,8 @@ ENDFUNC
     def test_request_maps_same_seed_egg_fields(self):
         values = egg_request_to_user_values(egg_request())
         self.assertEqual(values["静态或野生"], "孵蛋")
+        self.assertEqual(values["道具乱数模式"], 0)
+        self.assertEqual(values["队伍空位数量"], 1)
         self.assertEqual(values["目标Seed"], "75D1")
         self.assertEqual(values["目标消耗帧"], 8021)
         self.assertEqual(values["孵蛋领取目标帧"], 10021)
@@ -253,6 +255,7 @@ ENDFUNC
         names = (
             "游戏版本文本", "Seed模式", "NX机型", "目标Seed", "目标消耗帧",
             "目标宝可梦名称", "目标全国图鉴编号", "静态或野生",
+            "道具乱数模式", "队伍空位数量",
             "孵蛋同Seed模式", "孵蛋领取目标帧", "孵蛋双亲相性",
             "孵蛋亲本A性别", "孵蛋亲本B性别",
             "孵蛋双亲A_HP", "孵蛋双亲A_ATK", "孵蛋双亲A_DEF",
@@ -278,6 +281,8 @@ ENDFUNC
             template += f"\n${name} = 0"
         configured = configure_egg_template_text(template, egg_request())
         self.assertIn('$静态或野生 = "孵蛋"', configured)
+        self.assertIn("$道具乱数模式 = 0", configured)
+        self.assertIn("$队伍空位数量 = 1", configured)
         self.assertIn('$目标Seed = "75D1"', configured)
         self.assertIn('$孵蛋双亲A_DEF = 29', configured)
         self.assertIn('$孵蛋双亲B_SPA = 3', configured)
@@ -935,6 +940,11 @@ ENDFUNC
         self.assertIn("$孵蛋Pickup固定预校准帧 = 230", template)
         self.assertIn("$孵蛋Held反查帧容差 = 100", template)
         self.assertIn("$孵蛋Pickup反查帧容差 = 2000", template)
+        self.assertIn(
+            "Pickup尚未稳定：仍登记本轮Held无蛋区间证据，仅使用临时跳区，不修改正式Held修正",
+            template,
+        )
+        self.assertIn("连续命中目标Seed且无蛋超过处理上限，停止以避免死循环", template)
         self.assertIn("FUNC 孵蛋流程_候选个体是否完全一致(): INT", template)
         self.assertIn("FUNC 孵蛋流程_选择校准候选(): INT", template)
         self.assertIn("已在孵化蛋能力页识别到闪光，目标命中并结束反查", template)
