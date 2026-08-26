@@ -29,6 +29,12 @@ from automation.easycon118 import (
     EGG_TRANSIENT_RETRY_OVERRIDE_MARKER,
     EGG_TERMINAL_STOP_OVERRIDE_MARKER,
     PARTY_SUMMARY_NAVIGATION_PATH,
+    SEED_HOLD_OBSERVATION_CURRENT_BRANCH,
+    SEED_HOLD_OBSERVATION_CURRENT_DECISION,
+    SEED_HOLD_OBSERVATION_MARKER,
+    SEED_HOLD_OBSERVATION_MIN_GLOBAL,
+    SEED_HOLD_OBSERVATION_OLD_BRANCH,
+    SEED_HOLD_OBSERVATION_OLD_DECISION,
     TOGEPI_HATCH_CYCLE_OVERRIDE_PATH,
     WILD_PID_RETRY_LIMIT_MARKER,
     EggRunRequest,
@@ -46,6 +52,7 @@ from automation.easycon118 import (
     _apply_egg_prepared_254_runtime_override_text,
     _apply_egg_restart_runtime_override_text,
     _apply_egg_seed_controller_runtime_override_text,
+    _apply_seed_hold_observation_window_text,
     _apply_egg_summary_fix_text,
     _apply_egg_settings_runtime_override_text,
     _apply_egg_surf_battle_runtime_override_text,
@@ -870,8 +877,39 @@ ENDFUNC
         self.assertIn("$Seed命中保持计数", configured)
         self.assertIn("$Seed预校准索引_NS1", configured)
         self.assertIn("$Seed预校准索引_NS2", configured)
-        self.assertIn("正式版±1五次多数、固定半步与命中后10次保持", configured)
+        self.assertIn("正式版±1五次多数、固定半步与命中后10次可信反查观察窗", configured)
         self.assertNotIn("$孵蛋Seed等待MS = $孵蛋Seed等待MS -", configured)
+
+    def test_seed_hold_uses_ten_observations_but_only_plus_minus_one_votes(self):
+        original = (
+            "$Seed命中保持样本数 = 10\n"
+            "FUNC 计算Seed锁定众数修正(): INT\n"
+            + SEED_HOLD_OBSERVATION_OLD_BRANCH
+            + SEED_HOLD_OBSERVATION_OLD_DECISION
+            + "        IF $Seed命中保持正方向票数 > $Seed命中保持负方向票数\n"
+            + "            RETURN 1\n"
+            + "        ENDIF\n"
+            + "    ENDIF\n"
+            + "    RETURN 0\n"
+            + "ENDFUNC\n"
+        )
+        configured = _apply_seed_hold_observation_window_text(original)
+        configured_again = _apply_seed_hold_observation_window_text(configured)
+
+        self.assertEqual(configured_again, configured)
+        self.assertIn(SEED_HOLD_OBSERVATION_MARKER, configured)
+        self.assertIn(SEED_HOLD_OBSERVATION_MIN_GLOBAL, configured)
+        self.assertIn(SEED_HOLD_OBSERVATION_CURRENT_BRANCH, configured)
+        self.assertIn(SEED_HOLD_OBSERVATION_CURRENT_DECISION, configured)
+        self.assertNotIn(SEED_HOLD_OBSERVATION_OLD_BRANCH, configured)
+        self.assertNotIn(SEED_HOLD_OBSERVATION_OLD_DECISION, configured)
+        hold_branch = configured.split("ELIF $Seed命中保持启用 == 1", 1)[1]
+        self.assertLess(
+            hold_branch.index("$Seed命中保持计数 = $Seed命中保持计数 + 1"),
+            hold_branch.index("IF $Seed差绝对 == 1"),
+        )
+        self.assertIn("本轮大波动不投方向票", configured)
+        self.assertIn("±1方向样本不足3", configured)
 
     def test_egg_timeline_uses_formal_held_parity_and_pickup_menu_phase(self):
         original = """\

@@ -98,6 +98,9 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package where a residual odd Pickup phase uses the measured
     # post-daycare X/B menu action and pre-deducts its 7 advances.
     "e5a7c8312282070efe5bee72c0b3c5572c46c7ba4205a90188b39b792e228d95",
+    # Download package where the post-hit Seed hold advances on every trusted
+    # reverse lookup while only ±1 results vote on the correction direction.
+    "af0b4b16b6b90ba89ebbec3cc37b402b37b09196ba9bbbce8c6ffe94d2212123",
 )
 EXPECTED_SCRIPT_SHA256 = "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -127,6 +130,8 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "4a706951d032ed806c665889720cb235f72320d695dd60de3a782b23297bbd7d",
     # Materialized corpus with the Pickup 7-advance menu parity overlay.
     "4290019dc8c28deed87f647f72b0f65b56f8564cd9faf89688ec7955d41f4dc4",
+    # Materialized corpus with bounded ten-observation Seed hold windows.
+    "1240aeeb1e44d467f2074d1dced2ef650e1b89068f913c10b382817c45b4a79a",
 )
 
 
@@ -288,6 +293,100 @@ EGG_SURF_BATTLE_NEXT_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
 EGG_SEED_CONTROLLER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：复用正式版 Seed 锁定与相邻毫秒细调控制器"
 EGG_SEED_CONTROLLER_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_按观测Seed校正等待"
 EGG_SEED_CONTROLLER_NEXT_SECTION = "# -------------------- 蛋个体反查"
+SEED_HOLD_OBSERVATION_MARKER = "# 保持窗口按每次可信Seed反查推进；超出±1只占观察次数，不投方向票。"
+SEED_HOLD_OBSERVATION_FUNCTION = "FUNC 计算Seed锁定众数修正(): INT"
+SEED_HOLD_OBSERVATION_GLOBAL_ANCHOR = "$Seed命中保持样本数 = 10"
+SEED_HOLD_OBSERVATION_MIN_GLOBAL = "$Seed命中保持最少方向样本数 = 3"
+SEED_HOLD_OBSERVATION_OLD_BRANCH = """\
+        ELIF $Seed差绝对 == 1
+            $Seed锁定本轮样本计入 = 1
+            IF $Seed命中保持启用 == 1
+                $Seed命中保持计数 = $Seed命中保持计数 + 1
+                IF $命中差索引 > 0
+                    $Seed命中保持正方向票数 = $Seed命中保持正方向票数 + 1
+                ELSE
+                    $Seed命中保持负方向票数 = $Seed命中保持负方向票数 + 1
+                ENDIF
+            ELSE
+                $Seed锁定窗口[$Seed锁定窗口样本数] = $命中差索引
+                $Seed锁定窗口样本数 = $Seed锁定窗口样本数 + 1
+                $Seed锁定窗口指针 = $Seed锁定窗口样本数
+            ENDIF
+        ELSE
+            # 已经收敛到±1后，偶发大偏差视为机器波动：不修正，也不占5次/10次有效样本。
+            $Seed锁定本轮大波动忽略 = 1
+            $Seed修正模式文本 = "Seed已锁定，忽略本轮超出±1的机器波动"
+            RETURN 0
+        ENDIF
+"""
+SEED_HOLD_OBSERVATION_CURRENT_BRANCH = """\
+        ELIF $Seed命中保持启用 == 1
+            # 保持窗口按每次可信Seed反查推进；超出±1只占观察次数，不投方向票。
+            $Seed命中保持计数 = $Seed命中保持计数 + 1
+            IF $Seed差绝对 == 1
+                $Seed锁定本轮样本计入 = 1
+                IF $命中差索引 > 0
+                    $Seed命中保持正方向票数 = $Seed命中保持正方向票数 + 1
+                ELSE
+                    $Seed命中保持负方向票数 = $Seed命中保持负方向票数 + 1
+                ENDIF
+            ELSE
+                $Seed锁定本轮大波动忽略 = 1
+            ENDIF
+        ELIF $Seed差绝对 == 1
+            $Seed锁定本轮样本计入 = 1
+            $Seed锁定窗口[$Seed锁定窗口样本数] = $命中差索引
+            $Seed锁定窗口样本数 = $Seed锁定窗口样本数 + 1
+            $Seed锁定窗口指针 = $Seed锁定窗口样本数
+        ELSE
+            # 非保持期仍只收集±1微调样本；偶发大偏差不修正，也不占5次方向窗口。
+            $Seed锁定本轮大波动忽略 = 1
+            $Seed修正模式文本 = "Seed已锁定，忽略本轮超出±1的机器波动"
+            RETURN 0
+        ENDIF
+"""
+SEED_HOLD_OBSERVATION_OLD_DECISION = """\
+    IF $Seed命中保持启用 == 1
+        IF $Seed命中保持计数 < $Seed命中保持样本数
+            $Seed修正模式文本 = "目标Seed参数保持中：" & $Seed命中保持计数 & "/" & $Seed命中保持样本数
+            RETURN 0
+        ENDIF
+        IF $Seed命中保持正方向票数 == $Seed命中保持负方向票数
+            # 10次出现5比5时没有唯一最多方向，继续保持并重新收集，避免任意选边。
+            $Seed命中保持计数 = 0
+            $Seed命中保持正方向票数 = 0
+            $Seed命中保持负方向票数 = 0
+            $Seed修正模式文本 = "目标Seed保持10次后方向5比5，继续保持重新采样"
+            RETURN 0
+        ENDIF
+"""
+SEED_HOLD_OBSERVATION_CURRENT_DECISION = """\
+    IF $Seed命中保持启用 == 1
+        IF $Seed命中保持计数 < $Seed命中保持样本数
+            IF $Seed锁定本轮大波动忽略 == 1
+                $Seed修正模式文本 = "目标Seed参数保持中：" & $Seed命中保持计数 & "/" & $Seed命中保持样本数 & "；本轮大波动不投方向票"
+            ELSE
+                $Seed修正模式文本 = "目标Seed参数保持中：" & $Seed命中保持计数 & "/" & $Seed命中保持样本数
+            ENDIF
+            RETURN 0
+        ENDIF
+        $Seed锁定方向票数 = $Seed命中保持正方向票数 + $Seed命中保持负方向票数
+        IF $Seed锁定方向票数 < $Seed命中保持最少方向样本数
+            $Seed命中保持计数 = 0
+            $Seed命中保持正方向票数 = 0
+            $Seed命中保持负方向票数 = 0
+            $Seed修正模式文本 = "目标Seed保持10次后±1方向样本不足3，继续保持重新采样"
+            RETURN 0
+        ENDIF
+        IF $Seed命中保持正方向票数 == $Seed命中保持负方向票数
+            # 大波动只占观察次数，因此任意方向平票时都继续保持，避免任意选边。
+            $Seed命中保持计数 = 0
+            $Seed命中保持正方向票数 = 0
+            $Seed命中保持负方向票数 = 0
+            $Seed修正模式文本 = "目标Seed保持10次后±1方向票相同，继续保持重新采样"
+            RETURN 0
+        ENDIF
+"""
 EGG_FORMAL_PARITY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：生成与领取复用正式版F1/F2奇偶校准"
 EGG_FORMAL_PARITY_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_计算两次命中时间(): INT"
 EGG_FORMAL_PARITY_NEXT_FUNCTION = "FUNC 孵蛋流程_执行Seed预校准轮(): INT"
@@ -1412,6 +1511,51 @@ def _apply_egg_seed_controller_runtime_override_text(
     return template_text[:start] + replacement + template_text[end:]
 
 
+def _apply_seed_hold_observation_window_text(template_text: str) -> str:
+    """Bound the post-hit hold by ten trusted observations, not ten ±1 votes."""
+    configured = template_text
+    if SEED_HOLD_OBSERVATION_MIN_GLOBAL not in configured:
+        if configured.count(SEED_HOLD_OBSERVATION_GLOBAL_ANCHOR) != 1:
+            raise ValueError("主脚本缺少唯一的Seed命中保持样本数，拒绝升级观察窗口")
+        configured = configured.replace(
+            SEED_HOLD_OBSERVATION_GLOBAL_ANCHOR,
+            SEED_HOLD_OBSERVATION_GLOBAL_ANCHOR
+            + "\n"
+            + SEED_HOLD_OBSERVATION_MIN_GLOBAL,
+            1,
+        )
+
+    if configured.count(SEED_HOLD_OBSERVATION_FUNCTION) != 1:
+        raise ValueError("主脚本缺少唯一的Seed锁定修正函数，拒绝升级观察窗口")
+    start = configured.index(SEED_HOLD_OBSERVATION_FUNCTION)
+    end = configured.index("ENDFUNC", start) + len("ENDFUNC")
+    section = configured[start:end]
+    if (
+        SEED_HOLD_OBSERVATION_MARKER in section
+        and SEED_HOLD_OBSERVATION_CURRENT_DECISION in section
+    ):
+        return configured
+
+    if SEED_HOLD_OBSERVATION_OLD_BRANCH in section:
+        section = section.replace(
+            SEED_HOLD_OBSERVATION_OLD_BRANCH,
+            SEED_HOLD_OBSERVATION_CURRENT_BRANCH,
+            1,
+        )
+    elif SEED_HOLD_OBSERVATION_CURRENT_BRANCH not in section:
+        raise ValueError("Seed锁定修正函数的保持采样分支不受支持")
+
+    if SEED_HOLD_OBSERVATION_OLD_DECISION in section:
+        section = section.replace(
+            SEED_HOLD_OBSERVATION_OLD_DECISION,
+            SEED_HOLD_OBSERVATION_CURRENT_DECISION,
+            1,
+        )
+    elif SEED_HOLD_OBSERVATION_CURRENT_DECISION not in section:
+        raise ValueError("Seed锁定修正函数的保持结算分支不受支持")
+    return configured[:start] + section + configured[end:]
+
+
 def _apply_egg_formal_parity_runtime_override_text(
     template_text: str,
     override_text: str,
@@ -1978,6 +2122,9 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         classifier_text,
         False,
     )
+    standard_configured = _apply_seed_hold_observation_window_text(
+        standard_configured
+    )
     standard_path.write_text(standard_configured, encoding="utf-8")
 
     configured = _apply_egg_summary_fix_text(
@@ -1998,6 +2145,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         configured,
         EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH.read_text(encoding="utf-8"),
     )
+    configured = _apply_seed_hold_observation_window_text(configured)
     configured = _apply_egg_seed_controller_runtime_override_text(
         configured,
         EGG_SEED_CONTROLLER_OVERRIDE_PATH.read_text(encoding="utf-8"),
@@ -2080,6 +2228,7 @@ def write_configured_project(
         classifier_text,
         (options or EasyCon118Options()).home_buffer_adaptive_threshold,
     )
+    configured = _apply_seed_hold_observation_window_text(configured)
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
     wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
@@ -2120,6 +2269,13 @@ def write_configured_project(
             "wild_pid_retry_limit_sha256": wild_pid_retry_limit_sha256,
             "home_buffer_adaptive_classifier_sha256": hashlib.sha256(
                 classifier_text.encode("utf-8")
+            ).hexdigest(),
+            "seed_hold_observation_window_sha256": hashlib.sha256(
+                (
+                    SEED_HOLD_OBSERVATION_MIN_GLOBAL
+                    + SEED_HOLD_OBSERVATION_CURRENT_BRANCH
+                    + SEED_HOLD_OBSERVATION_CURRENT_DECISION
+                ).encode("utf-8")
             ).hexdigest(),
             "seed_tables": seed_table_override,
         },
@@ -2190,6 +2346,7 @@ def write_configured_egg_project(
         configured,
         party_slot_main_override_text,
     )
+    configured = _apply_seed_hold_observation_window_text(configured)
     seed_controller_override_text = EGG_SEED_CONTROLLER_OVERRIDE_PATH.read_text(
         encoding="utf-8"
     )
@@ -2243,6 +2400,13 @@ def write_configured_egg_project(
     ).hexdigest()
     runtime_overrides["egg_seed_controller_sha256"] = hashlib.sha256(
         seed_controller_override_text.encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["seed_hold_observation_window_sha256"] = hashlib.sha256(
+        (
+            SEED_HOLD_OBSERVATION_MIN_GLOBAL
+            + SEED_HOLD_OBSERVATION_CURRENT_BRANCH
+            + SEED_HOLD_OBSERVATION_CURRENT_DECISION
+        ).encode("utf-8")
     ).hexdigest()
     runtime_overrides["egg_formal_parity_main_sha256"] = hashlib.sha256(
         formal_parity_override_text.encode("utf-8")
