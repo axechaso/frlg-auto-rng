@@ -101,6 +101,9 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package where the post-hit Seed hold advances on every trusted
     # reverse lookup while only ±1 results vote on the correction direction.
     "af0b4b16b6b90ba89ebbec3cc37b402b37b09196ba9bbbce8c6ffe94d2212123",
+    # Download package where the first valid HOME_BUFFER delay is locked for
+    # the run, then unlocked only after three consecutive recognition misses.
+    "5e6cc6db83a020b59d71993eff390c04681c9e251f5534412ee63c54d8b0a5f9",
 )
 EXPECTED_SCRIPT_SHA256 = "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -132,6 +135,9 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "4290019dc8c28deed87f647f72b0f65b56f8564cd9faf89688ec7955d41f4dc4",
     # Materialized corpus with bounded ten-observation Seed hold windows.
     "1240aeeb1e44d467f2074d1dced2ef650e1b89068f913c10b382817c45b4a79a",
+    # Materialized corpus with HOME_BUFFER run locking, three-miss unlocks,
+    # and a 50 ms minimum search adjustment in both entry scripts.
+    "a3e6eedb7e35efcf8dc8c0ed0866a96efd66bc7e032411f296d9aa6801115a9c",
 )
 
 
@@ -516,6 +522,7 @@ $孵蛋HOME_BUFFER长边界 = 0
 $孵蛋HOME_BUFFER已有短边界 = 0
 $孵蛋HOME_BUFFER已有长边界 = 0
 $孵蛋HOME_BUFFER下一延迟 = 0
+$孵蛋HOME_BUFFER调整差 = 0
 $孵蛋HOME_BUFFER选中正确 = 0
 $孵蛋HOME_BUFFER选中普通 = 0
 $孵蛋HOME_BUFFER选中错误 = 0
@@ -536,6 +543,13 @@ $HOME_BUFFER自适应候选分数 = 0
 $HOME_BUFFER自适应首次状态 = 0
 $HOME_BUFFER自适应首次分数 = 0
 $HOME_BUFFER识别状态 = 0
+# 首次命中后锁定延迟；同一锁定值连续失败3次才重新校准，单次调整至少50 ms。
+$HOME_BUFFER最小调整MS = 50
+$HOME_BUFFER锁定失败阈值 = 3
+$HOME_BUFFER锁定启用 = 0
+$HOME_BUFFER锁定延迟 = 0
+$HOME_BUFFER锁定连续失败 = 0
+$HOME_BUFFER尝试 = 0
 """
 EGG_SETTINGS_GLOBALS = """\
 $孵蛋库_设置识别尝试 = 0
@@ -1850,12 +1864,24 @@ def _apply_home_buffer_adaptive_classifier_text(
 ) -> str:
     """Install the shared classifier and set its opt-in switch."""
     global_anchor = "$HOME_BUFFER当前错误退出_NS2 = 0\n"
-    if f"${HOME_BUFFER_ADAPTIVE_SWITCH} =" not in template_text:
+    missing_globals = []
+    for line in HOME_BUFFER_ADAPTIVE_GLOBALS.splitlines():
+        if not line:
+            continue
+        if line.startswith(f"${HOME_BUFFER_ADAPTIVE_SWITCH} ="):
+            if not re.search(
+                rf"(?m)^\${re.escape(HOME_BUFFER_ADAPTIVE_SWITCH)}\s*=",
+                template_text,
+            ):
+                missing_globals.append(line)
+        elif not re.search(rf"(?m)^{re.escape(line)}\r?$", template_text):
+            missing_globals.append(line)
+    if missing_globals:
         if template_text.count(global_anchor) != 1:
             raise ValueError("模板缺少唯一的 HOME_BUFFER 状态区，拒绝应用稳定低分自适应")
         template_text = template_text.replace(
             global_anchor,
-            global_anchor + HOME_BUFFER_ADAPTIVE_GLOBALS,
+            global_anchor + "\n".join(missing_globals) + "\n",
             1,
         )
 
@@ -1918,12 +1944,17 @@ def _apply_egg_home_buffer_runtime_override_text(
 ) -> str:
     """Replace HOME_BUFFER with a bounded, NX-specific bracket search."""
     global_anchor = "$HOME_BUFFER当前错误退出_NS2 = 0\n"
-    if EGG_HOME_BUFFER_GLOBALS not in template_text:
+    missing_globals = [
+        line
+        for line in EGG_HOME_BUFFER_GLOBALS.splitlines()
+        if line and not re.search(rf"(?m)^{re.escape(line)}\r?$", template_text)
+    ]
+    if missing_globals:
         if template_text.count(global_anchor) != 1:
             raise ValueError("孵蛋模板缺少唯一的 HOME_BUFFER 状态区，拒绝应用窗口搜索覆盖")
         template_text = template_text.replace(
             global_anchor,
-            global_anchor + EGG_HOME_BUFFER_GLOBALS,
+            global_anchor + "\n".join(missing_globals) + "\n",
             1,
         )
 

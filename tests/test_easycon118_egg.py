@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -440,6 +441,20 @@ ENDFUNC
             "$孵蛋HOME_BUFFER下一延迟 = ($孵蛋HOME_BUFFER短边界 + $孵蛋HOME_BUFFER长边界) / 2",
             configured,
         )
+        self.assertIn("$HOME_BUFFER最小调整MS", configured)
+        self.assertIn("$HOME_BUFFER锁定失败阈值", configured)
+        self.assertIn("$HOME_BUFFER延迟 = $HOME_BUFFER锁定延迟", configured)
+        self.assertIn(
+            "$HOME_BUFFER锁定连续失败 < $HOME_BUFFER锁定失败阈值",
+            configured,
+        )
+        self.assertIn("连续失败3次，解除锁定并重新校准", configured)
+        self.assertIn(
+            "$孵蛋HOME_BUFFER调整差 < $HOME_BUFFER最小调整MS",
+            configured,
+        )
+        self.assertNotIn("$HOME_BUFFER延迟 - 100", configured)
+        self.assertNotIn("$HOME_BUFFER延迟 + 100", configured)
         self.assertIn("$孵蛋HOME_BUFFER尝试 > 20", configured)
         self.assertEqual(
             configured.count("孵蛋流程停止：HOME_BUFFER未找到当前主机的可用延迟"),
@@ -507,6 +522,57 @@ ENDFUNC
         self.assertIn("FOR $HOME_BUFFER自适应采样 = 1 TO $HOME_BUFFER自适应稳定要求", standard)
         self.assertIn("$HOME_BUFFER自适应稳定要求 = 3", standard)
         self.assertIn("$HOME_BUFFER自适应最低阈值 = 90", standard)
+        for configured in (standard, egg):
+            self.assertIn("$HOME_BUFFER最小调整MS = 50", configured)
+            self.assertIn("$HOME_BUFFER锁定失败阈值 = 3", configured)
+            self.assertIn("$HOME_BUFFER锁定延迟 = $HOME_BUFFER延迟", configured)
+            self.assertIn(
+                "$HOME_BUFFER锁定连续失败 < $HOME_BUFFER锁定失败阈值",
+                configured,
+            )
+
+        legacy_standard = standard
+        for line in (
+            "$HOME_BUFFER最小调整MS = 50",
+            "$HOME_BUFFER锁定失败阈值 = 3",
+            "$HOME_BUFFER锁定启用 = 0",
+            "$HOME_BUFFER锁定延迟 = 0",
+            "$HOME_BUFFER锁定连续失败 = 0",
+            "$HOME_BUFFER尝试 = 0",
+        ):
+            legacy_standard = legacy_standard.replace(line + "\n", "", 1)
+        upgraded_standard = _apply_home_buffer_adaptive_classifier_text(
+            legacy_standard,
+            classifier,
+            True,
+        )
+        for line in (
+            "$HOME_BUFFER最小调整MS = 50",
+            "$HOME_BUFFER锁定失败阈值 = 3",
+            "$HOME_BUFFER锁定启用 = 0",
+            "$HOME_BUFFER锁定延迟 = 0",
+            "$HOME_BUFFER锁定连续失败 = 0",
+            "$HOME_BUFFER尝试 = 0",
+        ):
+            self.assertEqual(
+                len(re.findall(rf"(?m)^{re.escape(line)}\r?$", upgraded_standard)),
+                1,
+            )
+
+        legacy_egg = egg.replace("$孵蛋HOME_BUFFER调整差 = 0\n", "", 1)
+        upgraded_egg = _apply_egg_home_buffer_runtime_override_text(
+            legacy_egg,
+            Path(EGG_HOME_BUFFER_OVERRIDE_PATH).read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            len(
+                re.findall(
+                    r"(?m)^\$孵蛋HOME_BUFFER调整差 = 0\r?$",
+                    upgraded_egg,
+                )
+            ),
+            1,
+        )
         self.assertIn(
             "$HOME_BUFFER选中正确 >= $HOME_BUFFER有效识图阈值",
             standard,

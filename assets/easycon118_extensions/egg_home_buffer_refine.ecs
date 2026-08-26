@@ -13,6 +13,9 @@ FUNC HOME_BUFFER
             $孵蛋HOME_BUFFER失败 = 1
             RETURN
         ENDIF
+        IF $HOME_BUFFER锁定启用 == 1
+            $HOME_BUFFER延迟 = $HOME_BUFFER锁定延迟
+        ENDIF
 
         A
         WAIT 1500
@@ -27,7 +30,10 @@ FUNC HOME_BUFFER
         # 只使用用户选择的主机标签；可选自适应也只在连续稳定低分时生效。
         $HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态(1)
         IF $HOME_BUFFER识别状态 == 1
-            PRINT 可用HOME_BUFFER延迟: & $HOME_BUFFER延迟 & " ms"
+            $HOME_BUFFER锁定启用 = 1
+            $HOME_BUFFER锁定延迟 = $HOME_BUFFER延迟
+            $HOME_BUFFER锁定连续失败 = 0
+            PRINT 可用并锁定HOME_BUFFER延迟: & $HOME_BUFFER锁定延迟 & " ms"
             RETURN
         ELIF $HOME_BUFFER识别状态 == 3
             PRINT 错误进入休眠菜单
@@ -35,14 +41,48 @@ FUNC HOME_BUFFER
             WAIT 1500
             CALL 关闭游戏
             CONTINUE
-        ELIF $HOME_BUFFER识别状态 == 2
+        ENDIF
+
+        IF $HOME_BUFFER锁定启用 == 1
+            $HOME_BUFFER锁定连续失败 = $HOME_BUFFER锁定连续失败 + 1
+            IF $HOME_BUFFER锁定连续失败 < $HOME_BUFFER锁定失败阈值
+                PRINT HOME_BUFFER锁定值识别失败: & $HOME_BUFFER锁定连续失败 & "/" & $HOME_BUFFER锁定失败阈值 & "，保持 " & $HOME_BUFFER锁定延迟 & " ms 重试"
+                IF $HOME_BUFFER识别状态 == 2
+                    X
+                    WAIT 1500
+                    A
+                    WAIT 1500
+                    FOR
+                        IF @正在关闭 >= 95
+                            WAIT 100
+                        ELSE
+                            BREAK
+                        ENDIF
+                    NEXT
+                ENDIF
+                CALL 关闭游戏
+                CONTINUE
+            ENDIF
+            PRINT HOME_BUFFER锁定值连续失败3次，解除锁定并重新校准
+            $HOME_BUFFER锁定启用 = 0
+            $HOME_BUFFER锁定连续失败 = 0
+        ENDIF
+
+        IF $HOME_BUFFER识别状态 == 2
             # 已进入普通退出画面，当前延迟在可用窗口右侧。
             $孵蛋HOME_BUFFER长边界 = $HOME_BUFFER延迟
             $孵蛋HOME_BUFFER已有长边界 = 1
             IF $孵蛋HOME_BUFFER已有短边界 == 1
                 $孵蛋HOME_BUFFER下一延迟 = ($孵蛋HOME_BUFFER短边界 + $孵蛋HOME_BUFFER长边界) / 2
             ELSE
-                $孵蛋HOME_BUFFER下一延迟 = $HOME_BUFFER延迟 - 100
+                $孵蛋HOME_BUFFER下一延迟 = $HOME_BUFFER延迟 - $HOME_BUFFER最小调整MS
+            ENDIF
+            $孵蛋HOME_BUFFER调整差 = $孵蛋HOME_BUFFER下一延迟 - $HOME_BUFFER延迟
+            IF $孵蛋HOME_BUFFER调整差 < 0
+                $孵蛋HOME_BUFFER调整差 = 0 - $孵蛋HOME_BUFFER调整差
+            ENDIF
+            IF $孵蛋HOME_BUFFER调整差 < $HOME_BUFFER最小调整MS
+                $孵蛋HOME_BUFFER下一延迟 = $HOME_BUFFER延迟 - $HOME_BUFFER最小调整MS
             ENDIF
             IF $调试日志输出 == 1
                 PRINT HOME_BUFFER延迟过长，下一次尝试: & $孵蛋HOME_BUFFER下一延迟 & " ms"
@@ -67,7 +107,14 @@ FUNC HOME_BUFFER
             IF $孵蛋HOME_BUFFER已有长边界 == 1
                 $孵蛋HOME_BUFFER下一延迟 = ($孵蛋HOME_BUFFER短边界 + $孵蛋HOME_BUFFER长边界) / 2
             ELSE
-                $孵蛋HOME_BUFFER下一延迟 = $HOME_BUFFER延迟 + 100
+                $孵蛋HOME_BUFFER下一延迟 = $HOME_BUFFER延迟 + $HOME_BUFFER最小调整MS
+            ENDIF
+            $孵蛋HOME_BUFFER调整差 = $孵蛋HOME_BUFFER下一延迟 - $HOME_BUFFER延迟
+            IF $孵蛋HOME_BUFFER调整差 < 0
+                $孵蛋HOME_BUFFER调整差 = 0 - $孵蛋HOME_BUFFER调整差
+            ENDIF
+            IF $孵蛋HOME_BUFFER调整差 < $HOME_BUFFER最小调整MS
+                $孵蛋HOME_BUFFER下一延迟 = $HOME_BUFFER延迟 + $HOME_BUFFER最小调整MS
             ENDIF
             IF $调试日志输出 == 1
                 PRINT HOME_BUFFER延迟过短，下一次尝试: & $孵蛋HOME_BUFFER下一延迟 & " ms"
