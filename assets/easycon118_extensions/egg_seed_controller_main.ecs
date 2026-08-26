@@ -33,10 +33,15 @@ FUNC 孵蛋流程_初始化Seed校准控制器(): INT
     $Seed粗调上次有效 = 0
     $Seed精细校准启用 = 0
     $Seed精细修正MS = 0
+    $Seed精细固定半步MS = 0
+    $Seed命中保持启用 = 0
+    $Seed命中保持计数 = 0
+    $Seed命中保持正方向票数 = 0
+    $Seed命中保持负方向票数 = 0
     $Seed锁定参数累计修正 = $Seed累计修正索引
     $Seed锁定参数精细修正MS = 0
     $孵蛋Seed控制器已初始化 = 1
-    PRINT 孵蛋Seed校准控制器: 正式版锁定与相邻Seed毫秒细调，初始累计索引 & $Seed累计修正索引
+    PRINT 孵蛋Seed校准控制器: 正式版±1五次多数、固定半步与命中后10次保持，初始累计索引 & $Seed累计修正索引
     RETURN 1
 ENDFUNC
 
@@ -83,7 +88,8 @@ FUNC 孵蛋流程_按观测Seed校正等待($Seed差索引: INT): INT
     PRINT 【孵蛋Seed校准】
     PRINT 观测差: & $Seed差索引 & "；修正模式: " & $Seed修正模式文本
     PRINT 索引修正: 本次 & $Seed本次修正索引 & "，累计 " & $Seed累计修正索引 & "，查表累计 " & $SeedMS实际执行修正量 & " ms"
-    PRINT 毫秒细调: 启用 & $Seed精细校准启用 & "，区间 " & $Seed精细下界MS & ".." & $Seed精细上界MS & " ms，当前 " & $Seed精细修正MS & " ms"
+    PRINT 毫秒细调: 启用 & $Seed精细校准启用 & "，固定半步 " & $Seed精细固定半步MS & " ms，当前 " & $Seed精细修正MS & " ms"
+    PRINT 目标Seed保持: & $Seed命中保持启用 & "，有效样本 " & $Seed命中保持计数 & "/" & $Seed命中保持样本数
     PRINT 下轮Seed等待: & $孵蛋Seed等待MS & " ms"
     RETURN 1
 ENDFUNC

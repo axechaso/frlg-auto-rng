@@ -832,9 +832,12 @@ ENDFUNC
         self.assertEqual(configured_again, configured)
         self.assertIn("计算Seed锁定众数修正()", configured)
         self.assertIn("$Seed精细修正MS", configured)
+        self.assertIn("$Seed精细固定半步MS", configured)
+        self.assertIn("$Seed命中保持样本数", configured)
+        self.assertIn("$Seed命中保持计数", configured)
         self.assertIn("$Seed预校准索引_NS1", configured)
         self.assertIn("$Seed预校准索引_NS2", configured)
-        self.assertIn("正式版锁定与相邻Seed毫秒细调", configured)
+        self.assertIn("正式版±1五次多数、固定半步与命中后10次保持", configured)
         self.assertNotIn("$孵蛋Seed等待MS = $孵蛋Seed等待MS -", configured)
 
     def test_hatch_waits_between_all_menu_exit_layers_before_walking(self):
