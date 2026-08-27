@@ -117,6 +117,17 @@ class GuiIvInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "F3"):
             parse_tid_calibration_result(log.replace("F3脚本固定延迟：14900\n", ""), 0)
 
+    def test_tid_r3_calibration_uses_normalized_value_without_double_model_offset(self):
+        log = (
+            "OP机型补偿(ms)：-750；OP修正(ms)：0\n"
+            "OP实测耗时(ms)：29850；下列OP回填值已还原机型差\n"
+            "OP脚本固定延迟：30600\nF1脚本固定延迟：22050\n"
+            "F2脚本固定延迟：4250\nF3脚本固定延迟：14900\n"
+        )
+        result = parse_tid_calibration_result(log, 0)
+        self.assertEqual(result["OP"], 30600)
+        self.assertEqual(result["OP_CORRECTION"], 0)
+
     def test_tid_old_calibration_preserves_existing_op_correction(self):
         log = "OP脚本固定延迟：30600\nF1脚本固定延迟：22050\nF2脚本固定延迟：4250\nF3脚本固定延迟：14900\n"
         self.assertEqual(parse_tid_calibration_result(log, -50)["OP_CORRECTION"], -50)

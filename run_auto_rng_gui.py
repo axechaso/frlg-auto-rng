@@ -868,6 +868,7 @@ class AutoRngApp:
             f"{row['game']} / Switch {row['nx_model']} / {row['language']} / TID {row['tid']:05d}\n"
             f"主角：{row['player_name']}（{'男性' if row['gender'] == 0 else '女性'}）；"
             f"OP/F1/F2固定延迟：{row['op_fixed_delay']}/{row['f1_fixed_delay']}/{row['f2_fixed_delay']} ms；OP修正：{row['op_correction']} ms\n"
+            f"OP机型补偿：{row['op_model_offset']} ms；"
             f"SELECT执行/额外补偿：{row['select_count']}/{row['select_correction']}；HOME_BUFFER：{row['home_buffer_delay']} ms；"
             f"Sound：{('MONO','STEREO')[row['sound']]}；Button：{('HELP','LR','L=A')[row['button_mode']]}；"
             f"Seed键：{('A','START','L')[row['seed_button']]}；取名进入键：{('A','B')[row['name_entry_button']]}"

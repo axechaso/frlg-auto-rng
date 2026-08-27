@@ -120,6 +120,38 @@ class TidRecordTests(unittest.TestCase):
             store.append("run", list(enumerate(rows)), Path("test.log"))
             self.assertEqual(len(store.rows()), 3)
 
+    def test_r3_ns2_offset_never_merges_with_older_ns2_records(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = TidRecordStore(Path(temp) / "tid.sqlite3")
+            parser = TidLogParser(context("火红", 2))
+            rows = parser.feed(observation())
+            self.assertNotIn("op_model_offset", rows[0].parameters())
+            parser.feed("OP机型补偿(ms)：-750；OP修正(ms)：0\n")
+            rows.extend(parser.feed(observation()))
+            store.append("run", list(enumerate(rows)), Path("test.log"))
+            records = store.rows(game="火红", nx_model=2)
+            self.assertEqual({row["op_model_offset"] for row in records}, {0, -750})
+            self.assertTrue(all(row["occurrences"] == 1 for row in records))
+            path = Path(temp) / "table.csv"
+            store.export_csv(path)
+            exported = list(csv.DictReader(io.StringIO(path.read_text(encoding="utf-8-sig"))))
+            self.assertEqual({row["OP机型补偿ms"] for row in exported}, {"0", "-750"})
+
+    def test_r3_ns1_zero_offset_keeps_old_records_compatible(self):
+        parser = TidLogParser(context())
+        old = parser.feed(observation())[0]
+        parser.feed("OP机型补偿(ms)：0；OP修正(ms)：0\n")
+        new = parser.feed(observation())[0]
+        self.assertEqual(old.parameters(), new.parameters())
+
+    def test_model_offset_is_reset_when_flow_enters_new_id_attempt(self):
+        parser = TidLogParser(context(nx_model=2), flow=True)
+        parser.feed("========== 第1阶段：TID/SID ==========\nOP机型补偿(ms)：-750；OP修正(ms)：0\n")
+        self.assertEqual(parser.feed(observation())[0].op_model_offset, -750)
+        parser.feed("========== 第2阶段：研究所 ==========\nOP机型补偿(ms)：-123\n")
+        parser.feed("========== 第1阶段：TID/SID ==========\n")
+        self.assertEqual(parser.feed(observation())[0].op_model_offset, 0)
+
     def test_csv_is_filtered_utf8_and_contains_no_sid_fields(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

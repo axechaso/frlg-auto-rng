@@ -82,7 +82,49 @@ def compact_fixture():
     )
 
 
+def model_compensated_fixture():
+    source = compact_fixture()
+    helper = """FUNC TID_获取OP机型补偿($机型): INT
+    IF $机型 == 2
+        RETURN -750
+    ENDIF
+    RETURN 0
+ENDFUNC
+"""
+    head, english, japanese, tail = split_tid_modules(source)
+    head = "$OP机型补偿 = 0\n" + head + helper
+    modules = []
+    for module, base in ((english, 30550), (japanese, 30600)):
+        modules.append(module.replace("$KeyDelay = 50\n", f"""$KeyDelay = 50
+$OP机型补偿 = TID_获取OP机型补偿($NS机型)
+$OP固定 = {base} + $OP修正 + $OP机型补偿
+IF $脚本固定延迟检查开关 == 1
+    $OP_NOW = $OP_OUT - $OP_IN - $OP机型补偿
+ENDIF
+"""))
+    return head + modules[0] + modules[1] + tail
+
+
 class TidStarterSaveTests(unittest.TestCase):
+    def test_r3_model_offset_and_normalized_measurement_survive_generation(self):
+        source = model_compensated_fixture()
+        for language, index, name, base in (("英文", 1, "R", 30550), ("日文", 2, "レ", 30600)):
+            for model in (1, 2):
+                for mode in (0, 1):
+                    for adaptive in (False, True):
+                        request = TidRngRequest(language=language, player_name=name, nx_model=model,
+                                                mode=mode, op_correction=50, op_fixed_delay=31000,
+                                                home_buffer_adaptive_threshold=adaptive)
+                        configured = configure_starter_save_id(source, request, include_flow_marker=True)
+                        branch = split_tid_modules(configured)[index]
+                        self.assertIn(f"$NS机型 = {model}\n", branch)
+                        self.assertIn("$OP脚本固定延迟 = 31000\n", branch)
+                        self.assertEqual(branch.count("$OP机型补偿 = TID_获取OP机型补偿($NS机型)"), 1)
+                        self.assertIn(f"$OP固定 = {base} + $OP修正 + $OP机型补偿", branch)
+                        self.assertIn("$OP_NOW = $OP_OUT - $OP_IN - $OP机型补偿", branch)
+                        self.assertEqual(functions(source)["TID_获取OP机型补偿"], functions(configured)["TID_获取OP机型补偿"])
+                        self.assertEqual(split_tid_modules(source)[3 - index], split_tid_modules(configured)[3 - index])
+
     def test_compact_template_scopes_parameters_and_keeps_shared_recovery(self):
         source = compact_fixture()
         for language, index, name in (("英文", 1, "R"), ("日文", 2, "レ")):

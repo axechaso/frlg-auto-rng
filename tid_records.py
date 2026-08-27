@@ -62,9 +62,15 @@ class TidObservation:
     f2: int
     select_count: int
     context: TidRecordContext
+    op_model_offset: int = 0
 
     def parameters(self) -> dict:
-        return {**asdict(self.context), "OP": self.op, "F1": self.f1, "F2": self.f2, "select_count": self.select_count}
+        parameters = {**asdict(self.context), "OP": self.op, "F1": self.f1, "F2": self.f2, "select_count": self.select_count}
+        # r2 had no model offset. Keep zero-offset hashes identical to existing
+        # records, while r3's NS2 -750ms must never merge with old NS2 timings.
+        if self.op_model_offset:
+            parameters["op_model_offset"] = self.op_model_offset
+        return parameters
 
 
 class TidLogParser:
@@ -73,6 +79,7 @@ class TidLogParser:
     def __init__(self, context: TidRecordContext, *, flow: bool = False):
         self.base_context = context
         self.context = context
+        self.op_model_offset = 0
         self.active = not flow
         self.buffer = ""
         self.pending: dict = {}
@@ -96,10 +103,14 @@ class TidLogParser:
         if stage:
             self.active = int(stage[1]) == 1
             self.context = self.base_context
+            self.op_model_offset = 0
             self.pending = {}
             return None
         if not self.active:
             return None
+        model_offset = re.search(r"OP机型补偿\(ms\)[：:]\s*(-?\d+)", line)
+        if model_offset:
+            self.op_model_offset = int(model_offset[1])
         correction = re.search(r"OP修正增加50ms[：:]\s*当前修正=(-?\d+)ms", line)
         if correction:
             self.context = replace(self.context, op_correction=int(correction[1]))
@@ -120,7 +131,8 @@ class TidLogParser:
         if select and all(name in self.pending for name in ("tid", "op", "f1", "f2")):
             home = re.search(r"HOME_BUFFER\(ms\)[：:]\s*(\d+)", line)
             context = replace(self.context, home_buffer_delay=int(home[1])) if home else self.context
-            observation = TidObservation(**self.pending, select_count=int(select[1]), context=context)
+            observation = TidObservation(**self.pending, select_count=int(select[1]), context=context,
+                                         op_model_offset=self.op_model_offset)
             self.pending = {}
             return observation
         return None
@@ -176,18 +188,18 @@ class TidRecordStore:
         if not self.path.is_file():
             return []
         with self._connection() as connection:
-            return [{**json.loads(row["parameters"]), "tid": row["tid"],
+            return [{"op_model_offset": 0, **json.loads(row["parameters"]), "tid": row["tid"],
                      "occurrences": row["occurrences"], "last_seen": row["last_seen"]}
                     for row in connection.execute(query, arguments)]
 
     def export_csv(self, path: Path, **filters) -> int:
         rows = self.rows(**filters, limit=None)
         columns = ("game", "nx_model", "tid", "language", "OP", "F1", "F2", "occurrences",
-                   "player_name", "gender", "op_correction", "op_fixed_delay", "f1_fixed_delay",
+                   "player_name", "gender", "op_correction", "op_model_offset", "op_fixed_delay", "f1_fixed_delay",
                    "f2_fixed_delay", "select_count", "select_correction", "sound", "button_mode",
                    "seed_button", "name_entry_button", "home_buffer_delay", "last_seen")
         labels = ("游戏", "Switch机型", "TID", "语言", "OP", "F1", "F2", "出现次数", "主角名称",
-                  "性别(0男1女)", "OP修正ms", "OP固定延迟ms", "F1固定延迟ms", "F2固定延迟ms",
+                  "性别(0男1女)", "OP修正ms", "OP机型补偿ms", "OP固定延迟ms", "F1固定延迟ms", "F2固定延迟ms",
                   "SELECT执行次数", "SELECT额外补偿", "Sound", "ButtonMode", "SeedButton", "取名进入键",
                   "HOME_BUFFER延迟ms", "最近记录时间")
         with Path(path).open("w", encoding="utf-8-sig", newline="") as stream:
