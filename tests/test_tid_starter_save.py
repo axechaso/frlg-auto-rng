@@ -68,7 +68,7 @@ class TidStarterSaveTests(unittest.TestCase):
             source = root / TID_STARTER_SAVE_NAME
             source.write_text(fixture(), encoding="utf-8")
             for language in ("英文", "日文"):
-                self.assertEqual(resolve_tid_template(root, language), source)
+                self.assertEqual(resolve_tid_template(root, language), source.resolve())
 
     def test_only_active_user_section_changes_and_id_never_walks_route(self):
         source = fixture()

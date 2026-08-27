@@ -52,10 +52,10 @@ class TidTemplateRevisionTests(unittest.TestCase):
             root = Path(directory)
             legacy = root / TID_LEGACY_SCRIPT_NAMES["英文"]
             legacy.write_text("legacy", encoding="utf-8")
-            self.assertEqual(resolve_tid_template(root, "英文"), legacy)
+            self.assertEqual(resolve_tid_template(root, "英文"), legacy.resolve())
             updated = root / TID_SCRIPT_NAMES["英文"]
             updated.write_text("updated", encoding="utf-8")
-            self.assertEqual(resolve_tid_template(root, "英文"), updated)
+            self.assertEqual(resolve_tid_template(root, "英文"), updated.resolve())
 
     def test_unknown_new_fingerprint_does_not_silently_fall_back(self):
         manifest = {"scripts": {
