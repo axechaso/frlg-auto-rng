@@ -25,7 +25,7 @@ EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
 EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
-EXPECTED_COMPAT_PATCH_ID = "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v5"
+EXPECTED_COMPAT_PATCH_ID = "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v6"
 EXPECTED_TESSDATA_SHA256 = {
     "frlg_battle.traineddata": "7abcaef4936727b33717656b38fd5b5027823e1cafec21abb06cc8ef1f7ff758",
     "FRLG_EN_ALL.traineddata": "3272f23a6f259518813025d89be77d706574ccdf163132ccf6f5be15ca19cfa0",

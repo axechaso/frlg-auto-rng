@@ -26,7 +26,10 @@ locate its `x64` native libraries.
 
 The PreviewV5 runner accepts `--preview-port <port>` and serves `/mjpeg` only on
 `127.0.0.1`. The GUI monitor reads that stream while the script is running, so
-it never opens a second `VideoCapture`. Without this option the runner behaves
+it never opens a second `VideoCapture`. A pure button/timing script that has no
+ImgLabel or OCR calls (for example, the TID-to-lab bridge stage) still opens the
+capture reader when a preview port is requested, so the monitor remains usable
+through every stage of a continuous flow. Without this option the runner behaves
 like the prior v4 compatibility runner.
 
 The original `ezcon.exe` remains authoritative for version/hash checks, device

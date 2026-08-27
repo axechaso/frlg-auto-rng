@@ -47,7 +47,7 @@ ENDFUNC
 
         self.assertEqual(
             backend.EXPECTED_COMPAT_PATCH_ID,
-            "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v5",
+            "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v6",
         )
         self.assertIn("captureTask = Task.Run", additions)
         self.assertIn("latestFrame = frame.Clone()", additions)
@@ -70,6 +70,7 @@ ENDFUNC
         self.assertIn("--preview-port", additions)
         self.assertIn("MjpegPreviewServer", additions)
         self.assertIn("127.0.0.1", additions)
+        self.assertIn("runner.NeedILLoad || previewPort > 0", additions)
         self.assertIn(
             "<AssemblyName>EasyCon2.CLI.PreviewV5</AssemblyName>", additions
         )

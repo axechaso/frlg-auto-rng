@@ -360,7 +360,9 @@ index 087f503..b200362 100644
 -        cvcap = new();
 -        outdap.Log("准备打开采集卡...");
 -        if (!cvcap.Open(vId, (int)refs))
-+        if (runner.NeedILLoad)
++        // A pure button/timing stage (such as the TID -> lab bridge) may not
++        // reference labels, but it still needs to share the capture preview.
++        if (runner.NeedILLoad || previewPort > 0)
          {
 -            outdap.Error("采集卡打开失败！！");
 -            return;

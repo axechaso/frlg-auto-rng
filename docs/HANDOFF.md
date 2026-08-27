@@ -4,6 +4,13 @@
 
 快照日期：2026-08-28。
 
+## 2026-08-28 桥接阶段运行中预览修复（最新）
+
+- 连续 TID → 御三家流程的第二阶段 `02_lab_bridge/main.ecs` 只有按键和等待，没有 `ImgLabel`/`OCR`；兼容 runner 原先只在 `NeedILLoad` 为真时打开采集卡，导致该阶段虽然运行，监视窗口却没有可连接的 MJPEG 服务。
+- 兼容 runner 现在在收到 `--preview-port` 时，即使脚本不需要识图也启动持续采帧和回环预览；带识图的 TID/御三家阶段行为不变。GUI 继续复用同一预览端口，不增加第二个采集卡占用。
+- 兼容补丁标识更新为 `cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v6`，入口版本仍为 EasyCon `1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52`。构建脚本、发布清单和静态回归测试已同步。
+- 本次只改兼容 runner 与文档/测试，不改 TID、孵蛋、Seed、帧轴或球前存档操作顺序；尚未连接单片机或运行 Switch 实机。
+
 ## 2026-08-28 TID r1 同步与发布（最新）
 
 - 用户源包 `C:\Users\axenx\Downloads\NS火叶全自动一键乱数1.1.8\NS火叶TID-SID到御三家球前存档-测试.ecs` 已更新为 `2026-08-28-r1`，SHA-256 为 `54decdea179cf86689426444779cef90b6bedaa490932843901b83d541f97b35`；D 盘 `local_assets/tid_rng137` 缓存与源文件逐字一致，manifest 已同步。
@@ -351,7 +358,7 @@ ezcon.exe SHA-256: 559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1
 default path: %USERPROFILE%\Downloads\伊机控-EasyCon-v1.6.4alpha测试版-260518\publish\ezcon.exe
 ```
 
-自动执行兼容 runner 同样来自 commit `9c86137c7e63bff842175470895727a5fa9bab52`，功能补丁标识为 `cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v5`。入口为 `EasyCon2.CLI.PreviewV5.exe`，当前入口 SHA-256 为 `00487aeb32f9cda74173e924ce3c19c895b36e092314b65326a7dacaa68d1771`。它让 ImgLabel 与本地 OCR 共用持续采集的最新帧，并使用 GUI 的向上取整；运行期间通过 `127.0.0.1` 回环 MJPEG 共享最新帧，监视窗不再第二次打开 DSHOW。必须保留完整自包含文件夹；Tesseract 5.2 在单文件发布中无法取得原生库目录。运行文件因体积较大被 Git 忽略，只用 Git 迁移时须运行 `tools\build_easycon164a_compat_runner.ps1` 重建。
+自动执行兼容 runner 同样来自 commit `9c86137c7e63bff842175470895727a5fa9bab52`，功能补丁标识为 `cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v6`。入口为 `EasyCon2.CLI.PreviewV5.exe`，当前入口 SHA-256 为 `00487aeb32f9cda74173e924ce3c19c895b36e092314b65326a7dacaa68d1771`。它让 ImgLabel 与本地 OCR 共用持续采集的最新帧，并使用 GUI 的向上取整；运行期间通过 `127.0.0.1` 回环 MJPEG 共享最新帧，监视窗不再第二次打开 DSHOW，纯按键/等待阶段在请求预览端口时也保持该服务。必须保留完整自包含文件夹；Tesseract 5.2 在单文件发布中无法取得原生库目录。运行文件因体积较大被 Git 忽略，只用 Git 迁移时须运行 `tools\build_easycon164a_compat_runner.ps1` 重建。
 
 ### 1.1.8 正式/孵蛋脚本
 

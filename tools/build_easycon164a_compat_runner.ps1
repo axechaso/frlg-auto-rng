@@ -72,6 +72,7 @@ $patchAlreadyApplied = (
     (Select-String -LiteralPath $mockGamePadSource -Pattern 'public void Reset\(\)' -Quiet) -and
     (Test-Path -LiteralPath $previewSource) -and
     (Select-String -LiteralPath $programSource -Pattern 'previewPortOption' -Quiet) -and
+    (Select-String -LiteralPath $programSource -Pattern 'runner\.NeedILLoad \|\| previewPort > 0' -Quiet) -and
     (Select-String -LiteralPath $programSource -Pattern 'latestFrame = frame.Clone\(\)' -Quiet) -and
     (Select-String -LiteralPath $previewSource -Pattern 'class MjpegPreviewServer' -Quiet)
 )
@@ -122,7 +123,7 @@ $manifest = [ordered]@{
     source_repository = "https://github.com/EasyConNS/EasyCon.git"
     source_commit = $commit
     source_version = "1.6.4-a"
-    patch_id = "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v5"
+    patch_id = "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v6"
     description = "Continuously capture the newest DSHOW frame, share it with local OCR, and optionally expose the newest frame through a loopback-only MJPEG preview without a second capture-device owner."
     build_target = "net9.0/win-x64 self-contained onedir"
     filename = $runnerFilename
