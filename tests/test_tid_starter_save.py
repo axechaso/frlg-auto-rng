@@ -56,12 +56,82 @@ NEXT
         head += f'FUNC {prefix}_calcname($n: STRING, $i): INT\n    IF $char == "{name}"\n        RETURN 111\n    ENDIF\nENDFUNC\n'
     return head + """# =========================================================
 # 顶层入口收尾：ID 主体结束后才进入研究所桥接。
+IF $连续流程_游戏版本 != 0 and $连续流程_游戏版本 != 1
+    RETURN
+ENDIF
 CALL FLOW_桥接到御三家存档点
 RETURN
 """
 
 
+def compact_fixture():
+    """r2 removes tutorial separators and shares the startup helpers."""
+    source = fixture()
+    home = functions(source)["EN_HOME_BUFFER"]
+    for prefix in ("EN", "JP"):
+        source = source.replace(functions(source)[f"{prefix}_HOME_BUFFER"] + "\n", "")
+        source = source.replace(f"CALL {prefix}_HOME_BUFFER", "CALL TID_HOME_BUFFER")
+    shared = home.replace("EN_HOME_BUFFER", "TID_HOME_BUFFER").replace("EN_关闭游戏", "TID_关闭游戏")
+    shared += "\nFUNC TID_检测新建存档(): INT\n    RETURN 1\nENDFUNC\n"
+    shared += "FUNC TID_增加OP修正(): INT\n    $OP修正 += 50\n    RETURN 1\nENDFUNC\n"
+    source = source.replace("# ===== 英文版", shared + "\n# ===== 英文版", 1)
+    source = source.replace("# ======================== 用户自定义区结束\n", "$KeyDelay = 50\n")
+    return source.replace(
+        "# =========================================================\n# 顶层入口收尾：ID 主体结束后才进入研究所桥接。\n",
+        "",
+    )
+
+
 class TidStarterSaveTests(unittest.TestCase):
+    def test_compact_template_scopes_parameters_and_keeps_shared_recovery(self):
+        source = compact_fixture()
+        for language, index, name in (("英文", 1, "R"), ("日文", 2, "レ")):
+            for mode in (0, 1):
+                request = TidRngRequest(language=language, player_name=name, mode=mode, op_correction=100)
+                configured = configure_starter_save_id(source, request, include_flow_marker=True)
+                before, after = split_tid_modules(source), split_tid_modules(configured)
+                self.assertEqual(before[0].replace(
+                    "$连续流程_游戏版本 = 0", f"$连续流程_游戏版本 = {index - 1}"
+                ), after[0])
+                self.assertEqual(before[3 - index], after[3 - index])
+                self.assertEqual(functions(source), functions(configured))
+                self.assertIn("$OP修正 = 100\n", after[index])
+                self.assertIn(f"$ID_RNG = {mode}\n", after[index])
+                self.assertEqual(configured.count("TIDFLOW|ID|TID= & $ID"), 5)
+                self.assertNotIn("CALL FLOW_桥接到御三家存档点", configured)
+                updated = set_starter_save_sid_correction(configured, language, -13)
+                parts = split_tid_modules(updated)
+                self.assertEqual(parts[0], after[0])
+                self.assertEqual(parts[3 - index], after[3 - index])
+                self.assertIn("$SID_ADV修正 = -13\n", parts[index])
+
+    def test_compact_adaptive_changes_only_shared_home_and_keeps_op_helpers(self):
+        source = compact_fixture()
+        for language, name in (("英文", "R"), ("日文", "レ")):
+            configured = configure_starter_save_id(source, TidRngRequest(
+                language=language, player_name=name, home_buffer_adaptive_threshold=True
+            ))
+            original, updated = functions(source), functions(configured)
+            for name, body in original.items():
+                if name != "TID_HOME_BUFFER":
+                    self.assertEqual(updated[name], body)
+            self.assertEqual(configured.count("FUNC TID_HOME_BUFFER\n"), 1)
+            self.assertEqual(configured.count("CALL TID_HOME_BUFFER\n"), 2)
+            self.assertNotRegex(configured, r"(?:EN|JP)_HOME_BUFFER")
+            self.assertLess(configured.index("$HOME_BUFFER自适应稳定要求 = 3"), configured.index("# 唤醒设备"))
+            self.assertIn("A DOWN\n        WAIT 50\n        A UP", updated["TID_HOME_BUFFER"])
+
+    def test_compact_bridge_keeps_source_route_without_duplicating_it(self):
+        source = compact_fixture()
+        bridge = render_starter_save_bridge(source, "小火龙")
+        self.assertEqual(bridge.count("CALL FLOW_桥接到御三家存档点"), 1)
+        self.assertEqual(functions(bridge), {n: b for n, b in functions(source).items() if n.startswith("FLOW_")})
+
+    def test_unrecognized_user_boundary_is_rejected(self):
+        source = compact_fixture().replace("$KeyDelay = 50", "$KeyDelay = 51")
+        with self.assertRaisesRegex(ValueError, "用户自定义区结束"):
+            configure_starter_save_id(source, TidRngRequest(player_name="R"))
+
     def test_confirmed_file_has_priority_for_both_languages(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -139,7 +209,10 @@ class TidStarterSaveSourceTests(unittest.TestCase):
             for adaptive in (False, True):
                 configured = configure_starter_save_id(source, TidRngRequest(language=language, player_name=name, home_buffer_adaptive_threshold=adaptive), include_flow_marker=True)
                 original_functions, generated_functions = functions(source), functions(configured)
-                changed_home = ("EN" if language == "英文" else "JP") + "_HOME_BUFFER"
+                changed_home = (
+                    "TID_HOME_BUFFER" if "TID_HOME_BUFFER" in original_functions
+                    else ("EN" if language == "英文" else "JP") + "_HOME_BUFFER"
+                )
                 for function, body in original_functions.items():
                     if adaptive and function == changed_home:
                         continue

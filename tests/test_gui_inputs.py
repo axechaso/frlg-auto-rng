@@ -25,6 +25,7 @@ from run_auto_rng_gui import (
     parse_sid_effort_values,
     parse_sid_species,
     parse_tid_fixed_delays,
+    parse_tid_calibration_result,
     preferred_detected_port,
     preferred_detected_video,
 )
@@ -103,6 +104,22 @@ class GuiIvInputTests(unittest.TestCase):
         explanation = describe_sid_log_failure(cleaned)
         self.assertIn("没有生成任何 SID 观测", explanation)
         self.assertIn("停止/取消请求", explanation)
+
+    def test_tid_calibration_keeps_recovered_op_correction_with_measured_delays(self):
+        log = (
+            "OP修正增加50ms：当前修正=50ms，实际固定WAIT=30600ms\n"
+            "\x1b[90m[18:00:00] OP修正增加50ms：当前修正=100ms，实际固定WAIT=30650ms\x1b[0m\n"
+            "OP脚本固定延迟：30700\nF1脚本固定延迟：22050\n"
+            "F2脚本固定延迟：4250\nF3脚本固定延迟：14900\n"
+        )
+        result = parse_tid_calibration_result(log, 0)
+        self.assertEqual(result, {"OP": 30700, "F1": 22050, "F2": 4250, "F3": 14900, "OP_CORRECTION": 100})
+        with self.assertRaisesRegex(ValueError, "F3"):
+            parse_tid_calibration_result(log.replace("F3脚本固定延迟：14900\n", ""), 0)
+
+    def test_tid_old_calibration_preserves_existing_op_correction(self):
+        log = "OP脚本固定延迟：30600\nF1脚本固定延迟：22050\nF2脚本固定延迟：4250\nF3脚本固定延迟：14900\n"
+        self.assertEqual(parse_tid_calibration_result(log, -50)["OP_CORRECTION"], -50)
 
     def test_unrestricted_ability_maps_to_ten_lines_any(self):
         self.assertEqual(ABILITY_ZH_TO_EN["不限"], "Any")

@@ -134,6 +134,16 @@ def parse_tid_fixed_delays(text: str) -> dict[str, int]:
     return result
 
 
+def parse_tid_calibration_result(text: str, initial_op_correction: int) -> dict[str, int]:
+    """Keep a complete measured calibration paired with its actual OP correction."""
+    result = parse_tid_fixed_delays(text)
+    corrections = re.findall(
+        r"OP修正增加50ms[：:]\s*当前修正=(-?\d+)ms", clean_terminal_log(text)
+    )
+    result["OP_CORRECTION"] = int(corrections[-1]) if corrections else initial_op_correction
+    return result
+
+
 def read_display_log_tail(path: Path | None, maximum_chars: int = 20000) -> str:
     if path is None or not path.is_file():
         return ""
@@ -4141,7 +4151,7 @@ class AutoRngApp:
                 self.set_result("TID/SID运行日志：\n\n" + log_text)
             if completed_tid_request is not None and completed_tid_request.calibration_check:
                 try:
-                    delays = parse_tid_fixed_delays(log_text)
+                    delays = parse_tid_calibration_result(log_text, completed_tid_request.op_correction)
                 except ValueError as exc:
                     self.status_var.set(
                         f"固定延迟检查未得到完整四项结果：{exc}{detail}"
@@ -4153,6 +4163,7 @@ class AutoRngApp:
                         self.tid_f1_delay_var.set(str(delays["F1"]))
                         self.tid_f2_delay_var.set(str(delays["F2"]))
                         self.tid_f3_delay_var.set(str(delays["F3"]))
+                        self.tid_op_correction_var.set(str(delays["OP_CORRECTION"]))
                         self.tid_calibration_var.set(False)
                     finally:
                         self._updating = False
@@ -4160,7 +4171,8 @@ class AutoRngApp:
                     self.set_result(
                         "固定延迟检查完成，已自动回填：\n"
                         f"OP {delays['OP']} / F1 {delays['F1']} / "
-                        f"F2 {delays['F2']} / F3 {delays['F3']}\n\n"
+                        f"F2 {delays['F2']} / F3 {delays['F3']}\n"
+                        f"OP 修正 {delays['OP_CORRECTION']} ms（与本次固定延迟一起回填）\n\n"
                         "固定延迟检查已自动关闭，请重新生成正式TID/御三家方案。\n\n"
                         + log_text
                     )

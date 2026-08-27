@@ -15,9 +15,10 @@ if TYPE_CHECKING:
 
 
 TID_STARTER_SAVE_NAME = "NS火叶TID-SID到御三家球前存档-测试.ecs"
-TID_STARTER_SAVE_SHA256 = "8ccbe63e539788c72ef20219ca5b58dce124f58bbb3940cc9ed55cce8e16ce03"
+TID_STARTER_SAVE_SHA256 = "485278694b326ae9a1b4bcc3aeb37b629a9ef212fa6688a1a7fc6c5f1626b324"
 TID_STARTER_SAVE_SUPPORTED_SHA256 = {
     TID_STARTER_SAVE_SHA256,
+    "8ccbe63e539788c72ef20219ca5b58dce124f58bbb3940cc9ed55cce8e16ce03",
     # 同一执行代码，仅英文用户区的 $ID_RNG 初值为 0。
     "711f6ceb6fd08309a92b98caa853db235ab5b25070f3813baa5011e9af89cd58",
 }
@@ -31,6 +32,8 @@ _TAIL_MARKER = (
     "# 顶层入口收尾：ID 主体结束后才进入研究所桥接。"
 )
 _USER_END = "# ======================== 用户自定义区结束"
+_COMPACT_USER_END = "\n$KeyDelay = 50\n"
+_COMPACT_TAIL = "IF $连续流程_游戏版本 != 0 and $连续流程_游戏版本 != 1\n"
 _ID_END = "# 工具 ID 阶段结束：桥接与存档只在第二阶段执行。\nRETURN 0\n"
 
 
@@ -45,8 +48,9 @@ def split_tid_modules(text: str) -> tuple[str, str, str, str]:
             raise ValueError("TID球前存档模板缺少唯一语言分支：" + marker)
     head, _, rest = text.partition(_EN_MARKER)
     english, _, japanese = rest.partition(_JP_MARKER)
-    tail_marker = _TAIL_MARKER if _TAIL_MARKER in japanese else _ID_END
-    if japanese.count(tail_marker) != 1:
+    # 旧版注释收尾区本身也包含游戏语言检查，须优先使用完整旧标记。
+    tail_marker = next((marker for marker in (_TAIL_MARKER, _COMPACT_TAIL, _ID_END) if marker in japanese), None)
+    if tail_marker is None or japanese.count(tail_marker) != 1:
         raise ValueError("TID球前存档模板缺少唯一的顶层收尾区")
     japanese, _, tail = japanese.partition(tail_marker)
     return head, _EN_MARKER + english, _JP_MARKER + japanese, tail_marker + tail
@@ -55,7 +59,8 @@ def split_tid_modules(text: str) -> tuple[str, str, str, str]:
 def replace_user_values(module: str, values: dict[str, Any]) -> str:
     from .tid_rng137 import _ecs_literal
 
-    user, separator, rest = module.partition(_USER_END)
+    boundary = _USER_END if _USER_END in module else _COMPACT_USER_END
+    user, separator, rest = module.partition(boundary)
     if not separator:
         raise ValueError("TID球前存档模板缺少用户自定义区结束标记")
     for name, value in values.items():
@@ -125,7 +130,11 @@ def configure_starter_save_id(
                     PRINT TIDFLOW|ID|RIVAL_CUSTOM= & $Name_GREEN
                     BREAK 2""")
     if request.home_buffer_adaptive_threshold:
-        selected = _adaptive_home_buffer(selected, prefix)
+        if "FUNC TID_HOME_BUFFER\n" in head:
+            # r2 两种语言共用启动函数；只替换共享 HOME，不动 OP 检测/恢复。
+            head = _adaptive_home_buffer(head, "TID")
+        else:
+            selected = _adaptive_home_buffer(selected, prefix)
         if head.count("# 唤醒设备\n") != 1:
             raise ValueError("TID球前存档模板缺少全局区结束锚点")
         head = head.replace("# 唤醒设备\n", _TID_HOME_BUFFER_ADAPTIVE_GLOBALS + "\n# 唤醒设备\n", 1)

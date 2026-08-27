@@ -196,9 +196,10 @@ class TidRng137Tests(unittest.TestCase):
         self.assertIn('$name = "RED"', configured)
         self.assertIn("$OP_RNG_Max_Range = 4", configured)
         self.assertIn("$same_id_switch = 1", configured)
-        self.assertIn("# ======================== 用户自定义区结束", configured)
-
         marker = "# ======================== 用户自定义区结束 ========================"
+        if marker not in self.english:
+            marker = "\n$KeyDelay = 50\n"
+        self.assertIn(marker, configured)
         original_body = self.english
         if is_starter_save_template(self.english):
             configured = split_tid_modules(configured)[1]
@@ -264,8 +265,9 @@ class TidRng137Tests(unittest.TestCase):
             self.assertIn("$HOME_BUFFER自适应最低阈值 = 90", enabled, language)
             self.assertIn("$NS机型 == 1", enabled, language)
             self.assertEqual(
-                len(re.findall(r"(?m)^FUNC (?:(?:EN|JP)_)?HOME_BUFFER$", enabled)),
-                2 if is_starter_save_template(template) else 1, language,
+                len(re.findall(r"(?m)^FUNC (?:(?:EN|JP|TID)_)?HOME_BUFFER$", enabled)),
+                2 if is_starter_save_template(template) and "FUNC TID_HOME_BUFFER\n" not in template else 1,
+                language,
             )
 
     def test_home_buffer_adaptive_flag_must_be_boolean(self):
