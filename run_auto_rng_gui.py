@@ -1386,7 +1386,7 @@ class AutoRngApp:
         self.tid_button_mode_var = tk.StringVar(value="HELP")
         self.tid_seed_button_var = tk.StringVar(value="A")
         self.tid_name_entry_var = tk.StringVar(value="A")
-        self.tid_op_delay_var = tk.StringVar(value="30550")
+        self.tid_op_delay_var = tk.StringVar(value="30600")
         self.tid_f1_delay_var = tk.StringVar(value="22050")
         self.tid_f2_delay_var = tk.StringVar(value="4250")
         self.tid_f3_delay_var = tk.StringVar(value="14900")
@@ -2360,7 +2360,7 @@ class AutoRngApp:
             (self.tid_target_var, "1" if japanese else "0"),
             (self.tid_sid_var, "64506" if japanese else "38449"),
             (self.tid_name_var, "レット゛" if japanese else "Alxe"),
-            (self.tid_op_delay_var, "30650" if japanese else "30550"),
+            (self.tid_op_delay_var, "30650" if japanese else "30600"),
             (self.tid_f1_delay_var, "27600" if japanese else "22050"),
             (self.tid_f2_delay_var, "8960" if japanese else "4250"),
             (self.tid_f3_delay_var, "15950" if japanese else "14900"),
@@ -3366,8 +3366,13 @@ class AutoRngApp:
         self.project_main = project_main
         self.runtime_check = check
         mode_name = "乱数模式" if request.mode == 1 else "穷举模式"
+        generated_plan = json.loads(
+            (project_main.parent / "plan.json").read_text(encoding="utf-8")
+        )
+        starter_save_template = generated_plan.get("tid_template_family") == "starter_save_164a"
         lines = [
             f"TID/SID 1.3.7：{request.language}版 / {mode_name}",
+            f"实际模板：{generated_plan['template']}",
             f"目标 TID/SID：{request.target_tid:05d} / {request.target_sid:05d}",
             f"主角：{'男性' if request.gender == 0 else '女性'} / {request.player_name}",
             f"主机：Switch {request.nx_model}",
@@ -3383,7 +3388,9 @@ class AutoRngApp:
             f"计划文件：{plan_path}",
             f"生成脚本：{project_main}",
         ]
-        if request.language == "日文":
+        if starter_save_template:
+            lines.append("已接入同步按键与同语言帧换算更新；首次使用新版请先运行固定延迟检查，完成后会自动回填。")
+        elif request.language == "日文":
             lines.append("兼容修正：已把日版 FOR $InputLen 改为 1.6.4-a 可编译的显式索引循环。")
         if flow_plan is not None:
             target = flow_plan.starter_target

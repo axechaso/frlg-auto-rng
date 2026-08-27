@@ -51,6 +51,11 @@ from .tid_rng137 import (
     validate_tid_runtime,
     write_configured_tid_project,
 )
+from .tid_starter_save import (
+    is_starter_save_template,
+    render_starter_save_bridge,
+    set_starter_save_sid_correction,
+)
 
 
 @dataclass(frozen=True)
@@ -507,18 +512,23 @@ def write_tid_starter_flow_bundle(
         include_flow_marker=True,
     )
     id_template = (id_dir / "main.ecs").read_text(encoding="utf-8")
+    starter_save_template = is_starter_save_template(id_template)
     correction_pattern = re.compile(r"(?m)^\$SID_ADV修正\s*=\s*[^\r\n]*$")
     for stale_attempt in id_dir.glob("main_attempt_*.ecs"):
         stale_attempt.unlink()
     for attempt_index, correction in enumerate(plan.sid_retry_corrections):
-        attempt_text, replacement_count = correction_pattern.subn(
-            f"$SID_ADV修正 = {correction}",
-            id_template,
-        )
-        if replacement_count != 1:
-            raise ValueError(
-                "生成的TID/SID脚本中$SID_ADV修正字段数量异常，无法创建连续流程重试脚本"
+        if starter_save_template:
+            attempt_text = set_starter_save_sid_correction(
+                id_template, plan.request.tid_request.language, correction
             )
+        else:
+            attempt_text, replacement_count = correction_pattern.subn(
+                f"$SID_ADV修正 = {correction}", id_template,
+            )
+            if replacement_count != 1:
+                raise ValueError(
+                    "生成的TID/SID脚本中$SID_ADV修正字段数量异常，无法创建连续流程重试脚本"
+                )
         (id_dir / f"main_attempt_{attempt_index:03d}.ecs").write_text(
             attempt_text,
             encoding="utf-8",
@@ -526,7 +536,10 @@ def write_tid_starter_flow_bundle(
     bridge_dir.mkdir(parents=True, exist_ok=True)
     bridge_path = bridge_dir / "main.ecs"
     bridge_path.write_text(
-        render_lab_bridge_ecs(plan.request.starter),
+        (
+            render_starter_save_bridge(id_template, plan.request.starter)
+            if starter_save_template else render_lab_bridge_ecs(plan.request.starter)
+        ),
         encoding="utf-8",
     )
     if plan.starter_run_plan is not None:
@@ -544,6 +557,11 @@ def write_tid_starter_flow_bundle(
     plan_path = output_dir / "flow_plan.json"
     payload = plan.to_dict()
     payload["starter_source_dir"] = str(starter_source_dir)
+    id_manifest = json.loads((id_dir / "plan.json").read_text(encoding="utf-8"))
+    payload["tid_source_template"] = id_manifest["template"]
+    payload["lab_bridge_source"] = (
+        id_manifest["template"] if starter_save_template else "legacy_shared_lab_bridge"
+    )
     plan_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",

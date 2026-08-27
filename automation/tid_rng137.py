@@ -11,6 +11,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .tid_starter_save import (
+    TID_STARTER_SAVE_NAME,
+    TID_STARTER_SAVE_SUPPORTED_SHA256,
+    configure_starter_save_id,
+    is_starter_save_template,
+)
+
 from .easycon118 import (
     EASYCON_BACKEND_NAME,
     EXPECTED_EZCON_SHA256,
@@ -33,12 +40,25 @@ DEFAULT_TID_SOURCE_PATH = (
 )
 
 TID_SCRIPT_NAMES = {
-    "英文": "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7.txt",
+    "英文": "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7-164a重写版_v2_全局变量修正版.txt",
     "日文": "【TID+SID乱数&穷举】日文版-火红叶绿1.3.7.txt",
 }
+TID_LEGACY_SCRIPT_NAMES = {
+    "英文": "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7.txt",
+}
 EXPECTED_TID_SCRIPT_SHA256 = {
-    "英文": "8438b473f2032efe4b013fd6ac5976c62c7013c4bb983be543181ab6457c55d9",
+    "英文": "f8d88b87e012737746334f629dda881fd6f211c8649630b142643bb16016dfdb",
     "日文": "77072be5e6c4fdbb7723e0df7f36f10c2df5e62394c5e5f07b08b105e836cfe7",
+}
+SUPPORTED_TID_SCRIPT_SHA256 = {
+    "英文": {
+        *TID_STARTER_SAVE_SUPPORTED_SHA256,
+        EXPECTED_TID_SCRIPT_SHA256["英文"],
+        "8438b473f2032efe4b013fd6ac5976c62c7013c4bb983be543181ab6457c55d9",
+        # 原 1.3.7 仅把固定延迟检查默认值从 0 改为 1 的下载包。
+        "9b0941bf848e2b5fbeaf823274e6b07f78fccf7fc95744f7914a22a6dec913bc",
+    },
+    "日文": {EXPECTED_TID_SCRIPT_SHA256["日文"], *TID_STARTER_SAVE_SUPPORTED_SHA256},
 }
 EXPECTED_TID_LABEL_COUNT = 328
 EXPECTED_TID_LABEL_METHODS = {1: 4, 3: 1, 5: 322, 11: 1}
@@ -133,7 +153,7 @@ class TidRngRequest:
     language: str = "英文"
     mode: int = 1
     calibration_check: bool = False
-    op_fixed_delay: int = 30550
+    op_fixed_delay: int = 30600
     f1_fixed_delay: int = 22050
     f2_fixed_delay: int = 4250
     f3_fixed_delay: int = 14900
@@ -304,15 +324,26 @@ class TidRngRequest:
         return result
 
 
+def resolve_tid_template(source_dir: str | Path, language: str) -> Path:
+    """Prefer the confirmed combined update, then audited standalone versions."""
+    source_dir = Path(source_dir).resolve()
+    filenames = [TID_STARTER_SAVE_NAME, TID_SCRIPT_NAMES[language]]
+    if language in TID_LEGACY_SCRIPT_NAMES:
+        filenames.append(TID_LEGACY_SCRIPT_NAMES[language])
+    for filename in filenames:
+        path = source_dir / filename
+        if path.is_file():
+            return path
+    raise FileNotFoundError(f"TID 1.3.7 包缺少{language}模板：" + " / ".join(filenames))
+
+
 def inspect_tid_package(source_dir: str | Path) -> dict[str, Any]:
     source_dir = Path(source_dir).resolve()
     scripts = {}
-    for language, filename in TID_SCRIPT_NAMES.items():
-        path = source_dir / filename
-        if not path.is_file():
-            raise FileNotFoundError(f"TID 1.3.7 包缺少 {filename}")
+    for language in TID_SCRIPT_NAMES:
+        path = resolve_tid_template(source_dir, language)
         scripts[language] = {
-            "filename": filename,
+            "filename": path.name,
             "bytes": path.stat().st_size,
             "sha256": _sha256_file(path),
         }
@@ -325,9 +356,9 @@ def inspect_tid_package(source_dir: str | Path) -> dict[str, Any]:
 def verify_tid_package(source_dir: str | Path) -> dict[str, Any]:
     source_dir = Path(source_dir).resolve()
     manifest = inspect_tid_package(source_dir)
-    for language, expected_sha256 in EXPECTED_TID_SCRIPT_SHA256.items():
+    for language, supported_sha256 in SUPPORTED_TID_SCRIPT_SHA256.items():
         actual = manifest["scripts"][language]["sha256"]
-        if actual != expected_sha256:
+        if actual not in supported_sha256:
             raise ValueError(f"{language}版 TID 1.3.7 脚本指纹不一致: {actual}")
     labels = manifest["labels"]
     if labels["count"] != EXPECTED_TID_LABEL_COUNT:
@@ -347,6 +378,10 @@ def configure_tid_template_text(
     *,
     include_flow_marker: bool = False,
 ) -> str:
+    if is_starter_save_template(template_text):
+        return configure_starter_save_id(
+            template_text, request, include_flow_marker=include_flow_marker
+        )
     request.validate(template_text)
     user_section, separator, remainder = template_text.partition(_USER_SECTION_END)
     if not separator:
@@ -392,15 +427,23 @@ def _apply_tid_home_buffer_adaptive(template_text: str) -> str:
         return template_text
     if template_text.count(_TID_HOME_BUFFER_GLOBAL_ANCHOR) != 1:
         raise ValueError("TID 1.3.7模板缺少唯一的识图阈值锚点")
-    if template_text.count(_TID_HOME_BUFFER_ORIGINAL) != 1:
+    # v2 只给原辅助函数添加 EN_ 前缀；不能把它换回旧的函数名。
+    prefix = "EN_" if re.search(r"(?m)^FUNC EN_HOME_BUFFER\s*$", template_text) else ""
+    original = _TID_HOME_BUFFER_ORIGINAL.replace(
+        "FUNC HOME_BUFFER", f"FUNC {prefix}HOME_BUFFER"
+    ).replace("CALL 关闭游戏", f"CALL {prefix}关闭游戏")
+    if template_text.count(original) != 1:
         raise ValueError("TID 1.3.7模板的HOME_BUFFER函数与已审计版本不一致")
     extension = TID_HOME_BUFFER_ADAPTIVE_PATH.read_text(encoding="utf-8").rstrip()
+    extension = extension.replace(
+        "FUNC HOME_BUFFER", f"FUNC {prefix}HOME_BUFFER"
+    ).replace("CALL 关闭游戏", f"CALL {prefix}关闭游戏")
     template_text = template_text.replace(
         _TID_HOME_BUFFER_GLOBAL_ANCHOR,
         _TID_HOME_BUFFER_GLOBAL_ANCHOR + _TID_HOME_BUFFER_ADAPTIVE_GLOBALS,
         1,
     )
-    return template_text.replace(_TID_HOME_BUFFER_ORIGINAL, extension, 1)
+    return template_text.replace(original, extension, 1)
 
 
 def referenced_image_labels(template_text: str) -> tuple[str, ...]:
@@ -417,8 +460,8 @@ def write_configured_tid_project(
     source_dir = Path(source_dir).resolve()
     output_dir = Path(output_dir).resolve()
     manifest = verify_tid_package(source_dir)
-    template_path = source_dir / TID_SCRIPT_NAMES[request.language]
-    template_text = template_path.read_text(encoding="utf-8")
+    template_path = source_dir / manifest["scripts"][request.language]["filename"]
+    template_text = template_path.read_text(encoding="utf-8-sig")
     configured = configure_tid_template_text(
         template_text,
         request,
@@ -447,7 +490,12 @@ def write_configured_tid_project(
                 "template": template_path.name,
                 "tid_request": request.to_dict(),
                 "source_manifest": manifest,
-                "japanese_164a_compatibility": request.language == "日文",
+                "japanese_164a_compatibility": (
+                    request.language == "日文" and not is_starter_save_template(template_text)
+                ),
+                "tid_template_family": (
+                    "starter_save_164a" if is_starter_save_template(template_text) else "standalone_137"
+                ),
                 "tid_starter_flow_marker": include_flow_marker,
                 "backend": {
                     "name": EASYCON_BACKEND_NAME,

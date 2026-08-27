@@ -6,7 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from automation.easycon118 import EasyConRuntimeCheck
-from automation.tid_rng137 import DEFAULT_TID_SOURCE_PATH, TidRngRequest
+from automation.tid_rng137 import (
+    DEFAULT_TID_SOURCE_PATH, TID_LEGACY_SCRIPT_NAMES, TID_SCRIPT_NAMES, TidRngRequest,
+)
+from automation.tid_starter_save import TID_STARTER_SAVE_NAME, is_starter_save_template
 from automation.tid_starter_flow import (
     TidStarterFlowRequest,
     build_tid_starter_flow_plan,
@@ -17,6 +20,10 @@ from automation.tid_starter_flow import (
 )
 
 SOURCE_118 = Path(__file__).resolve().parents[1] / "local_assets" / "easycon118"
+HAS_TID_ASSETS = any(
+    (DEFAULT_TID_SOURCE_PATH / filename).is_file()
+    for filename in (TID_STARTER_SAVE_NAME, TID_SCRIPT_NAMES["英文"], TID_LEGACY_SCRIPT_NAMES["英文"])
+)
 
 
 class TidStarterFlowTests(unittest.TestCase):
@@ -183,10 +190,7 @@ class TidStarterFlowTests(unittest.TestCase):
         validate_starter.assert_not_called()
 
     @unittest.skipUnless(
-        (
-            DEFAULT_TID_SOURCE_PATH
-            / "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7.txt"
-        ).is_file(),
+        HAS_TID_ASSETS and SOURCE_118.is_dir(),
         "requires the external TID 1.3.7 package",
     )
     def test_bundle_keeps_language_template_separate_and_adds_marker(self):
@@ -218,7 +222,13 @@ class TidStarterFlowTests(unittest.TestCase):
 
         self.assertIn("TIDFLOW|ID|MATCH=1", id_text)
         self.assertIn("TIDFLOW|ID|TID=", id_text)
-        self.assertNotIn("FUNC JP_", id_text)
+        if is_starter_save_template(id_text):
+            self.assertIn("$连续流程_游戏版本 = 0", id_text)
+            self.assertNotIn("CALL FLOW_桥接到御三家存档点", id_text)
+            self.assertEqual(bridge_text.count("CALL FLOW_桥接到御三家存档点"), 1)
+            self.assertEqual(payload["lab_bridge_source"], TID_STARTER_SAVE_NAME)
+        else:
+            self.assertNotIn("FUNC JP_", id_text)
         self.assertIn("$SID_ADV修正 = 1", id_attempt_1)
         self.assertIn("TIDFLOW|BRIDGE|DONE=1", bridge_text)
         self.assertIn('$目标Seed = "9CA9"', starter_text)
@@ -228,10 +238,7 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertEqual(payload["starter_118_plan"]["request"]["category"], "Starter")
 
     @unittest.skipUnless(
-        (
-            DEFAULT_TID_SOURCE_PATH
-            / "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7.txt"
-        ).is_file(),
+        HAS_TID_ASSETS and SOURCE_118.is_dir(),
         "requires the external TID 1.3.7 package",
     )
     def test_exhaustive_bundle_preserves_filters_and_defers_starter_project(self):

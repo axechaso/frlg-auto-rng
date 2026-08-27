@@ -4,6 +4,20 @@
 
 快照日期：2026-08-27。
 
+## 2026-08-27 TID 球前存档版接入（当前更新源）
+
+- 实际工具目录仍为 `D:\Codex\火叶乱数\frlg-auto-rng`，本轮沿用 `experiment/shared-capture` 推送 Action，不创建 PR、不切换 main。
+- 用户明确确认源文件为 `C:\Users\axenx\Downloads\NS火叶全自动一键乱数1.1.8\NS火叶TID-SID到御三家球前存档-测试.ecs`，不是下载 TID 包中的英文 v2，也不是旧的合并领取流程。当前 SHA-256 为 `8ccbe63e539788c72ef20219ca5b58dce124f58bbb3940cc9ed55cce8e16ce03`；先前 `711f6ceb6fd08309a92b98caa853db235ab5b25070f3813baa5011e9af89cd58` 只把英文用户区 `$ID_RNG` 初值设为0，执行代码逐字相同，兼容保留。
+- `automation/tid_starter_save.py` 保留整份脚本的全局声明、两种语言顶层分支和所有时序函数。只修改当前语言用户区与语言选择；不把主体包入函数，不用另一个语言的名称字符表校验输入。
+- 现有三阶段编排不变：ID 阶段移除原脚本最后的自动桥接收尾，停在训练家卡片；球前存档阶段从同一个源文件原样提取五个 `FLOW_` 函数和步进/Oak设置，只执行一次路线；第三阶段仍为现有1.1.8御三家。未修改 `run_tid_starter_flow.py`、Seed 控制器、孵蛋或帧轴。
+- 连续穷举继续允许五种启用的成功条件；成功标记使用去噪后的实际 `$ID` 和打印参数已计算的 `$adv`，不能把目标TID冒充实际TID。SID ADV重试只替换当前语言用户区，不能同时改全局零值或另一个语言的参数。
+- 同步按键保留 `DOWN / WAIT / UP`。英文 OP 默认固定延迟改为30600ms（日文30650ms），实际等待基准仍来自新版原函数；用户已有参数不自动加减50ms。首次使用新版应执行固定延迟检查，GUI原有完整四项自动回填与关闭检查开关继续使用。
+- HOME_BUFFER 自适应默认关闭；开启时仅替换当前语言 HOME_BUFFER，新增状态放在主脚本全局区，且扩展同样使用同步按键；不会把新函数换回异步短按。其他原始辅助函数和球前路线逐字不变。
+- 模板优先级为球前存档版、英文v2、旧1.3.7。TID专用328标签未变；新版引用的117标签与原TID包逐字一致。导入器保留旧模板和其他文本，并支持从1.1.8目录额外导入球前存档源文件。`plan.json`记录实际模板、指纹与`starter_save_164a`类型，GUI结果区显示实际文件名。
+- 换设备须复制该源文件（或整个`local_assets/tid_rng137`）；忽略资产不会随Git迁移。在项目根目录运行 `.\.venv\Scripts\python.exe tools\import_tid_rng137.py` 会导入TID标签并自动同步1.1.8目录中的球前存档新版，也可用`--starter-save-source`指定新设备上的文件。更新后重启工具并重新生成，已生成的旧`main.ecs`不会自动变化。
+- `tests/test_tid_starter_save.py`覆盖语言隔离、同步按键、实际身份输出、SID重试范围、路线只执行一次和原函数一致性；不依赖外部资产的部分加入CI，真实原文件检查在有源文件时执行。
+- 本轮验证：240项工具单元测试、26个下载包`Tools/check_*.py`全部通过；英/日、乱数/穷举、自适应开/关、固定延迟检查、三种球前路线、SID重试与原始入口共24份脚本通过真实`1.6.4-a+9c86137` format。生成脚本的432组毫秒级模式往返检查、Python编译、当前配置及乱数/穷举连续流程的完整运行前预检、`git diff --check`均通过；现有用户配置逐项未变。尚未进行NS1实机验收，不能据此宣称命中率或流程稳定性已经改善。
+
 ## 2026-08-27 HOME_BUFFER 修复（优先于下方历史快照）
 
 当前工作分支仍为 `experiment/shared-capture`；本轮只提交并推送当前分支触发 Action，不切换 main、不创建 PR。以下规则已同步到下载包两份 1.1.8 入口和工具生成覆盖：
@@ -30,26 +44,26 @@
 D:\Codex\火叶乱数\frlg-auto-rng
 ```
 
-当前发布分支：
+当前工作与本轮 Action 分支：
 
 ```text
-branch: main
-release point: 以 origin/main 最新提交和 git log -1 为准
+branch: experiment/shared-capture
+release point: 以 origin/experiment/shared-capture 最新提交和 git log -1 为准
 ```
 
-私有网络远端为 `https://github.com/axechaso/frlg-auto-rng.git`。本项目按用户约定直接把已验证的大改提交并推送到 `main` 触发 GitHub Actions，不创建 PR。具体提交号会继续前进，因此新设备必须以 `origin/main` 和 `git log -1` 为准，不能照抄旧哈希。
+私有网络远端为 `https://github.com/axechaso/frlg-auto-rng.git`。本轮按用户约定把已验证改动提交并推送当前 `experiment/shared-capture` 分支触发 GitHub Actions，不创建 PR、不切换或合并到 `main`。新设备若继续本轮工作，须取得该分支，不能只取旧的 `main`。
 
-本快照对应的最近两个功能提交是：
+以下是早期 main 快照的两个历史功能提交，并非本轮最新落点：
 
 - `bf2f44a`：统一孵蛋页与定点波克比的固定周期孵化执行和两次 `B` 收尾；
 - `602440c`：复用孵化后队伍页导航，普通新入队目标向上 2 次，孵蛋蛋向上 3 次。
 
-`602440c` 推送后的 GitHub Actions 运行 `32560865715` 已成功完成：<https://github.com/axechaso/frlg-auto-rng/actions/runs/32560865715>。这些提交号只标记本次交接的已验证落点；后续仍以最新 `origin/main` 为准。
+`602440c` 推送后的 GitHub Actions 运行 `32560865715` 已成功完成：<https://github.com/axechaso/frlg-auto-rng/actions/runs/32560865715>。这些仅为历史记录；当前落点以实际工作分支及 `git log -1` 为准。
 
 因此：
 
 - 直接换设备时，复制整个项目工作区最稳妥；
-- 若走 Git，克隆私有 `origin` 后直接使用最新 `main`；
+- 若走 Git，克隆私有 `origin` 后使用最新 `experiment/shared-capture` 继续本轮工作；
 - 新对话不得执行 `git reset --hard`、`git clean` 或用旧提交覆盖工作区；
 - `local_assets/`、`runtime/`、`rng_logs/` 和 `.venv/` 被 Git 忽略，不会随普通提交迁移；
 - 外部 1.1.8 和 EasyCon 安装包也必须单独复制或重新取得。

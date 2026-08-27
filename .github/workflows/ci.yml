@@ -48,6 +48,7 @@ jobs:
           automation/script_test.py
           automation/sid_reverse118.py
           automation/tid_rng137.py
+          automation/tid_starter_save.py
           automation/tid_starter_flow.py
           rng/sid_reverse.py
           rng/sid_reverse_workflow.py
@@ -74,5 +75,7 @@ jobs:
           tests.test_save_profiles
           tests.test_seed_table_updater
           tests.test_tenlines_fixes
+          tests.test_tid_rng137
+          tests.test_tid_starter_save
           tests.test_tid_starter_flow
           tests.test_tid_starter_runner
