@@ -17,6 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from app_paths import DATA_ROOT, RESOURCE_ROOT, USER_DATA_ROOT
 from save_profiles import SaveProfile, SaveProfileStore
+from tid_records import TidRecordContext, TidRecordStore
 
 from assets.game_text import (
     ABILITY_EN_TO_ZH,
@@ -90,6 +91,8 @@ SID_SOURCE_LABELS = ("定点", "野生")
 MODE_TAB_ORDER = ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）")
 ADVANCED_TAB_LABEL = "脚本测试（高级）"
 RUN_LOG_TAB_LABEL = "运行日志"
+TID_RECORD_TAB_LABEL = "TID 实测表"
+TID_RECORD_PATH = USER_DATA_ROOT / "tid_records.sqlite3"
 MANUAL_PROFILE_LABEL = "未选择（手动输入）"
 SAVE_PROFILE_PATH = USER_DATA_ROOT / "save_profiles.json"
 EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
@@ -730,6 +733,7 @@ class AutoRngApp:
         self.manual_tools: ManualToolsManager | None = None
         self.preview_url: str | None = None
         self.profile_store = SaveProfileStore(SAVE_PROFILE_PATH)
+        self.tid_record_store = TidRecordStore(TID_RECORD_PATH)
         self.profile_load_error: str | None = None
         try:
             self.profile_store.load()
@@ -778,6 +782,112 @@ class AutoRngApp:
             for location, category in load_frlg_encounters(game):
                 result.setdefault(category, set()).add(location)
         return {category: sorted(locations) for category, locations in result.items()}
+
+    def _build_tid_records_tab(self):
+        filters = ttk.Frame(self.tid_records_tab)
+        filters.pack(fill="x", pady=(0, 8))
+        self.tid_record_game_var = tk.StringVar(value="全部")
+        self.tid_record_nx_var = tk.StringVar(value="全部")
+        self.tid_record_filter_var = tk.StringVar(value="")
+        for label, variable, choices in (
+            ("游戏", self.tid_record_game_var, ("全部", "火红", "叶绿")),
+            ("机型", self.tid_record_nx_var, ("全部", "Switch 1", "Switch 2")),
+        ):
+            ttk.Label(filters, text=label).pack(side="left", padx=(0, 4))
+            combo = ttk.Combobox(filters, textvariable=variable, values=choices, state="readonly", width=11)
+            combo.pack(side="left", padx=(0, 12))
+            combo.bind("<<ComboboxSelected>>", lambda _event: self.refresh_tid_records())
+        ttk.Label(filters, text="TID").pack(side="left")
+        entry = ttk.Entry(filters, textvariable=self.tid_record_filter_var, width=10)
+        entry.pack(side="left", padx=4)
+        entry.bind("<Return>", lambda _event: self.refresh_tid_records())
+        ttk.Button(filters, text="查询 / 刷新", command=self.refresh_tid_records).pack(side="left", padx=4)
+        ttk.Button(filters, text="导出 CSV", command=self.export_tid_records).pack(side="left", padx=4)
+        ttk.Label(self.tid_records_tab, text="自动记录 TID 页运行得到的有效结果；不同游戏、机型和参数分别统计。不记录 SID 或 SID ADV。").pack(anchor="w")
+        frame = ttk.Frame(self.tid_records_tab)
+        frame.pack(fill="both", expand=True, pady=6)
+        columns = ("tid", "game", "nx_model", "language", "OP", "F1", "F2", "occurrences", "player_name", "op_correction", "last_seen")
+        labels = ("TID", "游戏", "机型", "语言", "OP", "F1", "F2", "出现次数", "主角名称", "OP修正ms", "最近记录")
+        self.tid_record_tree = ttk.Treeview(frame, columns=columns, show="headings", height=18, selectmode="browse")
+        for column, label in zip(columns, labels):
+            self.tid_record_tree.heading(column, text=label)
+            self.tid_record_tree.column(column, width=160 if column == "last_seen" else 85, minwidth=65, anchor="center")
+        ybar = ttk.Scrollbar(frame, orient="vertical", command=self.tid_record_tree.yview)
+        xbar = ttk.Scrollbar(frame, orient="horizontal", command=self.tid_record_tree.xview)
+        self.tid_record_tree.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
+        self.tid_record_tree.grid(row=0, column=0, sticky="nsew")
+        ybar.grid(row=0, column=1, sticky="ns")
+        xbar.grid(row=1, column=0, sticky="ew")
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+        self.tid_record_rows = {}
+        self.tid_record_status_var = tk.StringVar(value=f"记录自动保存到：{TID_RECORD_PATH}")
+        ttk.Label(self.tid_records_tab, textvariable=self.tid_record_status_var).pack(anchor="w")
+        self.tid_record_details_var = tk.StringVar(value="选择一条记录查看固定延迟、按键及主角设置。次数表示观测次数，不保证再次命中。")
+        ttk.Label(self.tid_records_tab, textvariable=self.tid_record_details_var, wraplength=950, justify="left").pack(anchor="w", pady=8)
+        self.tid_record_tree.bind("<<TreeviewSelect>>", self._show_tid_record_details)
+
+    def _tid_record_filters(self):
+        text = self.tid_record_filter_var.get().strip()
+        if text and (not text.isascii() or not text.isdigit() or not 0 <= int(text) <= 65535):
+            raise ValueError("TID 必须为 0–65535，留空查询全部")
+        return {
+            "game": None if self.tid_record_game_var.get() == "全部" else self.tid_record_game_var.get(),
+            "nx_model": None if self.tid_record_nx_var.get() == "全部" else int(self.tid_record_nx_var.get()[-1]),
+            "tid": int(text) if text else None,
+        }
+
+    def refresh_tid_records(self):
+        try:
+            rows = self.tid_record_store.rows(**self._tid_record_filters())
+        except Exception as exc:
+            self.tid_record_status_var.set(f"TID表读取失败：{exc}")
+            return
+        selected = self.tid_record_tree.selection()
+        self.tid_record_tree.delete(*self.tid_record_tree.get_children())
+        self.tid_record_rows = {}
+        for row in rows:
+            identity = {k: v for k, v in row.items() if k not in ("occurrences", "last_seen")}
+            key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+            self.tid_record_rows[key] = row
+            values = [f"{row['tid']:05d}", row["game"], f"Switch {row['nx_model']}", row["language"], row["OP"], row["F1"], row["F2"], row["occurrences"], row["player_name"], row["op_correction"], row["last_seen"]]
+            self.tid_record_tree.insert("", "end", iid=key, values=values)
+        if selected and selected[0] in self.tid_record_rows:
+            self.tid_record_tree.selection_set(selected[0])
+            self._show_tid_record_details()
+        else:
+            self.tid_record_details_var.set("选择一条记录查看固定延迟、按键及主角设置。次数表示观测次数，不保证再次命中。")
+        self.tid_record_status_var.set(f"显示 {len(rows)} 项参数记录（最多1000项）；导出包含全部筛选结果。保存位置：{TID_RECORD_PATH}")
+
+    def _show_tid_record_details(self, _event=None):
+        selected = self.tid_record_tree.selection()
+        if not selected or selected[0] not in self.tid_record_rows:
+            return
+        row = self.tid_record_rows[selected[0]]
+        self.tid_record_details_var.set(
+            f"{row['game']} / Switch {row['nx_model']} / {row['language']} / TID {row['tid']:05d}\n"
+            f"主角：{row['player_name']}（{'男性' if row['gender'] == 0 else '女性'}）；"
+            f"OP/F1/F2固定延迟：{row['op_fixed_delay']}/{row['f1_fixed_delay']}/{row['f2_fixed_delay']} ms；OP修正：{row['op_correction']} ms\n"
+            f"SELECT执行/额外补偿：{row['select_count']}/{row['select_correction']}；HOME_BUFFER：{row['home_buffer_delay']} ms；"
+            f"Sound：{('MONO','STEREO')[row['sound']]}；Button：{('HELP','LR','L=A')[row['button_mode']]}；"
+            f"Seed键：{('A','START','L')[row['seed_button']]}；取名进入键：{('A','B')[row['name_entry_button']]}"
+        )
+
+    def export_tid_records(self):
+        try:
+            filters = self._tid_record_filters()
+            path = filedialog.asksaveasfilename(parent=self.root, title="导出TID实测表", initialfile="TID实测表.csv", defaultextension=".csv", filetypes=[("CSV表格", "*.csv")])
+            if path:
+                count = self.tid_record_store.export_csv(Path(path), **filters)
+                self.tid_record_status_var.set(f"已导出 {count} 项记录：{path}")
+        except Exception as exc:
+            messagebox.showerror("TID表导出失败", str(exc), parent=self.root)
+
+    def _tid_record_arguments(self, log_path):
+        context = TidRecordContext.from_request(self.tid_game_var.get(), self.tid_request)
+        path = Path(log_path).with_suffix(".tid-context.json")
+        context.save(path)
+        return ["--tid-context", str(path), "--tid-records", str(TID_RECORD_PATH)]
 
     def _build_ui(self):
         page = ttk.Frame(self.root)
@@ -835,6 +945,7 @@ class AutoRngApp:
         egg_tab = ttk.Frame(self.mode_notebook, padding=6)
         self.script_test_tab = ttk.Frame(self.mode_notebook, padding=6)
         self.run_log_tab = ttk.Frame(self.mode_notebook, padding=6)
+        self.tid_records_tab = ttk.Frame(self.mode_notebook, padding=6)
         for tab, label in zip(
             (sid_tab, tid_tab, normal_tab, egg_tab), MODE_TAB_ORDER
         ):
@@ -846,11 +957,14 @@ class AutoRngApp:
             str(egg_tab): "egg",
             str(self.script_test_tab): "script_test",
             str(self.run_log_tab): "log",
+            str(self.tid_records_tab): "tid_records",
         }
+        self.mode_notebook.insert(2, self.tid_records_tab, text=TID_RECORD_TAB_LABEL)
         self.mode_notebook.add(self.script_test_tab, text=ADVANCED_TAB_LABEL)
         self.mode_notebook.hide(self.script_test_tab)
         self.mode_notebook.add(self.run_log_tab, text=RUN_LOG_TAB_LABEL)
         self.mode_notebook.pack(fill="x")
+        self._build_tid_records_tab()
 
         log_frame = ttk.LabelFrame(
             self.run_log_tab,
@@ -1303,6 +1417,7 @@ class AutoRngApp:
         tid_identity = ttk.LabelFrame(tid_tab, text="1. TID / SID 基本条件", padding=8)
         tid_identity.pack(fill="x")
         self.tid_language_var = tk.StringVar(value="英文")
+        self.tid_game_var = tk.StringVar(value="火红")
         self.tid_mode_var = tk.StringVar(value="乱数模式")
         self.tid_nx_var = tk.StringVar(value="Switch 1")
         self.tid_gender_var = tk.StringVar(value="女性")
@@ -1342,6 +1457,9 @@ class AutoRngApp:
         )
         self.tid_calibration_check.grid(
             row=2, column=2, columnspan=4, sticky="w", padx=4, pady=4
+        )
+        self.tid_game_combo = self._labeled_combo(
+            tid_identity, "游戏版本", self.tid_game_var, ("火红", "叶绿"), 2, 0
         )
         ttk.Label(
             tid_identity,
@@ -1451,7 +1569,6 @@ class AutoRngApp:
         tid_starter = ttk.LabelFrame(tid_tab, text="4. 御三家连续乱数", padding=8)
         tid_starter.pack(fill="x", pady=(8, 0))
         self.tid_starter_flow_var = tk.BooleanVar(value=True)
-        self.tid_game_var = tk.StringVar(value="火红")
         self.tid_starter_var = tk.StringVar(value="妙蛙种子")
         self.tid_starter_min_adv_var = tk.StringVar(value="1500")
         self.tid_starter_max_adv_var = tk.StringVar(value="10000")
@@ -1461,9 +1578,7 @@ class AutoRngApp:
             text="TID 阶段完成后继续御三家；穷举模式使用实际 TID 与 SID ADV",
             variable=self.tid_starter_flow_var,
         ).grid(row=0, column=0, columnspan=8, sticky="w", padx=4, pady=4)
-        self.tid_game_combo = self._labeled_combo(
-            tid_starter, "游戏版本", self.tid_game_var, ("火红", "叶绿"), 1, 0
-        )
+        ttk.Label(tid_starter, text="游戏版本使用上方基本条件").grid(row=1, column=0, columnspan=2, padx=4)
         self.tid_starter_combo = self._labeled_combo(
             tid_starter,
             "御三家",
@@ -1482,7 +1597,6 @@ class AutoRngApp:
             tid_starter, "SID ADV 重试半径", self.tid_sid_retry_radius_var, 2, 0, width=12
         )
         self.tid_starter_flow_controls = (
-            self.tid_game_combo,
             self.tid_starter_combo,
             self.tid_starter_min_adv_entry,
             self.tid_starter_max_adv_entry,
@@ -2283,6 +2397,10 @@ class AutoRngApp:
 
     def _on_mode_tab_change(self, _event=None):
         mode = self.tab_modes.get(self.mode_notebook.select(), "normal")
+        if mode == "tid_records":
+            self.refresh_tid_records()
+            self.root.after_idle(self._update_page_scrollregion)
+            return
         if mode == "log":
             if not self.busy and not self._process_running():
                 self.status_var.set("运行日志页会保留当前或最近一次自动流程输出。")
@@ -4037,6 +4155,18 @@ class AutoRngApp:
                 ])
                 command_cwd = ROOT
                 self.running_mode = "easycon"
+        if self.running_mode in ("tid", "tid_flow"):
+            try:
+                arguments = self._tid_record_arguments(self._current_running_log_path())
+                if self.running_mode == "tid":
+                    separator = command.index("--")
+                    command[separator:separator] = arguments
+                else:
+                    command.extend(arguments)
+            except (OSError, ValueError) as exc:
+                self.running_mode = None
+                messagebox.showerror("TID记录准备失败", str(exc))
+                return
         flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         self.manual_tools.close_monitor()
         try:
@@ -4083,6 +4213,8 @@ class AutoRngApp:
         if self.process is None:
             return
         code = self.process.poll()
+        if self.mode_notebook.select() == str(self.tid_records_tab):
+            self.refresh_tid_records()
         if code is None:
             log_text = read_display_log_tail(
                 self._current_running_log_path(),

@@ -13,6 +13,8 @@ import subprocess
 import sys
 from typing import TextIO
 
+from tid_records import recording_session
+
 from automation.easycon118 import build_run_command, prepare_compat_runner, validate_runtime
 from automation.tid_starter_flow import (
     resolve_exhaustive_starter_plan,
@@ -65,6 +67,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", required=True)
     parser.add_argument("--video", required=True, type=int)
     parser.add_argument("--log-path")
+    parser.add_argument("--tid-context", type=Path)
+    parser.add_argument("--tid-records", type=Path)
     return parser.parse_args()
 
 
@@ -76,11 +80,13 @@ class FlowRunner:
         port: str,
         video_device: int,
         log: TextIO,
+        recording=None,
     ) -> None:
         self.runner_path = runner_path
         self.port = port
         self.video_device = video_device
         self.log = log
+        self.recording = recording
         self.current_process: subprocess.Popen[str] | None = None
         self.stop_requested = False
         self.stage_lines: list[str] = []
@@ -94,6 +100,8 @@ class FlowRunner:
             print(safe_message, flush=True)
         self.log.write(message + "\n")
         self.log.flush()
+        if self.recording is not None:
+            self.recording.feed(message + "\n")
 
     def request_stop(self, _signum=None, _frame=None) -> None:
         self.stop_requested = True
@@ -305,12 +313,16 @@ def main() -> int:
         print(f"[流程错误] EasyCon 1.6.4-a 兼容运行器检查失败：{exc}")
         return 2
 
-    with log_path.open("w", encoding="utf-8") as log:
+    with log_path.open("w", encoding="utf-8") as log, recording_session(
+        args.tid_context, args.tid_records, log_path, flow=True,
+        warning=lambda message: log.write(message + "\n"),
+    ) as recording:
         flow = FlowRunner(
             runner_path,
             port=args.port.strip().upper(),
             video_device=args.video,
             log=log,
+            recording=recording,
         )
         if hasattr(signal, "SIGBREAK"):
             signal.signal(signal.SIGBREAK, flow.request_stop)

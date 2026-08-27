@@ -37,6 +37,7 @@ jobs:
           python -m py_compile
           app_paths.py
           save_profiles.py
+          tid_records.py
           run_auto_rng_gui.py
           run_auto_planner.py
           run_easycon_logged.py
@@ -76,6 +77,7 @@ jobs:
           tests.test_seed_table_updater
           tests.test_tenlines_fixes
           tests.test_tid_rng137
+          tests.test_tid_records
           tests.test_tid_starter_save
           tests.test_tid_starter_flow
           tests.test_tid_starter_runner

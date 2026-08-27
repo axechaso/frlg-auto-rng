@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tid_records import recording_session
+
 
 def _write_console(text: str) -> None:
     stream = sys.stdout
@@ -25,11 +27,16 @@ def run_logged(
     cwd: Path,
     log_path: Path,
     expected_markers: tuple[str, ...] = (),
+    *,
+    tid_context: Path | None = None,
+    tid_records: Path | None = None,
 ) -> int:
     if not command:
         raise ValueError("缺少要执行的 EasyCon 命令")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("w", encoding="utf-8", newline="") as log_file:
+    with log_path.open("w", encoding="utf-8", newline="") as log_file, recording_session(
+        tid_context, tid_records, log_path, warning=lambda message: log_file.write(message + "\n")
+    ) as recording:
         process = subprocess.Popen(
             command,
             cwd=str(cwd),
@@ -54,6 +61,8 @@ def run_logged(
             _write_console(text)
             log_file.write(text)
             log_file.flush()
+            if recording is not None:
+                recording.feed(text)
 
         try:
             # EasyCon terminates the previous log entry only when the next one
@@ -92,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-path", required=True, type=Path)
     parser.add_argument("--cwd", required=True, type=Path)
     parser.add_argument("--expected-marker", action="append", default=[])
+    parser.add_argument("--tid-context", type=Path)
+    parser.add_argument("--tid-records", type=Path)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = list(args.command)
@@ -102,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
         args.cwd,
         args.log_path,
         tuple(args.expected_marker),
+        tid_context=args.tid_context,
+        tid_records=args.tid_records,
     )
 
 
