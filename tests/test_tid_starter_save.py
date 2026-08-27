@@ -22,6 +22,12 @@ def functions(text):
     }
 
 
+def execution_body(module):
+    boundary = "# ======================== 用户自定义区结束" if "# ======================== 用户自定义区结束" in module else "$KeyDelay = 50\n"
+    body = module.partition(boundary)[2]
+    return re.sub(r"(?m)^[ \t]*PRINT TIDFLOW\|ID\|[^\n]*\n", "", body)
+
+
 def fixture():
     head = """$连续流程_游戏版本 = 0
 $连续流程_御三家选择 = 0
@@ -106,6 +112,46 @@ ENDIF
 
 
 class TidStarterSaveTests(unittest.TestCase):
+    def test_r4_startup_guard_stays_before_down_and_keeps_post_confirm_wait(self):
+        head, english, japanese, tail = split_tid_modules(model_compensated_fixture())
+        modules = []
+        for module, prefix in ((english, "EN"), (japanese, "JP")):
+            sequence = f"""A DOWN
+WAIT 3000
+A UP
+$OP新建存档检查 = TID_检测新建存档()
+IF $OP新建存档检查 == 0
+    $OP可重试 = TID_增加OP修正()
+    CALL {prefix}_清空窗口
+    $denoise_hit_count = 0
+    IF $OP可重试 == 0
+        RETURN
+    ENDIF
+    CONTINUE
+ENDIF
+LS DOWN
+WAIT 50
+LS RESET
+WAIT 500
+A DOWN
+WAIT 1000
+A UP
+WAIT 550
+"""
+            modules.append(module.replace("CALL TID_HOME_BUFFER\n", "CALL TID_HOME_BUFFER\n" + sequence))
+        source = head + modules[0] + modules[1] + tail
+        for language, index, name in (("英文", 1, "R"), ("日文", 2, "レ")):
+            for model in (1, 2):
+                for adaptive in (False, True):
+                    for flow in (False, True):
+                        request = TidRngRequest(language=language, nx_model=model, player_name=name, home_buffer_adaptive_threshold=adaptive)
+                        generated = configure_starter_save_id(source, request, include_flow_marker=flow)
+                        branch = split_tid_modules(generated)[index]
+                        self.assertEqual(execution_body(branch), execution_body(split_tid_modules(source)[index]))
+                        self.assertIn("A UP\n$OP新建存档检查 = TID_检测新建存档()", branch)
+                        self.assertLess(branch.index("$OP新建存档检查 ="), branch.index("LS DOWN"))
+                        self.assertIn("A DOWN\nWAIT 1000\nA UP\nWAIT 550\n", branch)
+
     def test_r3_model_offset_and_normalized_measurement_survive_generation(self):
         source = model_compensated_fixture()
         for language, index, name, base in (("英文", 1, "R", 30550), ("日文", 2, "レ", 30600)):
@@ -245,6 +291,17 @@ class TidStarterSaveTests(unittest.TestCase):
 
 @unittest.skipUnless(DEFAULT_TID_STARTER_SAVE_SOURCE.is_file(), "requires the confirmed external TID/save source")
 class TidStarterSaveSourceTests(unittest.TestCase):
+    def test_real_source_preserves_entire_language_execution_body(self):
+        source = DEFAULT_TID_STARTER_SAVE_SOURCE.read_text(encoding="utf-8-sig")
+        for language, index, name in (("英文", 1, "Alxe"), ("日文", 2, "レット゛")):
+            for model in (1, 2):
+                for mode in (0, 1):
+                    for adaptive in (False, True):
+                        generated = configure_starter_save_id(source, TidRngRequest(language=language, nx_model=model,
+                            mode=mode, player_name=name, home_buffer_adaptive_threshold=adaptive), include_flow_marker=True)
+                        self.assertEqual(execution_body(split_tid_modules(generated)[index]),
+                                         execution_body(split_tid_modules(source)[index]))
+
     def test_real_source_preserves_all_timing_and_route_functions(self):
         source = DEFAULT_TID_STARTER_SAVE_SOURCE.read_text(encoding="utf-8-sig")
         for language, name in (("英文", "Alxed"), ("日文", "レット゛")):
