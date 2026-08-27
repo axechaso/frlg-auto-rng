@@ -63,6 +63,7 @@ jobs:
           tests.test_easycon_logged
           tests.test_egg_surf_menu_probe
           tests.test_gui_inputs
+          tests.test_home_buffer_recovery
           tests.test_label_matcher
           tests.test_sid_reverse
           tests.test_sid_reverse118

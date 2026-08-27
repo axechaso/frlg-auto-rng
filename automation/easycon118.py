@@ -104,11 +104,18 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package where the first valid HOME_BUFFER delay is locked for
     # the run, then unlocked only after three consecutive recognition misses.
     "5e6cc6db83a020b59d71993eff390c04681c9e251f5534412ee63c54d8b0a5f9",
+    # Download package with verified HOME recovery and unknown-state-safe
+    # 50 ms probing, without contradictory binary-search boundaries.
+    "0b4d7fdfc4370fd84f7956e12b001e867b7cbe40e13c39baf191dfc245b279a9",
 )
-EXPECTED_SCRIPT_SHA256 = "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57"
+EXPECTED_SCRIPT_SHA256 = "3df6f91b12901b488f84b07ecde2ba9a45b9ee5638f76b2b28d6fe9b906a7ccc"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57",
+    # In-place upgrade of the existing local cache has equivalent HOME_BUFFER
+    # functions but retains its historical global-declaration ordering.
+    "272406a322605609787af5dd29af9a0203e22b0aed7d2d40c38a4a870122b476",
     # Previous canonical corpus before later upstream egg-flow updates.
     "b0941989541991148e075926775f35bac301b524587048ba741a52f7f01da1b4",
     # Materialized corpus before the Held no-egg interval table was added.
@@ -184,6 +191,9 @@ HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH = (
 )
 STANDARD_HOME_BUFFER_OVERRIDE_PATH = (
     EASYCON118_EXTENSION_LABEL_DIR / "home_buffer_standard_adaptive.ecs"
+)
+HOME_BUFFER_RECOVERY_PATH = (
+    EASYCON118_EXTENSION_LABEL_DIR / "home_buffer_recovery.ecs"
 )
 EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH = (
     Path(__file__).resolve().parents[1]
@@ -550,6 +560,21 @@ $HOME_BUFFER锁定启用 = 0
 $HOME_BUFFER锁定延迟 = 0
 $HOME_BUFFER锁定连续失败 = 0
 $HOME_BUFFER尝试 = 0
+$HOME_BUFFER未知连续次数 = 0
+$HOME_BUFFER重采样 = 0
+$HOME_BUFFER恢复需要 = 0
+$HOME_BUFFER恢复结果 = 0
+$HOME_BUFFER恢复采样 = 0
+$HOME_BUFFER恢复已按HOME = 0
+$HOME_BUFFER恢复关闭次数 = 0
+$HOME_BUFFER恢复主页 = 0
+$HOME_BUFFER恢复普通 = 0
+$HOME_BUFFER恢复窗口 = 0
+$HOME_BUFFER恢复错误 = 0
+$HOME_BUFFER恢复关闭中 = 0
+$HOME_BUFFER恢复稳定 = 0
+$HOME_BUFFER恢复未知 = 0
+$HOME_BUFFER下一延迟 = 0
 """
 EGG_SETTINGS_GLOBALS = """\
 $孵蛋库_设置识别尝试 = 0
@@ -1853,7 +1878,10 @@ def _apply_standard_home_buffer_runtime_override_text(
     if template_text.count(EGG_HOME_BUFFER_NEXT_FUNCTION) != 1:
         raise ValueError("正式版模板缺少 HOME_BUFFER 后继函数，拒绝应用自适应覆盖")
     end = template_text.index(EGG_HOME_BUFFER_NEXT_FUNCTION, start)
-    replacement = override_text.rstrip() + "\n\n"
+    replacement = (
+        override_text.rstrip() + "\n\n"
+        + HOME_BUFFER_RECOVERY_PATH.read_text(encoding="utf-8").rstrip() + "\n\n"
+    )
     return template_text[:start] + replacement + template_text[end:]
 
 
@@ -1967,7 +1995,10 @@ def _apply_egg_home_buffer_runtime_override_text(
     if template_text.count(EGG_HOME_BUFFER_NEXT_FUNCTION) != 1:
         raise ValueError("孵蛋模板缺少 HOME_BUFFER 后继函数，拒绝应用窗口搜索覆盖")
     end = template_text.index(EGG_HOME_BUFFER_NEXT_FUNCTION, start)
-    replacement = override_text.rstrip() + "\n\n"
+    replacement = (
+        override_text.rstrip() + "\n\n"
+        + HOME_BUFFER_RECOVERY_PATH.read_text(encoding="utf-8").rstrip() + "\n\n"
+    )
     template_text = template_text[:start] + replacement + template_text[end:]
 
     initial_restart = """\
@@ -2301,6 +2332,9 @@ def write_configured_project(
             "home_buffer_adaptive_classifier_sha256": hashlib.sha256(
                 classifier_text.encode("utf-8")
             ).hexdigest(),
+            "home_buffer_recovery_sha256": hashlib.sha256(
+                HOME_BUFFER_RECOVERY_PATH.read_bytes()
+            ).hexdigest(),
             "seed_hold_observation_window_sha256": hashlib.sha256(
                 (
                     SEED_HOLD_OBSERVATION_MIN_GLOBAL
@@ -2425,6 +2459,9 @@ def write_configured_egg_project(
     ).hexdigest()
     runtime_overrides["home_buffer_adaptive_classifier_sha256"] = hashlib.sha256(
         classifier_text.encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["home_buffer_recovery_sha256"] = hashlib.sha256(
+        HOME_BUFFER_RECOVERY_PATH.read_bytes()
     ).hexdigest()
     runtime_overrides["egg_party_slot_main_sha256"] = hashlib.sha256(
         party_slot_main_override_text.encode("utf-8")

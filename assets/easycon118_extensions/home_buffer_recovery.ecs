@@ -1,0 +1,114 @@
+# HOME_BUFFER 专用恢复与步长决策；不改变其他流程的关闭游戏函数。
+FUNC HOME_BUFFER重采样状态($只使用当前NX: INT): INT
+    FOR $HOME_BUFFER重采样 = 1 TO 3
+        $HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态($只使用当前NX)
+        IF $HOME_BUFFER识别状态 != 0
+            RETURN $HOME_BUFFER识别状态
+        ENDIF
+        IF $HOME_BUFFER重采样 < 3
+            WAIT 200
+        ENDIF
+    NEXT
+    RETURN 0
+ENDFUNC
+
+FUNC HOME_BUFFER恢复启动原点(): INT
+    FOR $HOME_BUFFER恢复采样 = 1 TO 10
+        IF $NX机型 == 1
+            $HOME_BUFFER恢复主页 = @主页
+            $HOME_BUFFER恢复普通 = @正确退出
+            $HOME_BUFFER恢复窗口 = @HOME_BUFFER正确退出
+            $HOME_BUFFER恢复错误 = @错误退出
+        ELSE
+            $HOME_BUFFER恢复主页 = @主页_NS2
+            $HOME_BUFFER恢复普通 = @正确退出_NS2
+            $HOME_BUFFER恢复窗口 = @HOME_BUFFER正确退出_NS2
+            $HOME_BUFFER恢复错误 = @错误退出_NS2
+        ENDIF
+        $HOME_BUFFER恢复关闭中 = @正在关闭
+        IF $调试日志输出 == 1
+            PRINT "HOME_BUFFER_RECOVERY|NX=" & $NX机型 & "|HOME=" & $HOME_BUFFER恢复主页 & "|NORMAL=" & $HOME_BUFFER恢复普通 & "|BUFFER=" & $HOME_BUFFER恢复窗口 & "|ERROR=" & $HOME_BUFFER恢复错误 & "|CLOSING=" & $HOME_BUFFER恢复关闭中 & "|HOME_SENT=" & $HOME_BUFFER恢复已按HOME
+        ENDIF
+
+        IF $HOME_BUFFER恢复关闭中 >= 95
+            $HOME_BUFFER恢复稳定 = 0
+            $HOME_BUFFER恢复未知 = 0
+        ELIF $HOME_BUFFER恢复普通 >= $HOME_BUFFER有效识图阈值 or $HOME_BUFFER恢复窗口 >= $HOME_BUFFER有效识图阈值
+            IF $HOME_BUFFER恢复关闭次数 >= 3
+                RETURN 0
+            ENDIF
+            $HOME_BUFFER恢复关闭次数 = $HOME_BUFFER恢复关闭次数 + 1
+            X
+            WAIT 1500
+            A
+            WAIT 1500
+            $HOME_BUFFER恢复稳定 = 0
+            $HOME_BUFFER恢复未知 = 0
+            CONTINUE
+        ELIF $HOME_BUFFER恢复错误 >= $HOME_BUFFER有效识图阈值
+            B
+            WAIT 1500
+            $HOME_BUFFER恢复稳定 = 0
+            $HOME_BUFFER恢复未知 = 0
+            CONTINUE
+        ELIF $HOME_BUFFER恢复主页 >= 95 and $HOME_BUFFER恢复普通 < 90 and $HOME_BUFFER恢复窗口 < 90 and $HOME_BUFFER恢复错误 < 90
+            # Online 图标只能证明在 HOME 页；还需连续确认两种正在游玩标签均已消失。
+            $HOME_BUFFER恢复稳定 = $HOME_BUFFER恢复稳定 + 1
+            $HOME_BUFFER恢复未知 = 0
+            IF $HOME_BUFFER恢复稳定 >= 3
+                PRINT HOME_BUFFER恢复：已连续确认主页且正在游玩标志消失
+                RETURN 1
+            ENDIF
+        ELSE
+            $HOME_BUFFER恢复稳定 = 0
+            # 90-94 只用于阻止误按 HOME/误判关闭，绝不作为成功阈值。
+            IF $HOME_BUFFER恢复主页 >= 95 or $HOME_BUFFER恢复普通 >= 90 or $HOME_BUFFER恢复窗口 >= 90 or $HOME_BUFFER恢复错误 >= 90
+                $HOME_BUFFER恢复未知 = 0
+            ELSE
+                $HOME_BUFFER恢复未知 = $HOME_BUFFER恢复未知 + 1
+                IF $HOME_BUFFER恢复未知 >= 3 and $HOME_BUFFER恢复已按HOME == 0
+                    HOME 100
+                    WAIT 1500
+                    $HOME_BUFFER恢复已按HOME = 1
+                    $HOME_BUFFER恢复未知 = 0
+                    CONTINUE
+                ENDIF
+            ENDIF
+        ENDIF
+        WAIT 200
+    NEXT
+    RETURN 0
+ENDFUNC
+
+FUNC HOME_BUFFER规划下一延迟($状态: INT): INT
+    IF $状态 == 0
+        # 未识别不是过短证据，也不能与普通退出混算为连续方向失败。
+        $HOME_BUFFER锁定连续失败 = 0
+        $HOME_BUFFER未知连续次数 = $HOME_BUFFER未知连续次数 + 1
+        PRINT HOME_BUFFER画面未识别：保留当前延迟，不记录短边界
+        IF $HOME_BUFFER锁定启用 == 0 and $HOME_BUFFER未知连续次数 >= 3
+            $HOME_BUFFER未知连续次数 = 0
+            PRINT HOME_BUFFER尚无锁定值：连续未识别后按50ms向上试探，不认定过短
+            RETURN $HOME_BUFFER延迟 + $HOME_BUFFER最小调整MS
+        ENDIF
+        RETURN $HOME_BUFFER延迟
+    ENDIF
+
+    $HOME_BUFFER未知连续次数 = 0
+    IF $状态 != 2
+        $HOME_BUFFER锁定连续失败 = 0
+        RETURN $HOME_BUFFER延迟
+    ENDIF
+    IF $HOME_BUFFER锁定启用 == 1
+        $HOME_BUFFER锁定连续失败 = $HOME_BUFFER锁定连续失败 + 1
+        IF $HOME_BUFFER锁定连续失败 < $HOME_BUFFER锁定失败阈值
+            PRINT HOME_BUFFER普通退出连续确认: & $HOME_BUFFER锁定连续失败 & "/" & $HOME_BUFFER锁定失败阈值 & "，保持锁定延迟重试"
+            RETURN $HOME_BUFFER延迟
+        ENDIF
+        PRINT HOME_BUFFER连续3次明确识别普通退出，解除锁定并重新校准
+        $HOME_BUFFER锁定启用 = 0
+        $HOME_BUFFER锁定连续失败 = 0
+    ENDIF
+    PRINT HOME_BUFFER明确识别普通退出：按50ms向下试探
+    RETURN $HOME_BUFFER延迟 - $HOME_BUFFER最小调整MS
+ENDFUNC

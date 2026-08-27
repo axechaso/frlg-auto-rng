@@ -397,7 +397,7 @@ ENDFUNC
         self.assertIn("PRINT 亲本: A & $孵蛋亲本A性别", configured)
         self.assertNotIn('PRINT 亲本: A " &', configured)
 
-    def test_egg_home_buffer_brackets_selected_nx_window(self):
+    def test_egg_home_buffer_retries_selected_nx_without_unknown_brackets(self):
         original = """\
 $HOME_BUFFER当前错误退出_NS2 = 0
 FUNC HOME_BUFFER
@@ -430,17 +430,16 @@ ENDFUNC
         self.assertEqual(configured_again, configured)
         self.assertIn(EGG_HOME_BUFFER_GLOBALS, configured)
         self.assertIn(
-            "$HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态(1)",
+            "$HOME_BUFFER识别状态 = HOME_BUFFER重采样状态(1)",
             configured,
         )
         self.assertNotIn(
             "IF @HOME_BUFFER正确退出 >= 95 or @HOME_BUFFER正确退出_NS2 >= 95",
             configured,
         )
-        self.assertIn(
-            "$孵蛋HOME_BUFFER下一延迟 = ($孵蛋HOME_BUFFER短边界 + $孵蛋HOME_BUFFER长边界) / 2",
-            configured,
-        )
+        self.assertNotIn("$孵蛋HOME_BUFFER短边界 = $HOME_BUFFER延迟", configured)
+        self.assertNotIn("没有达到当前识图阈值的整数延迟", configured)
+        self.assertIn("$HOME_BUFFER恢复结果 = HOME_BUFFER恢复启动原点()", configured)
         self.assertIn("$HOME_BUFFER最小调整MS", configured)
         self.assertIn("$HOME_BUFFER锁定失败阈值", configured)
         self.assertIn("$HOME_BUFFER延迟 = $HOME_BUFFER锁定延迟", configured)
@@ -448,11 +447,8 @@ ENDFUNC
             "$HOME_BUFFER锁定连续失败 < $HOME_BUFFER锁定失败阈值",
             configured,
         )
-        self.assertIn("连续失败3次，解除锁定并重新校准", configured)
-        self.assertIn(
-            "$孵蛋HOME_BUFFER调整差 < $HOME_BUFFER最小调整MS",
-            configured,
-        )
+        self.assertIn("连续3次明确识别普通退出，解除锁定并重新校准", configured)
+        self.assertIn("RETURN $HOME_BUFFER延迟 - $HOME_BUFFER最小调整MS", configured)
         self.assertNotIn("$HOME_BUFFER延迟 - 100", configured)
         self.assertNotIn("$HOME_BUFFER延迟 + 100", configured)
         self.assertIn("$孵蛋HOME_BUFFER尝试 > 20", configured)

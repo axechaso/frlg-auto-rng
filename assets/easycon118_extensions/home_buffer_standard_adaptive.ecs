@@ -1,91 +1,58 @@
 # 1.6.4-a 正式版 HOME_BUFFER：可选稳定低分自适应，关闭时保持原 95 分逻辑。
 FUNC HOME_BUFFER
     $HOME_BUFFER尝试 = 0
+    $HOME_BUFFER未知连续次数 = 0
+    $HOME_BUFFER锁定连续失败 = 0
+    $HOME_BUFFER恢复需要 = 1
+    $HOME_BUFFER恢复已按HOME = 0
+    $HOME_BUFFER恢复关闭次数 = 0
+    $HOME_BUFFER恢复稳定 = 0
+    $HOME_BUFFER恢复未知 = 0
     FOR
         $HOME_BUFFER尝试 = $HOME_BUFFER尝试 + 1
         IF $HOME_BUFFER尝试 > 20
-            PRINT HOME_BUFFER校准失败：20轮内未找到可用延迟
+            PRINT HOME_BUFFER校准失败：20轮恢复或试探后仍未确认可用窗口
             RETURN
         ENDIF
         IF $HOME_BUFFER锁定启用 == 1
             $HOME_BUFFER延迟 = $HOME_BUFFER锁定延迟
         ENDIF
+        IF $HOME_BUFFER恢复需要 == 1
+            $HOME_BUFFER恢复结果 = HOME_BUFFER恢复启动原点()
+            IF $HOME_BUFFER恢复结果 == 0
+                PRINT HOME_BUFFER恢复未确认：保持延迟，只重采样，不启动游戏
+                WAIT 500
+                CONTINUE
+            ENDIF
+            $HOME_BUFFER恢复需要 = 0
+        ENDIF
         A
-        1500
+        WAIT 1500
         A
         WAIT $HOME_BUFFER延迟
         IF $调试日志输出 == 1
             PRINT 尝试HOME_BUFFER延迟: & $HOME_BUFFER延迟 & " ms"
         ENDIF
         HOME 100
-        1500
-        $HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态(0)
+        WAIT 1500
+        $HOME_BUFFER识别状态 = HOME_BUFFER重采样状态(0)
         IF $HOME_BUFFER识别状态 == 1
             $HOME_BUFFER锁定启用 = 1
             $HOME_BUFFER锁定延迟 = $HOME_BUFFER延迟
             $HOME_BUFFER锁定连续失败 = 0
             PRINT 可用并锁定HOME_BUFFER延迟: & $HOME_BUFFER锁定延迟 & " ms"
             RETURN
-        ELIF $HOME_BUFFER识别状态 == 3
-            PRINT 错误进入休眠菜单
-            B
-            1500
-            CALL 关闭游戏
-            CONTINUE
         ENDIF
-
-        IF $HOME_BUFFER锁定启用 == 1
-            $HOME_BUFFER锁定连续失败 = $HOME_BUFFER锁定连续失败 + 1
-            IF $HOME_BUFFER锁定连续失败 < $HOME_BUFFER锁定失败阈值
-                PRINT HOME_BUFFER锁定值识别失败: & $HOME_BUFFER锁定连续失败 & "/" & $HOME_BUFFER锁定失败阈值 & "，保持 " & $HOME_BUFFER锁定延迟 & " ms 重试"
-                IF $HOME_BUFFER识别状态 == 2
-                    X
-                    1500
-                    A
-                    1500
-                    FOR
-                        IF @正在关闭 >= 95
-                            WAIT 100
-                        ELSE
-                            BREAK
-                        ENDIF
-                    NEXT
-                ENDIF
-                CALL 关闭游戏
-                CONTINUE
-            ENDIF
-            PRINT HOME_BUFFER锁定值连续失败3次，解除锁定并重新校准
-            $HOME_BUFFER锁定启用 = 0
-            $HOME_BUFFER锁定连续失败 = 0
-        ENDIF
-
-        IF $HOME_BUFFER识别状态 == 2
-            IF $调试日志输出 == 1
-                PRINT HOME_BUFFER延迟过长，减最小步长继续尝试中
-            ENDIF
-            $HOME_BUFFER延迟 = $HOME_BUFFER延迟 - $HOME_BUFFER最小调整MS
-            X
-            1500
-            A
-            1500
-            FOR
-                IF @正在关闭 >= 95
-                    WAIT 100
-                ELSE
-                    BREAK
-                ENDIF
-            NEXT
-            CALL 关闭游戏
-        ELSE
-            IF $调试日志输出 == 1
-                PRINT HOME_BUFFER延迟过短，加最小步长继续尝试中
-            ENDIF
-            $HOME_BUFFER延迟 = $HOME_BUFFER延迟 + $HOME_BUFFER最小调整MS
-            CALL 关闭游戏
-        ENDIF
-        IF $HOME_BUFFER延迟 < 100 or $HOME_BUFFER延迟 > 3000
-            PRINT HOME_BUFFER校准失败：延迟超出100-3000 ms
+        $HOME_BUFFER下一延迟 = HOME_BUFFER规划下一延迟($HOME_BUFFER识别状态)
+        IF $HOME_BUFFER下一延迟 < 100 or $HOME_BUFFER下一延迟 > 3000
+            PRINT HOME_BUFFER校准失败：下一延迟超出100-3000 ms
             RETURN
         ENDIF
+        $HOME_BUFFER延迟 = $HOME_BUFFER下一延迟
+        $HOME_BUFFER恢复需要 = 1
+        $HOME_BUFFER恢复已按HOME = 0
+        $HOME_BUFFER恢复关闭次数 = 0
+        $HOME_BUFFER恢复稳定 = 0
+        $HOME_BUFFER恢复未知 = 0
     NEXT
 ENDFUNC
