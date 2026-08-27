@@ -67,9 +67,17 @@ class TidStarterFlowRequest:
     starter_max_advances: int = 10_000
     sid_chain_search_advances: int = 10_000
     sid_retry_radius: int = 20
+    accept_any_tid: bool = False
+    any_tid_require_denoise: bool = True
 
     def validate(self) -> None:
         self.tid_request.validate()
+        if not isinstance(self.accept_any_tid, bool):
+            raise ValueError("任意TID衔接开关必须为布尔值")
+        if not isinstance(self.any_tid_require_denoise, bool):
+            raise ValueError("任意TID去噪开关必须为布尔值")
+        if self.accept_any_tid and self.tid_request.mode != 0:
+            raise ValueError("任意TID衔接仅适用于穷举模式")
         if self.tid_request.calibration_check:
             raise ValueError("连续流程不能同时启用TID固定延迟检查")
         if self.tid_request.mode == 1 and self.tid_request.sid_random:
@@ -148,6 +156,8 @@ def tid_starter_flow_request_from_dict(payload: dict[str, object]) -> TidStarter
         starter_max_advances=int(payload.get("starter_max_advances", 10_000)),
         sid_chain_search_advances=int(payload.get("sid_chain_search_advances", 10_000)),
         sid_retry_radius=int(payload.get("sid_retry_radius", 20)),
+        accept_any_tid=payload.get("accept_any_tid", False),
+        any_tid_require_denoise=payload.get("any_tid_require_denoise", True),
     )
 
 
@@ -491,6 +501,39 @@ ENDFUNC
 """
 
 
+def enable_any_tid_handoff(template: str, *, require_denoise: bool = True) -> str:
+    """Opt-in early handoff after original digit validation and denoising.
+
+    Leave all timing, recognition and search helpers unchanged. The original
+    print helper computes the actual SID ADV before emitting identity markers.
+    """
+    prefix = "EN_" if re.search(r"(?m)^FUNC EN_匹配\s*$", template) else ""
+    anchor = f"            CALL {prefix}匹配\n"
+    if template.count(anchor) != 1 or f"FUNC {prefix}打印参数\n" not in template:
+        raise ValueError("任意TID衔接缺少唯一的匹配/参数输出结构")
+    before = template.partition(anchor)[0]
+    guard = "            IF $digits_ok == 0\n"
+    denoise = f"            CALL {prefix}去噪\n"
+    if guard not in before or denoise not in before or before.rfind(guard) > before.rfind(denoise):
+        raise ValueError("任意TID衔接必须位于完整识别和原版去噪之后")
+    confirmation = "$denoise_hit_count >= $denoise_need_hit and " if require_denoise else ""
+    description = "通过去噪确认" if require_denoise else "首次完整识别，不等待去噪"
+    block = f"""            # TIDFLOW_ANY_TID_BEGIN
+            IF $ID_RNG == 0 and $脚本固定延迟检查开关 == 0
+                IF {confirmation}$ID >= 0 and $ID <= 65535
+                    PRINT 已取得实际TID（{description}），忽略目标TID和特殊号码筛选，继续御三家计划
+                    CALL {prefix}打印参数
+                    PRINT TIDFLOW|ID|MATCH=1
+                    PRINT TIDFLOW|ID|TID= & $ID
+                    PRINT TIDFLOW|ID|SID_ADV= & $adv
+                    BREAK 2
+                ENDIF
+            ENDIF
+            # TIDFLOW_ANY_TID_END
+"""
+    return template.replace(anchor, anchor + block, 1)
+
+
 def write_tid_starter_flow_bundle(
     source_dir: str | Path,
     output_dir: str | Path,
@@ -512,6 +555,10 @@ def write_tid_starter_flow_bundle(
         include_flow_marker=True,
     )
     id_template = (id_dir / "main.ecs").read_text(encoding="utf-8")
+    if plan.request.accept_any_tid:
+        plan.request.validate()
+        id_template = enable_any_tid_handoff(id_template, require_denoise=plan.request.any_tid_require_denoise)
+        (id_dir / "main.ecs").write_text(id_template, encoding="utf-8")
     starter_save_template = is_starter_save_template(id_template)
     correction_pattern = re.compile(r"(?m)^\$SID_ADV修正\s*=\s*[^\r\n]*$")
     for stale_attempt in id_dir.glob("main_attempt_*.ecs"):

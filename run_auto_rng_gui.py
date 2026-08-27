@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import threading
+from dataclasses import replace
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -18,6 +19,12 @@ from tkinter import filedialog, messagebox, ttk
 from app_paths import DATA_ROOT, RESOURCE_ROOT, USER_DATA_ROOT
 from save_profiles import SaveProfile, SaveProfileStore
 from tid_records import TidRecordContext, TidRecordStore
+from automation.tid_calibration import (
+    calibrated_tid_request,
+    parse_tid_calibration_result,
+    parse_tid_fixed_delays,
+    validate_tid_plan_runtime,
+)
 
 from assets.game_text import (
     ABILITY_EN_TO_ZH,
@@ -56,8 +63,6 @@ from automation import (
     search_best_plan,
     get_static_targets,
     validate_runtime,
-    validate_tid_starter_flow_runtime,
-    validate_tid_runtime,
     write_configured_egg_project,
     write_configured_project,
     write_configured_tid_project,
@@ -102,12 +107,6 @@ TID_SID_MODE_TARGET = "目标 SID（自动计算 ADV）"
 TID_SID_MODE_FIXED_F3 = "固定 F3 延迟（采用实际 SID）"
 TID_SID_MODES = (TID_SID_MODE_TARGET, TID_SID_MODE_FIXED_F3)
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
-TID_FIXED_DELAY_PATTERNS = {
-    "OP": re.compile(r"OP脚本固定延迟[：:]\s*(\d+)"),
-    "F1": re.compile(r"F1脚本固定延迟[：:]\s*(\d+)"),
-    "F2": re.compile(r"F2脚本固定延迟[：:]\s*(\d+)"),
-    "F3": re.compile(r"F3脚本固定延迟[：:]\s*(\d+)"),
-}
 
 
 def allocate_preview_port() -> int:
@@ -121,30 +120,6 @@ def clean_terminal_log(text: str) -> str:
     """Remove terminal color/control sequences before showing a saved log in Tk."""
     cleaned = ANSI_ESCAPE_RE.sub("", text)
     return cleaned.replace("\r\n", "\n").replace("\r", "\n")
-
-
-def parse_tid_fixed_delays(text: str) -> dict[str, int]:
-    """Parse one complete OP/F1/F2/F3 calibration result from an EasyCon log."""
-    cleaned = clean_terminal_log(text)
-    result: dict[str, int] = {}
-    for name, pattern in TID_FIXED_DELAY_PATTERNS.items():
-        matches = pattern.findall(cleaned)
-        if matches:
-            result[name] = int(matches[-1])
-    missing = [name for name in TID_FIXED_DELAY_PATTERNS if name not in result]
-    if missing:
-        raise ValueError("固定延迟日志缺少：" + "/".join(missing))
-    return result
-
-
-def parse_tid_calibration_result(text: str, initial_op_correction: int) -> dict[str, int]:
-    """Keep a complete measured calibration paired with its actual OP correction."""
-    result = parse_tid_fixed_delays(text)
-    corrections = re.findall(
-        r"OP修正增加50ms[：:]\s*当前修正=(-?\d+)ms", clean_terminal_log(text)
-    )
-    result["OP_CORRECTION"] = int(corrections[-1]) if corrections else initial_op_correction
-    return result
 
 
 def read_display_log_tail(path: Path | None, maximum_chars: int = 20000) -> str:
@@ -732,6 +707,10 @@ class AutoRngApp:
         self._updating = False
         self.manual_tools: ManualToolsManager | None = None
         self.preview_url: str | None = None
+        self.tid_calibration_result_path: Path | None = None
+        self.tid_calibration_snapshot = None
+        self.tid_calibration_input_fingerprint = None
+        self.tid_calibration_applied = False
         self.profile_store = SaveProfileStore(SAVE_PROFILE_PATH)
         self.tid_record_store = TidRecordStore(TID_RECORD_PATH)
         self.profile_load_error: str | None = None
@@ -1442,7 +1421,7 @@ class AutoRngApp:
             tid_identity, "主角性别", self.tid_gender_var,
             ("男性", "女性"), 0, 6,
         )
-        self._labeled_entry(tid_identity, "目标 TID", self.tid_target_var, 1, 0, width=12)
+        self.tid_target_entry = self._labeled_entry(tid_identity, "目标 TID", self.tid_target_var, 1, 0, width=12)
         self.tid_sid_entry = self._labeled_entry(
             tid_identity, "目标 SID", self.tid_sid_var, 1, 2, width=12
         )
@@ -1453,7 +1432,7 @@ class AutoRngApp:
         )
         self.tid_calibration_check = ttk.Checkbutton(
             tid_identity,
-            text="固定延迟检查（名称或性别变化后先运行一次）",
+            text="先检测固定延迟，完成后自动运行计划",
             variable=self.tid_calibration_var,
         )
         self.tid_calibration_check.grid(
@@ -1570,6 +1549,8 @@ class AutoRngApp:
         tid_starter = ttk.LabelFrame(tid_tab, text="4. 御三家连续乱数", padding=8)
         tid_starter.pack(fill="x", pady=(8, 0))
         self.tid_starter_flow_var = tk.BooleanVar(value=True)
+        self.tid_any_tid_var = tk.BooleanVar(value=False)
+        self.tid_any_tid_denoise_var = tk.BooleanVar(value=True)
         self.tid_starter_var = tk.StringVar(value="妙蛙种子")
         self.tid_starter_min_adv_var = tk.StringVar(value="1500")
         self.tid_starter_max_adv_var = tk.StringVar(value="10000")
@@ -1597,6 +1578,19 @@ class AutoRngApp:
         self.tid_sid_retry_radius_entry = self._labeled_entry(
             tid_starter, "SID ADV 重试半径", self.tid_sid_retry_radius_var, 2, 0, width=12
         )
+        self.tid_any_tid_check = ttk.Checkbutton(
+            tid_starter,
+            text="取得任意 TID 后继续（忽略目标 TID / 特殊号码）",
+            variable=self.tid_any_tid_var,
+            command=self._update_tid_flow_controls,
+        )
+        self.tid_any_tid_check.grid(row=2, column=2, columnspan=6, sticky="w", padx=4, pady=4)
+        self.tid_any_tid_denoise_check = ttk.Checkbutton(
+            tid_starter,
+            text="任意 TID 等待去噪确认（默认开启；关闭后首次完整识别即继续）",
+            variable=self.tid_any_tid_denoise_var,
+        )
+        self.tid_any_tid_denoise_check.grid(row=3, column=2, columnspan=6, sticky="w", padx=4, pady=4)
         self.tid_starter_flow_controls = (
             self.tid_starter_combo,
             self.tid_starter_min_adv_entry,
@@ -2219,6 +2213,8 @@ class AutoRngApp:
             self.tid_starter_flow_var, self.tid_game_var, self.tid_starter_var,
             self.tid_starter_min_adv_var, self.tid_starter_max_adv_var,
             self.tid_sid_retry_radius_var,
+            self.tid_any_tid_var,
+            self.tid_any_tid_denoise_var,
             self.sid_game_var, self.sid_nx_var, self.sid_tid_var, self.sid_count_var,
             self.sid_candies_var, self.sid_threshold_var, self.sid_ack_var,
             *self.sid_species_vars, *self.sid_initial_level_vars,
@@ -2457,10 +2453,10 @@ class AutoRngApp:
     def _update_tid_flow_controls(self):
         enabled = self.tid_starter_flow_var.get()
         exhaustive = self.tid_mode_var.get() == "穷举模式"
+        any_tid = enabled and exhaustive and self.tid_any_tid_var.get()
         if enabled:
             self._updating = True
             try:
-                self.tid_calibration_var.set(False)
                 self.tid_sid_mode_var.set(
                     TID_SID_MODE_FIXED_F3 if exhaustive else TID_SID_MODE_TARGET
                 )
@@ -2470,9 +2466,12 @@ class AutoRngApp:
         self.tid_mode_combo.configure(state="readonly")
         self.tid_sid_mode_combo.configure(state="disabled" if enabled else "readonly")
         self.tid_sid_entry.configure(state="disabled" if fixed_f3 else "normal")
-        self.tid_calibration_check.configure(state="disabled" if enabled else "normal")
+        self.tid_calibration_check.configure(state="normal")
+        self.tid_any_tid_check.configure(state="normal" if enabled and exhaustive else "disabled")
+        self.tid_any_tid_denoise_check.configure(state="normal" if any_tid else "disabled")
+        self.tid_target_entry.configure(state="disabled" if any_tid else "normal")
         for widget in self.tid_special_checks:
-            widget.configure(state="normal" if not enabled or exhaustive else "disabled")
+            widget.configure(state="normal" if (not enabled or exhaustive) and not any_tid else "disabled")
         for widget in self.tid_starter_flow_controls:
             state = "readonly" if enabled and isinstance(widget, ttk.Combobox) else (
                 "normal" if enabled else "disabled"
@@ -2845,6 +2844,7 @@ class AutoRngApp:
 
     def collect_tid_request(self) -> TidRngRequest:
         sid_mode = self.tid_sid_mode_var.get()
+        any_tid = self.tid_starter_flow_var.get() and self.tid_mode_var.get() == "穷举模式" and self.tid_any_tid_var.get()
         request = TidRngRequest(
             language=self.tid_language_var.get(),
             mode=1 if self.tid_mode_var.get() == "乱数模式" else 0,
@@ -2858,7 +2858,7 @@ class AutoRngApp:
             op_correction=int(self.tid_op_correction_var.get()),
             gender=0 if self.tid_gender_var.get() == "男性" else 1,
             nx_model=2 if self.tid_nx_var.get() == "Switch 2" else 1,
-            target_tid=int(self.tid_target_var.get()),
+            target_tid=0 if any_tid else int(self.tid_target_var.get()),
             target_sid=int(self.tid_sid_var.get()),
             sid_advance_correction=int(self.tid_sid_adv_correction_var.get()),
             op_target_frame=int(self.tid_op_target_var.get()),
@@ -2909,12 +2909,14 @@ class AutoRngApp:
         if not self.tid_starter_flow_var.get():
             return None
         request = TidStarterFlowRequest(
-            tid_request=tid_request,
+            tid_request=replace(tid_request, calibration_check=False),
             version=self.tid_game_var.get(),
             starter=self.tid_starter_var.get(),
             starter_min_advances=int(self.tid_starter_min_adv_var.get()),
             starter_max_advances=int(self.tid_starter_max_adv_var.get()),
             sid_retry_radius=int(self.tid_sid_retry_radius_var.get()),
+            accept_any_tid=tid_request.mode == 0 and self.tid_any_tid_var.get(),
+            any_tid_require_denoise=self.tid_any_tid_denoise_var.get(),
         )
         request.validate()
         return request
@@ -3380,6 +3382,7 @@ class AutoRngApp:
         flow_request: TidStarterFlowRequest | None = None,
     ):
         source_path = Path(self.tid_source_var.get())
+        starter_source_path = Path(self.source_var.get())
         ezcon_path = Path(self.ezcon_var.get())
         input_fingerprint = self.input_fingerprint()
         self.plan_result = None
@@ -3428,26 +3431,20 @@ class AutoRngApp:
                         source_path,
                         output,
                         flow_plan,
-                        starter_source_dir=Path(self.source_var.get()),
+                        starter_source_dir=starter_source_path,
                     )
                     project_main = output / "01_id" / "main.ecs"
                 else:
                     output = WRITABLE_ROOT / "runtime" / "tid_rng137"
-                    project_main = write_configured_tid_project(source_path, output, request)
-                if flow_plan is not None:
-                    bridge_main = output / "02_lab_bridge" / "main.ecs"
-                    check = validate_tid_starter_flow_runtime(
-                        ezcon_path,
-                        project_main,
-                        bridge_main,
-                        (
-                            None
-                            if flow_plan.request.deferred_identity
-                            else output / "03_starter_118" / "main.ecs"
-                        ),
+                    project_main = write_configured_tid_project(
+                        source_path, output, replace(request, calibration_check=False)
                     )
-                else:
-                    check = validate_tid_runtime(ezcon_path, project_main)
+                if request.calibration_check:
+                    write_configured_tid_project(source_path, output / "00_calibration", request)
+                check = validate_tid_plan_runtime(
+                    ezcon_path, output, is_flow=flow_plan is not None,
+                    calibrate_first=request.calibration_check,
+                )
                 plan_dir = WRITABLE_ROOT / "rng_logs" / "plans"
                 plan_dir.mkdir(parents=True, exist_ok=True)
                 plan_path = plan_dir / (
@@ -3518,10 +3515,15 @@ class AutoRngApp:
             f"生成脚本：{project_main}",
         ]
         if starter_save_template:
-            lines.append("已接入同步按键与同语言帧换算更新；首次使用新版请先运行固定延迟检查，完成后会自动回填。")
-        elif request.language == "日文":
+            lines.append("已接入同步按键与同语言帧换算更新；首次使用新版建议勾选固定延迟检查。")
+        if request.calibration_check:
+            lines.append("启动后先测量OP/F1/F2/F3，自动回填实际OP修正并关闭检测，再生成、预检和执行正式计划；无需再次点击开始。")
+        elif not starter_save_template and request.language == "日文":
             lines.append("兼容修正：已把日版 FOR $InputLen 改为 1.6.4-a 可编译的显式索引循环。")
         if flow_plan is not None:
+            if flow_plan.request.accept_any_tid:
+                condition = "通过原版去噪确认" if flow_plan.request.any_tid_require_denoise else "首次完整识别，不等待去噪"
+                lines.append(f"TID接续条件：任意合法TID，{condition}；目标TID和特殊号码均不参与成功判定。")
             target = flow_plan.starter_target
             if target is None:
                 lines.extend(
@@ -3882,20 +3884,13 @@ class AutoRngApp:
             self.script_test_preparation = preparation
             self.project_main = preparation.script_path
             check = preparation.check
-        elif self.tid_flow_plan is not None:
-            flow_dir = self.project_main.parents[1]
-            check = validate_tid_starter_flow_runtime(
-                Path(self.ezcon_var.get()),
-                self.project_main,
-                flow_dir / "02_lab_bridge" / "main.ecs",
-                (
-                    None
-                    if self.tid_flow_plan.request.deferred_identity
-                    else flow_dir / "03_starter_118" / "main.ecs"
-                ),
-            )
         elif self.tid_request is not None:
-            check = validate_tid_runtime(Path(self.ezcon_var.get()), self.project_main)
+            is_flow = self.tid_flow_plan is not None
+            check = validate_tid_plan_runtime(
+                Path(self.ezcon_var.get()),
+                self.project_main.parents[1] if is_flow else self.project_main.parent,
+                is_flow=is_flow, calibrate_first=self.tid_request.calibration_check,
+            )
         else:
             check = validate_runtime(Path(self.ezcon_var.get()), self.project_main)
         self.runtime_check = check
@@ -3921,9 +3916,16 @@ class AutoRngApp:
         elif self.tid_flow_plan is not None:
             target = self.tid_flow_plan.starter_target
             if target is None:
+                condition = (
+                    ("第一阶段取得任意合法TID后（忽略目标TID及特殊号码；"
+                     + ("等待去噪确认" if self.tid_flow_plan.request.any_tid_require_denoise else "首次完整识别即继续，不等待去噪")
+                     + "），")
+                    if self.tid_flow_plan.request.accept_any_tid
+                    else "第一阶段命中启用的TID条件后，"
+                )
                 confirmation = (
                     "将运行穷举TID → 动态计算实际SID → 研究所桥接 → 1.1.8御三家流程。\n"
-                    "第一阶段命中启用的TID条件后，工具读取实际TID和SID ADV，"
+                    + condition + "工具读取实际TID和SID ADV，"
                     "计算实际SID并搜索最早闪光御三家；第三阶段届时生成并预检。\n"
                     f"{self.tid_flow_plan.request.version} / {self.tid_flow_plan.request.starter} / "
                     f"ADV {self.tid_flow_plan.request.starter_min_advances}-"
@@ -3968,12 +3970,20 @@ class AutoRngApp:
                 f"{self.plan_result.plan.initial_seed.settings}\n"
                 "请确认游戏设置、存档位置和 NS 主页状态均符合 1.1.8 要求，是否继续？"
             )
+        if self.tid_request is not None and self.tid_request.calibration_check:
+            confirmation = (
+                "已开启固定延迟检测：先执行检测，再自动回填四项延迟与实际OP修正，"
+                "重新生成并预检下述计划，通过后自动继续；不会再次询问。\n\n" + confirmation
+            )
         if not messagebox.askyesno(
             "开始全自动流程",
             confirmation,
         ):
             return
         self.preview_url = None
+        self.tid_calibration_result_path = None
+        self.tid_calibration_snapshot = None
+        self.tid_calibration_applied = False
         preview_url: str | None = None
         if self.script_test_preparation is not None:
             runner_path = self.script_test_preparation.runner_path
@@ -4055,6 +4065,8 @@ class AutoRngApp:
             self.sid_log_path = output_dir / f"sid-reverse-{timestamp}.log"
             self.sid_report_path = output_dir / f"sid-reverse-{timestamp}.txt"
             self.running_log_snapshot = ""
+            preview_port = allocate_preview_port()
+            preview_url = f"http://127.0.0.1:{preview_port}/mjpeg"
             command = build_worker_command("sid-capture", [
                 "--request-json",
                 str(output_dir / "plan.json"),
@@ -4074,15 +4086,24 @@ class AutoRngApp:
                 str(self.sid_log_path),
                 "--report-path",
                 str(self.sid_report_path),
+                "--preview-port",
+                str(preview_port),
             ])
             command_cwd = ROOT
             self.running_mode = "sid"
-        elif self.tid_flow_plan is not None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            flow_dir = self.project_main.parents[1]
-            self.tid_flow_log_path = flow_dir / f"tid-starter-{timestamp}.log"
+        elif self.tid_flow_plan is not None or (self.tid_request is not None and self.tid_request.calibration_check):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            is_flow = self.tid_flow_plan is not None
+            flow_dir = self.project_main.parents[1] if is_flow else self.project_main.parent
+            log_path = flow_dir / f"tid-{'starter' if is_flow else 'calibration'}-{timestamp}.log"
+            if is_flow:
+                self.tid_flow_log_path = log_path
+            else:
+                self.tid_log_path = log_path
+            preview_port = allocate_preview_port()
+            preview_url = f"http://127.0.0.1:{preview_port}/mjpeg"
             command = build_worker_command("tid-flow", [
-                "--flow-dir",
+                "--flow-dir" if is_flow else "--tid-dir",
                 str(flow_dir),
                 "--ezcon",
                 self.ezcon_var.get(),
@@ -4091,10 +4112,17 @@ class AutoRngApp:
                 "--video",
                 str(video_device),
                 "--log-path",
-                str(self.tid_flow_log_path),
+                str(log_path),
+                "--preview-port",
+                str(preview_port),
             ])
+            if self.tid_request.calibration_check:
+                self.tid_calibration_result_path = log_path.with_suffix(".calibration.json")
+                self.tid_calibration_snapshot = self.tid_request
+                self.tid_calibration_input_fingerprint = self.input_fingerprint()
+                command.extend(["--calibrate-first", "--calibration-result", str(self.tid_calibration_result_path)])
             command_cwd = ROOT
-            self.running_mode = "tid_flow"
+            self.running_mode = "tid_flow" if is_flow else "tid"
         else:
             try:
                 runner_path = prepare_compat_runner(Path(self.ezcon_var.get()))
@@ -4159,7 +4187,7 @@ class AutoRngApp:
         if self.running_mode in ("tid", "tid_flow"):
             try:
                 arguments = self._tid_record_arguments(self._current_running_log_path())
-                if self.running_mode == "tid":
+                if "--" in command:
                     separator = command.index("--")
                     command[separator:separator] = arguments
                 else:
@@ -4210,10 +4238,49 @@ class AutoRngApp:
         )
         self.root.after(1000, self.poll_process)
 
+    def _poll_tid_calibration_result(self):
+        path = self.tid_calibration_result_path
+        if path is None or self.tid_calibration_applied or not path.is_file():
+            return
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            initial = self.tid_calibration_snapshot
+            if not isinstance(payload, dict) or initial is None or payload.get("schema") != 1 or payload.get("initial_request") != initial.to_dict():
+                raise ValueError("固定延迟结果与本次启动的配置不一致")
+            updated = calibrated_tid_request(initial, payload["values"])
+            if payload.get("request") != updated.to_dict():
+                raise ValueError("固定延迟结果包含测量项以外的参数变化")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self.status_var.set(f"固定延迟结果未回填：{exc}；请查看运行日志。")
+            self.tid_calibration_applied = True
+            return
+        self.tid_calibration_applied = True
+        if self.input_fingerprint() != self.tid_calibration_input_fingerprint:
+            self.status_var.set("检测已完成，后台按启动时的计划继续；界面输入已修改，未覆盖新输入。")
+            return
+        self._updating = True
+        try:
+            for variable, value in (
+                (self.tid_op_delay_var, updated.op_fixed_delay),
+                (self.tid_f1_delay_var, updated.f1_fixed_delay),
+                (self.tid_f2_delay_var, updated.f2_fixed_delay),
+                (self.tid_f3_delay_var, updated.f3_fixed_delay),
+                (self.tid_op_correction_var, updated.op_correction),
+            ):
+                variable.set(str(value))
+            self.tid_calibration_var.set(False)
+        finally:
+            self._updating = False
+        # The running worker owns its immutable plan. A future start must use
+        # a fresh plan for these newly displayed values, never the old files.
+        self.invalidate_plan()
+        self.status_var.set("固定延迟与实际OP修正已自动回填；后台正在生成、预检并继续正式计划。")
+
     def poll_process(self):
         if self.process is None:
             return
         code = self.process.poll()
+        self._poll_tid_calibration_result()
         if self.mode_notebook.select() == str(self.tid_records_tab):
             self.refresh_tid_records()
         if code is None:
@@ -4231,7 +4298,6 @@ class AutoRngApp:
         log_path = self.sid_log_path
         tid_flow_log_path = self.tid_flow_log_path
         tid_log_path = self.tid_log_path
-        completed_tid_request = self.tid_request
         egg_log_path = self.egg_log_path
         script_test_log_path = self.script_test_log_path
         easycon_log_path = self.easycon_log_path
@@ -4282,38 +4348,7 @@ class AutoRngApp:
             log_text = read_display_log_tail(tid_log_path, maximum_chars=30000)
             if log_text:
                 self.set_result("TID/SID运行日志：\n\n" + log_text)
-            if completed_tid_request is not None and completed_tid_request.calibration_check:
-                try:
-                    delays = parse_tid_calibration_result(log_text, completed_tid_request.op_correction)
-                except ValueError as exc:
-                    self.status_var.set(
-                        f"固定延迟检查未得到完整四项结果：{exc}{detail}"
-                    )
-                else:
-                    self._updating = True
-                    try:
-                        self.tid_op_delay_var.set(str(delays["OP"]))
-                        self.tid_f1_delay_var.set(str(delays["F1"]))
-                        self.tid_f2_delay_var.set(str(delays["F2"]))
-                        self.tid_f3_delay_var.set(str(delays["F3"]))
-                        self.tid_op_correction_var.set(str(delays["OP_CORRECTION"]))
-                        self.tid_calibration_var.set(False)
-                    finally:
-                        self._updating = False
-                    self.invalidate_plan()
-                    self.set_result(
-                        "固定延迟检查完成，已自动回填：\n"
-                        f"OP {delays['OP']} / F1 {delays['F1']} / "
-                        f"F2 {delays['F2']} / F3 {delays['F3']}\n"
-                        f"OP 修正 {delays['OP_CORRECTION']} ms（与本次固定延迟一起回填）\n\n"
-                        "固定延迟检查已自动关闭，请重新生成正式TID/御三家方案。\n\n"
-                        + log_text
-                    )
-                    self.status_var.set(
-                        "固定延迟已自动更新；请重新生成正式TID/御三家方案。"
-                    )
-            else:
-                self.status_var.set(f"TID/SID脚本已退出，退出码 {code}{detail}")
+            self.status_var.set(f"TID/SID脚本已退出，退出码 {code}{detail}")
         elif completed_mode == "tid_flow":
             detail = f"；日志：{tid_flow_log_path}" if tid_flow_log_path is not None else ""
             if code == 0:

@@ -225,6 +225,11 @@ class TidRecordingSession:
         self.warned = False
         self.retry_after = 0.0
 
+    def update_request(self, request):
+        """Start a fresh measurement context after the calibration stage."""
+        context = TidRecordContext.from_request(self.parser.base_context.game, request)
+        self.parser = TidLogParser(context, flow=True)
+
     def feed(self, text: str, *, final=False):
         for row in self.parser.feed(text, final=final):
             self.sequence += 1

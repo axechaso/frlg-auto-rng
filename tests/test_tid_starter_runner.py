@@ -21,7 +21,7 @@ from run_tid_starter_flow import (
 
 class _FakeProcess:
     def __init__(self, lines, returncode=0):
-        self.stdout = iter(lines)
+        self.stdout = io.StringIO("".join(lines))
         self.returncode = returncode
 
     def wait(self):

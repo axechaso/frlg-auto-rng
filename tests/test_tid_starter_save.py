@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -10,7 +11,8 @@ from automation.tid_rng137 import (
 )
 from automation.tid_starter_save import (
     DEFAULT_TID_STARTER_SAVE_SOURCE, TID_STARTER_SAVE_NAME,
-    _blocking_buttons, configure_starter_save_id, render_starter_save_bridge,
+    TID_STARTER_SAVE_SHA256, _blocking_buttons, configure_starter_save_id,
+    render_starter_save_bridge,
     set_starter_save_sid_correction, split_tid_modules,
 )
 
@@ -323,6 +325,27 @@ class TidStarterSaveSourceTests(unittest.TestCase):
         source = DEFAULT_TID_STARTER_SAVE_SOURCE.read_text(encoding="utf-8-sig")
         bridge = render_starter_save_bridge(source, "小火龙")
         self.assertEqual(functions(bridge), {name: body for name, body in functions(source).items() if name.startswith("FLOW_")})
+
+    def test_real_bridge_uses_current_overwrite_save_sequence(self):
+        source_path = DEFAULT_TID_STARTER_SAVE_SOURCE
+        source = source_path.read_text(encoding="utf-8-sig")
+        self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(), TID_STARTER_SAVE_SHA256)
+        bridge = render_starter_save_bridge(source, "小火龙")
+        save_block = bridge.split("PRINT >>> 开始保存 >>>", 1)[1].split(
+            "$连续流程_桥接完成 = 1", 1
+        )[0]
+        executable = [
+            line.split("#", 1)[0].strip()
+            for line in save_block.splitlines()
+            if line.split("#", 1)[0].strip()
+        ]
+        expected = (
+            ["X", "WAIT 1000"]
+            + ["DOWN", "WAIT 200"] * 3
+            + ["A", "WAIT 1500"] * 6
+            + ["UP", "WAIT 500", "A", "WAIT 3500"]
+        )
+        self.assertEqual(executable, expected)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,6 @@
 import json
+from dataclasses import replace
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +14,8 @@ from automation.tid_rng137 import (
 from automation.tid_starter_save import TID_STARTER_SAVE_NAME, is_starter_save_template
 from automation.tid_starter_flow import (
     TidStarterFlowRequest,
+    enable_any_tid_handoff,
+    tid_starter_flow_request_from_dict,
     build_tid_starter_flow_plan,
     render_lab_bridge_ecs,
     resolve_exhaustive_starter_plan,
@@ -27,6 +31,57 @@ HAS_TID_ASSETS = any(
 
 
 class TidStarterFlowTests(unittest.TestCase):
+    def test_any_tid_is_opt_in_exhaustive_only_and_survives_plan_reload(self):
+        request = TidStarterFlowRequest(TidRngRequest(mode=0, sid_random=True), "火红", "妙蛙种子")
+        self.assertFalse(request.accept_any_tid)
+        self.assertTrue(request.any_tid_require_denoise)
+        request = replace(request, accept_any_tid=True, any_tid_require_denoise=False)
+        plan = build_tid_starter_flow_plan(request)
+        restored = tid_starter_flow_request_from_dict(plan.to_dict()["request"])
+        self.assertTrue(restored.accept_any_tid)
+        self.assertFalse(restored.any_tid_require_denoise)
+        restored.validate()
+        with self.assertRaisesRegex(ValueError, "穷举"):
+            replace(request, tid_request=TidRngRequest()).validate()
+
+    def test_any_tid_insertion_refuses_to_bypass_digit_validation(self):
+        with self.assertRaisesRegex(ValueError, "完整识别"):
+            enable_any_tid_handoff("            CALL EN_匹配\nFUNC EN_匹配\nENDFUNC\nFUNC EN_打印参数\nENDFUNC\n")
+
+    @unittest.skipUnless(HAS_TID_ASSETS and SOURCE_118.is_dir(), "requires TID assets")
+    def test_any_tid_handoff_changes_only_the_opt_in_success_branch(self):
+        request = TidStarterFlowRequest(
+            TidRngRequest(mode=0, sid_random=True, target_tid=65535, same_id=True),
+            "火红", "妙蛙种子", starter_max_advances=1600,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            texts = []
+            for enabled in (False, True):
+                output = root / str(enabled)
+                plan = build_tid_starter_flow_plan(replace(request, accept_any_tid=enabled))
+                write_tid_starter_flow_bundle(DEFAULT_TID_SOURCE_PATH, output, plan, starter_source_dir=SOURCE_118)
+                texts.append((output / "01_id" / "main.ecs").read_text(encoding="utf-8"))
+                self.assertEqual((output / "01_id" / "main_attempt_000.ecs").read_text(encoding="utf-8"), texts[-1])
+            normal, any_tid = texts
+            pattern = r"(?ms)^            # TIDFLOW_ANY_TID_BEGIN\n.*?^            # TIDFLOW_ANY_TID_END\n"
+            blocks = re.findall(pattern, any_tid)
+            self.assertEqual(len(blocks), 1)
+            block = blocks[0]
+            self.assertIn("$denoise_hit_count >= $denoise_need_hit", block)
+            self.assertIn("$ID >= 0 and $ID <= 65535", block)
+            self.assertIn("PRINT TIDFLOW|ID|TID= & $ID", block)
+            self.assertIn("PRINT TIDFLOW|ID|SID_ADV= & $adv", block)
+            self.assertLess(block.index("打印参数"), block.index("TIDFLOW|ID|SID_ADV="))
+            self.assertNotIn("$EN_TARGET_TID", block)
+            self.assertEqual(re.sub(pattern, "", any_tid), normal)
+            first_read = enable_any_tid_handoff(normal, require_denoise=False)
+            first_block = re.findall(pattern, first_read)[0]
+            self.assertNotIn("$denoise_hit_count", first_block)
+            self.assertIn("$ID >= 0 and $ID <= 65535", first_block)
+            self.assertIn("$脚本固定延迟检查开关 == 0", first_block)
+            self.assertEqual(re.sub(pattern, "", first_read), normal)
+
     def test_plan_uses_shared_target_search_and_first_sid_advance(self):
         request = TidStarterFlowRequest(
             tid_request=TidRngRequest(

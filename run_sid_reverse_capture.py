@@ -397,6 +397,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--port")
     parser.add_argument("--video", type=int)
+    parser.add_argument("--preview-port", type=int, default=0)
     parser.add_argument("--request-json", type=Path, help="GUI 生成的 SID plan.json")
     parser.add_argument("--log-path", type=Path)
     parser.add_argument("--report-path", type=Path)
@@ -477,6 +478,7 @@ def main(argv: list[str] | None = None) -> int:
                     port=port,
                     video_device=video,
                     video_type="DSHOW",
+                    preview_port=args.preview_port,
                 )
                 code, output, stopped_for_unique_pid = _run_easycon(
                     command,
