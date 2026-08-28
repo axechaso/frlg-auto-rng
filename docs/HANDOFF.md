@@ -4,7 +4,16 @@
 
 快照日期：2026-08-28。
 
-## 2026-08-28 TID r2、参数持久化、穷举续跑与停止修复（最新）
+## 2026-08-28 TID r3 同步与绿色版打包（最新）
+
+- 最新源仍为C盘1.1.8包的 `NS火叶TID-SID到御三家球前存档-测试.ecs`，版本 `2026-08-28-r3`，SHA-256 `ecfeaa5d2209992711afaa17e6967c287bd657b9c38085762b785db1b081baf5`。只同步到D盘工具缓存，原包、用户配置和现有运行工程不覆盖；r2及更早指纹继续兼容。
+- r3仅把球前存档菜单的两次DOWN改为一次 `DOWN / WAIT 500`，因为菜单光标保留在训练家卡片；版本号及相应注释同步。其他桥接路线、六次A和最后确认等待、OP/HOME_BUFFER及Seed/帧轴逐字不变；生成桥接仍原样提取并只执行一次。
+- 本次用户要求重新打包，绿色版必须包含r3缓存、上一轮参数记忆/零默认起点/穷举续跑/停止进程树修复、Seed表更新器和完整164a兼容runner。打包仍使用 `tools/build_windows_release.ps1`；源码版和绿色版共用 `%LOCALAPPDATA%/FRLG-Auto-RNG` 参数及进度。
+- 仍沿用 `experiment/shared-capture` 提交推送Action，不建PR、不切main。新模板版本按既有规则使用独立进度键，不把旧版本进度强行迁移；使用新包须重新生成脚本，打开窗口不自动操作Switch。
+- 发布目录 `.build/windows-release/FRLG-Auto-RNG-绿色版-20260828-TID-r3/`，同目录ZIP为 `FRLG-Auto-RNG-绿色版-20260828-TID-r3.zip`，545051664字节，SHA-256 `0c6e5e05e1ffcee0799d4f802a589d793d3c82b3ff250699c9e0ff10075be7cb`。这些构建产物仍忽略于Git，不要把大体积运行库提交进仓库。
+- 验证：313项工具测试、27个源包检查、23份真实164a格式检查及隐藏源码GUI回归通过（`runtime/tid_session_validation_mj_s6288`）。打包版另用包内164a检查英日TID与r3桥接；核对原模板字节、标签、Python/Tk/native依赖、Seed更新器、v6 runner和本地OCR模型。清除Python/venv路径后，三个冻结后台入口可启动；提前停止不执行TID计划，日志运行器能终止专用PowerShell子孙进程且无残留。ZIP全量CRC通过，报告在 `runtime/tid_r3_release_validation_kja8lkxn/report.json`。未连接单片机/采集卡或运行Switch实机。
+
+## 2026-08-28 TID r2、参数持久化、穷举续跑与停止修复（历史更新）
 
 - 最新源仍是C盘1.1.8包中的 `NS火叶TID-SID到御三家球前存档-测试.ecs`，版本 `2026-08-28-r2`，SHA-256 `3b8cb56328817dcf5adec8c6271a530fae8aab3ce6b784b29a73d22797c366c5`。D盘工具缓存和manifest已同步；旧指纹仍兼容，下载源、旧运行工程和用户JSON不改写。本轮不重新打包、不建PR，提交 `experiment/shared-capture` 推送Action。
 - 原样同步r2的二楼、一楼、镇上摇杆路线，以及两次DOWN各500ms、六次A各1500ms、UP等500ms/A等2500ms的球前存档段。OP、HOME_BUFFER、模型补偿和118第三阶段无算法调整；仍没有保存成功识别。

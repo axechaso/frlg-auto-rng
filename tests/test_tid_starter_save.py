@@ -341,7 +341,7 @@ class TidStarterSaveSourceTests(unittest.TestCase):
         ]
         expected = (
             ["X", "WAIT 1000"]
-            + ["DOWN", "WAIT 500"] * 2
+            + ["DOWN", "WAIT 500"]
             + ["A", "WAIT 1500"] * 6
             + ["UP", "WAIT 500", "A", "WAIT 2500"]
         )
