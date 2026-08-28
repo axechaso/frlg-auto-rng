@@ -16,6 +16,7 @@ from app_paths import RESOURCE_ROOT
 from tenlines_seed_updater import apply_easycon_seed_table_overrides
 
 from .planner import RunPlan
+from .seed_common_regions import apply_seed_common_regions
 
 
 EXPECTED_LABEL_COUNT = 1150
@@ -112,6 +113,9 @@ EXPECTED_SCRIPT_SHA256 = "3df6f91b12901b488f84b07ecde2ba9a45b9ee5638f76b2b28d6fe
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # Paired, bounded 2D common regions (direct source and materialized tool).
+    "c83b9a4b11c15aea37bc824f758e7f6c316b89d0dda15dbf460085e3c36925ad",
+    "f0220899d797bc94b1d3cd7e30e82db24452b696e6ba3aa4345995e69b77e50c",
     "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57",
     # In-place upgrade of the existing local cache has equivalent HOME_BUFFER
     # functions but retains its historical global-declaration ordering.
@@ -2244,6 +2248,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         TOGEPI_HATCH_CYCLE_OVERRIDE_PATH.read_text(encoding="utf-8"),
     )
     static_target_path.write_text(static_target_text, encoding="utf-8")
+    apply_seed_common_regions(source_dir)
     return inspect_script_corpus(source_dir)
 
 
@@ -2307,6 +2312,7 @@ def write_configured_project(
             if directory == "ImgLabel":
                 copy_easycon118_extension_labels(target)
 
+    apply_seed_common_regions(output_dir, ("main.ecs",))
     seed_table_override = apply_easycon_seed_table_overrides(output_dir / "lib")
     ocr_fallback_sha256 = apply_ocr_runtime_fallback(
         output_dir / "lib" / OCR_NAME_LIBRARY_NAME
@@ -2446,6 +2452,7 @@ def write_configured_egg_project(
             if directory == "ImgLabel":
                 copy_easycon118_extension_labels(target)
 
+    apply_seed_common_regions(output_dir, ("main.ecs",))
     seed_table_override = apply_easycon_seed_table_overrides(output_dir / "lib")
     ocr_fallback_sha256 = apply_ocr_runtime_fallback(
         output_dir / "lib" / OCR_NAME_LIBRARY_NAME

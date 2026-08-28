@@ -48,6 +48,7 @@ jobs:
           run_tid_starter_flow.py
           tenlines_seed_updater.py
           automation/easycon118.py
+          automation/seed_common_regions.py
           automation/script_test.py
           automation/sid_reverse118.py
           automation/tid_rng137.py
@@ -80,6 +81,7 @@ jobs:
           tests.test_script_test
           tests.test_save_profiles
           tests.test_seed_table_updater
+          tests.test_seed_common_regions
           tests.test_tenlines_fixes
           tests.test_tid_rng137
           tests.test_tid_calibration
