@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+from process_control import StopFileWatcher, terminate_process_tree
 import sys
 from typing import Callable
 
@@ -301,7 +302,10 @@ def _run_easycon(
     pokemon_index: int,
     game: str,
     output_callback: Callable[[str], None] | None = None,
+    stop_file: Path | None = None,
 ) -> tuple[int, str, bool]:
+    if stop_file is not None and stop_file.is_file():
+        return 130, "[SID_DIAGNOSTIC] 用户已请求停止\n", False
     process = subprocess.Popen(
         command,
         cwd=str(cwd),
@@ -315,6 +319,8 @@ def _run_easycon(
     lines: list[str] = []
     stopped_for_unique_pid = False
     assert process.stdout is not None
+    stop = StopFileWatcher(stop_file, lambda: terminate_process_tree(process))
+    stop.__enter__()
     try:
         for line in process.stdout:
             _safe_print(line, end="")
@@ -345,7 +351,13 @@ def _run_easycon(
     except KeyboardInterrupt:
         process.terminate()
         raise
-    return process.wait(), "".join(lines), stopped_for_unique_pid
+    finally:
+        stop.__exit__(None, None, None)
+        close_output = getattr(process.stdout, "close", None)
+        if close_output is not None:
+            close_output()
+    code = process.wait()
+    return (130 if stop.requested else code), "".join(lines), stopped_for_unique_pid and not stop.requested
 
 
 def _write_slot_project(
@@ -401,6 +413,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--request-json", type=Path, help="GUI 生成的 SID plan.json")
     parser.add_argument("--log-path", type=Path)
     parser.add_argument("--report-path", type=Path)
+    parser.add_argument("--stop-file", type=Path)
     args = parser.parse_args(argv)
 
     try:
@@ -462,6 +475,8 @@ def main(argv: list[str] | None = None) -> int:
 
             write_sid_reverse_plan(args.source, args.output, base_request)
             for slot in range(1, count + 1):
+                if args.stop_file is not None and args.stop_file.is_file():
+                    raise RuntimeError("用户已请求停止，不继续下一个队伍槽位")
                 _safe_print(f"\n=== 采集队伍第{slot}位 ===")
                 main_path = _write_slot_project(
                     args.source,
@@ -486,6 +501,7 @@ def main(argv: list[str] | None = None) -> int:
                     pokemon_index=slot,
                     game=game,
                     output_callback=persist_output,
+                    stop_file=args.stop_file,
                 )
                 all_output.append(output)
                 if "SIDREV|ERROR|" in output or (

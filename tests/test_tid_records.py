@@ -33,6 +33,15 @@ def observation(tid="12345", op=3693, f1=2693, f2=2105, *, newline=True):
 
 
 class TidRecordTests(unittest.TestCase):
+    def test_resumed_checkpoint_restores_actual_op_correction_only_in_id_stage(self):
+        from tests.test_tid_session import state_for, state_line
+        line = state_line(state_for(TidRngRequest(mode=0))) + "\n"
+        parser = TidLogParser(context(), flow=True)
+        parser.feed("========== 第1阶段：TID/SID ==========\n" + line)
+        self.assertEqual(parser.feed(observation())[0].context.op_correction, 100)
+        parser.feed("========== 第2阶段：桥接 ==========\n" + line)
+        self.assertEqual(parser.feed(observation()), [])
+
     def test_context_whitelists_tid_settings_and_requires_game_and_model(self):
         data = asdict(context("叶绿", 2))
         self.assertEqual((data["game"], data["nx_model"]), ("叶绿", 2))

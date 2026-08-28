@@ -38,6 +38,8 @@ jobs:
           app_paths.py
           save_profiles.py
           tid_records.py
+          tid_session.py
+          process_control.py
           run_auto_rng_gui.py
           run_auto_planner.py
           run_easycon_logged.py
@@ -50,6 +52,7 @@ jobs:
           automation/sid_reverse118.py
           automation/tid_rng137.py
           automation/tid_calibration.py
+          automation/tid_checkpoint.py
           automation/tid_starter_save.py
           automation/tid_starter_flow.py
           rng/sid_reverse.py
@@ -81,6 +84,8 @@ jobs:
           tests.test_tid_rng137
           tests.test_tid_calibration
           tests.test_tid_records
+          tests.test_tid_session
+          tests.test_process_control
           tests.test_tid_starter_save
           tests.test_tid_starter_flow
           tests.test_tid_starter_runner

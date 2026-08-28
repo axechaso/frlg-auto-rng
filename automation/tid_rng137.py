@@ -168,9 +168,9 @@ class TidRngRequest:
     op_target_frame: int = 3693
     f1_target_frame: int = 2693
     f2_target_frame: int = 2105
-    op_start: int = 3902
-    f1_start: int = 2649
-    f2_start: int = 2183
+    op_start: int = 0
+    f1_start: int = 0
+    f2_start: int = 0
     player_name: str = "Alxe"
     select_correction: int = 0
     sound: int = 0

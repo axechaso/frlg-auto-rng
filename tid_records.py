@@ -112,6 +112,10 @@ class TidLogParser:
         if model_offset:
             self.op_model_offset = int(model_offset[1])
         correction = re.search(r"OP修正增加50ms[：:]\s*当前修正=(-?\d+)ms", line)
+        if correction is None:
+            # A resumed worker restores actual OP recovery separately from the
+            # unchanged calibration baseline. Record that actual correction.
+            correction = re.search(r"TIDPROGRESS\|V=1\|.*\|OP_CORRECTION=(-?\d+)\|.*\|END=1$", line)
         if correction:
             self.context = replace(self.context, op_correction=int(correction[1]))
             self.pending = {}

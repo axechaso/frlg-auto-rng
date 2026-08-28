@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from tid_records import recording_session
+from process_control import StopFileWatcher, terminate_process_tree
 
 
 def _write_console(text: str) -> None:
@@ -30,9 +31,12 @@ def run_logged(
     *,
     tid_context: Path | None = None,
     tid_records: Path | None = None,
+    stop_file: Path | None = None,
 ) -> int:
     if not command:
         raise ValueError("缺少要执行的 EasyCon 命令")
+    if stop_file is not None and stop_file.is_file():
+        return 130
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8", newline="") as log_file, recording_session(
         tid_context, tid_records, log_path, warning=lambda message: log_file.write(message + "\n")
@@ -64,6 +68,8 @@ def run_logged(
             if recording is not None:
                 recording.feed(text)
 
+        stop = StopFileWatcher(stop_file, lambda: terminate_process_tree(process))
+        stop.__enter__()
         try:
             # EasyCon terminates the previous log entry only when the next one
             # starts. Reading by line would therefore hide the final entry
@@ -74,6 +80,9 @@ def run_logged(
             tail = decoder.decode(b"", final=True)
             consume_text(tail)
             exit_code = process.wait()
+            if stop.requested:
+                consume_text("\n[EASYCON_DIAGNOSTIC][工具诊断] 已按用户请求停止本次EasyCon进程。\n")
+                return 130
             if not marker_seen:
                 diagnostic = (
                     "\n[EASYCON_DIAGNOSTIC][工具诊断] EasyCon 在脚本输出完成/失败状态前结束。"
@@ -89,10 +98,11 @@ def run_logged(
                 "正在终止 EasyCon；本次不是脚本正常完成。\n"
             )
             if process.poll() is None:
-                process.terminate()
+                terminate_process_tree(process)
             process.wait()
             return 130
         finally:
+            stop.__exit__(None, None, None)
             process.stdout.close()
 
 
@@ -103,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-marker", action="append", default=[])
     parser.add_argument("--tid-context", type=Path)
     parser.add_argument("--tid-records", type=Path)
+    parser.add_argument("--stop-file", type=Path)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = list(args.command)
@@ -115,6 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         tuple(args.expected_marker),
         tid_context=args.tid_context,
         tid_records=args.tid_records,
+        stop_file=args.stop_file,
     )
 
 

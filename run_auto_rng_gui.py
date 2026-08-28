@@ -4,12 +4,12 @@
 import hashlib
 import json
 import re
-import signal
 import socket
 import subprocess
 import sys
 import threading
-from dataclasses import replace
+import uuid
+from dataclasses import asdict, replace
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -19,6 +19,9 @@ from tkinter import filedialog, messagebox, ttk
 from app_paths import DATA_ROOT, RESOURCE_ROOT, USER_DATA_ROOT
 from save_profiles import SaveProfile, SaveProfileStore
 from tid_records import TidRecordContext, TidRecordStore
+from tid_session import load_tid_settings, write_json_atomic, progress_context, read_progress
+from process_control import terminate_process_tree
+from automation.tid_rng137 import resolve_tid_template
 from automation.tid_calibration import (
     calibrated_tid_request,
     parse_tid_calibration_result,
@@ -98,6 +101,8 @@ ADVANCED_TAB_LABEL = "脚本测试（高级）"
 RUN_LOG_TAB_LABEL = "运行日志"
 TID_RECORD_TAB_LABEL = "TID 实测表"
 TID_RECORD_PATH = USER_DATA_ROOT / "tid_records.sqlite3"
+TID_SETTINGS_PATH = USER_DATA_ROOT / "tid_settings.json"
+TID_PROGRESS_DIR = USER_DATA_ROOT / "tid_progress"
 MANUAL_PROFILE_LABEL = "未选择（手动输入）"
 SAVE_PROFILE_PATH = USER_DATA_ROOT / "save_profiles.json"
 EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
@@ -711,6 +716,9 @@ class AutoRngApp:
         self.tid_calibration_snapshot = None
         self.tid_calibration_input_fingerprint = None
         self.tid_calibration_applied = False
+        self.running_tid_exhaustive = False
+        self.close_when_stopped = False
+        self.stop_request_path: Path | None = None
         self.profile_store = SaveProfileStore(SAVE_PROFILE_PATH)
         self.tid_record_store = TidRecordStore(TID_RECORD_PATH)
         self.profile_load_error: str | None = None
@@ -741,6 +749,7 @@ class AutoRngApp:
         )
         if selected_profile is not None:
             self._apply_save_profile(selected_profile, persist=False)
+        self._install_tid_persistence()
         if self.profile_load_error:
             self.root.after(
                 0,
@@ -1465,9 +1474,9 @@ class AutoRngApp:
         self.tid_op_rng_range_var = tk.StringVar(value="0")
         self.tid_f1_rng_range_var = tk.StringVar(value="0")
         self.tid_f2_rng_range_var = tk.StringVar(value="0")
-        self.tid_op_start_var = tk.StringVar(value="3902")
-        self.tid_f1_start_var = tk.StringVar(value="2649")
-        self.tid_f2_start_var = tk.StringVar(value="2183")
+        self.tid_op_start_var = tk.StringVar(value="0")
+        self.tid_f1_start_var = tk.StringVar(value="0")
+        self.tid_f2_start_var = tk.StringVar(value="0")
         self.tid_op_max_range_var = tk.StringVar(value="600")
         self.tid_f1_max_range_var = tk.StringVar(value="30")
         self.tid_f2_max_range_var = tk.StringVar(value="300")
@@ -1646,6 +1655,21 @@ class AutoRngApp:
         ttk.Button(tid_source, text="选择", command=self.choose_tid_source).grid(
             row=0, column=6, padx=4
         )
+
+        tid_resume = ttk.LabelFrame(tid_tab, text="7. 参数保存与穷举续跑", padding=8)
+        tid_resume.pack(fill="x", pady=(8, 0))
+        self.tid_resume_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            tid_resume, text="开始时继续同参数的上次穷举进度（默认开启）",
+            variable=self.tid_resume_var,
+        ).pack(anchor="w")
+        ttk.Label(tid_resume, text="TID参数自动保存。取消勾选则本次从所填起点开始；打开工具不会自动运行游戏。\n"
+                  "续跑会重试停止时的当前点，并重新进行去噪观察；已命中完成的进度不会继续。",
+                  justify="left").pack(anchor="w", pady=4)
+        self.tid_progress_status_var = tk.StringVar(value="尚无本次参数的穷举进度。")
+        ttk.Label(tid_resume, textvariable=self.tid_progress_status_var, wraplength=950,
+                  justify="left").pack(anchor="w")
+        ttk.Button(tid_resume, text="刷新进度", command=self._refresh_tid_progress).pack(anchor="w", pady=4)
 
         script_test = ttk.LabelFrame(
             self.script_test_tab,
@@ -2268,6 +2292,120 @@ class AutoRngApp:
     def input_fingerprint(self):
         return tuple(str(variable.get()) for variable in self.tracked_variables)
 
+    def _tid_setting_variables(self):
+        return {
+            name: variable for name, variable in vars(self).items()
+            if (name.startswith("tid_") and name.endswith("_var")
+                and not name.startswith("tid_record_") and name != "tid_progress_status_var"
+                or name == "home_buffer_adaptive_var")
+            and isinstance(variable, (tk.StringVar, tk.BooleanVar))
+        }
+
+    def _tid_settings_fingerprint(self):
+        return {name: variable.get() for name, variable in self._tid_setting_variables().items()}
+
+    def _install_tid_persistence(self):
+        self._tid_save_job = None
+        self._tid_pending_job = None
+        self._tid_settings_blocked = False
+        self._tid_pending_calibration = None
+        try:
+            saved = load_tid_settings(TID_SETTINGS_PATH)
+            variables = self._tid_setting_variables()
+            # Check all known types first: no half-applied drafts.
+            for name, value in saved.get("values", {}).items():
+                if name in variables and type(value) is not type(variables[name].get()):
+                    raise ValueError(f"TID参数{name}类型无效，原文件保留")
+            self._updating = True
+            try:
+                for name, value in saved.get("values", {}).items():
+                    if name in variables:
+                        variables[name].set(value)
+            finally:
+                self._updating = False
+            self._update_tid_flow_controls()
+            self._tid_pending_calibration = saved.get("pending_calibration")
+            self._restore_pending_tid_calibration()
+        except (ValueError, OSError, tk.TclError, KeyError, TypeError) as exc:
+            self._tid_settings_blocked = True
+            self.tid_progress_status_var.set(str(exc) + "；未覆盖原参数文件。")
+        for variable in self._tid_setting_variables().values():
+            variable.trace_add("write", self._schedule_tid_settings_save)
+        if not self._tid_settings_blocked:
+            self._refresh_tid_progress()
+            self._tid_pending_job = self.root.after(1000, self._poll_pending_tid_settings)
+
+    def _poll_pending_tid_settings(self):
+        self._tid_pending_job = None
+        if self._tid_pending_calibration and not self._process_running():
+            try:
+                self._restore_pending_tid_calibration()
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                self.tid_progress_status_var.set(f"后台固定延迟结果未回填：{exc}")
+                self._tid_pending_calibration = None
+        if self._tid_pending_calibration:
+            self._tid_pending_job = self.root.after(1000, self._poll_pending_tid_settings)
+
+    def _schedule_tid_settings_save(self, *_):
+        if self._tid_save_job is not None:
+            self.root.after_cancel(self._tid_save_job)
+        self._tid_save_job = self.root.after(500, self._save_tid_settings)
+
+    def _save_tid_settings(self):
+        if self._tid_save_job is not None:
+            self.root.after_cancel(self._tid_save_job)
+        self._tid_save_job = None
+        if self._tid_settings_blocked:
+            return
+        try:
+            write_json_atomic(TID_SETTINGS_PATH, {
+                "schema": 1, "values": self._tid_settings_fingerprint(),
+                "pending_calibration": self._tid_pending_calibration,
+            })
+            self._refresh_tid_progress()
+        except OSError as exc:
+            self.tid_progress_status_var.set(f"TID参数保存失败：{exc}")
+
+    def _restore_pending_tid_calibration(self):
+        pending = self._tid_pending_calibration
+        if not isinstance(pending, dict) or pending.get("values") != self._tid_settings_fingerprint():
+            self._tid_pending_calibration = None
+            return
+        path = Path(pending.get("path", ""))
+        if not path.is_file():
+            return
+        from automation.tid_calibration import tid_request_from_dict
+        self.tid_calibration_result_path = path
+        self.tid_calibration_snapshot = tid_request_from_dict(pending["request"])
+        self.tid_calibration_input_fingerprint = self.input_fingerprint()
+        self.tid_calibration_applied = False
+        self._poll_tid_calibration_result()
+
+    def _refresh_tid_progress(self):
+        try:
+            if self.tid_mode_var.get() != "穷举模式":
+                self.tid_progress_status_var.set("TID参数自动保存；穷举模式运行时自动记录搜索进度。")
+                return
+            request = replace(self.collect_tid_request(), calibration_check=False)
+            flow = self.collect_tid_starter_flow_request(request)
+            if flow is not None:
+                request = flow.to_flow_tid_request()
+            template = resolve_tid_template(self.tid_source_var.get(), request.language)
+            flow_payload = {**asdict(flow), "tid_request": flow.tid_request.to_dict()} if flow else None
+            context = progress_context(request, self.tid_game_var.get(),
+                hashlib.sha256(template.read_bytes()).hexdigest(), flow_payload)
+            saved = read_progress(TID_PROGRESS_DIR, context)
+            if not saved or saved.get("state") is None:
+                text = "当前游戏、机型、参数及脚本版本没有可续跑的检查点，将从所填起点开始。"
+            else:
+                state = saved["state"]
+                status = "已命中完成；下次重新开始" if saved["status"] == "completed" else "可续跑（若后台仍在运行，须先停止）"
+                text = (f"{status}：搜索层级 {state['STAGE']}，OP/F1/F2偏移 "
+                        f"{state['OP']}/{state['F1']}/{state['F2']}，累计 {state['COUNT']} 次。")
+            self.tid_progress_status_var.set(text)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self.tid_progress_status_var.set(f"暂不能匹配穷举进度：{exc}")
+
     def invalidate_plan(self, *_):
         if self._updating:
             return
@@ -2495,9 +2633,9 @@ class AutoRngApp:
             (self.tid_op_target_var, "3689" if japanese else "3693"),
             (self.tid_f1_target_var, "3323" if japanese else "2693"),
             (self.tid_f2_target_var, "2011" if japanese else "2105"),
-            (self.tid_op_start_var, "0" if japanese else "3902"),
-            (self.tid_f1_start_var, "0" if japanese else "2649"),
-            (self.tid_f2_start_var, "0" if japanese else "2183"),
+            (self.tid_op_start_var, "0"),
+            (self.tid_f1_start_var, "0"),
+            (self.tid_f2_start_var, "0"),
             (self.tid_op_rng_range_var, "10" if japanese else "0"),
             (self.tid_f1_rng_range_var, "10" if japanese else "0"),
             (self.tid_f2_rng_range_var, "10" if japanese else "0"),
@@ -2892,14 +3030,13 @@ class AutoRngApp:
             image_threshold=int(self.tid_threshold_var.get()),
             home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
         )
-        source_path = Path(self.tid_source_var.get())
-        template_path = source_path / {
-            "英文": "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7.txt",
-            "日文": "【TID+SID乱数&穷举】日文版-火红叶绿1.3.7.txt",
-        }[request.language]
-        if not template_path.is_file():
-            raise FileNotFoundError(f"找不到 TID 1.3.7 模板：{template_path}")
-        request.validate(template_path.read_text(encoding="utf-8"))
+        template_path = resolve_tid_template(self.tid_source_var.get(), request.language)
+        template_text = template_path.read_text(encoding="utf-8-sig")
+        from automation.tid_starter_save import is_starter_save_template, split_tid_modules
+        if is_starter_save_template(template_text):
+            modules = split_tid_modules(template_text)
+            template_text = modules[1 if request.language == "英文" else 2]
+        request.validate(template_text)
         return request
 
     def collect_tid_starter_flow_request(
@@ -4091,11 +4228,11 @@ class AutoRngApp:
             ])
             command_cwd = ROOT
             self.running_mode = "sid"
-        elif self.tid_flow_plan is not None or (self.tid_request is not None and self.tid_request.calibration_check):
+        elif self.tid_request is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             is_flow = self.tid_flow_plan is not None
             flow_dir = self.project_main.parents[1] if is_flow else self.project_main.parent
-            log_path = flow_dir / f"tid-{'starter' if is_flow else 'calibration'}-{timestamp}.log"
+            log_path = flow_dir / f"tid-{'starter' if is_flow else 'run'}-{timestamp}.log"
             if is_flow:
                 self.tid_flow_log_path = log_path
             else:
@@ -4116,11 +4253,23 @@ class AutoRngApp:
                 "--preview-port",
                 str(preview_port),
             ])
+            if self.tid_request.mode == 0:
+                command.extend(["--tid-progress-dir", str(TID_PROGRESS_DIR),
+                                "--tid-game", self.tid_game_var.get()])
+                if not self.tid_resume_var.get():
+                    command.append("--fresh-exhaustive")
             if self.tid_request.calibration_check:
                 self.tid_calibration_result_path = log_path.with_suffix(".calibration.json")
                 self.tid_calibration_snapshot = self.tid_request
                 self.tid_calibration_input_fingerprint = self.input_fingerprint()
                 command.extend(["--calibrate-first", "--calibration-result", str(self.tid_calibration_result_path)])
+                self._tid_pending_calibration = {
+                    "path": str(self.tid_calibration_result_path),
+                    "request": self.tid_request.to_dict(),
+                    "values": self._tid_settings_fingerprint(),
+                }
+            else:
+                self._tid_pending_calibration = None
             command_cwd = ROOT
             self.running_mode = "tid_flow" if is_flow else "tid"
         else:
@@ -4156,19 +4305,6 @@ class AutoRngApp:
                 ])
                 command_cwd = ROOT
                 self.running_mode = "egg"
-            elif self.tid_request is not None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                self.tid_log_path = self.project_main.parent / f"tid-{timestamp}.log"
-                command = build_worker_command("easycon-log", [
-                    "--log-path",
-                    str(self.tid_log_path),
-                    "--cwd",
-                    str(self.project_main.parent),
-                    "--",
-                    *easycon_command,
-                ])
-                command_cwd = ROOT
-                self.running_mode = "tid"
             else:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 self.easycon_log_path = (
@@ -4196,6 +4332,13 @@ class AutoRngApp:
                 self.running_mode = None
                 messagebox.showerror("TID记录准备失败", str(exc))
                 return
+        log_path = self._current_running_log_path()
+        self.stop_request_path = log_path.with_name(log_path.name + "." + uuid.uuid4().hex + ".stop")
+        stop_arguments = ["--stop-file", str(self.stop_request_path)]
+        if "--" in command:
+            command[command.index("--"):command.index("--")] = stop_arguments
+        else:
+            command.extend(stop_arguments)
         flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         self.manual_tools.close_monitor()
         try:
@@ -4205,6 +4348,9 @@ class AutoRngApp:
             messagebox.showerror("启动失败", str(exc))
             return
         self.preview_url = preview_url
+        self.running_tid_exhaustive = bool(self.tid_request and self.tid_request.mode == 0)
+        self.close_when_stopped = False
+        self._save_tid_settings()
         self.start_button.configure(state="disabled")
         self.search_button.configure(state="disabled")
         self.device_button.configure(state="disabled")
@@ -4274,6 +4420,9 @@ class AutoRngApp:
         # The running worker owns its immutable plan. A future start must use
         # a fresh plan for these newly displayed values, never the old files.
         self.invalidate_plan()
+        self._tid_pending_calibration = None
+        if hasattr(self, "_tid_save_job"):
+            self._save_tid_settings()
         self.status_var.set("固定延迟与实际OP修正已自动回填；后台正在生成、预检并继续正式计划。")
 
     def poll_process(self):
@@ -4373,31 +4522,54 @@ class AutoRngApp:
             detail = f"；日志：{easycon_log_path}" if easycon_log_path is not None else ""
             self.status_var.set(f"EasyCon 已退出，退出码 {code}{detail}")
 
+        self._refresh_tid_progress()
+        if self.close_when_stopped:
+            self._finish_close()
+
     def stop_run(self):
         if self.process is None or self.process.poll() is not None:
             return
         if not messagebox.askyesno("停止", "请求停止当前 EasyCon 流程？"):
             return
+        self._request_stop()
+
+    def _request_stop(self):
+        process = self.process
+        if process is None or process.poll() is not None:
+            return
         try:
-            self.process.send_signal(signal.CTRL_BREAK_EVENT)
-        except (OSError, AttributeError):
-            self.process.terminate()
+            if self.stop_request_path is None:
+                raise OSError("缺少本次运行的停止通道")
+            write_json_atomic(self.stop_request_path, {"stop": True})
+        except OSError as exc:
+            self.status_var.set(f"停止通知写入失败（{exc}），正在清理本次进程树……")
+            self._force_stop_process(process)
+            return
         self.stop_button.configure(state="disabled")
         self.status_var.set("已发送停止请求，正在等待 EasyCon 退出……")
-        self.root.after(5000, self.finish_stop_request)
+        self.root.after(5000, lambda: self.finish_stop_request(process))
 
-    def finish_stop_request(self):
-        if self.process is None or self.process.poll() is not None:
+    def finish_stop_request(self, expected_process=None):
+        process = expected_process if expected_process is not None else self.process
+        if process is None or self.process is not process or process.poll() is not None:
             return
-        if messagebox.askyesno(
-            "停止超时",
-            "EasyCon 在 5 秒内没有退出。是否强制终止该进程？",
-        ):
-            self.process.terminate()
-            self.status_var.set("已强制终止 EasyCon；请重新检测串口后再运行。")
-        else:
-            self.stop_button.configure(state="normal")
-            self.status_var.set("EasyCon 仍在运行。")
+        self.status_var.set("停止请求超时，正在终止本次运行器及其EasyCon子进程……")
+        self._force_stop_process(process)
+
+    def _force_stop_process(self, process):
+        def worker():
+            try:
+                terminate_process_tree(process)
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                self.root.after(0, lambda error=str(exc): failed(error))
+
+        def failed(error):
+            if self.process is process and process.poll() is None:
+                self.close_when_stopped = False
+                self.stop_button.configure(state="normal")
+                self.status_var.set(f"本次进程树停止失败：{error}；可以再次点击停止。")
+
+        threading.Thread(target=worker, daemon=True, name="stop-worker-tree").start()
 
     def choose_source(self):
         path = filedialog.askdirectory(initialdir=self.source_var.get() or str(DEFAULT_SOURCE_118))
@@ -4469,8 +4641,30 @@ class AutoRngApp:
                 messagebox.showinfo("正在检测", "设备检测尚未结束，请等待完成后再关闭。")
             return
         if self.process is not None and self.process.poll() is None:
-            if not messagebox.askyesno("仍在运行", "EasyCon 仍在运行。关闭界面但保留运行进程？"):
+            if self.close_when_stopped:
                 return
+            if self.running_tid_exhaustive:
+                stop = messagebox.askyesnocancel("保存穷举进度并关闭",
+                    "是否停止当前流程并保存进度后关闭？\n\n"
+                    "是：停止后关闭，下次继续当前TID搜索点。\n"
+                    "否：仅关闭界面，后台继续运行并记录进度。\n取消：返回工具。")
+                if stop is None:
+                    return
+                if stop:
+                    self._save_tid_settings()
+                    self.close_when_stopped = True
+                    self._request_stop()
+                    return
+            elif not messagebox.askyesno("仍在运行", "EasyCon 仍在运行。关闭界面但保留运行进程？"):
+                return
+        self._finish_close()
+
+    def _finish_close(self):
+        self._poll_tid_calibration_result()
+        self._save_tid_settings()
+        if self._tid_pending_job is not None:
+            self.root.after_cancel(self._tid_pending_job)
+            self._tid_pending_job = None
         self._close_manual_tools()
         self.root.destroy()
 

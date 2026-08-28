@@ -4,18 +4,24 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime
 import json
+import hashlib
 from pathlib import Path
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
 from typing import TextIO
 
 from tid_records import recording_session
+from process_control import StopFileWatcher, terminate_process_tree
+from tid_session import TidProgressSession, progress_context, progress_lease
+from automation.tid_checkpoint import instrument_tid_checkpoint
 from automation.tid_calibration import (
     calibrated_tid_request,
     parse_tid_calibration_result,
@@ -85,6 +91,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preview-port", type=int, default=0)
     parser.add_argument("--calibrate-first", action="store_true")
     parser.add_argument("--calibration-result", type=Path)
+    parser.add_argument("--tid-progress-dir", type=Path)
+    parser.add_argument("--tid-game", choices=("火红", "叶绿"))
+    parser.add_argument("--fresh-exhaustive", action="store_true")
+    parser.add_argument("--stop-file", type=Path)
     return parser.parse_args()
 
 
@@ -108,6 +118,9 @@ class FlowRunner:
         self.current_process: subprocess.Popen[str] | None = None
         self.stop_requested = False
         self.stage_lines: list[str] = []
+        self.progress = None
+        self.active_stage = None
+        self.id_main_override: Path | None = None
 
     def output(self, message: str) -> None:
         try:
@@ -120,6 +133,8 @@ class FlowRunner:
         self.log.flush()
         if self.recording is not None:
             self.recording.feed(message + "\n")
+        if self.progress is not None and self.active_stage == 1:
+            self.progress.feed(message)
 
     def request_stop(self, _signum=None, _frame=None) -> None:
         self.stop_requested = True
@@ -127,9 +142,9 @@ class FlowRunner:
         if process is None or process.poll() is not None:
             return
         try:
-            process.send_signal(signal.CTRL_BREAK_EVENT)
-        except (OSError, AttributeError):
-            process.terminate()
+            terminate_process_tree(process)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            self.output(f"[停止警告] 子进程未退出，等待工具清理本次进程树：{exc}")
 
     def run_stage(
         self,
@@ -142,6 +157,9 @@ class FlowRunner:
         if self.stop_requested:
             self.output("[流程停止] 已收到用户停止请求，不启动下一阶段。")
             return 130
+        self.active_stage = number
+        if number == 1 and self.id_main_override is not None:
+            main_path = self.id_main_override
         if not main_path.is_file():
             self.output(f"[流程错误] 找不到第{number}阶段脚本：{main_path}")
             return 2
@@ -331,6 +349,9 @@ def run_tid_plan(
     is_flow: bool,
     calibrate_first: bool = False,
     result_path: Path | None = None,
+    progress_dir: Path | None = None,
+    game: str | None = None,
+    resume: bool = True,
 ) -> int:
     """Own calibration and continuation even if the GUI has been closed."""
     try:
@@ -409,6 +430,50 @@ def run_tid_plan(
 
         if flow.stop_requested:
             return 130
+        if progress_dir is not None and request.mode == 0:
+            id_dir = plan_dir / "01_id" if is_flow else plan_dir
+            manifest = json.loads((id_dir / "plan.json").read_text(encoding="utf-8"))
+            actual_request = tid_request_from_dict(manifest["tid_request"])
+            template_hash = manifest["source_manifest"]["scripts"][actual_request.language]["sha256"]
+            context = progress_context(
+                actual_request, game, template_hash,
+                payload["request"] if is_flow else None,
+            )
+            # Acquire the lease before any new ID game operation. The worker,
+            # not the GUI, owns writes even when its parent window is closed.
+            with TidProgressSession(progress_dir, context, resume=resume) as progress:
+                source_main = id_dir / ("main_attempt_000.ecs" if is_flow else "main.ecs")
+                configured = instrument_tid_checkpoint(
+                    source_main.read_text(encoding="utf-8-sig"), actual_request, progress.state
+                )
+                runtime_dir = Path(tempfile.mkdtemp(prefix="tid-resume-", dir=plan_dir.parent))
+                main = runtime_dir / "main.ecs"
+                main.write_text(configured, encoding="utf-8")
+                shutil.copytree(id_dir / "ImgLabel", runtime_dir / "ImgLabel")
+                (runtime_dir / "progress_context.json").write_text(
+                    json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                check = validate_tid_runtime(ezcon_path, main)
+                if not check.ok:
+                    raise ValueError("穷举续跑脚本预检失败：" + "; ".join(check.errors))
+                if flow.stop_requested:
+                    return 130
+                flow.id_main_override = main
+                flow.progress = progress
+                if progress.state:
+                    state = progress.state
+                    flow.output(f"[TID续跑] 恢复搜索层级{state['STAGE']}，OP/F1/F2偏移="
+                                f"{state['OP']}/{state['F1']}/{state['F2']}；当前点重新进行去噪观察。")
+                else:
+                    flow.output("[TID进度] 从所填起点开始，逐轮自动保存穷举进度。")
+                flow.output(f"[TID进度] {progress.path}")
+                try:
+                    if is_flow:
+                        return run_exhaustive_flow(flow, plan_dir, payload, ezcon_path)
+                    return flow.run_stage(1, "TID/SID正式计划", main)
+                finally:
+                    flow.progress = None
+                    flow.id_main_override = None
         if not is_flow:
             return flow.run_stage(1, "TID/SID正式计划", plan_dir / "main.ecs")
         corrections = [int(value) for value in payload["sid_retry_corrections"]]
@@ -441,7 +506,15 @@ def main() -> int:
     with log_path.open("w", encoding="utf-8") as log, recording_session(
         args.tid_context, args.tid_records, log_path, flow=True,
         warning=lambda message: log.write(message + "\n"),
-    ) as recording:
+    ) as recording, ExitStack() as leases:
+        if args.tid_progress_dir is not None:
+            port_key = hashlib.sha256(args.port.strip().upper().encode("utf-8")).hexdigest()
+            try:
+                leases.enter_context(progress_lease(args.tid_progress_dir / ("device-" + port_key + ".lock")))
+            except (OSError, RuntimeError) as exc:
+                log.write(f"[流程停止] {exc}\n")
+                print(f"[流程停止] {exc}")
+                return 2
         flow = FlowRunner(
             runner_path,
             port=args.port.strip().upper(),
@@ -456,11 +529,16 @@ def main() -> int:
         flow.output("TID/SID → 研究所 → 1.1.8 御三家连续流程" if args.flow_dir else "TID/SID计划")
         flow.output(f"日志：{log_path}")
 
-        return run_tid_plan(
-            flow, flow_dir, Path(args.ezcon).resolve(),
-            is_flow=bool(args.flow_dir), calibrate_first=args.calibrate_first,
-            result_path=args.calibration_result,
-        )
+        with StopFileWatcher(args.stop_file, flow.request_stop) as stop:
+            if stop.requested:
+                flow.request_stop()
+            return run_tid_plan(
+                flow, flow_dir, Path(args.ezcon).resolve(),
+                is_flow=bool(args.flow_dir), calibrate_first=args.calibrate_first,
+                result_path=args.calibration_result,
+                progress_dir=args.tid_progress_dir, game=args.tid_game,
+                resume=not args.fresh_exhaustive,
+            )
 
 
 if __name__ == "__main__":
