@@ -286,7 +286,7 @@ class CompatibilityTests(unittest.TestCase):
             seed_search=lambda **_: [route("9C76", 100020, mode=6)],
         )
         names = (
-            "游戏版本文本", "Seed模式", "NX机型", "目标Seed", "目标消耗帧",
+            "游戏版本文本", "Seed模式", "NX机型", "Seed启动方案", "目标Seed", "目标消耗帧",
             "目标全国图鉴编号", "静态或野生", "宝可梦遭遇方法",
             "宝可梦遭遇地点", "麻痹", "点到为止", "出闪后继续抓捕",
         )
@@ -295,9 +295,10 @@ class CompatibilityTests(unittest.TestCase):
         configured = configure_template_text(
             template,
             result.plan,
-            EasyCon118Options(nx_model=1),
+            EasyCon118Options(nx_model=1, seed_startup_scheme=1),
         )
         self.assertIn('$Seed模式 = 6', configured)
+        self.assertIn('$Seed启动方案 = 1', configured)
         self.assertIn('$目标Seed = "9C76"', configured)
         self.assertIn('$目标消耗帧 = 100020', configured)
         self.assertIn('$静态或野生 = "野生"', configured)
@@ -316,6 +317,11 @@ class CompatibilityTests(unittest.TestCase):
             configure_template_text("$游戏版本文本 = \"火红\"", result.plan)
         with self.assertRaisesRegex(ValueError, "NX 机型 1"):
             plan_to_user_values(result.plan, EasyCon118Options(nx_model=2))
+        with self.assertRaisesRegex(ValueError, "Seed启动方案"):
+            plan_to_user_values(
+                result.plan,
+                EasyCon118Options(nx_model=1, seed_startup_scheme=2),
+            )
 
     @unittest.skipUnless(LABEL_DIR.is_dir(), "local 1.1.8 label package is not present")
     def test_real_118_label_manifest(self):

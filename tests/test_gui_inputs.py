@@ -8,6 +8,9 @@ from run_auto_rng_gui import (
     AutoRngApp,
     MODE_TAB_ORDER,
     RUN_LOG_TAB_LABEL,
+    SEED_STARTUP_FIXED_USER_HOME,
+    SEED_STARTUP_HOME_BUFFER,
+    SEED_STARTUP_SCHEME_CODES,
     _install_autocomplete_combo,
     build_egg_config_payload,
     build_egg_full_config_payload,
@@ -230,6 +233,7 @@ class GuiIvInputTests(unittest.TestCase):
             [1, 2, 3, 4, 5, 6],
             True,
             True,
+            1,
         )
         self.assertEqual(payload["kind"], "egg_full")
         self.assertEqual(payload["target_seed"], "EDDE")
@@ -238,7 +242,16 @@ class GuiIvInputTests(unittest.TestCase):
         self.assertEqual(payload["pickup_advances"], 3405)
         self.assertTrue(payload["start_from_prepared_254"])
         self.assertTrue(payload["home_buffer_adaptive_threshold"])
+        self.assertEqual(payload["seed_startup_scheme"], 1)
         self.assertEqual(parse_egg_full_config_payload(payload), payload)
+
+        legacy = dict(payload)
+        legacy.pop("seed_startup_scheme")
+        self.assertEqual(
+            parse_egg_full_config_payload(legacy)["seed_startup_scheme"], 0
+        )
+        self.assertEqual(SEED_STARTUP_SCHEME_CODES[SEED_STARTUP_HOME_BUFFER], 0)
+        self.assertEqual(SEED_STARTUP_SCHEME_CODES[SEED_STARTUP_FIXED_USER_HOME], 1)
 
     def test_egg_full_config_rejects_wrong_kind_and_invalid_game_mode(self):
         parent = build_egg_parent_config_payload(
@@ -260,6 +273,11 @@ class GuiIvInputTests(unittest.TestCase):
                 [31] * 6,
                 "雄",
                 [31] * 6,
+            )
+        with self.assertRaisesRegex(ValueError, "Seed启动方案"):
+            build_egg_full_config_payload(
+                "火红", 1, 0, "EDDE", 1115, 3405, 46, 50,
+                "雌", [31] * 6, "雄", [31] * 6, False, False, 2,
             )
 
     def test_seed_mode_choices_keep_mode_three_for_both_games(self):

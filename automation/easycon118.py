@@ -119,11 +119,15 @@ PREVIOUS_SCRIPT_SHA256S = (
     "0c011cb464ff3a83a9be379d9493455c2cd0075139626f28dad6c1e2b6ec3028",
     # Egg wild verification adds one +5 Seed / +1000 upper-advance fallback.
     "c4a1ca509199d1ad3c3589bb019d286b0c2cac5e52a51c0f70e7d297597b2c8a",
+    # Download package with the selectable current/fixed-user Seed startup path.
+    "e82ed39b65a5b4c8ee39287906d4317e58c84334c656f08a8cad6b31d8fde0f5",
 )
-EXPECTED_SCRIPT_SHA256 = "bde2ffddbb42b6c71b2494968c2ccfb8d04291ea3f3c6c755fa79ac825aba923"
+EXPECTED_SCRIPT_SHA256 = "36c83915f208741608d278c17754deae7951c3389b3a3f1e450694c687f66003"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # Canonical corpus before the fixed user-selection HOME startup A/B was added.
+    "bde2ffddbb42b6c71b2494968c2ccfb8d04291ea3f3c6c755fa79ac825aba923",
     # Canonical corpus before the no-egg escape switched from whole-envelope
     # fitting to a same-parity point target.
     "2ad7486f7be10e46fe57ca61d26065722340c6522907f8d7f084637161bb03f2",
@@ -489,7 +493,7 @@ EGG_FORMAL_PARITY_REAL_CALL_CURRENT = EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU.repla
     "$孵蛋流程领取目标截止MS, $孵蛋出蛋检测阈值",
     "$孵蛋流程领取目标截止MS, $孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",
     1,
-)
+)[:-1] + ", $Seed启动方案)"
 EGG_PICKUP_PARITY_MENU_MARKER = "# GUI 孵蛋领取奇偶：确认出蛋后开关菜单增加7 advance"
 EGG_PICKUP_PARITY_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_执行同Seed两次命中"
 EGG_PICKUP_PARITY_SIGNATURE_OLD = "FUNC 孵蛋测试_执行同Seed两次命中($Seed模式: INT, $Seed等待MS: INT, $精确尾段MS: INT, $奇偶等待MS: INT, $封面长按MS: INT, $TV开关: INT, $TV等待MS: INT, $出蛋目标MS: INT, $领蛋目标MS: INT, $出蛋识图阈值: INT, $抓捕识图阈值: INT, $出闪后继续抓捕: INT, $无蛋后复核Seed: INT): INT"
@@ -497,7 +501,7 @@ EGG_PICKUP_PARITY_SIGNATURE_CURRENT = EGG_PICKUP_PARITY_SIGNATURE_OLD.replace(
     "$领蛋目标MS: INT, $出蛋识图阈值",
     "$领蛋目标MS: INT, $Pickup菜单奇偶开关: INT, $出蛋识图阈值",
     1,
-)
+)[:-6] + ", $Seed启动方案: INT): INT"
 EGG_PICKUP_PARITY_VALIDATION_OLD = """\
     IF $无蛋后复核Seed != 0 and $无蛋后复核Seed != 1
         PRINT 孵蛋无蛋后Seed复核开关无效: & $无蛋后复核Seed
@@ -514,7 +518,7 @@ EGG_PICKUP_PARITY_VALIDATION_CURRENT = """\
         PRINT 孵蛋Pickup菜单奇偶开关无效: & $Pickup菜单奇偶开关
         RETURN 0
     ENDIF
-    $孵蛋库_启动结果 = 孵蛋测试_启动并进入存档($Seed模式, $Seed等待MS, $精确尾段MS, $奇偶等待MS, $封面长按MS)
+    $孵蛋库_启动结果 = 孵蛋测试_启动并进入存档($Seed模式, $Seed等待MS, $精确尾段MS, $奇偶等待MS, $封面长按MS, $Seed启动方案)
 """
 EGG_PICKUP_PARITY_ACTION_OLD = """\
         RETURN 2
@@ -823,6 +827,9 @@ class EasyCon118Options:
     false_swipe: bool = False
     continue_capture_after_shiny: bool = False
     home_buffer_adaptive_threshold: bool = False
+    # 0 keeps the current HOME_BUFFER path; 1 uses the fixed user-selection
+    # HOME sequence measured by the legacy standalone RNG script.
+    seed_startup_scheme: int = 0
     # Temporary Japanese starter branch.  It changes only the generated
     # starter project; ordinary English 1.1.8 projects keep their corpus.
     japanese_starter: bool = False
@@ -845,6 +852,7 @@ class EggRunRequest:
     parent_b_ivs: tuple[int, int, int, int, int, int]
     start_from_prepared_254: bool = False
     home_buffer_adaptive_threshold: bool = False
+    seed_startup_scheme: int = 0
 
     @property
     def nx_model(self) -> int:
@@ -886,6 +894,8 @@ class EggRunRequest:
             raise ValueError("孵蛋254步启动模式必须是布尔值")
         if not isinstance(self.home_buffer_adaptive_threshold, bool):
             raise ValueError("HOME_BUFFER稳定低分自适应开关必须是布尔值")
+        if self.seed_startup_scheme not in {0, 1}:
+            raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
         for label, ivs in (("A", self.parent_a_ivs), ("B", self.parent_b_ivs)):
             if len(ivs) != 6 or any(not 0 <= iv <= 31 for iv in ivs):
                 raise ValueError(f"亲本 {label} 的六项 IV 必须均在 0-31 之间")
@@ -1061,6 +1071,8 @@ def plan_to_user_values(
             f"不能写入 {nx_model}"
         )
 
+    if options.seed_startup_scheme not in {0, 1}:
+        raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
     is_wild = _is_wild(plan)
     category_zh = CATEGORY_EN_TO_ZH.get(plan.request.category, plan.request.category)
     location_zh = location_to_zh(plan.request.location)
@@ -1076,6 +1088,7 @@ def plan_to_user_values(
         "游戏版本文本": _game_text(plan.request.game),
         "Seed模式": script_seed_mode,
         "NX机型": nx_model,
+        "Seed启动方案": options.seed_startup_scheme,
         "目标Seed": plan.initial_seed.seed.upper(),
         "目标消耗帧": plan.initial_seed.advances,
         "目标全国图鉴编号": plan.species_id,
@@ -1095,6 +1108,7 @@ def egg_request_to_user_values(request: EggRunRequest) -> dict[str, Any]:
         "游戏版本文本": _game_text(request.game),
         "Seed模式": request.seed_mode,
         "NX机型": request.nx_model,
+        "Seed启动方案": request.seed_startup_scheme,
         "目标Seed": request.normalized_seed,
         "目标消耗帧": request.held_advances,
         "目标宝可梦名称": "",

@@ -11,9 +11,12 @@ from automation.easycon118 import (
     EGG_HATCH_EXIT_OVERRIDE_PATH,
     EGG_FORMAL_PARITY_OVERRIDE_MARKER,
     EGG_FORMAL_PARITY_OVERRIDE_PATH,
+    EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
     EGG_PICKUP_PARITY_MENU_MARKER,
+    EGG_PICKUP_PARITY_SIGNATURE_CURRENT,
+    EGG_PICKUP_PARITY_VALIDATION_CURRENT,
     EGG_POST_PICKUP_RETRY_POLICY_MARKER,
     EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER,
     EGG_NO_EGG_SEED_GATE_CURRENT,
@@ -296,11 +299,18 @@ ENDFUNC
         self.assertEqual(values["道具乱数模式"], 0)
         self.assertEqual(values["队伍空位数量"], 1)
         self.assertEqual(values["目标Seed"], "75D1")
+        self.assertEqual(values["Seed启动方案"], 0)
         self.assertEqual(values["目标消耗帧"], 8021)
         self.assertEqual(values["孵蛋领取目标帧"], 10021)
         self.assertEqual(values["孵蛋双亲A_HP"], 31)
         self.assertEqual(values["孵蛋双亲B_SPE"], 5)
         self.assertFalse(egg_request().to_dict()["start_from_prepared_254"])
+        self.assertEqual(
+            egg_request_to_user_values(
+                egg_request(seed_startup_scheme=1)
+            )["Seed启动方案"],
+            1,
+        )
 
     def test_held_availability_matches_ten_lines_vector(self):
         request = egg_request(
@@ -371,7 +381,7 @@ ENDFUNC
 
     def test_template_replaces_all_required_egg_inputs(self):
         names = (
-            "游戏版本文本", "Seed模式", "NX机型", "目标Seed", "目标消耗帧",
+            "游戏版本文本", "Seed模式", "NX机型", "Seed启动方案", "目标Seed", "目标消耗帧",
             "目标宝可梦名称", "目标全国图鉴编号", "静态或野生",
             "道具乱数模式", "队伍空位数量",
             "孵蛋同Seed模式", "孵蛋领取目标帧", "孵蛋双亲相性",
@@ -397,11 +407,14 @@ ENDFUNC
             "孵蛋Held无蛋区间起点表", "孵蛋Held无蛋区间终点表",
         ):
             template += f"\n${name} = 0"
-        configured = configure_egg_template_text(template, egg_request())
+        configured = configure_egg_template_text(
+            template, egg_request(seed_startup_scheme=1)
+        )
         self.assertIn('$静态或野生 = "孵蛋"', configured)
         self.assertIn("$道具乱数模式 = 0", configured)
         self.assertIn("$队伍空位数量 = 1", configured)
         self.assertIn('$目标Seed = "75D1"', configured)
+        self.assertIn('$Seed启动方案 = 1', configured)
         self.assertIn('$孵蛋双亲A_DEF = 29', configured)
         self.assertIn('$孵蛋双亲B_SPA = 3', configured)
         self.assertIn('$孵蛋Held无蛋表Seed = "75D1"', configured)
@@ -423,6 +436,7 @@ ENDFUNC
             ({"parent_a_gender": "雄"}, "亲本 A"),
             ({"parent_a_ivs": (31, 31, 31, 31, 31, 32)}, "0-31"),
             ({"start_from_prepared_254": 1}, "布尔值"),
+            ({"seed_startup_scheme": 2}, "Seed启动方案"),
         )
         for changes, message in invalid:
             with self.subTest(changes=changes):
@@ -1355,6 +1369,12 @@ ENDFUNC
         self.assertIn(EGG_TRANSIENT_RETRY_OVERRIDE_MARKER, template)
         self.assertIn(EGG_TERMINAL_STOP_OVERRIDE_MARKER, template)
         self.assertIn(EGG_FORMAL_PARITY_OVERRIDE_MARKER, template)
+        self.assertIn("$Seed启动方案 = 0", template)
+        self.assertIn("FUNC 准备Seed启动原点", template)
+        self.assertIn("CALL 关闭游戏", template.split("FUNC 准备Seed启动原点", 1)[1].split("ENDFUNC", 1)[0])
+        self.assertIn("PRINT Seed启动方案: 固定用户界面HOME", template)
+        self.assertIn(EGG_FORMAL_PARITY_REAL_CALL_CURRENT, template)
+        self.assertIn("A#固定方案：恢复游戏后再建立Seed计时原点，与参考脚本一致", template)
         self.assertIn("抓捕失败，关闭游戏并继续下一轮", template)
         self.assertIn("RETURN 2", template)
         self.assertIn("$候选细分累计范围有效 = 0", template)
@@ -1442,6 +1462,14 @@ ENDFUNC
         self.assertIn(
             "$孵蛋流程执行Pickup帧 = $孵蛋流程Pickup奇偶基准帧 - $孵蛋流程Pickup菜单推进帧",
             template,
+        )
+        library = library_path.read_text(encoding="utf-8")
+        self.assertIn("$Seed启动方案: INT", library)
+        self.assertIn(EGG_PICKUP_PARITY_SIGNATURE_CURRENT, library)
+        self.assertIn(EGG_PICKUP_PARITY_VALIDATION_CURRENT, library)
+        self.assertIn(
+            "IF $Seed启动方案 == 1\n        A\n        $孵蛋库_Seed时间轴原点 = TIME()",
+            library,
         )
         self.assertIn("孵蛋正式版奇偶校准: F1增加", template)
         self.assertIn("$孵蛋流程本轮奇偶等待MS, $孵蛋封面长按MS", template)

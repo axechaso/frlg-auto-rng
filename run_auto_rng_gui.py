@@ -108,6 +108,16 @@ SAVE_PROFILE_PATH = USER_DATA_ROOT / "save_profiles.json"
 EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
 EGG_START_MODE_PREPARED = "从已完成254步准备开始"
 EGG_START_MODES = (EGG_START_MODE_FULL, EGG_START_MODE_PREPARED)
+SEED_STARTUP_HOME_BUFFER = "方案0：当前 HOME_BUFFER（原样）"
+SEED_STARTUP_FIXED_USER_HOME = "方案1：固定用户界面 HOME"
+SEED_STARTUP_SCHEMES = (
+    SEED_STARTUP_HOME_BUFFER,
+    SEED_STARTUP_FIXED_USER_HOME,
+)
+SEED_STARTUP_SCHEME_CODES = {
+    SEED_STARTUP_HOME_BUFFER: 0,
+    SEED_STARTUP_FIXED_USER_HOME: 1,
+}
 TID_SID_MODE_TARGET = "目标 SID（自动计算 ADV）"
 TID_SID_MODE_FIXED_F3 = "固定 F3 延迟（采用实际 SID）"
 TID_SID_MODES = (TID_SID_MODE_TARGET, TID_SID_MODE_FIXED_F3)
@@ -406,6 +416,7 @@ def build_egg_full_config_payload(
     parent_b_ivs,
     start_from_prepared_254=False,
     home_buffer_adaptive_threshold=False,
+    seed_startup_scheme=0,
 ) -> dict:
     """Validate and build a complete egg-page configuration."""
     parent = build_egg_parent_config_payload(
@@ -438,6 +449,12 @@ def build_egg_full_config_payload(
         raise ValueError("254步启动模式必须是布尔值")
     if not isinstance(home_buffer_adaptive_threshold, bool):
         raise ValueError("HOME_BUFFER稳定低分自适应开关必须是布尔值")
+    try:
+        seed_startup_scheme = int(seed_startup_scheme)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Seed启动方案只能是0或1") from exc
+    if seed_startup_scheme not in {0, 1}:
+        raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
     game_code = ("fr" if game == "火红" else "lg") + ("_nx2" if nx_model == 2 else "_nx")
     request = EggRunRequest(
         game=game_code,
@@ -453,6 +470,7 @@ def build_egg_full_config_payload(
         parent_b_ivs=tuple(parent["parent_b_ivs"]),
         start_from_prepared_254=start_from_prepared_254,
         home_buffer_adaptive_threshold=home_buffer_adaptive_threshold,
+        seed_startup_scheme=seed_startup_scheme,
     )
     request.validate()
     return {
@@ -472,6 +490,7 @@ def build_egg_full_config_payload(
         "parent_b_ivs": parent["parent_b_ivs"],
         "start_from_prepared_254": start_from_prepared_254,
         "home_buffer_adaptive_threshold": home_buffer_adaptive_threshold,
+        "seed_startup_scheme": seed_startup_scheme,
     }
 
 
@@ -502,6 +521,7 @@ def parse_egg_full_config_payload(payload) -> dict:
         payload.get("parent_b_ivs"),
         payload.get("start_from_prepared_254", False),
         payload.get("home_buffer_adaptive_threshold", False),
+        payload.get("seed_startup_scheme", 0),
     )
 
 
@@ -1337,7 +1357,7 @@ class AutoRngApp:
         )
         ttk.Label(
             egg_identity,
-            text="第二项要求当前存档已经完成254步准备；仍会执行HOME_BUFFER与全部校准流程。",
+            text="第二项要求当前存档已经完成254步准备；仍会执行所选Seed启动方案与全部校准流程。",
         ).grid(row=2, column=4, columnspan=3, sticky="w", padx=4, pady=4)
         self.egg_game_combo.bind("<<ComboboxSelected>>", lambda _: self._on_game_change())
         self.egg_nx_combo.bind("<<ComboboxSelected>>", lambda _: self._on_game_change())
@@ -1806,6 +1826,16 @@ class AutoRngApp:
             command=self._toggle_advanced_mode,
         )
         self.advanced_mode_check.pack(side="left", padx=(18, 0))
+        self.seed_startup_scheme_var = tk.StringVar(value=SEED_STARTUP_HOME_BUFFER)
+        ttk.Label(manual_tools, text="Seed启动").pack(side="left", padx=(14, 4))
+        self.seed_startup_scheme_combo = ttk.Combobox(
+            manual_tools,
+            textvariable=self.seed_startup_scheme_var,
+            values=SEED_STARTUP_SCHEMES,
+            width=29,
+            state="readonly",
+        )
+        self.seed_startup_scheme_combo.pack(side="left")
         self.home_buffer_adaptive_var = tk.BooleanVar(value=False)
         self.home_buffer_adaptive_check = ttk.Checkbutton(
             manual_tools,
@@ -2231,7 +2261,7 @@ class AutoRngApp:
             self.min_adv_var, self.max_adv_var, self.shiny_var, self.nature_var,
             self.gender_var, self.ability_var, self.hidden_type_var, self.seed_mode_var,
             self.auto_capture_var, self.paralysis_var, self.false_swipe_var,
-            self.home_buffer_adaptive_var,
+            self.home_buffer_adaptive_var, self.seed_startup_scheme_var,
             self.source_var, self.ezcon_var,
             self.egg_seed_var, self.egg_held_var, self.egg_pickup_var,
             self.egg_seed_mode_var, self.egg_pokemon_var, self.egg_compatibility_var,
@@ -2821,6 +2851,7 @@ class AutoRngApp:
             [variable.get() for variable in self.egg_parent_b_iv_vars],
             self.egg_start_mode_var.get() == EGG_START_MODE_PREPARED,
             self.home_buffer_adaptive_var.get(),
+            SEED_STARTUP_SCHEME_CODES[self.seed_startup_scheme_var.get()],
         )
 
     def _save_egg_json(self, payload: dict, title: str, initialfile: str) -> str | None:
@@ -2959,6 +2990,11 @@ class AutoRngApp:
                 self.home_buffer_adaptive_var.set(
                     config["home_buffer_adaptive_threshold"]
                 )
+                self.seed_startup_scheme_var.set(
+                    SEED_STARTUP_FIXED_USER_HOME
+                    if config["seed_startup_scheme"] == 1
+                    else SEED_STARTUP_HOME_BUFFER
+                )
             finally:
                 self._updating = False
             self.invalidate_plan()
@@ -3000,6 +3036,9 @@ class AutoRngApp:
                 self.egg_start_mode_var.get() == EGG_START_MODE_PREPARED
             ),
             home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
+            seed_startup_scheme=SEED_STARTUP_SCHEME_CODES[
+                self.seed_startup_scheme_var.get()
+            ],
         )
 
     def collect_tid_request(self) -> TidRngRequest:
@@ -3347,6 +3386,9 @@ class AutoRngApp:
             false_swipe=self.false_swipe_var.get(),
             continue_capture_after_shiny=self.auto_capture_var.get(),
             home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
+            seed_startup_scheme=SEED_STARTUP_SCHEME_CODES[
+                self.seed_startup_scheme_var.get()
+            ],
         )
         fingerprint_warning_only = self.advanced_mode_var.get()
         input_fingerprint = self.input_fingerprint()
@@ -3868,6 +3910,11 @@ class AutoRngApp:
             ),
             f"蛋种：{SPECIES_EN_TO_ZH.get(pokemon, pokemon)} ({pokemon})",
             f"目标 Seed：{request.normalized_seed}，Seed 模式：{request.seed_mode}",
+            (
+                "Seed启动：固定用户界面 HOME（关闭游戏识图保持原样）"
+                if request.seed_startup_scheme == 1
+                else "Seed启动：当前 HOME_BUFFER（原样）"
+            ),
             f"Held/生成帧：{request.held_advances}",
             f"Pickup/领取帧：{request.pickup_advances}",
             f"双亲相性：{request.compatibility}",
@@ -3922,6 +3969,7 @@ class AutoRngApp:
             f"初始 Seed：{plan.initial_seed.seed}",
             f"Advance：{plan.initial_seed.advances}",
             f"Seed 模式：{plan.seed_mode}",
+            f"Seed启动：{self.seed_startup_scheme_var.get()}",
             (
                 "指定模式：已跳过筛选搜索"
                 if direct_mode
