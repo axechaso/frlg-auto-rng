@@ -10,9 +10,13 @@ import unittest
 from automation.easycon118 import (
     EGG_HOME_BUFFER_GLOBALS,
     EGG_HOME_BUFFER_OVERRIDE_PATH,
+    HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH,
     HOME_BUFFER_ADAPTIVE_GLOBALS,
     HOME_BUFFER_RECOVERY_PATH,
     STANDARD_HOME_BUFFER_OVERRIDE_PATH,
+    _apply_egg_home_buffer_runtime_override_text,
+    _apply_home_buffer_adaptive_classifier_text,
+    _apply_standard_home_buffer_runtime_override_text,
 )
 
 
@@ -40,7 +44,8 @@ class ECSReplay:
             "range": range,
             "int": int,
         }
-        source = HOME_BUFFER_RECOVERY_PATH.read_text(encoding="utf-8")
+        source = HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH.read_text(encoding="utf-8")
+        source += "\n" + HOME_BUFFER_RECOVERY_PATH.read_text(encoding="utf-8")
         if controller:
             source += "\n" + controller.read_text(encoding="utf-8")
         self.load(source)
@@ -126,6 +131,44 @@ class ECSReplay:
 
 
 class HomeBufferRecoveryTests(unittest.TestCase):
+    def test_generated_entries_share_recovery_and_global_state_idempotently(self):
+        original = """\
+$HOME_BUFFER当前错误退出_NS2 = 0
+FUNC HOME_BUFFER
+    RETURN
+ENDFUNC
+
+FUNC 各阶段脚本固定延迟转帧数
+    RETURN
+ENDFUNC
+
+FUNC 孵蛋流程_执行(): INT
+    CALL 孵蛋流程_重开下一轮
+
+    $孵蛋流程尝试次数 = 0
+    FOR
+        $孵蛋流程尝试次数 += 1
+    NEXT
+    RETURN 1
+ENDFUNC
+"""
+        classifier = HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH.read_text(encoding="utf-8")
+        recovery = HOME_BUFFER_RECOVERY_PATH.read_text(encoding="utf-8").rstrip()
+        for apply_controller, path in (
+            (_apply_standard_home_buffer_runtime_override_text, STANDARD_HOME_BUFFER_OVERRIDE_PATH),
+            (_apply_egg_home_buffer_runtime_override_text, EGG_HOME_BUFFER_OVERRIDE_PATH),
+        ):
+            with self.subTest(controller=path.name):
+                controller = path.read_text(encoding="utf-8")
+                configured = apply_controller(original, controller)
+                configured = _apply_home_buffer_adaptive_classifier_text(configured, classifier, False)
+                self.assertEqual(configured.count(recovery), 1)
+                for name in ("HOME_BUFFER本轮延迟", "HOME_BUFFER本轮待确认"):
+                    self.assertIn(f"${name} = 0", configured.split("FUNC ", 1)[0])
+                again = apply_controller(configured, controller)
+                again = _apply_home_buffer_adaptive_classifier_text(again, classifier, False)
+                self.assertEqual(again, configured)
+
     def locked(self):
         replay = ECSReplay()
         replay.values.update(HOME_BUFFER锁定启用=1, HOME_BUFFER锁定延迟=1200)
@@ -171,6 +214,114 @@ class HomeBufferRecoveryTests(unittest.TestCase):
         replay = ECSReplay(frames=[{"主页": 97, "正确退出": 94, "HOME_BUFFER正确退出": 61}])
         self.assertEqual(replay.call("HOME_BUFFER恢复启动原点"), 0)
         self.assertEqual(replay.actions, [])
+
+    def test_real_classifier_accepts_picture_after_old_three_sample_window(self):
+        unknown = {"HOME_BUFFER正确退出": 50, "正确退出": 50}
+        for score in (95, 97, 100):
+            with self.subTest(score=score):
+                replay = ECSReplay(frames=[unknown] * 3 + [
+                    {"HOME_BUFFER正确退出": score, "正确退出": 62},
+                ])
+                self.assertEqual(replay.call("HOME_BUFFER重采样状态", 1), 1)
+                self.assertEqual(replay.waits, [200] * 3)
+                self.assertEqual(replay.actions, [])
+                self.assertEqual(replay.values["HOME_BUFFER有效识图阈值"], 95)
+
+    def test_unknown_wait_is_bounded_and_does_not_lower_threshold(self):
+        replay = ECSReplay(frames=[{"HOME_BUFFER正确退出": 94, "正确退出": 62}])
+        self.assertEqual(replay.call("HOME_BUFFER重采样状态", 1), 0)
+        self.assertEqual(replay.waits, [200] * 7)
+        self.assertEqual(replay.actions, [])
+        self.assertEqual(replay.values["HOME_BUFFER有效识图阈值"], 95)
+
+    def test_known_normal_and_error_do_not_use_extra_wait(self):
+        for label, state in (("正确退出", 2), ("错误退出", 3)):
+            with self.subTest(label=label):
+                replay = ECSReplay(frames=[{label: 100}])
+                self.assertEqual(replay.call("HOME_BUFFER重采样状态", 1), state)
+                self.assertEqual(replay.waits, [])
+
+    def test_recovery_accepts_current_attempt_late_success_without_keys(self):
+        for nx, suffix in ((1, ""), (2, "_NS2")):
+            for score in (95, 97, 100):
+                with self.subTest(nx=nx, score=score):
+                    replay = ECSReplay(frames=[{
+                        "主页" + suffix: 97,
+                        "HOME_BUFFER正确退出" + suffix: score,
+                        "正确退出" + suffix: 62,
+                    }])
+                    replay.values.update(NX机型=nx, HOME_BUFFER本轮待确认=1, HOME_BUFFER本轮延迟=1200)
+                    self.assertEqual(replay.call("HOME_BUFFER恢复启动原点"), 2)
+                    self.assertEqual(replay.actions, [])
+                    self.assertEqual(replay.waits, [])
+                    self.assertEqual(replay.values["HOME_BUFFER本轮待确认"], 0)
+
+    def test_late_recovery_does_not_accept_low_score_or_other_console(self):
+        for frame in (
+            {"主页": 97, "HOME_BUFFER正确退出": 94},
+            {"主页": 97, "HOME_BUFFER正确退出": 50, "HOME_BUFFER正确退出_NS2": 100},
+        ):
+            with self.subTest(frame=frame):
+                replay = ECSReplay(frames=[frame])
+                replay.values["HOME_BUFFER本轮待确认"] = 1
+                self.assertNotEqual(replay.call("HOME_BUFFER恢复启动原点"), 2)
+                self.assertEqual(replay.actions, [])
+                self.assertEqual(replay.values["HOME_BUFFER有效识图阈值"], 95)
+
+    def test_recovery_actions_and_closing_invalidate_late_success(self):
+        closed = {"主页": 97, "正确退出": 50, "HOME_BUFFER正确退出": 50}
+        success = {"主页": 97, "正确退出": 62, "HOME_BUFFER正确退出": 100}
+        cases = (
+            ([{"正在关闭": 100}, success, closed, closed], ["X", "A"]),
+            ([{"正确退出": 100}, success, closed, closed], ["X", "A"]),
+            ([{"错误退出": 100}, success, closed, closed], ["B", "X", "A"]),
+            ([{}] * 3 + [success, closed, closed], ["HOME", "X", "A"]),
+        )
+        for frames, actions in cases:
+            with self.subTest(actions=actions, first_frame=frames[0]):
+                replay = ECSReplay(frames=frames)
+                replay.values["HOME_BUFFER本轮待确认"] = 1
+                self.assertEqual(replay.call("HOME_BUFFER恢复启动原点"), 1)
+                self.assertEqual(replay.actions, actions)
+                self.assertEqual(replay.values["HOME_BUFFER本轮待确认"], 0)
+
+    def test_both_controllers_keep_late_success_and_lock_actual_trial_delay(self):
+        for controller in (EGG_HOME_BUFFER_OVERRIDE_PATH, STANDARD_HOME_BUFFER_OVERRIDE_PATH):
+            for probe_was_planned in (False, True):
+                with self.subTest(controller=controller.name, probe=probe_was_planned):
+                    closed = {"主页": 97, "正确退出": 50, "HOME_BUFFER正确退出": 50}
+                    replay = ECSReplay(controller, frames=[closed])
+                    observed = []
+
+                    def observe(nx):
+                        observed.append(replay.values["HOME_BUFFER延迟"])
+                        # The log's last unknown sample, followed by BUFFER=100 in recovery.
+                        replay.frames = [{"主页": 97, "HOME_BUFFER正确退出": 100, "正确退出": 62}]
+                        replay.frame = 0
+                        if probe_was_planned:
+                            replay.values["HOME_BUFFER未知连续次数"] = 2
+                        return 0
+
+                    replay.env["HOME_BUFFER重采样状态"] = observe
+                    replay.call("HOME_BUFFER")
+                    self.assertEqual(observed, [1200])
+                    self.assertEqual(replay.actions, ["A", "A", "HOME"])
+                    self.assertEqual(replay.values["HOME_BUFFER锁定延迟"], 1200)
+                    self.assertEqual(replay.values["HOME_BUFFER延迟"], 1200)
+                    self.assertEqual(replay.values["HOME_BUFFER锁定启用"], 1)
+                    self.assertEqual(replay.values["孵蛋HOME_BUFFER失败"], 0)
+
+    def test_controller_entry_clears_pending_success_from_previous_call(self):
+        for controller in (EGG_HOME_BUFFER_OVERRIDE_PATH, STANDARD_HOME_BUFFER_OVERRIDE_PATH):
+            with self.subTest(controller=controller.name):
+                closed = {"主页": 97, "正确退出": 50, "HOME_BUFFER正确退出": 50}
+                replay = ECSReplay(controller, frames=[
+                    {"主页": 97, "HOME_BUFFER正确退出": 100}, closed, closed,
+                ])
+                replay.values["HOME_BUFFER本轮待确认"] = 1
+                replay.env["HOME_BUFFER重采样状态"] = lambda nx: 1
+                replay.call("HOME_BUFFER")
+                self.assertEqual(replay.actions, ["X", "A", "A", "A", "HOME"])
 
     def test_unknown_recovery_presses_home_at_most_once_across_retries(self):
         replay = ECSReplay(frames=[{"主页": 50, "正确退出": 50, "HOME_BUFFER正确退出": 50}])

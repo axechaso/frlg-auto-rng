@@ -86,6 +86,9 @@ class TidStarterFlowTests(unittest.TestCase):
         request = TidStarterFlowRequest(
             tid_request=TidRngRequest(
                 language="英文",
+                sound=0,
+                button_mode=1,
+                seed_button=0,
                 target_tid=12345,
                 target_sid=8832,
                 sid_advance_correction=5,
@@ -101,9 +104,83 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertEqual(plan.starter_run_plan.initial_seed.advances, 1513)
         self.assertEqual(plan.starter_run_plan.request.category, "Starter")
         self.assertEqual(plan.starter_run_plan.species_id, 1)
+        self.assertEqual(request.tid_request.button_mode, 1)
+        self.assertEqual(request.to_starter_search_request().setting_key, "mono_h_a")
+        self.assertEqual(plan.starter_run_plan.initial_seed.settings.setting_key, "mono_h_a")
         self.assertGreaterEqual(plan.earliest_sid_chain_advance, 0)
         self.assertEqual(plan.sid_retry_corrections[:5], (5, 6, 4, 7, 3))
         self.assertFalse(plan.request.to_flow_tid_request().include_65535)
+
+    @unittest.skipUnless(HAS_TID_ASSETS and SOURCE_118.is_dir(), "requires TID assets")
+    def test_japanese_starter_uses_japanese_seed_table_and_ocr_branch(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(
+                language="日文",
+                target_tid=12345,
+                target_sid=8832,
+            ),
+            version="火红",
+            starter="妙蛙种子",
+            starter_max_advances=3000,
+        )
+        plan = build_tid_starter_flow_plan(request)
+        self.assertEqual(plan.starter_target.game_code, "fr_jpn_nx")
+        self.assertEqual(plan.starter_target.setting_key, "mono_h_a")
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            write_tid_starter_flow_bundle(
+                DEFAULT_TID_SOURCE_PATH,
+                output,
+                plan,
+                starter_source_dir=SOURCE_118,
+            )
+            starter = (output / "03_starter_118" / "main.ecs").read_text(encoding="utf-8")
+            fire_red = (output / "03_starter_118" / "lib" / "02_Seed表_火红_NX.ecs").read_text(encoding="utf-8-sig")
+
+        self.assertIn("$Seed模式 = 10", starter)
+        self.assertIn("FUNC 读取并输出日版御三家识图结果(): INT", starter)
+        self.assertIn("@性格日版天真 > $识图阈值", starter)
+        self.assertIn("$识图性格 = 24", starter)
+        self.assertIn("# mode 10 = japanese_mono_h_a（临时日版御三家）", fire_red)
+        self.assertIn("ELIF $mode == 10", fire_red)
+
+    def test_japanese_starter_rejects_unavailable_seed_settings(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(language="日文"),
+            version="火红",
+            starter="妙蛙种子",
+            starter_sound=1,
+        )
+        with self.assertRaisesRegex(ValueError, "MONO.*HELP.*A"):
+            request.validate()
+
+    def test_starter_settings_are_serialized_separately_from_tid_settings(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(
+                language="英文",
+                sound=1,
+                button_mode=1,
+                seed_button=2,
+                target_tid=12345,
+                target_sid=8832,
+            ),
+            version="火红",
+            starter="妙蛙种子",
+            starter_sound=0,
+            starter_button_mode=0,
+            starter_seed_button=0,
+        )
+        payload = build_tid_starter_flow_plan(request).to_dict()["request"]
+        self.assertEqual(payload["tid_request"]["button_mode"], 1)
+        self.assertEqual(payload["tid_request"]["seed_button"], 2)
+        self.assertEqual(payload["starter_sound"], 0)
+        self.assertEqual(payload["starter_button_mode"], 0)
+        self.assertEqual(payload["starter_seed_button"], 0)
+        restored = tid_starter_flow_request_from_dict(payload)
+        self.assertEqual(restored.tid_request.button_mode, 1)
+        self.assertEqual(restored.tid_request.seed_button, 2)
+        self.assertEqual(restored.to_starter_search_request().setting_key, "mono_h_a")
 
     def test_exhaustive_plan_defers_starter_search_until_actual_identity(self):
         request = TidStarterFlowRequest(

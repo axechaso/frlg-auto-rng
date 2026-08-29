@@ -7,7 +7,7 @@ _MODE_VALUES = {
     0: ("mono", "h", "a", "none"),
     1: ("stereo", "h", "a", "none"),
     2: ("mono", "h", "start", "none"),
-    3: ("stereo", "r", "a", "none"),
+    3: ("stereo", "h", "start", "none"),
     4: ("mono", "h", "a", "blackout_r"),
     5: ("mono", "h", "a", "blackout_l"),
     6: ("stereo", "h", "a", "blackout_r"),

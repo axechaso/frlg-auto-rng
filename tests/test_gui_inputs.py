@@ -246,11 +246,11 @@ class GuiIvInputTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "不是孵蛋全部配置"):
             parse_egg_full_config_payload(parent)
-        with self.assertRaisesRegex(ValueError, "火红 NX Seed 表不包含模式 3"):
+        with self.assertRaisesRegex(ValueError, "0-9"):
             build_egg_full_config_payload(
                 "火红",
                 1,
-                3,
+                10,
                 "EDDE",
                 1115,
                 3405,
@@ -261,6 +261,37 @@ class GuiIvInputTests(unittest.TestCase):
                 "雄",
                 [31] * 6,
             )
+
+    def test_seed_mode_choices_keep_mode_three_for_both_games(self):
+        class FakeVariable:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        class FakeCombo:
+            def __init__(self):
+                self.values = ()
+
+            def configure(self, *, values):
+                self.values = tuple(values)
+
+        for game in ("火红", "叶绿"):
+            app = SimpleNamespace(
+                game_var=FakeVariable(game),
+                seed_mode_var=FakeVariable("自动选择"),
+                egg_seed_mode_var=FakeVariable("请选择"),
+                seed_mode_combo=FakeCombo(),
+                egg_seed_mode_combo=FakeCombo(),
+                _updating=False,
+            )
+            AutoRngApp._populate_seed_modes(app)
+            self.assertIn("3: stereo_h_start_none", app.seed_mode_combo.values)
+            self.assertIn("3: stereo_h_start_none", app.egg_seed_mode_combo.values)
 
     def test_autocomplete_filters_chinese_english_and_location_fragments(self):
         species = ("皮卡丘 (Pikachu)", "雷丘 (Raichu)", "皮皮 (Clefairy)")

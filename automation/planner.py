@@ -67,7 +67,10 @@ class AutoSearchRequest:
     direct_advances: Optional[int] = None
 
     def validate(self) -> None:
-        if self.game not in {"fr_nx", "fr_nx2", "lg_nx", "lg_nx2"}:
+        if self.game not in {
+            "fr_nx", "fr_nx2", "lg_nx", "lg_nx2",
+            "fr_jpn_nx", "lg_jpn_nx",
+        }:
             raise ValueError(f"首版只支持火红/叶绿 Switch 1/2，当前游戏为 {self.game!r}")
         if not (0 <= self.tid <= 65535):
             raise ValueError("TID 必须在 0-65535 之间")
@@ -85,8 +88,6 @@ class AutoSearchRequest:
             raise ValueError("搜索工作量上限必须大于 0")
         if self.seed_mode is not None and not (0 <= self.seed_mode <= 9):
             raise ValueError("Seed 模式必须在 0-9 之间")
-        if self.game.startswith("fr") and self.seed_mode == 3:
-            raise ValueError("火红 NX Seed 表不包含模式 3 (stereo_r_a)，请选择自动或其他模式")
         if len(self.iv_min) != 6 or len(self.iv_max) != 6:
             raise ValueError("个体值范围必须各包含 6 项")
         for lo, hi in zip(self.iv_min, self.iv_max):

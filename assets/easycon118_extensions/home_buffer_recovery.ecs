@@ -1,11 +1,15 @@
 # HOME_BUFFER 专用恢复与步长决策；不改变其他流程的关闭游戏函数。
 FUNC HOME_BUFFER重采样状态($只使用当前NX: INT): INT
-    FOR $HOME_BUFFER重采样 = 1 TO 3
+    # 未知画面只等待，不发送按键；覆盖直采中晚于旧三次采样窗口到达的画面。
+    FOR $HOME_BUFFER重采样 = 1 TO 8
         $HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态($只使用当前NX)
+        IF $调试日志输出 == 1
+            PRINT "HOME_BUFFER_RESAMPLE|SAMPLE=" & $HOME_BUFFER重采样 & "|LIMIT=8|STATE=" & $HOME_BUFFER识别状态
+        ENDIF
         IF $HOME_BUFFER识别状态 != 0
             RETURN $HOME_BUFFER识别状态
         ENDIF
-        IF $HOME_BUFFER重采样 < 3
+        IF $HOME_BUFFER重采样 < 8
             WAIT 200
         ENDIF
     NEXT
@@ -31,13 +35,20 @@ FUNC HOME_BUFFER恢复启动原点(): INT
         ENDIF
 
         IF $HOME_BUFFER恢复关闭中 >= 95
+            $HOME_BUFFER本轮待确认 = 0
             $HOME_BUFFER恢复稳定 = 0
             $HOME_BUFFER恢复未知 = 0
+        ELIF $HOME_BUFFER本轮待确认 == 1 and $HOME_BUFFER恢复窗口 >= $HOME_BUFFER有效识图阈值
+            # 只接纳本轮 HOME 后的未知结果；恢复尚未发键，窗口仍属于本轮延迟。
+            $HOME_BUFFER本轮待确认 = 0
+            PRINT "HOME_BUFFER_LATE_SUCCESS|DELAY=" & $HOME_BUFFER本轮延迟 & "|BUFFER=" & $HOME_BUFFER恢复窗口 & "|THRESHOLD=" & $HOME_BUFFER有效识图阈值
+            RETURN 2
         ELIF $HOME_BUFFER恢复普通 >= $HOME_BUFFER有效识图阈值 or $HOME_BUFFER恢复窗口 >= $HOME_BUFFER有效识图阈值
             IF $HOME_BUFFER恢复关闭次数 >= 3
                 RETURN 0
             ENDIF
             $HOME_BUFFER恢复关闭次数 = $HOME_BUFFER恢复关闭次数 + 1
+            $HOME_BUFFER本轮待确认 = 0
             X
             WAIT 1500
             A
@@ -46,6 +57,7 @@ FUNC HOME_BUFFER恢复启动原点(): INT
             $HOME_BUFFER恢复未知 = 0
             CONTINUE
         ELIF $HOME_BUFFER恢复错误 >= $HOME_BUFFER有效识图阈值
+            $HOME_BUFFER本轮待确认 = 0
             B
             WAIT 1500
             $HOME_BUFFER恢复稳定 = 0
@@ -56,6 +68,7 @@ FUNC HOME_BUFFER恢复启动原点(): INT
             $HOME_BUFFER恢复稳定 = $HOME_BUFFER恢复稳定 + 1
             $HOME_BUFFER恢复未知 = 0
             IF $HOME_BUFFER恢复稳定 >= 3
+                $HOME_BUFFER本轮待确认 = 0
                 PRINT HOME_BUFFER恢复：已连续确认主页且正在游玩标志消失
                 RETURN 1
             ENDIF
@@ -67,6 +80,7 @@ FUNC HOME_BUFFER恢复启动原点(): INT
             ELSE
                 $HOME_BUFFER恢复未知 = $HOME_BUFFER恢复未知 + 1
                 IF $HOME_BUFFER恢复未知 >= 3 and $HOME_BUFFER恢复已按HOME == 0
+                    $HOME_BUFFER本轮待确认 = 0
                     HOME 100
                     WAIT 1500
                     $HOME_BUFFER恢复已按HOME = 1

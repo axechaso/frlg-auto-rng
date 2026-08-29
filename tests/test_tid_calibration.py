@@ -302,6 +302,26 @@ class TidCalibrationGuiTests(unittest.TestCase):
         self.assertEqual(formal.tid_request, replace(initial, calibration_check=False))
         self.assertTrue(initial.calibration_check)
 
+    def test_collect_flow_keeps_tid_and_starter_game_settings_independent(self):
+        app = SimpleNamespace(
+            tid_starter_flow_var=Variable(True),
+            tid_game_var=Variable("火红"),
+            tid_starter_var=Variable("妙蛙种子"),
+            tid_starter_min_adv_var=Variable("1500"),
+            tid_starter_max_adv_var=Variable("1600"),
+            tid_sid_retry_radius_var=Variable("20"),
+            tid_starter_sound_var=Variable("STEREO"),
+            tid_starter_button_mode_var=Variable("HELP"),
+            tid_starter_seed_button_var=Variable("A"),
+            tid_any_tid_var=Variable(False),
+            tid_any_tid_denoise_var=Variable(True),
+        )
+        initial = TidRngRequest(sound=0, button_mode=1, seed_button=2)
+        formal = AutoRngApp.collect_tid_starter_flow_request(app, initial)
+        self.assertEqual((formal.tid_request.sound, formal.tid_request.button_mode, formal.tid_request.seed_button), (0, 1, 2))
+        self.assertEqual((formal.starter_sound, formal.starter_button_mode, formal.starter_seed_button), (1, 0, 0))
+        self.assertEqual(formal.to_starter_search_request().setting_key, "stereo_h_a")
+
     def test_any_tid_option_disables_target_filters_only_for_exhaustive_flow(self):
         for enabled, exhaustive in ((True, True), (True, False), (False, True)):
             app = SimpleNamespace(

@@ -138,9 +138,6 @@ FUNC 孵蛋测试_检查校正并保存游戏设置($Seed模式: INT, $识图阈
     IF $Seed模式 == 1 or $Seed模式 == 3 or $Seed模式 == 6 or $Seed模式 == 7
         $孵蛋库_目标声音 = 1
     ENDIF
-    IF $Seed模式 == 3
-        $孵蛋库_目标按键 = 1
-    ENDIF
 
     PRINT 【孵蛋准备】按 Seed模式检查游戏设置
     X

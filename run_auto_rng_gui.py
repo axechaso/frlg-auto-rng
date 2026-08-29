@@ -1564,6 +1564,9 @@ class AutoRngApp:
         self.tid_starter_min_adv_var = tk.StringVar(value="1500")
         self.tid_starter_max_adv_var = tk.StringVar(value="10000")
         self.tid_sid_retry_radius_var = tk.StringVar(value="20")
+        self.tid_starter_sound_var = tk.StringVar(value="MONO")
+        self.tid_starter_button_mode_var = tk.StringVar(value="HELP")
+        self.tid_starter_seed_button_var = tk.StringVar(value="A")
         ttk.Checkbutton(
             tid_starter,
             text="TID 阶段完成后继续御三家；穷举模式使用实际 TID 与 SID ADV",
@@ -1584,8 +1587,24 @@ class AutoRngApp:
         self.tid_starter_max_adv_entry = self._labeled_entry(
             tid_starter, "最高 ADV", self.tid_starter_max_adv_var, 1, 6, width=12
         )
+        ttk.Label(
+            tid_starter,
+            text="御三家游戏设置（独立于 TID 设置）",
+        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=4, pady=4)
+        self.tid_starter_sound_combo = self._labeled_combo(
+            tid_starter, "Sound", self.tid_starter_sound_var,
+            ("MONO", "STEREO"), 2, 2,
+        )
+        self.tid_starter_button_mode_combo = self._labeled_combo(
+            tid_starter, "Button Mode", self.tid_starter_button_mode_var,
+            ("HELP", "LR", "L=A"), 2, 4,
+        )
+        self.tid_starter_seed_button_combo = self._labeled_combo(
+            tid_starter, "Seed Button", self.tid_starter_seed_button_var,
+            ("A", "START", "L(L=A)"), 2, 6,
+        )
         self.tid_sid_retry_radius_entry = self._labeled_entry(
-            tid_starter, "SID ADV 重试半径", self.tid_sid_retry_radius_var, 2, 0, width=12
+            tid_starter, "SID ADV 重试半径", self.tid_sid_retry_radius_var, 3, 0, width=12
         )
         self.tid_any_tid_check = ttk.Checkbutton(
             tid_starter,
@@ -1593,18 +1612,21 @@ class AutoRngApp:
             variable=self.tid_any_tid_var,
             command=self._update_tid_flow_controls,
         )
-        self.tid_any_tid_check.grid(row=2, column=2, columnspan=6, sticky="w", padx=4, pady=4)
+        self.tid_any_tid_check.grid(row=3, column=2, columnspan=6, sticky="w", padx=4, pady=4)
         self.tid_any_tid_denoise_check = ttk.Checkbutton(
             tid_starter,
             text="任意 TID 等待去噪确认（默认开启；关闭后首次完整识别即继续）",
             variable=self.tid_any_tid_denoise_var,
         )
-        self.tid_any_tid_denoise_check.grid(row=3, column=2, columnspan=6, sticky="w", padx=4, pady=4)
+        self.tid_any_tid_denoise_check.grid(row=4, column=2, columnspan=6, sticky="w", padx=4, pady=4)
         self.tid_starter_flow_controls = (
             self.tid_starter_combo,
             self.tid_starter_min_adv_entry,
             self.tid_starter_max_adv_entry,
             self.tid_sid_retry_radius_entry,
+            self.tid_starter_sound_combo,
+            self.tid_starter_button_mode_combo,
+            self.tid_starter_seed_button_combo,
         )
 
         tid_filters = ttk.LabelFrame(tid_tab, text="5. 穷举判定与高级范围", padding=8)
@@ -2237,6 +2259,8 @@ class AutoRngApp:
             self.tid_starter_flow_var, self.tid_game_var, self.tid_starter_var,
             self.tid_starter_min_adv_var, self.tid_starter_max_adv_var,
             self.tid_sid_retry_radius_var,
+            self.tid_starter_sound_var, self.tid_starter_button_mode_var,
+            self.tid_starter_seed_button_var,
             self.tid_any_tid_var,
             self.tid_any_tid_denoise_var,
             self.sid_game_var, self.sid_nx_var, self.sid_tid_var, self.sid_count_var,
@@ -2665,8 +2689,6 @@ class AutoRngApp:
 
     def _populate_seed_modes(self):
         choices = ["自动选择", *SEED_MODE_CHOICES]
-        if self.game_var.get() == "火红":
-            choices = [choice for choice in choices if not choice.startswith("3:")]
         current = self.seed_mode_var.get()
         egg_choices = ["请选择", *[choice for choice in choices if choice != "自动选择"]]
         egg_current = self.egg_seed_mode_var.get()
@@ -3052,6 +3074,30 @@ class AutoRngApp:
             starter_min_advances=int(self.tid_starter_min_adv_var.get()),
             starter_max_advances=int(self.tid_starter_max_adv_var.get()),
             sid_retry_radius=int(self.tid_sid_retry_radius_var.get()),
+            starter_sound=(
+                {"MONO": 0, "STEREO": 1}.get(
+                    getattr(self, "tid_starter_sound_var", None).get()
+                    if getattr(self, "tid_starter_sound_var", None) is not None
+                    else "MONO",
+                    0,
+                )
+            ),
+            starter_button_mode=(
+                {"HELP": 0, "LR": 1, "L=A": 2}.get(
+                    getattr(self, "tid_starter_button_mode_var", None).get()
+                    if getattr(self, "tid_starter_button_mode_var", None) is not None
+                    else "HELP",
+                    0,
+                )
+            ),
+            starter_seed_button=(
+                {"A": 0, "START": 1, "L(L=A)": 2}.get(
+                    getattr(self, "tid_starter_seed_button_var", None).get()
+                    if getattr(self, "tid_starter_seed_button_var", None) is not None
+                    else "A",
+                    0,
+                )
+            ),
             accept_any_tid=tid_request.mode == 0 and self.tid_any_tid_var.get(),
             any_tid_require_denoise=self.tid_any_tid_denoise_var.get(),
         )
@@ -3691,6 +3737,11 @@ class AutoRngApp:
         elif not starter_save_template and request.language == "日文":
             lines.append("兼容修正：已把日版 FOR $InputLen 改为 1.6.4-a 可编译的显式索引循环。")
         if flow_plan is not None:
+            if flow_plan.request.tid_request.language == "日文":
+                lines.append(
+                    "日版御三家临时分支：Seed模式10（mono_h_a / HELP / 封面A），"
+                    "使用日版识图标签；识图失败不会默认判为天真。"
+                )
             if flow_plan.request.accept_any_tid:
                 condition = "通过原版去噪确认" if flow_plan.request.any_tid_require_denoise else "首次完整识别，不等待去噪"
                 lines.append(f"TID接续条件：任意合法TID，{condition}；目标TID和特殊号码均不参与成功判定。")
@@ -3699,6 +3750,7 @@ class AutoRngApp:
                 lines.extend(
                     (
                         f"连续流程：{flow_plan.request.version} / {flow_plan.request.starter} / 穷举动态衔接",
+                        f"御三家游戏设置：{flow_plan.request.starter_settings}",
                         (
                             "御三家搜索：取得实际TID和SID ADV后计算实际SID，再在 ADV "
                             f"{flow_plan.request.starter_min_advances}-"
@@ -3718,6 +3770,7 @@ class AutoRngApp:
                 lines.extend(
                     (
                         f"连续流程：{flow_plan.request.version} / {target.species_zh} ({target.species_en})",
+                        f"御三家游戏设置：{flow_plan.request.starter_settings}",
                         (
                             "御三家搜索：ADV "
                             f"{flow_plan.request.starter_min_advances}-"

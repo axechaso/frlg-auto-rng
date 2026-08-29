@@ -14,7 +14,11 @@ from typing import Any
 from assets.game_text import CATEGORY_EN_TO_ZH, location_to_zh
 from app_paths import RESOURCE_ROOT
 from fingerprint_policy import record_fingerprint_mismatch
-from tenlines_seed_updater import apply_easycon_seed_table_overrides
+from tenlines_seed_updater import (
+    apply_easycon_seed_table_overrides,
+    decode_nx_seed_binary,
+    upgrade_easycon_seed_mode3_tables,
+)
 
 from .planner import RunPlan
 from .seed_common_regions import apply_seed_common_regions
@@ -109,14 +113,31 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package with verified HOME recovery and unknown-state-safe
     # 50 ms probing, without contradictory binary-search boundaries.
     "0b4d7fdfc4370fd84f7956e12b001e867b7cbe40e13c39baf191dfc245b279a9",
+    # Mode 3 is stereo/HELP/Start; the LR/A column is no longer reused.
+    "1d8dc9f0b207c4f44f5a62a72cbcc6346aa28a1f0cdaa2cf6880f191430d6db1",
+    # Current download package: immediate no-egg Seed checks after Held calibration.
+    "0c011cb464ff3a83a9be379d9493455c2cd0075139626f28dad6c1e2b6ec3028",
+    # Egg wild verification adds one +5 Seed / +1000 upper-advance fallback.
+    "c4a1ca509199d1ad3c3589bb019d286b0c2cac5e52a51c0f70e7d297597b2c8a",
 )
-EXPECTED_SCRIPT_SHA256 = "3df6f91b12901b488f84b07ecde2ba9a45b9ee5638f76b2b28d6fe9b906a7ccc"
+EXPECTED_SCRIPT_SHA256 = "bde2ffddbb42b6c71b2494968c2ccfb8d04291ea3f3c6c755fa79ac825aba923"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # Canonical corpus before the no-egg escape switched from whole-envelope
+    # fitting to a same-parity point target.
+    "2ad7486f7be10e46fe57ca61d26065722340c6522907f8d7f084637161bb03f2",
+    # Cross-method confirmation before no-egg destination parity was enforced.
+    "208cc09726ca7f902ee1374f0103d88bd245938e028969d6e45073c84ef398c9",
+    # Canonical corpus before cross-method Egg confirmation and no-egg
+    # prediction-envelope jumps were added.
+    "910667b1bb4f82f5ee82767db5d3b9dbf0f272c4cb2feb78cde4fbc5d5066bbf",
     # Paired, bounded 2D common regions (direct source and materialized tool).
     "c83b9a4b11c15aea37bc824f758e7f6c316b89d0dda15dbf460085e3c36925ad",
     "f0220899d797bc94b1d3cd7e30e82db24452b696e6ba3aa4345995e69b77e50c",
+    "3527aaa13ac30108c93699b8566353627d740f5e9dc7dc2becfd6aa7b50da946",
+    "04514280811922c6b0809c0e61f1395a0b172d6197703f4a905b92a412e84db2",
+    "3df6f91b12901b488f84b07ecde2ba9a45b9ee5638f76b2b28d6fe9b906a7ccc",
     "b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57",
     # In-place upgrade of the existing local cache has equivalent HOME_BUFFER
     # functions but retains its historical global-declaration ordering.
@@ -150,6 +171,8 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # Materialized corpus with HOME_BUFFER run locking, three-miss unlocks,
     # and a 50 ms minimum search adjustment in both entry scripts.
     "a3e6eedb7e35efcf8dc8c0ed0866a96efd66bc7e032411f296d9aa6801115a9c",
+    # Local materialized corpus with cross-round Seed hit-range clustering.
+    "419b599234a28c23611f60fac558f963d87d12adb641feaef115a8c1e00935bc",
 )
 
 
@@ -303,7 +326,8 @@ EGG_PARTY_SLOT_MAIN_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_选择队伍槽"
 EGG_PARTY_SLOT_MAIN_NEXT_SECTION = "# -------------------- 野生Seed验证"
 EGG_PARTY_SLOT_MAIN_EGG_FUNCTION = "FUNC 孵蛋流程_执行蛋个体反查(): INT"
 EGG_PARTY_SLOT_MAIN_EGG_NEXT_SECTION = "# -------------------- 总控与重试"
-EGG_REVERSE_LOOKUP_POLICY_MARKER = "# GUI 孵蛋反查覆盖：Normal 优先，方法候选不跨算法累加"
+EGG_REVERSE_LOOKUP_POLICY_MARKER = "# GUI 孵蛋反查覆盖：四方法候选全部合并确认"
+EGG_REVERSE_LOOKUP_LEGACY_POLICY_MARKER = "# GUI 孵蛋反查覆盖：Normal 优先，方法候选不跨算法累加"
 EGG_REVERSE_LOOKUP_WINDOW_MARKER = "# GUI 孵蛋反查覆盖：固定帧窗，不再扩展"
 EGG_REVERSE_LOOKUP_METHOD_COMMENT = "# FRLG常用Split优先；Split有候选时不再混入其他方法，避免扩大歧义。"
 EGG_PARTY_SLOT_CANDY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：神奇糖果按目标身份选择队伍末位或固定槽位"
@@ -567,6 +591,8 @@ $HOME_BUFFER锁定连续失败 = 0
 $HOME_BUFFER尝试 = 0
 $HOME_BUFFER未知连续次数 = 0
 $HOME_BUFFER重采样 = 0
+$HOME_BUFFER本轮待确认 = 0
+$HOME_BUFFER本轮延迟 = 0
 $HOME_BUFFER恢复需要 = 0
 $HOME_BUFFER恢复结果 = 0
 $HOME_BUFFER恢复采样 = 0
@@ -681,6 +707,54 @@ EGG_NO_EGG_REQUEST_CHANGE_OLD = """\
         $孵蛋流程上次无蛋请求Held帧 = $孵蛋流程请求Held帧
     ENDIF
 """
+EGG_NO_EGG_SEED_GATE_OLD = """\
+    $孵蛋流程无蛋复核Seed开关 = 0
+    IF $孵蛋流程Pickup已稳定 == 1
+        $孵蛋流程无蛋复核Seed开关 = 1
+    ELIF $孵蛋流程无蛋连续次数 + 1 >= $孵蛋普通无蛋复核阈值
+        $孵蛋流程无蛋复核Seed开关 = 1
+    ENDIF
+"""
+EGG_NO_EGG_SEED_GATE_CURRENT = """\
+    $孵蛋流程无蛋复核Seed开关 = 0
+    # 使用蛋反查留下的Held记录，不把固定预校准或当前累计修正当作已校准标志。
+    IF $孵蛋流程上次确认实际Held帧 >= 0 or $孵蛋流程Pickup已稳定 == 1
+        $孵蛋流程无蛋复核Seed开关 = 1
+    ELIF $孵蛋流程无蛋连续次数 + 1 >= $孵蛋普通无蛋复核阈值
+        $孵蛋流程无蛋复核Seed开关 = 1
+    ENDIF
+"""
+EGG_WILD_SEED_WINDOW_INIT = """\
+    # 同一只野生扩窗后，后续吃糖继续使用扩大窗口；下一只重新从默认窗口开始。
+    $有效Seed容差 = $孵蛋野生Seed容差
+    $有效最小消耗帧 = $孵蛋野生最小消耗帧
+    $有效最大消耗帧 = $孵蛋野生最大消耗帧
+"""
+EGG_WILD_SEED_SCAN_OLD = """\
+        $有效Seed容差 = $孵蛋野生Seed容差
+        $有效最小消耗帧 = $孵蛋野生最小消耗帧
+        $有效最大消耗帧 = $孵蛋野生最大消耗帧
+        $孵蛋流程扫描结果 = 执行反查扫描()
+        IF $孵蛋流程扫描结果 != 1
+            PRINT 孵蛋野生Seed反查无候选
+            RETURN 0
+        ENDIF
+"""
+EGG_WILD_SEED_SCAN_CURRENT = """\
+        $孵蛋流程扫描结果 = 执行反查扫描()
+        IF $孵蛋流程扫描结果 != 1 and $有效Seed容差 == $孵蛋野生Seed容差
+            # 仅默认窗口无候选时追加一档：Seed前后各5，帧上限增加1000，下限不变。
+            $有效Seed容差 = $孵蛋野生Seed容差 + 5
+            $有效最大消耗帧 = $孵蛋野生最大消耗帧 + 1000
+            PRINT 孵蛋野生Seed反查无候选，追加一档扩窗
+            PRINT 有效Seed容差: ± & $有效Seed容差 & "，有效消耗帧范围: " & $有效最小消耗帧 & "-" & $有效最大消耗帧
+            $孵蛋流程扫描结果 = 执行反查扫描()
+        ENDIF
+        IF $孵蛋流程扫描结果 != 1
+            PRINT 孵蛋野生Seed反查无候选
+            RETURN 0
+        ENDIF
+"""
 EGG_NO_EGG_REQUEST_CHANGE_CURRENT = f"""\
     {EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER}
     IF $孵蛋流程上次无蛋请求Held帧 != $孵蛋流程请求Held帧
@@ -749,6 +823,9 @@ class EasyCon118Options:
     false_swipe: bool = False
     continue_capture_after_shiny: bool = False
     home_buffer_adaptive_threshold: bool = False
+    # Temporary Japanese starter branch.  It changes only the generated
+    # starter project; ordinary English 1.1.8 projects keep their corpus.
+    japanese_starter: bool = False
 
 
 @dataclass(frozen=True)
@@ -785,8 +862,6 @@ class EggRunRequest:
             raise ValueError(f"孵蛋测试只支持火红/叶绿 Switch 1/2，当前为 {self.game!r}")
         if not 0 <= self.seed_mode <= 9:
             raise ValueError("孵蛋 Seed 模式必须在 0-9 之间")
-        if self.game.startswith("fr") and self.seed_mode == 3:
-            raise ValueError("火红 NX Seed 表不包含模式 3 (stereo_r_a)")
         raw_seed = self.target_seed.strip().upper()
         if raw_seed.startswith("0X"):
             raw_seed = raw_seed[2:]
@@ -989,9 +1064,17 @@ def plan_to_user_values(
     is_wild = _is_wild(plan)
     category_zh = CATEGORY_EN_TO_ZH.get(plan.request.category, plan.request.category)
     location_zh = location_to_zh(plan.request.location)
+    if options.japanese_starter and (
+        plan.request.category != "Starter" or plan.species_id not in {1, 4, 7}
+    ):
+        raise ValueError("日版御三家临时分支仅支持静态图鉴1/4/7")
+    # The Japanese NX table currently contains only mono_h_a.  Keep the
+    # planner's logical setting at mode 0, but materialize it as the
+    # generated-project-only mode 10 so the English table cannot be reused.
+    script_seed_mode = 10 if options.japanese_starter else plan.seed_mode
     return {
         "游戏版本文本": _game_text(plan.request.game),
-        "Seed模式": plan.seed_mode,
+        "Seed模式": script_seed_mode,
         "NX机型": nx_model,
         "目标Seed": plan.initial_seed.seed.upper(),
         "目标消耗帧": plan.initial_seed.advances,
@@ -1138,6 +1221,7 @@ def configure_template_text(
 
 
 def _configure_user_values(template_text: str, values: dict[str, Any]) -> str:
+    template_text = _apply_seed_mode3_help_start_text(template_text)
     marker = "# ============================进阶设置"
     user_section, separator, remainder = template_text.partition(marker)
     if not separator:
@@ -1149,6 +1233,266 @@ def _configure_user_values(template_text: str, values: dict[str, Any]) -> str:
         if count != 1:
             raise ValueError(f"1.1.8 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
     return configured + (separator + remainder if separator else "")
+
+
+def _apply_seed_mode3_help_start_text(text: str) -> str:
+    """Upgrade only mode 3: stereo/HELP/Start (controller X), without disabling it."""
+    text = re.sub(r"(?m)^(#\s+3\s*=\s*)stereo_r_a\b", r"\1stereo_h_start", text)
+    text = text.replace(
+        "# Seed模式名称中的mono/stereo和h/r分别对应Sound与Button Mode。",
+        "# 模式0-9均使用HELP；mono/stereo决定Sound，模式3为STEREO/HELP/START。",
+    )
+    for variable in ("游戏设置目标按键", "孵蛋库_目标按键"):
+        text = re.sub(
+            rf"(?m)^    IF \$Seed模式 == 3\r?\n"
+            rf"        \${variable} = 1\r?\n    ENDIF\r?\n",
+            "", text,
+        )
+    text = text.replace(
+        "$Seed模式 == 0 or $Seed模式 == 1 or $Seed模式 == 3 or $Seed模式 == 4",
+        "$Seed模式 == 0 or $Seed模式 == 1 or $Seed模式 == 4",
+    )
+    return text.replace(
+        "$Seed模式 == 2 or $Seed模式 == 8 or $Seed模式 == 9",
+        "$Seed模式 == 2 or $Seed模式 == 3 or $Seed模式 == 8 or $Seed模式 == 9",
+    )
+
+
+def _apply_seed_mode3_library_mapping(library_path: Path) -> None:
+    original = library_path.read_text(encoding="utf-8")
+    configured = _apply_seed_mode3_help_start_text(original)
+    if configured != original:
+        library_path.write_text(configured, encoding="utf-8")
+
+
+_JAPANESE_NATURE_LABELS = (
+    "勤奋", "怕寂寞", "勇敢", "固执", "顽皮", "大胆", "坦率", "悠闲",
+    "淘气", "乐天", "胆小", "急躁", "认真", "爽朗", "内敛", "慢吞吞",
+    "冷静", "害羞", "马虎", "温和", "温顺", "自大", "慎重", "浮躁", "天真",
+)
+_JAPANESE_STAT_LABELS = (
+    ("HP", "实HP", "日版HP_", (18, 19, 20, 21)),
+    ("ATK", "实ATK", "日版ATTACK_", tuple(range(8, 15))),
+    ("DEF", "实DEF", "日版DEFENSE_", tuple(range(8, 15))),
+    ("SPA", "实SPA", "日版SP_ATK_", tuple(range(9, 15))),
+    ("SPD", "实SPD", "日版SP_DEF_", tuple(range(9, 15))),
+    ("SPE", "实SPE", "日版SPEED_", tuple(range(8, 15))),
+)
+_JAPANESE_STARTER_MARKER = "# ===== 日版御三家临时识图分支 ====="
+_JAPANESE_STARTER_GUARD_MARKER = "日版御三家临时模式10仅支持静态图鉴1/4/7"
+
+
+def _render_japanese_starter_ocr_helper() -> str:
+    """Render the main-script-only Japanese starter OCR helper."""
+    lines = [
+        _JAPANESE_STARTER_MARKER,
+        "# 日版御三家临时分支；日版标签随1.1.8包提供，默认英文流程不调用。",
+        "FUNC 读取并输出日版御三家识图结果(): INT",
+        "    $性别识图失败 = 0",
+        "    $性格识图失败 = 0",
+        "    $LV识图失败 = 0",
+        "    $HP识图失败 = 0",
+        "    $ATK识图失败 = 0",
+        "    $DEF识图失败 = 0",
+        "    $SPA识图失败 = 0",
+        "    $SPD识图失败 = 0",
+        "    $SPE识图失败 = 0",
+        "    $等级表直读 = 1",
+        "    $等级标签识别 = 0",
+        "    $候选数字命中项数 = 0",
+        "    $候选数字回退项数 = 0",
+        "    $候选数字标签次数 = 0",
+        "    CALL 重置候选数字标签次数",
+        "",
+        "    IF $道具乱数模式 == 0 and @出闪 >= $识图阈值",
+        "        PRINT 已识别到出闪，脚本停止",
+        "        RETURN 0",
+        "    ENDIF",
+        "",
+        "    $日版公图标分数 = @火红公图标",
+        "    $日版母图标分数 = @火红母图标",
+        "    IF $日版公图标分数 < $识图阈值 and $日版母图标分数 < $识图阈值",
+        "        $识图性别 = -1",
+        "        $性别识图失败 = 1",
+        "        PRINT 日版性别识图失败，公母标签均低于阈值",
+        "    ELIF $日版公图标分数 >= $日版母图标分数",
+        "        $识图性别 = 0",
+        "        $当前性别 = 0",
+        "        PRINT ▶ 日版性别: ♂",
+        "    ELSE",
+        "        $识图性别 = 1",
+        "        $当前性别 = 1",
+        "        $检测到性别母 = 1",
+        "        PRINT ▶ 日版性别: ♀",
+        "    ENDIF",
+        "",
+        "    $识图性格 = -1",
+    ]
+    for index, label in enumerate(_JAPANESE_NATURE_LABELS):
+        keyword = "IF" if index == 0 else "ELIF"
+        lines.extend(
+            (
+                f"    {keyword} @性格日版{label} > $识图阈值",
+                f"        $识图性格 = {index}",
+            )
+        )
+    lines.extend(
+        (
+            "    ELSE",
+            "        $性格识图失败 = 1",
+            "        PRINT 日版性格识图失败，日版性格标签均低于阈值",
+            "    ENDIF",
+            "    $当前性格 = $识图性格",
+            "",
+            "    $等级 = 5",
+            "    RIGHT",
+            "    1000",
+            "",
+        )
+    )
+    for stat_name, target_name, prefix, values in _JAPANESE_STAT_LABELS:
+        lines.append(f"    ${target_name} = -1")
+        for index, value in enumerate(values):
+            keyword = "IF" if index == 0 else "ELIF"
+            lines.extend(
+                (
+                    f"    {keyword} @{prefix}{value:02d} > $识图阈值",
+                    f"        ${target_name} = {value}",
+                )
+            )
+        lines.extend(
+            (
+                "    ELSE",
+                f"        ${stat_name}识图失败 = 1",
+                f"        PRINT 日版{stat_name}识图失败，标签均低于阈值",
+                "    ENDIF",
+                "",
+            )
+        )
+    lines.extend(
+        (
+            "    $识图性别文本 = 性别文本($识图性别)",
+            "    $识图性格文本 = 性格文本($识图性格)",
+            "    PRINT \"\"",
+            "    PRINT 【日版御三家识图】",
+            "    PRINT 个体: & $识图性格文本 & \"，\" & $识图性别文本 & \"，LV\" & $等级",
+            "    PRINT 能力: HP & $实HP & \" ATK \" & $实ATK & \" DEF \" & $实DEF & \" SPA \" & $实SPA & \" SPD \" & $实SPD & \" SPE \" & $实SPE",
+            "",
+            "    IF $性别识图失败 == 1",
+            "        RETURN 0",
+            "    ENDIF",
+            "    IF $性格识图失败 == 1",
+            "        RETURN 0",
+            "    ENDIF",
+        )
+    )
+    for stat_name, _, _, _ in _JAPANESE_STAT_LABELS:
+        lines.extend(
+            (
+                f"    IF ${stat_name}识图失败 == 1",
+                "        RETURN 0",
+                "    ENDIF",
+            )
+        )
+    lines.extend(("", "    RETURN 1", "ENDFUNC", ""))
+    return "\n".join(lines)
+
+
+def _apply_japanese_starter_guard_text(text: str) -> str:
+    """Restrict mode 10 to the static starter encounters it can recognize."""
+    if _JAPANESE_STARTER_GUARD_MARKER in text:
+        return text
+    anchor = "FUNC 检查运行参数(): INT\n"
+    if text.count(anchor) != 1:
+        raise ValueError("1.1.8 主脚本缺少唯一的运行参数检查入口")
+    guard = (
+        "    IF $Seed模式 == 10\n"
+        "        IF $遭遇类型 != 1 or ($目标全国图鉴编号 != 1 and $目标全国图鉴编号 != 4 and $目标全国图鉴编号 != 7)\n"
+        "            PRINT 日版御三家临时模式10仅支持静态图鉴1/4/7\n"
+        "            RETURN 0\n"
+        "        ENDIF\n"
+        "    ENDIF\n\n"
+    )
+    return text.replace(anchor, anchor + guard, 1)
+
+
+def _apply_japanese_starter_runtime_text(text: str) -> str:
+    """Inject Japanese starter recognition into one generated main script."""
+    text = _apply_japanese_starter_guard_text(text)
+    if _JAPANESE_STARTER_MARKER in text:
+        return text
+    anchor = "FUNC 读取并输出识图结果(): INT\n"
+    if text.count(anchor) != 1:
+        raise ValueError("1.1.8 主脚本缺少唯一的识图结果入口")
+    branch = (
+        "    IF $Seed模式 == 10\n"
+        "        RETURN 读取并输出日版御三家识图结果()\n"
+        "    ENDIF\n"
+    )
+    configured = text.replace(anchor, anchor + branch, 1)
+    configured = configured.replace(
+        "#   9 = mono_h_start_blackout_l",
+        "#   9 = mono_h_start_blackout_l\n#   10 = japanese_mono_h_a（临时日版御三家，仅MONO/HELP/A）",
+        1,
+    )
+    configured = configured.replace(
+        "# 模式0-9均使用HELP；mono/stereo决定Sound，模式3为STEREO/HELP/START。",
+        "# 模式0-9均使用HELP；模式3为STEREO/HELP/START；模式10为日版MONO/HELP/A。",
+    )
+    configured = re.sub(
+        r"(?m)^    IF \$Seed模式 == 0 or \$Seed模式 == 1 or \$Seed模式 == 4 or \$Seed模式 == 5 or \$Seed模式 == 6 or  \$Seed模式 == 7$",
+        "    IF $Seed模式 == 0 or $Seed模式 == 1 or $Seed模式 == 4 or $Seed模式 == 5 or $Seed模式 == 6 or  $Seed模式 == 7 or $Seed模式 == 10",
+        configured,
+        count=1,
+    )
+    configured = re.sub(
+        r"(?m)^    ELIF \$Seed模式 < 0 or \$Seed模式 > 9$",
+        "    ELIF $Seed模式 < 0 or $Seed模式 > 10",
+        configured,
+        count=1,
+    )
+    return configured + "\n" + _render_japanese_starter_ocr_helper()
+
+
+def _japanese_seed_values(game: str) -> tuple[str, ...]:
+    filename = "fr_jpn_nx.bin" if game == "fr" else "lg_jpn_nx.bin"
+    path = RESOURCE_ROOT / "rng" / "resources" / filename
+    if not path.is_file():
+        raise FileNotFoundError(f"缺少日版御三家 Seed 资源: {path}")
+    table = decode_nx_seed_binary(path.read_bytes())
+    values = table.modes.get("mono_h_a")
+    if values is None:
+        raise ValueError(f"日版 Seed 表缺少 mono_h_a: {filename}")
+    return tuple("" if value is None else f"{value:04X}" for value in values)
+
+
+def _apply_japanese_seed_mode10(library_path: Path, game_cn: str, game: str) -> str:
+    """Add temporary mode 10 to a copied ECS table, leaving source cache intact."""
+    original = library_path.read_text(encoding="utf-8-sig")
+    if re.search(r"(?m)^# mode 10 = japanese_mono_h_a$", original):
+        return original
+    values = _japanese_seed_values(game)
+    max_index = re.search(rf"(?m)^FUNC 取Seed最大索引_{re.escape(game_cn)}\(\): INT\n    RETURN (\d+)$", original)
+    if max_index is None or int(max_index.group(1)) != len(values) - 1:
+        raise ValueError(f"{game_cn}日版 Seed 表长度与 1.1.8 时间表不一致")
+    rendered = ",".join('""' if value == "" else f'"{value}"' for value in values)
+    function_anchor = f"\nFUNC 取SeedHEX_{game_cn}($idx: INT, $mode: INT): STRING\n"
+    if original.count(function_anchor) != 1:
+        raise ValueError(f"{game_cn} Seed 表缺少唯一的取SeedHEX入口")
+    array = (
+        f"\n# mode 10 = japanese_mono_h_a（临时日版御三家）\n"
+        f"$Seed_HEX_{game_cn}_m10 = [{rendered}]\n"
+    )
+    configured = original.replace(function_anchor, array + function_anchor, 1)
+    mode_anchor = f"    ELIF $mode == 9\n        RETURN $Seed_HEX_{game_cn}_m9[$idx]"
+    if configured.count(mode_anchor) != 1:
+        raise ValueError(f"{game_cn} Seed 表缺少模式9入口")
+    configured = configured.replace(
+        mode_anchor,
+        mode_anchor + f"\n    ELIF $mode == 10\n        RETURN $Seed_HEX_{game_cn}_m10[$idx]",
+        1,
+    )
+    return configured
 
 
 def configure_egg_template_text(template_text: str, request: EggRunRequest) -> str:
@@ -1438,8 +1782,10 @@ def _apply_egg_reverse_lookup_window_text(template_text: str) -> str:
 
 
 def _apply_egg_reverse_lookup_policy_text(template_text: str) -> str:
-    """Prefer Normal, then Split, without combining candidates across methods."""
+    """Preserve the current cross-method policy and upgrade raw legacy templates."""
     if EGG_REVERSE_LOOKUP_POLICY_MARKER in template_text:
+        return _apply_egg_reverse_lookup_window_text(template_text)
+    if EGG_REVERSE_LOOKUP_LEGACY_POLICY_MARKER in template_text:
         return _apply_egg_reverse_lookup_window_text(template_text)
 
     # This limit belongs to the egg reverse lookup only. The separate generic
@@ -1767,6 +2113,45 @@ def _apply_egg_no_egg_evidence_policy_text(template_text: str) -> str:
     elif EGG_NO_EGG_NON_TARGET_CURRENT not in configured:
         raise ValueError("孵蛋模板缺少无蛋后的非目标Seed分支，拒绝应用无蛋证据策略")
     return configured
+
+
+def _apply_egg_no_egg_seed_gate_text(template_text: str) -> str:
+    """Check Seed on every no-egg round after the first Held calibration."""
+    old_count = template_text.count(EGG_NO_EGG_SEED_GATE_OLD)
+    current_count = template_text.count(EGG_NO_EGG_SEED_GATE_CURRENT)
+    if old_count == 1 and current_count == 0:
+        configured = template_text.replace(
+            EGG_NO_EGG_SEED_GATE_OLD, EGG_NO_EGG_SEED_GATE_CURRENT, 1
+        )
+    elif old_count == 0 and current_count == 1:
+        configured = template_text
+    else:
+        raise ValueError("孵蛋模板缺少唯一的无蛋Seed复核门槛，拒绝应用Held校准后立即复核策略")
+    return configured.replace(
+        "# 普通阶段累计无蛋后才复核Seed；微调阶段第一次无蛋就复核。",
+        "# 首次Held反查校准前才使用连续无蛋门槛；有校准记录后无蛋立即复核Seed，不要求Pickup稳定。",
+    )
+
+
+def _apply_egg_wild_seed_fallback_text(template_text: str) -> str:
+    """Add one fallback only to egg-flow wild verification, keeping its lower bound."""
+    signature = "FUNC 孵蛋流程_验证野生Seed($队伍位置: INT): INT"
+    if template_text.count(signature) != 1:
+        raise ValueError("孵蛋模板缺少唯一的野生Seed反查函数")
+    start = template_text.index(signature)
+    end = template_text.index("ENDFUNC", start) + len("ENDFUNC")
+    section = template_text[start:end]
+    old_count = section.count(EGG_WILD_SEED_SCAN_OLD)
+    current_count = section.count(EGG_WILD_SEED_SCAN_CURRENT)
+    if old_count == 1 and current_count == 0 and section.count("    FOR\n") == 1:
+        section = section.replace(EGG_WILD_SEED_SCAN_OLD, EGG_WILD_SEED_SCAN_CURRENT, 1)
+        section = section.replace("    FOR\n", EGG_WILD_SEED_WINDOW_INIT + "    FOR\n", 1)
+    elif old_count != 0 or current_count != 1:
+        raise ValueError("孵蛋野生Seed反查缺少唯一的扫描分支，拒绝应用兜底扩窗")
+    if (section.count(EGG_WILD_SEED_WINDOW_INIT) != 1
+            or section.index(EGG_WILD_SEED_WINDOW_INIT) > section.index("    FOR\n")):
+        raise ValueError("孵蛋野生Seed反查窗口必须在吃糖循环前初始化")
+    return template_text[:start] + section + template_text[end:]
 
 
 def _apply_egg_terminal_stop_policy_text(template_text: str) -> str:
@@ -2144,6 +2529,7 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
     )
     configured = _apply_egg_pickup_parity_menu_text(configured)
     configured = _apply_egg_pond_settle_delay_text(configured)
+    configured = _apply_seed_mode3_help_start_text(configured)
     library_path.write_text(configured, encoding="utf-8")
     return {
         "egg_restart_original_flow_sha256": hashlib.sha256(
@@ -2192,6 +2578,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     standard_configured = _apply_seed_hold_observation_window_text(
         standard_configured
     )
+    standard_configured = _apply_seed_mode3_help_start_text(standard_configured)
     standard_path.write_text(standard_configured, encoding="utf-8")
 
     configured = _apply_egg_summary_fix_text(
@@ -2224,7 +2611,10 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
     configured = _apply_egg_post_pickup_retry_policy_text(configured)
     configured = _apply_egg_no_egg_evidence_policy_text(configured)
+    configured = _apply_egg_no_egg_seed_gate_text(configured)
+    configured = _apply_egg_wild_seed_fallback_text(configured)
     configured = _apply_egg_terminal_stop_policy_text(configured)
+    configured = _apply_seed_mode3_help_start_text(configured)
     egg_path.write_text(configured, encoding="utf-8")
 
     party_summary_helper = PARTY_SUMMARY_NAVIGATION_PATH.read_text(
@@ -2249,6 +2639,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         TOGEPI_HATCH_CYCLE_OVERRIDE_PATH.read_text(encoding="utf-8"),
     )
     static_target_path.write_text(static_target_text, encoding="utf-8")
+    upgrade_easycon_seed_mode3_tables(source_dir / "lib")
     apply_seed_common_regions(source_dir)
     return inspect_script_corpus(source_dir)
 
@@ -2262,6 +2653,7 @@ def write_configured_project(
     copy_assets: bool = True,
 ) -> Path:
     """Create an EasyCon CLI project with ``main.ecs``, ``lib`` and labels."""
+    options = options or EasyCon118Options()
     source_dir = Path(source_dir).resolve()
     output_dir = Path(output_dir).resolve()
     script_corpus = inspect_script_corpus(source_dir)
@@ -2294,9 +2686,11 @@ def write_configured_project(
     configured = _apply_home_buffer_adaptive_classifier_text(
         configured,
         classifier_text,
-        (options or EasyCon118Options()).home_buffer_adaptive_threshold,
+        options.home_buffer_adaptive_threshold,
     )
     configured = _apply_seed_hold_observation_window_text(configured)
+    if options.japanese_starter:
+        configured = _apply_japanese_starter_runtime_text(configured)
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
     wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
@@ -2315,6 +2709,23 @@ def write_configured_project(
 
     apply_seed_common_regions(output_dir, ("main.ecs",))
     seed_table_override = apply_easycon_seed_table_overrides(output_dir / "lib")
+    if options.japanese_starter:
+        japanese_tables = {}
+        for game_cn, game in (("火红", "fr"), ("叶绿", "lg")):
+            library_path = output_dir / "lib" / (
+                "02_Seed表_火红_NX.ecs" if game == "fr" else "03_Seed表_叶绿_NX.ecs"
+            )
+            configured_table = _apply_japanese_seed_mode10(library_path, game_cn, game)
+            library_path.write_text(configured_table, encoding="utf-8")
+            japanese_tables[game] = {
+                "mode": 10,
+                "source": "bundled " + ("fr_jpn_nx.bin" if game == "fr" else "lg_jpn_nx.bin"),
+                "sha256": hashlib.sha256(configured_table.encode("utf-8")).hexdigest(),
+            }
+        if seed_table_override is None:
+            seed_table_override = {}
+        seed_table_override["temporary_japanese_mode10"] = japanese_tables
+    _apply_seed_mode3_library_mapping(output_dir / "lib" / EGG_SETTINGS_LIBRARY_NAME)
     ocr_fallback_sha256 = apply_ocr_runtime_fallback(
         output_dir / "lib" / OCR_NAME_LIBRARY_NAME
     )
@@ -2350,6 +2761,7 @@ def write_configured_project(
                 ).encode("utf-8")
             ).hexdigest(),
             "seed_tables": seed_table_override,
+            "temporary_japanese_starter": options.japanese_starter,
         },
         "backend": {
             "name": EASYCON_BACKEND_NAME,
@@ -2436,6 +2848,8 @@ def write_configured_egg_project(
     configured = _apply_egg_transient_retry_runtime_override_text(configured)
     configured = _apply_egg_post_pickup_retry_policy_text(configured)
     configured = _apply_egg_no_egg_evidence_policy_text(configured)
+    configured = _apply_egg_no_egg_seed_gate_text(configured)
+    configured = _apply_egg_wild_seed_fallback_text(configured)
     configured = _apply_egg_terminal_stop_policy_text(configured)
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
@@ -2477,6 +2891,16 @@ def write_configured_egg_project(
     runtime_overrides["egg_seed_controller_sha256"] = hashlib.sha256(
         seed_controller_override_text.encode("utf-8")
     ).hexdigest()
+    runtime_overrides["egg_cross_method_confirmation_sha256"] = hashlib.sha256(
+        (
+            EGG_REVERSE_LOOKUP_POLICY_MARKER
+            + "$孵蛋流程跨方法候选总数"
+            + "$孵蛋流程候选参考Held帧"
+            + "$孵蛋流程无蛋跳出估计落点"
+            + "$孵蛋流程无蛋预测Held帧 = $孵蛋流程无蛋跳出最佳预测落点"
+            + "$孵蛋流程无蛋跳出候选预测落点 % 2"
+        ).encode("utf-8")
+    ).hexdigest()
     runtime_overrides["seed_hold_observation_window_sha256"] = hashlib.sha256(
         (
             SEED_HOLD_OBSERVATION_MIN_GLOBAL
@@ -2510,6 +2934,12 @@ def write_configured_egg_project(
             replacement
             for _, replacement in EGG_TERMINAL_STOP_REPLACEMENTS
         ).encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["egg_no_egg_seed_gate_sha256"] = hashlib.sha256(
+        EGG_NO_EGG_SEED_GATE_CURRENT.encode("utf-8")
+    ).hexdigest()
+    runtime_overrides["egg_wild_seed_fallback_sha256"] = hashlib.sha256(
+        (EGG_WILD_SEED_WINDOW_INIT + EGG_WILD_SEED_SCAN_CURRENT).encode("utf-8")
     ).hexdigest()
     runtime_overrides["egg_prepared_254_start_sha256"] = hashlib.sha256(
         _egg_prepared_254_override_text(request.start_from_prepared_254).encode(

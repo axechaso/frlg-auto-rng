@@ -190,9 +190,14 @@ class CompatibilityTests(unittest.TestCase):
         for mode in range(10):
             self.assertEqual(settings_to_seed_mode(seed_mode_to_settings(mode)), mode)
 
-    def test_fire_red_rejects_seed_mode_missing_from_118_table(self):
-        with self.assertRaisesRegex(ValueError, "模式 3"):
-            request(game="fr_nx", seed_mode=3).validate()
+    def test_help_start_mode_three_is_not_disabled_for_either_game(self):
+        for game in ("fr_nx", "fr_nx2", "lg_nx", "lg_nx2"):
+            request(game=game, seed_mode=3).validate()
+        settings = seed_mode_to_settings(3)
+        self.assertEqual(
+            (settings.sound, settings.button_mode, settings.seed_button, settings.extra_button),
+            ("stereo", "h", "start", "none"),
+        )
 
     def test_leaf_green_accepts_seed_mode_three(self):
         request(game="lg_nx", seed_mode=3).validate()

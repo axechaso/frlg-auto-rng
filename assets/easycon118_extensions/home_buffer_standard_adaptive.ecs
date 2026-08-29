@@ -3,6 +3,7 @@ FUNC HOME_BUFFER
     $HOME_BUFFER尝试 = 0
     $HOME_BUFFER未知连续次数 = 0
     $HOME_BUFFER锁定连续失败 = 0
+    $HOME_BUFFER本轮待确认 = 0
     $HOME_BUFFER恢复需要 = 1
     $HOME_BUFFER恢复已按HOME = 0
     $HOME_BUFFER恢复关闭次数 = 0
@@ -19,6 +20,14 @@ FUNC HOME_BUFFER
         ENDIF
         IF $HOME_BUFFER恢复需要 == 1
             $HOME_BUFFER恢复结果 = HOME_BUFFER恢复启动原点()
+            IF $HOME_BUFFER恢复结果 == 2
+                $HOME_BUFFER延迟 = $HOME_BUFFER本轮延迟
+                $HOME_BUFFER锁定启用 = 1
+                $HOME_BUFFER锁定延迟 = $HOME_BUFFER本轮延迟
+                $HOME_BUFFER锁定连续失败 = 0
+                PRINT 可用并锁定HOME_BUFFER延迟: & $HOME_BUFFER锁定延迟 & " ms"
+                RETURN
+            ENDIF
             IF $HOME_BUFFER恢复结果 == 0
                 PRINT HOME_BUFFER恢复未确认：保持延迟，只重采样，不启动游戏
                 WAIT 500
@@ -26,6 +35,8 @@ FUNC HOME_BUFFER
             ENDIF
             $HOME_BUFFER恢复需要 = 0
         ENDIF
+        $HOME_BUFFER本轮待确认 = 0
+        $HOME_BUFFER本轮延迟 = $HOME_BUFFER延迟
         A
         WAIT 1500
         A
@@ -42,6 +53,9 @@ FUNC HOME_BUFFER
             $HOME_BUFFER锁定连续失败 = 0
             PRINT 可用并锁定HOME_BUFFER延迟: & $HOME_BUFFER锁定延迟 & " ms"
             RETURN
+        ENDIF
+        IF $HOME_BUFFER识别状态 == 0
+            $HOME_BUFFER本轮待确认 = 1
         ENDIF
         $HOME_BUFFER下一延迟 = HOME_BUFFER规划下一延迟($HOME_BUFFER识别状态)
         IF $HOME_BUFFER下一延迟 < 100 or $HOME_BUFFER下一延迟 > 3000

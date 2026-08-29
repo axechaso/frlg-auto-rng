@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -26,7 +27,7 @@ from fingerprint_policy import record_fingerprint_mismatch
 
 
 SEED_BASE_URL = "https://lincoln-lm.github.io/ten-lines/generated"
-UPDATER_VERSION = "1.0.0"
+UPDATER_VERSION = "1.1.0"
 FORMAT_VERSION = 1
 USER_AGENT = f"frlg-auto-rng-seed-updater/{UPDATER_VERSION}"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
@@ -47,7 +48,7 @@ CANONICAL_NX_ENGLISH_MODES = (
     "mono_h_a",
     "stereo_h_a",
     "mono_h_start",
-    "stereo_r_a",
+    "stereo_h_start",
     "mono_h_a_blackout_r",
     "mono_h_a_blackout_l",
     "stereo_h_a_blackout_r",
@@ -57,7 +58,7 @@ CANONICAL_NX_ENGLISH_MODES = (
 )
 REQUIRED_BASE_MODES = {
     "fr": ("mono_h_a", "stereo_h_a", "mono_h_start"),
-    "lg": ("mono_h_a", "stereo_h_a", "mono_h_start", "stereo_r_a"),
+    "lg": ("mono_h_a", "stereo_h_a", "mono_h_start"),
 }
 
 ProgressCallback = Callable[[str], None]
@@ -221,7 +222,7 @@ def canonical_seed_modes(table: NxSeedTable) -> tuple[tuple[int | None, ...], ..
         mono_h_a,
         stereo_h_a,
         mono_h_start,
-        table.modes.get("stereo_r_a", blank),
+        table.modes.get("stereo_h_start", blank),
         _offset(mono_h_a, -36),
         _offset(mono_h_a, -36),
         _offset(stereo_h_a, -36),
@@ -426,24 +427,74 @@ def verify_seed_table_directory(directory: str | Path) -> dict[str, object]:
     return manifest
 
 
+def upgrade_legacy_mode3_table(text: str, game_cn: str) -> str:
+    """Migrate a mislabeled legacy slot, never use LR/A seeds as HELP/Start.
+
+    Already-correct HELP/Start tables (including user-supplied data) are left
+    untouched. Missing columns remain ordinary blank cells, not a disabled mode.
+    """
+    if not re.search(r"(?m)^#\s+3\s*=\s*stereo_r_a\s*$", text):
+        return text
+    pattern = rf"(?m)^\$Seed_HEX_{re.escape(game_cn)}_m3 = \[(?P<values>[^\r\n]*)\]"
+    match = re.search(pattern, text)
+    if match is None:
+        raise SeedTableUpdateError(f"{game_cn}旧模式3缺少Seed数组，不能安全转换")
+    values = json.loads("[" + match.group("values") + "]")
+    if not values or any(not isinstance(value, str) for value in values):
+        raise SeedTableUpdateError(f"{game_cn}旧模式3的Seed数组无效")
+    replacement = f"$Seed_HEX_{game_cn}_m3 = [" + ",".join('""' for _ in values) + "]"
+    text = text[:match.start()] + replacement + text[match.end():]
+    return text.replace("3 = stereo_r_a", "3 = stereo_h_start")
+
+
+def upgrade_easycon_seed_mode3_tables(lib_directory: str | Path) -> bool:
+    changed = False
+    for filename, game_cn in ((FR_ECS_NAME, "火红"), (LG_ECS_NAME, "叶绿")):
+        path = Path(lib_directory) / filename
+        if not path.is_file():
+            continue
+        original = path.read_text(encoding="utf-8-sig")
+        configured = upgrade_legacy_mode3_table(original, game_cn)
+        if configured != original:
+            path.write_bytes(_encode_ecs(configured))
+            changed = True
+    return changed
+
+
 def apply_easycon_seed_table_overrides(
     lib_directory: str | Path, data_root: str | Path = DATA_ROOT
 ) -> dict[str, object] | None:
     """Overlay both validated ECS tables onto a generated 1.1.8 project."""
     active = active_seed_table_directory(data_root)
     if active is None:
+        if upgrade_easycon_seed_mode3_tables(lib_directory):
+            return {"mode3_mapping_upgraded": True}
         return None
     lib_directory = Path(lib_directory)
     if not lib_directory.is_dir():
         raise SeedTableUpdateError(f"EasyCon 工程缺少 lib 目录：{lib_directory}")
-    for filename in (FR_ECS_NAME, LG_ECS_NAME):
-        shutil.copy2(active / filename, lib_directory / filename)
     manifest = verify_seed_table_directory(active)
+    for game, filename, binary_name in (
+        ("fr", FR_ECS_NAME, FR_BINARY_NAME),
+        ("lg", LG_ECS_NAME, LG_BINARY_NAME),
+    ):
+        if manifest.get("updater_version") == UPDATER_VERSION:
+            shutil.copy2(active / filename, lib_directory / filename)
+        else:
+            # Re-render an older active cache using its own validated binary;
+            # do not mutate the cache or relabel its LR/A column as HELP/Start.
+            data = (active / binary_name).read_bytes()
+            configured = render_easycon_seed_table(
+                game, decode_nx_seed_binary(data), source_sha256=_sha256(data),
+                generated_at=str(manifest.get("generated_at_utc", "")),
+            )
+            (lib_directory / filename).write_bytes(_encode_ecs(configured))
     return {
         "directory": str(active),
         "source_fingerprint": manifest["source_fingerprint"],
         "files": {
-            filename: manifest["files"][filename]
+            filename: {"sha256": _sha256((lib_directory / filename).read_bytes()),
+                       "size": (lib_directory / filename).stat().st_size}
             for filename in (FR_ECS_NAME, LG_ECS_NAME)
         },
     }

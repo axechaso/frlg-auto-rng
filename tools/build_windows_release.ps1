@@ -1,7 +1,9 @@
 param(
     [string]$Python = "",
     [string]$EasyConPublish = "",
-    [string]$OutputName = "FRLG-Auto-RNG-绿色版"
+    [string]$OutputName = "FRLG-Auto-RNG-绿色版",
+    [string]$BuildTag = "",
+    [string]$LocalAssets = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +14,16 @@ if (-not $Python) {
 if (-not (Test-Path -LiteralPath $Python)) {
     throw "找不到 Python 构建环境：$Python"
 }
+if ($BuildTag -and $BuildTag -notmatch '^[a-zA-Z0-9-]+$') {
+    throw "BuildTag 只能包含字母、数字和短横线"
+}
+$BuildSuffix = if ($BuildTag) { "-$BuildTag" } else { "" }
+$BuildRoot = Join-Path $Root ".build\windows-release$BuildSuffix"
+if (Test-Path -LiteralPath $BuildRoot) {
+    throw "构建目录已存在，已保留旧包。请使用新的 -BuildTag：$BuildRoot"
+}
+if (-not $LocalAssets) { $LocalAssets = Join-Path $Root "local_assets" }
+$LocalAssets = (Resolve-Path -LiteralPath $LocalAssets).Path
 
 # tkinter is part of the CPython distribution, not a pip package.  Some
 # installations cannot be inspected by PyInstaller's Tcl/Tk hook (for
@@ -48,11 +60,9 @@ if (-not $EasyConPublish -or -not (Test-Path -LiteralPath (Join-Path $EasyConPub
 & $Python -m pip install --disable-pip-version-check "pyinstaller==6.15.0"
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller 安装失败" }
 
-$BuildRoot = Join-Path $Root ".build\windows-release"
 $PyInstallerWork = Join-Path $BuildRoot "pyinstaller"
 $PyInstallerDist = Join-Path $BuildRoot "dist"
 $ReleaseRoot = Join-Path $BuildRoot $OutputName
-Remove-Item -Force -Recurse -LiteralPath $BuildRoot -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $BuildRoot | Out-Null
 
 $args = @(
@@ -75,7 +85,7 @@ $args = @(
     "--add-data", "$TclModules;tcl8",
     "--add-data", "$(Join-Path $Root 'assets');assets",
     "--add-data", "$(Join-Path $Root 'rng\resources');rng\resources",
-    "--add-data", "$(Join-Path $Root 'local_assets');local_assets",
+    "--add-data", "$LocalAssets;local_assets",
     "--add-data", "$(Join-Path $Root 'runtime_backend');runtime_backend",
     "--add-data", "$(Join-Path $Root 'default.yaml');.",
     "--add-binary", "$(Join-Path $Root 'rng\src\pybind\calibration_bind.cp312-win_amd64.pyd');rng\src\pybind",

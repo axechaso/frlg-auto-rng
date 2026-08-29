@@ -29,6 +29,31 @@ def sample_tables():
 
 
 class SeedTableBinaryTests(unittest.TestCase):
+    def test_mode_three_uses_help_start_and_never_lr_a(self):
+        _, lg = sample_tables()
+        self.assertEqual(updater.CANONICAL_NX_ENGLISH_MODES[3], "stereo_h_start")
+        self.assertEqual(updater.canonical_seed_modes(lg)[3], (None, None))
+        with_start = updater.NxSeedTable(
+            raw_times=lg.raw_times,
+            modes={**lg.modes, "stereo_h_start": (0x0000, 0x1234)},
+        )
+        self.assertEqual(updater.canonical_seed_modes(with_start)[3], (0, 0x1234))
+        for index in (0, 1, 2, 4, 5, 6, 7, 8, 9):
+            self.assertEqual(updater.canonical_seed_modes(lg)[index],
+                             updater.canonical_seed_modes(with_start)[index])
+
+    def test_legacy_mode_three_migration_is_idempotent_and_preserves_correct_tables(self):
+        old = ('#   3 = stereo_r_a\n# mode 3 = stereo_r_a\n'
+               '$Seed_HEX_叶绿_m3 = ["CAFE","BEEF"]\n'
+               '$Seed_HEX_叶绿_m4 = ["1234",""]\n')
+        upgraded = updater.upgrade_legacy_mode3_table(old, "叶绿")
+        self.assertIn('#   3 = stereo_h_start', upgraded)
+        self.assertIn('$Seed_HEX_叶绿_m3 = ["",""]', upgraded)
+        self.assertIn('$Seed_HEX_叶绿_m4 = ["1234",""]', upgraded)
+        self.assertEqual(updater.upgrade_legacy_mode3_table(upgraded, "叶绿"), upgraded)
+        correct = old.replace("stereo_r_a", "stereo_h_start")
+        self.assertEqual(updater.upgrade_legacy_mode3_table(correct, "叶绿"), correct)
+
     def test_binary_round_trip_preserves_blank_entries(self):
         fr, _ = sample_tables()
         encoded = updater.encode_nx_seed_binary(fr)
@@ -139,6 +164,26 @@ class SeedTableStoreTests(unittest.TestCase):
             self.assertIn(0x0010, seed_map)
             self.assertEqual(contiguous["mono_h_a"][0]["seed_time"], 5837)
             tenlines.clear_frlg_seed_cache()
+
+    def test_old_active_cache_is_rerendered_without_mutating_it(self):
+        fr, lg = sample_tables()
+        lg = updater.NxSeedTable(lg.raw_times, {**lg.modes, "stereo_h_start": (0, 0x1234)})
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with mock.patch.object(updater, "_fetch_bytes", side_effect=[
+                updater.encode_nx_seed_binary(fr), updater.encode_nx_seed_binary(lg),
+            ]), mock.patch.object(updater, "_validate_easycon_candidate"), \
+                 mock.patch.object(updater, "UPDATER_VERSION", "1.0.0"):
+                result = updater.update_seed_tables(
+                    source_directory=root, ezcon_path=root / "ezcon.exe", data_root=root,
+                )
+            original = {p.name: p.read_bytes() for p in result.active_directory.iterdir()}
+            lib = root / "project" / "lib"
+            lib.mkdir(parents=True)
+            updater.apply_easycon_seed_table_overrides(lib, root)
+            configured = (lib / updater.LG_ECS_NAME).read_text(encoding="utf-8-sig")
+            self.assertIn('$Seed_HEX_叶绿_m3 = ["0000","1234"]', configured)
+            self.assertEqual(original, {p.name: p.read_bytes() for p in result.active_directory.iterdir()})
 
 
 if __name__ == "__main__":

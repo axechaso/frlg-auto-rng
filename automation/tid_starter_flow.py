@@ -67,6 +67,9 @@ class TidStarterFlowRequest:
     starter_max_advances: int = 10_000
     sid_chain_search_advances: int = 10_000
     sid_retry_radius: int = 20
+    starter_sound: int = 0
+    starter_button_mode: int = 0
+    starter_seed_button: int = 0
     accept_any_tid: bool = False
     any_tid_require_denoise: bool = True
 
@@ -76,6 +79,12 @@ class TidStarterFlowRequest:
             raise ValueError("任意TID衔接开关必须为布尔值")
         if not isinstance(self.any_tid_require_denoise, bool):
             raise ValueError("任意TID去噪开关必须为布尔值")
+        if self.starter_sound not in {0, 1}:
+            raise ValueError("御三家 Sound 只能是 MONO 或 STEREO")
+        if self.starter_button_mode not in {0, 1, 2}:
+            raise ValueError("御三家 Button Mode 只能是 HELP、LR 或 L=A")
+        if self.starter_seed_button not in {0, 1, 2}:
+            raise ValueError("御三家 Seed Button 只能是 A、START 或 L(L=A)")
         if self.accept_any_tid and self.tid_request.mode != 0:
             raise ValueError("任意TID衔接仅适用于穷举模式")
         if self.tid_request.calibration_check:
@@ -84,11 +93,11 @@ class TidStarterFlowRequest:
             raise ValueError("目标TID乱数连续流程必须使用目标SID")
         if self.tid_request.mode == 0 and not self.tid_request.sid_random:
             raise ValueError("穷举连续流程必须使用固定F3延迟取得实际SID")
-        if self.tid_request.language != "英文":
-            raise ValueError(
-                "连续御三家流程的第三阶段使用现有1.1.8；当前1.1.8只审计了英文版游戏，"
-                "日文版暂时只能单独运行TID/SID脚本"
-            )
+        if self.tid_request.language == "日文":
+            if (self.starter_sound, self.starter_button_mode, self.starter_seed_button) != (0, 0, 0):
+                raise ValueError(
+                    "日文版御三家临时分支目前只支持 MONO + HELP + A（Seed模式10）"
+                )
         if self.sid_chain_search_advances <= 0:
             raise ValueError("SID生成链搜索上限必须大于0")
         if self.sid_retry_radius < 0:
@@ -99,6 +108,16 @@ class TidStarterFlowRequest:
     def deferred_identity(self) -> bool:
         """Whether starter search must wait for the TID produced by stage 1."""
         return self.tid_request.mode == 0
+
+    @property
+    def starter_settings(self) -> GameSettings:
+        """Return the independent 1.1.8 settings used by the starter stage."""
+        return GameSettings(
+            sound={0: "mono", 1: "stereo"}[self.starter_sound],
+            button_mode={0: "h", 1: "r", 2: "a"}[self.starter_button_mode],
+            seed_button={0: "a", 1: "start", 2: "l"}[self.starter_seed_button],
+            extra_button="none",
+        )
 
     def to_flow_tid_request(self) -> TidRngRequest:
         """Return the stage-1 request appropriate for the selected flow."""
@@ -131,9 +150,9 @@ class TidStarterFlowRequest:
             starter=self.starter,
             tid=request.target_tid if tid is None else tid,
             sid=request.target_sid if sid is None else sid,
-            sound=request.sound,
-            button_mode=request.button_mode,
-            seed_button=request.seed_button,
+            sound=self.starter_sound,
+            button_mode=self.starter_button_mode,
+            seed_button=self.starter_seed_button,
             min_advances=self.starter_min_advances,
             max_advances=self.starter_max_advances,
         )
@@ -156,6 +175,9 @@ def tid_starter_flow_request_from_dict(payload: dict[str, object]) -> TidStarter
         starter_max_advances=int(payload.get("starter_max_advances", 10_000)),
         sid_chain_search_advances=int(payload.get("sid_chain_search_advances", 10_000)),
         sid_retry_radius=int(payload.get("sid_retry_radius", 20)),
+        starter_sound=int(payload.get("starter_sound", 0)),
+        starter_button_mode=int(payload.get("starter_button_mode", 0)),
+        starter_seed_button=int(payload.get("starter_seed_button", 0)),
         accept_any_tid=payload.get("accept_any_tid", False),
         any_tid_require_denoise=payload.get("any_tid_require_denoise", True),
     )
@@ -224,12 +246,7 @@ def build_starter_run_plan(
 ) -> RunPlan:
     """Adapt the searched starter result to the existing 1.1.8 plan format."""
     tid_request = request.tid_request
-    settings = GameSettings(
-        sound={0: "mono", 1: "stereo"}[tid_request.sound],
-        button_mode={0: "h", 1: "r", 2: "a"}[tid_request.button_mode],
-        seed_button={0: "a", 1: "start", 2: "l"}[tid_request.seed_button],
-        extra_button="none",
-    )
+    settings = request.starter_settings
     seed_mode = settings_to_seed_mode(settings)
     if seed_mode is None:
         raise ValueError(
@@ -238,7 +255,8 @@ def build_starter_run_plan(
         )
 
     game_family = "fr" if request.version == "火红" else "lg"
-    game = f"{game_family}_{'nx2' if tid_request.nx_model == 2 else 'nx'}"
+    language_suffix = "_jpn" if tid_request.language == "日文" else ""
+    game = f"{game_family}{language_suffix}_{'nx2' if tid_request.nx_model == 2 else 'nx'}"
     species_en = target.species_en
     search_request = AutoSearchRequest(
         game=game,
@@ -601,6 +619,7 @@ def write_tid_starter_flow_bundle(
             EasyCon118Options(
                 nx_model=plan.request.tid_request.nx_model,
                 continue_capture_after_shiny=False,
+                japanese_starter=plan.request.tid_request.language == "日文",
             ),
         )
     elif starter_dir.exists():
@@ -634,6 +653,7 @@ def write_resolved_exhaustive_starter_project(
         EasyCon118Options(
             nx_model=resolved.request.tid_request.nx_model,
             continue_capture_after_shiny=False,
+            japanese_starter=resolved.request.tid_request.language == "日文",
         ),
     )
     (starter_dir.parent / "resolved_identity.json").write_text(

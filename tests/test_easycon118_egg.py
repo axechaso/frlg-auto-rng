@@ -16,6 +16,12 @@ from automation.easycon118 import (
     EGG_PICKUP_PARITY_MENU_MARKER,
     EGG_POST_PICKUP_RETRY_POLICY_MARKER,
     EGG_NO_EGG_EVIDENCE_OVERRIDE_MARKER,
+    EGG_NO_EGG_SEED_GATE_CURRENT,
+    EGG_NO_EGG_SEED_GATE_OLD,
+    EGG_WILD_SEED_WINDOW_INIT,
+    EGG_WILD_SEED_SCAN_CURRENT,
+    EGG_WILD_SEED_SCAN_OLD,
+    EGG_REVERSE_LOOKUP_LEGACY_POLICY_MARKER,
     EGG_REVERSE_LOOKUP_POLICY_MARKER,
     EGG_REVERSE_LOOKUP_WINDOW_MARKER,
     EGG_POND_SETTLE_FIXED,
@@ -54,6 +60,7 @@ from automation.easycon118 import (
     _apply_egg_restart_runtime_override_text,
     _apply_egg_seed_controller_runtime_override_text,
     _apply_seed_hold_observation_window_text,
+    _apply_seed_mode3_help_start_text,
     _apply_egg_summary_fix_text,
     _apply_egg_settings_runtime_override_text,
     _apply_egg_surf_battle_runtime_override_text,
@@ -62,6 +69,8 @@ from automation.easycon118 import (
     _apply_party_summary_navigation_text,
     _apply_egg_post_pickup_retry_policy_text,
     _apply_egg_no_egg_evidence_policy_text,
+    _apply_egg_no_egg_seed_gate_text,
+    _apply_egg_wild_seed_fallback_text,
     _apply_home_buffer_adaptive_classifier_text,
     _apply_standard_home_buffer_runtime_override_text,
     _apply_togepi_hatch_cycle_override_text,
@@ -91,6 +100,26 @@ def egg_request(**changes):
 
 
 class EasyCon118EggTests(unittest.TestCase):
+    def test_seed_mode_three_help_start_acceptance_and_runtime_migration(self):
+        for game in ("fr_nx", "fr_nx2", "lg_nx", "lg_nx2"):
+            egg_request(game=game, seed_mode=3).validate()
+        old = '''#   3 = stereo_r_a
+    $孵蛋库_目标按键 = 0
+    IF $Seed模式 == 3
+        $孵蛋库_目标按键 = 1
+    ENDIF
+    IF $Seed模式 == 2 or $Seed模式 == 8 or $Seed模式 == 9
+        X DOWN
+    ELSE
+        A DOWN
+    ENDIF
+'''
+        new = _apply_seed_mode3_help_start_text(old)
+        self.assertIn("#   3 = stereo_h_start", new)
+        self.assertNotIn("$孵蛋库_目标按键 = 1", new)
+        self.assertIn("$Seed模式 == 2 or $Seed模式 == 3 or $Seed模式 == 8 or $Seed模式 == 9", new)
+        self.assertEqual(_apply_seed_mode3_help_start_text(new), new)
+
     def test_egg_reverse_lookup_prefers_normal_then_split_without_mixing_methods(self):
         original = """\
 $孵蛋蛋反查最多糖果 = 8
@@ -127,7 +156,7 @@ FUNC 孵蛋流程_执行蛋个体反查(): INT
         configured_again = _apply_egg_reverse_lookup_policy_text(configured)
 
         self.assertEqual(configured_again, configured)
-        self.assertIn(EGG_REVERSE_LOOKUP_POLICY_MARKER, configured)
+        self.assertIn(EGG_REVERSE_LOOKUP_LEGACY_POLICY_MARKER, configured)
         self.assertIn("$孵蛋蛋反查最多糖果 = 20", configured)
         self.assertLess(
             configured.index("$孵蛋流程扫描方法 = 11"),
@@ -139,6 +168,80 @@ FUNC 孵蛋流程_执行蛋个体反查(): INT
         )
         self.assertNotIn("Split已有候选", configured)
         self.assertNotIn("$孵蛋流程候选总数 += $孵蛋流程当前方法候选数", configured)
+
+    def test_cross_method_candidate_and_no_egg_point_jump_examples(self):
+        candidates = [
+            (1058, 3408),
+            (1100, 3408),
+            (1113, 3408),
+            (1114, 3408),
+            (1126, 3408),
+            (1128, 3408),
+        ]
+        selected = min(
+            candidates,
+            key=lambda item: (
+                -int(1128 <= item[0] <= 1132),
+                abs(item[0] - 1127),
+                abs(item[1] - 3405),
+            ),
+        )
+        self.assertEqual(selected, (1128, 3408))
+
+        different = [(16, 28, 25, 29, 12, 5), (8, 19, 25, 15, 12, 31)]
+        same = [(16, 28, 25, 29, 12, 5), (16, 28, 25, 29, 12, 5)]
+        self.assertNotEqual(len(set(different)), 1)
+        self.assertEqual(len(set(same)), 1)
+
+        def estimate(source, predicted, direction, target):
+            value = min(max(predicted, source[0]), source[1])
+            if value % 2 != target % 2:
+                if direction > 0 and value + 1 <= source[1]:
+                    value += 1
+                elif direction < 0 and value - 1 >= source[0]:
+                    value -= 1
+                elif value - 1 >= source[0]:
+                    value -= 1
+                elif value + 1 <= source[1]:
+                    value += 1
+            return value
+
+        def jump(source, estimated, destination, target):
+            if destination[1] < source[0]:
+                landing = destination[1]
+                if landing % 2 != target % 2:
+                    landing -= 1
+                if landing < destination[0]:
+                    return None
+            else:
+                landing = destination[0]
+                if landing % 2 != target % 2:
+                    landing += 1
+                if landing > destination[1]:
+                    return None
+            return landing - estimated, landing
+
+        source = (1116, 1120)
+        estimated = estimate(source, 1115, 1, 1115)
+        self.assertEqual(estimated, 1117)
+        self.assertEqual(jump(source, estimated, (1113, 1115), 1115), (-2, 1115))
+        self.assertEqual(jump(source, estimated, (1121, 1121), 1115), (4, 1121))
+        self.assertEqual(jump(source, estimated, (1128, 1132), 1115), (12, 1129))
+        self.assertIsNone(jump(source, estimated, (1124, 1124), 1115))
+
+        choices = [
+            (int(offset < 0), abs(offset), offset, landing)
+            for offset, landing in (
+                jump(source, estimated, (1113, 1115), 1115),
+                jump(source, estimated, (1121, 1121), 1115),
+            )
+        ]
+        _, _, offset, landing = min(choices)
+        self.assertEqual(
+            (offset, landing),
+            (4, 1121),
+            "向右修正时应优先选择右侧同奇偶出蛋帧",
+        )
 
     def test_egg_reverse_lookup_does_not_expand_frame_window(self):
         original = """\
@@ -872,6 +975,98 @@ ENDFUNC
         self.assertNotIn("$孵蛋流程目标Seed无蛋区间确认次数 = 0", non_target)
         self.assertIn("保留同一Held请求已有无蛋区间证据", non_target)
 
+    def test_no_egg_seed_gate_after_held_is_idempotent_and_preserves_other_policy(self):
+        prefix = (
+            "$孵蛋Held固定预校准帧 = 230\n"
+            "$孵蛋流程上次确认实际Held帧 = -1\n"
+            "$孵蛋普通无蛋复核阈值 = 3\n"
+            "$Seed命中保持样本数 = 10\n"
+        )
+        suffix = (
+            "$孵蛋流程目标Seed无蛋区间确认次数 = 0\n"
+            "$孵蛋Held执行修正帧 = 0\n"
+        )
+        original = prefix + EGG_NO_EGG_SEED_GATE_OLD + suffix
+        configured = _apply_egg_no_egg_seed_gate_text(original)
+        self.assertEqual(configured, prefix + EGG_NO_EGG_SEED_GATE_CURRENT + suffix)
+        self.assertEqual(_apply_egg_no_egg_seed_gate_text(configured), configured)
+
+    def test_no_egg_seed_gate_checks_first_miss_after_held_even_without_stable_pickup(self):
+        configured = _apply_egg_no_egg_seed_gate_text(EGG_NO_EGG_SEED_GATE_OLD)
+        conditions = re.findall(r"^\s*(?:IF|ELIF) (.+)$", configured, re.M)
+        self.assertEqual(len(conditions), 2)
+        for held, stable, misses, expected in (
+            (-1, 0, 0, False),  # Fixed precalibration is not a Held observation.
+            (-1, 0, 1, False),
+            (-1, 0, 2, True),   # Original third-consecutive-miss threshold.
+            (1114, 0, 0, True), # Pickup not yet stable / has drifted again.
+            (1115, 0, 0, True), # Even if the dynamic Held correction is zero.
+            (0, 0, 0, True),
+            (-1, 1, 0, True),   # Preserve the prior Pickup-stable behavior.
+        ):
+            with self.subTest(held=held, stable=stable, misses=misses):
+                values = {
+                    "$孵蛋流程上次确认实际Held帧": held,
+                    "$孵蛋流程Pickup已稳定": stable,
+                    "$孵蛋流程无蛋连续次数": misses,
+                    "$孵蛋普通无蛋复核阈值": 3,
+                }
+                # Evaluate the actual patched ECS IF/ELIF expressions, not a second rule.
+                observed = any(
+                    eval(
+                        re.sub(r"\$\w+", lambda m: str(values[m.group()]), expression),
+                        {"__builtins__": {}},
+                        {},
+                    )
+                    for expression in conditions
+                )
+                self.assertEqual(observed, expected)
+
+    def test_no_egg_seed_gate_rejects_missing_or_ambiguous_branches(self):
+        for source in (
+            "", EGG_NO_EGG_SEED_GATE_OLD * 2, EGG_NO_EGG_SEED_GATE_CURRENT * 2,
+            EGG_NO_EGG_SEED_GATE_OLD + EGG_NO_EGG_SEED_GATE_CURRENT,
+        ):
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, "唯一"):
+                _apply_egg_no_egg_seed_gate_text(source)
+
+    def test_egg_wild_seed_fallback_is_scoped_idempotent_and_keeps_lower_bound(self):
+        prefix = "$孵蛋野生最小消耗帧 = 500\n$孵蛋Held反查帧容差 = 100\n"
+        old_function = (
+            "FUNC 孵蛋流程_验证野生Seed($队伍位置: INT): INT\n"
+            "    FOR\n" + EGG_WILD_SEED_SCAN_OLD
+            + "        IF $候选全部同一Seed == 1\n            RETURN 1\n        ENDIF\n"
+            "        CALL 打开能力值识图页面\n    NEXT\n    RETURN 0\nENDFUNC\n"
+        )
+        # Identical scan text elsewhere must not be changed by the egg-only overlay.
+        suffix = "FUNC 普通野生测试\n" + EGG_WILD_SEED_SCAN_OLD + "ENDFUNC\n"
+        expected = old_function.replace(
+            EGG_WILD_SEED_SCAN_OLD, EGG_WILD_SEED_SCAN_CURRENT
+        ).replace("    FOR\n", EGG_WILD_SEED_WINDOW_INIT + "    FOR\n")
+        configured = _apply_egg_wild_seed_fallback_text(prefix + old_function + suffix)
+        self.assertEqual(configured, prefix + expected + suffix)
+        self.assertEqual(_apply_egg_wild_seed_fallback_text(configured), configured)
+        self.assertEqual(
+            re.findall(r"^\s*\$有效最小消耗帧 = (.+)$", expected, re.M),
+            ["$孵蛋野生最小消耗帧"],
+        )
+        self.assertIn("$有效Seed容差 = $孵蛋野生Seed容差 + 5", expected)
+        self.assertIn("$有效最大消耗帧 = $孵蛋野生最大消耗帧 + 1000", expected)
+        self.assertIn(
+            "IF $孵蛋流程扫描结果 != 1 and $有效Seed容差 == $孵蛋野生Seed容差",
+            expected,
+        )
+        self.assertEqual(expected.count("$孵蛋流程扫描结果 = 执行反查扫描()"), 2)
+
+    def test_egg_wild_seed_fallback_rejects_unknown_or_repeated_scan(self):
+        signature = "FUNC 孵蛋流程_验证野生Seed($队伍位置: INT): INT\n"
+        for text in (
+            "", signature + "ENDFUNC", signature * 2 + "ENDFUNC",
+            signature + "    FOR\n" + EGG_WILD_SEED_SCAN_OLD * 2 + "    NEXT\nENDFUNC",
+        ):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                _apply_egg_wild_seed_fallback_text(text)
+
     def test_terminal_egg_lookup_failure_keeps_the_current_game_screen(self):
         original = """\
 FUNC 孵蛋流程_执行孵化与个体反查(): INT
@@ -1198,7 +1393,43 @@ ENDFUNC
             self.assertNotIn(forbidden_reset, non_target_no_egg)
         self.assertIn("连续命中目标Seed且无蛋超过处理上限，停止以避免死循环", template)
         self.assertIn("FUNC 孵蛋流程_候选个体是否完全一致(): INT", template)
+        self.assertIn("FUNC 孵蛋流程_合并当前方法候选($方法: INT): INT", template)
         self.assertIn("FUNC 孵蛋流程_选择校准候选(): INT", template)
+        self.assertIn(EGG_REVERSE_LOOKUP_POLICY_MARKER, template)
+        self.assertIn(
+            "$孵蛋流程跨方法候选总数 += $孵蛋流程合并方法总数",
+            template,
+        )
+        self.assertIn(
+            "$孵蛋流程实际方法 = $孵蛋流程最佳候选方法",
+            template,
+        )
+        method_scan = template.split(EGG_REVERSE_LOOKUP_POLICY_MARKER, 1)[1]
+        method_scan = method_scan.split("            NEXT", 1)[0]
+        self.assertNotIn("BREAK", method_scan)
+        self.assertIn(
+            "$孵蛋流程候选参考Held帧 = $孵蛋流程上次确认实际Held帧 + $孵蛋流程本轮Held总执行修正帧 - $孵蛋流程上次确认Held总执行修正帧",
+            template,
+        )
+        self.assertIn("$孵蛋流程无蛋跳出估计落点", template)
+        self.assertIn("$孵蛋流程无蛋跳出最佳预测落点", template)
+        self.assertIn(
+            "$孵蛋流程无蛋跳出候选预测落点 % 2 != $孵蛋生成目标帧 % 2",
+            template,
+        )
+        self.assertIn(
+            "$孵蛋流程无蛋跳出候选偏移 = $孵蛋流程无蛋跳出候选预测落点 - $孵蛋流程无蛋跳出估计落点",
+            template,
+        )
+        self.assertIn(
+            "$孵蛋流程无蛋预测Held帧 = $孵蛋流程无蛋跳出最佳预测落点",
+            template,
+        )
+        self.assertIn(
+            "$孵蛋流程候选参考Held帧 = $孵蛋流程无蛋跳出最佳预测落点",
+            template,
+        )
+        self.assertNotIn("$孵蛋流程无蛋跳出包络宽度", template)
         self.assertIn("已在孵化蛋能力页识别到闪光，目标命中并结束反查", template)
         self.assertIn(
             "$孵蛋流程请求Held帧 = $孵蛋生成目标帧 - $孵蛋Held固定预校准帧 + $孵蛋Held执行修正帧",
