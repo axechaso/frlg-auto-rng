@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from app_paths import DATA_ROOT, RESOURCE_ROOT
+from fingerprint_policy import record_fingerprint_mismatch
 
 
 SEED_BASE_URL = "https://lincoln-lm.github.io/ten-lines/generated"
@@ -453,14 +454,20 @@ def _validate_easycon_candidate(
     source_directory: Path,
     ezcon_path: Path,
     progress: ProgressCallback | None,
+    *,
+    fingerprint_warning_only: bool = False,
+    fingerprint_warnings: list[str] | None = None,
 ) -> None:
     if not ezcon_path.is_file():
         raise FileNotFoundError(f"找不到 ezcon.exe：{ezcon_path}")
     actual_sha256 = _sha256(ezcon_path.read_bytes())
     if actual_sha256 != EXPECTED_EZCON_SHA256:
-        raise SeedTableUpdateError(
-            "Seed 表校验只允许已审计的 EasyCon 1.6.4-a；ezcon.exe 指纹为 "
-            + actual_sha256
+        record_fingerprint_mismatch(
+            "Seed 表校验使用的 EasyCon 1.6.4-a ezcon.exe 指纹不一致: "
+            + actual_sha256,
+            warning_only=fingerprint_warning_only,
+            warnings=fingerprint_warnings,
+            exception_type=SeedTableUpdateError,
         )
     try:
         version = subprocess.run(
@@ -551,6 +558,7 @@ def update_seed_tables(
     data_root: str | Path = DATA_ROOT,
     progress: ProgressCallback | None = None,
     timeout: float = 25.0,
+    fingerprint_warning_only: bool = False,
 ) -> SeedTableUpdateResult:
     """Check official binaries, validate both ECS entries, then activate together."""
     store_root = seed_table_store_root(data_root)
@@ -564,6 +572,7 @@ def update_seed_tables(
     _validate_base_modes("fr", fr_table)
     _validate_base_modes("lg", lg_table)
     fingerprint = _sha256(fr_data + b"\0" + lg_data)
+    fingerprint_warnings: list[str] = []
     current = store_root / "current"
     if current.exists():
         try:
@@ -622,7 +631,11 @@ def update_seed_tables(
             Path(source_directory).resolve(),
             Path(ezcon_path).resolve(),
             progress,
+            fingerprint_warning_only=fingerprint_warning_only,
+            fingerprint_warnings=fingerprint_warnings,
         )
+        for warning in fingerprint_warnings:
+            _notify(progress, warning)
         _notify(progress, "两份主脚本校验通过，正在同时切换新 Seed 表……")
         active = _activate_candidate(candidate, store_root)
     except Exception:

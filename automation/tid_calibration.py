@@ -70,7 +70,14 @@ def calibrated_tid_request(request: TidRngRequest, values: dict[str, int]) -> Ti
     return calibrated
 
 
-def validate_tid_plan_runtime(ezcon_path, plan_dir, *, is_flow, calibrate_first=False):
+def validate_tid_plan_runtime(
+    ezcon_path,
+    plan_dir,
+    *,
+    is_flow,
+    calibrate_first=False,
+    fingerprint_warning_only=False,
+):
     """Preflight all available stages, including the optional calibration."""
     plan_dir = Path(plan_dir)
     if is_flow:
@@ -80,12 +87,21 @@ def validate_tid_plan_runtime(ezcon_path, plan_dir, *, is_flow, calibrate_first=
             plan_dir / "01_id" / "main.ecs",
             plan_dir / "02_lab_bridge" / "main.ecs",
             None if payload.get("deferred_identity") else plan_dir / "03_starter_118" / "main.ecs",
+            fingerprint_warning_only=fingerprint_warning_only,
         )
     else:
-        check = validate_tid_runtime(ezcon_path, plan_dir / "main.ecs")
+        check = validate_tid_runtime(
+            ezcon_path,
+            plan_dir / "main.ecs",
+            fingerprint_warning_only=fingerprint_warning_only,
+        )
     if not calibrate_first:
         return check
-    calibration = validate_tid_runtime(ezcon_path, plan_dir / "00_calibration" / "main.ecs")
+    calibration = validate_tid_runtime(
+        ezcon_path,
+        plan_dir / "00_calibration" / "main.ecs",
+        fingerprint_warning_only=fingerprint_warning_only,
+    )
     return EasyConRuntimeCheck(
         check.ok and calibration.ok,
         check.errors + calibration.errors,

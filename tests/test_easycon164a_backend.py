@@ -179,6 +179,57 @@ ENDFUNC
                 preview_port=65536,
             )
 
+    def test_advanced_mode_only_downgrades_runtime_fingerprint_mismatches(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            ezcon = root / "ezcon.exe"
+            ezcon.write_bytes(b"modified")
+            project = root / "project"
+            (project / "lib").mkdir(parents=True)
+            (project / "ImgLabel").mkdir()
+            main = project / "main.ecs"
+            main.write_text("PRINT test\n", encoding="utf-8")
+            label_manifest = {
+                "count": backend.EXPECTED_LABEL_COUNT,
+                "methods": backend.EXPECTED_LABEL_METHODS,
+                "sha256": "modified-labels",
+            }
+            version = subprocess.CompletedProcess(
+                [], 0, stdout=backend.EXPECTED_EZCON_VERSION + "\n", stderr=""
+            )
+            formatted = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+            with mock.patch.object(
+                backend, "EXPECTED_EZCON_SHA256", "0" * 64
+            ), mock.patch.object(
+                backend, "EXPECTED_TESSDATA_SHA256", {}
+            ), mock.patch.object(
+                backend, "inspect_label_corpus", return_value=label_manifest
+            ), mock.patch.object(
+                backend.subprocess, "run", side_effect=(version, formatted)
+            ):
+                check = backend.validate_runtime(
+                    ezcon, main, fingerprint_warning_only=True
+                )
+
+            self.assertTrue(check.ok, check.errors)
+            warning_text = "\n".join(check.warnings)
+            self.assertIn("ezcon.exe 指纹不一致", warning_text)
+            self.assertIn("标签指纹不一致", warning_text)
+
+            (project / "lib").rmdir()
+            with mock.patch.object(
+                backend, "EXPECTED_EZCON_SHA256", "0" * 64
+            ), mock.patch.object(
+                backend, "EXPECTED_TESSDATA_SHA256", {}
+            ), mock.patch.object(
+                backend, "inspect_label_corpus", return_value=label_manifest
+            ):
+                missing = backend.validate_runtime(
+                    ezcon, main, fingerprint_warning_only=True
+                )
+            self.assertFalse(missing.ok)
+            self.assertIn("缺少 lib", "\n".join(missing.errors))
+
     def test_compat_runner_is_pinned_and_receives_audited_ocr_models(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -250,6 +301,67 @@ ENDFUNC
                 self.assertEqual((runner_dir / "Tessdata" / name).read_bytes(), data)
             for relative_name, data in native_files.items():
                 self.assertEqual((runner_dir / Path(relative_name)).read_bytes(), data)
+
+    def test_advanced_mode_warns_for_all_compat_runner_hash_mismatches(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            publish = root / "publish"
+            runner_dir = root / "runner"
+            (publish / "Tessdata").mkdir(parents=True)
+            runner_dir.mkdir()
+            ezcon = publish / "ezcon.exe"
+            runner = runner_dir / "EasyCon2.CLI.exe"
+            ezcon.write_bytes(b"modified-ezcon")
+            runner.write_bytes(b"modified-runner")
+            models = {
+                "frlg_battle.traineddata": b"modified-battle",
+                "FRLG_EN_ALL.traineddata": b"modified-english",
+            }
+            for name, data in models.items():
+                (publish / "Tessdata" / name).write_bytes(data)
+            native_files = {
+                "x64/leptonica-1.82.0.dll": b"modified-leptonica",
+                "x64/tesseract50.dll": b"modified-tesseract",
+            }
+            for relative_name, data in native_files.items():
+                path = runner_dir / Path(relative_name)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            runner.with_name("build-manifest.json").write_text(
+                json.dumps({
+                    "source_commit": backend.EXPECTED_COMPAT_SOURCE_COMMIT,
+                    "patch_id": backend.EXPECTED_COMPAT_PATCH_ID,
+                    "sha256": "0" * 64,
+                }),
+                encoding="utf-8",
+            )
+            completed = subprocess.CompletedProcess(
+                [], 0, stdout=backend.EXPECTED_EZCON_VERSION + "\n", stderr=""
+            )
+            warnings = []
+            with mock.patch.object(
+                backend, "EXPECTED_EZCON_SHA256", "1" * 64
+            ), mock.patch.object(
+                backend,
+                "EXPECTED_TESSDATA_SHA256",
+                {name: "2" * 64 for name in models},
+            ), mock.patch.object(
+                backend,
+                "EXPECTED_COMPAT_OCR_NATIVE_SHA256",
+                {name: "3" * 64 for name in native_files},
+            ), mock.patch.object(
+                backend.subprocess, "run", return_value=completed
+            ):
+                result = backend.prepare_compat_runner(
+                    ezcon,
+                    runner,
+                    fingerprint_warning_only=True,
+                    fingerprint_warnings=warnings,
+                )
+
+            self.assertEqual(result, runner.resolve())
+            self.assertEqual(len(warnings), 6)
+            self.assertTrue(all(message.startswith("高级模式指纹警告：") for message in warnings))
 
 
 if __name__ == "__main__":

@@ -66,6 +66,29 @@ class TidTemplateRevisionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "英文版.*指纹不一致"):
                 verify_tid_package(".")
 
+    def test_advanced_mode_warns_for_unknown_tid_script_and_label_hashes(self):
+        manifest = {
+            "scripts": {
+                "英文": {"sha256": "unknown-en", "filename": TID_SCRIPT_NAMES["英文"]},
+                "日文": {"sha256": "unknown-jp", "filename": TID_SCRIPT_NAMES["日文"]},
+            },
+            "labels": {
+                "count": EXPECTED_TID_LABEL_COUNT,
+                "methods": EXPECTED_TID_LABEL_METHODS,
+                "sha256": "unknown-labels",
+            },
+        }
+        warnings = []
+        with patch("automation.tid_rng137.inspect_tid_package", return_value=manifest):
+            result = verify_tid_package(
+                ".",
+                fingerprint_warning_only=True,
+                fingerprint_warnings=warnings,
+            )
+        self.assertEqual(result, manifest)
+        self.assertEqual(len(warnings), 3)
+        self.assertTrue(all(message.startswith("高级模式指纹警告：") for message in warnings))
+
     def test_import_copies_selected_rewrite_and_preserves_old_text_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

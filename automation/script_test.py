@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app_paths import RESOURCE_ROOT
+from fingerprint_policy import record_fingerprint_mismatch
 
 from .easycon118 import (
     EASYCON118_EXTENSION_LABEL_DIR,
@@ -72,6 +73,8 @@ def prepare_script_test_runtime(
     ezcon_path: str | Path,
     script_path: str | Path,
     backend: str,
+    *,
+    fingerprint_warning_only: bool = False,
 ) -> ScriptTestPreparation:
     """Validate an arbitrary ECS project without applying 1.1.8 rewrites.
 
@@ -99,12 +102,16 @@ def prepare_script_test_runtime(
             errors.append(f"无法读取 ezcon.exe: {exc}")
         else:
             if actual_sha256 != EXPECTED_EZCON_SHA256:
-                errors.append(
-                    "EasyCon 1.6.4-a ezcon.exe 指纹不一致，拒绝运行: "
-                    + actual_sha256
+                record_fingerprint_mismatch(
+                    "EasyCon 1.6.4-a ezcon.exe 指纹不一致: " + actual_sha256,
+                    warning_only=fingerprint_warning_only,
+                    errors=errors,
+                    warnings=warnings,
                 )
-            else:
-                ezcon_is_pinned = True
+            ezcon_is_pinned = (
+                actual_sha256 == EXPECTED_EZCON_SHA256
+                or fingerprint_warning_only
+            )
 
     if not script_path.is_file():
         errors.append(f"找不到所选 ECS 脚本: {script_path}")
@@ -145,8 +152,11 @@ def prepare_script_test_runtime(
                 errors.append(f"无法读取 EasyCon Tessdata/{model}: {exc}")
                 continue
             if actual_sha256 != expected_sha256:
-                errors.append(
-                    f"EasyCon Tessdata/{model} 指纹不一致: {actual_sha256}"
+                record_fingerprint_mismatch(
+                    f"EasyCon Tessdata/{model} 指纹不一致: {actual_sha256}",
+                    warning_only=fingerprint_warning_only,
+                    errors=errors,
+                    warnings=warnings,
                 )
 
     run_options = dict(
@@ -196,7 +206,11 @@ def prepare_script_test_runtime(
         warnings.append("运行后端：原始 1.6.4-a CLI（不含工具兼容补丁）")
     elif backend == SCRIPT_TEST_BACKEND_COMPAT and ezcon_is_pinned and not errors:
         try:
-            runner_path = prepare_compat_runner(ezcon_path)
+            runner_path = prepare_compat_runner(
+                ezcon_path,
+                fingerprint_warning_only=fingerprint_warning_only,
+                fingerprint_warnings=warnings,
+            )
         except (OSError, ValueError, RuntimeError) as exc:
             errors.append(f"工具兼容运行器预检失败: {exc}")
         else:

@@ -136,7 +136,61 @@ class DirectScriptTestTests(unittest.TestCase):
 
             self.assertTrue(preparation.check.ok, preparation.check.errors)
             self.assertEqual(preparation.runner_path, runner)
-            prepare_runner.assert_called_once_with(ezcon.resolve())
+            prepare_runner.assert_called_once_with(
+                ezcon.resolve(),
+                fingerprint_warning_only=False,
+                fingerprint_warnings=mock.ANY,
+            )
+
+    def test_advanced_mode_warns_for_hash_mismatches_but_keeps_hard_checks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            main = self._project(root)
+            ezcon = root / "ezcon.exe"
+            ezcon.write_bytes(b"locally-modified-ezcon")
+            tessdata = root / "Tessdata"
+            tessdata.mkdir()
+            model_name = "FRLG_EN_ALL.traineddata"
+            (tessdata / model_name).write_bytes(b"locally-modified-model")
+            completed = subprocess.CompletedProcess(
+                [], 0, stdout=script_test.EXPECTED_EZCON_VERSION + "\n", stderr=""
+            )
+            with mock.patch.object(
+                script_test, "EXPECTED_EZCON_SHA256", "0" * 64
+            ), mock.patch.object(
+                script_test, "EXPECTED_TESSDATA_SHA256", {model_name: "1" * 64}
+            ), mock.patch.object(
+                script_test.subprocess, "run", side_effect=(completed, completed)
+            ):
+                preparation = script_test.prepare_script_test_runtime(
+                    ezcon,
+                    main,
+                    script_test.SCRIPT_TEST_BACKEND_ORIGINAL,
+                    fingerprint_warning_only=True,
+                )
+
+            self.assertTrue(preparation.check.ok, preparation.check.errors)
+            warning_text = "\n".join(preparation.check.warnings)
+            self.assertIn("高级模式指纹警告", warning_text)
+            self.assertIn("ezcon.exe 指纹不一致", warning_text)
+            self.assertIn(f"Tessdata/{model_name} 指纹不一致", warning_text)
+
+            (tessdata / model_name).unlink()
+            with mock.patch.object(
+                script_test, "EXPECTED_EZCON_SHA256", "0" * 64
+            ), mock.patch.object(
+                script_test, "EXPECTED_TESSDATA_SHA256", {model_name: "1" * 64}
+            ), mock.patch.object(
+                script_test.subprocess, "run", side_effect=(completed, completed)
+            ):
+                missing = script_test.prepare_script_test_runtime(
+                    ezcon,
+                    main,
+                    script_test.SCRIPT_TEST_BACKEND_ORIGINAL,
+                    fingerprint_warning_only=True,
+                )
+            self.assertFalse(missing.check.ok)
+            self.assertIn("Tessdata 缺少", "\n".join(missing.check.errors))
 
     def test_missing_ocr_model_blocks_raw_and_compat_comparison(self):
         with tempfile.TemporaryDirectory() as temporary:

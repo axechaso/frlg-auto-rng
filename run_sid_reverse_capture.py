@@ -414,6 +414,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-path", type=Path)
     parser.add_argument("--report-path", type=Path)
     parser.add_argument("--stop-file", type=Path)
+    parser.add_argument(
+        "--fingerprint-warnings",
+        action="store_true",
+        help="仅将已审计文件的指纹不一致记录为警告",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -456,7 +461,14 @@ def main(argv: list[str] | None = None) -> int:
         ports, videos, device_output = probe_easycon_devices(args.ezcon)
         _safe_print(device_output)
         port, video = _select_device(ports, videos, args.port, args.video)
-        runner = prepare_compat_runner(args.ezcon)
+        runner_warnings: list[str] = []
+        runner = prepare_compat_runner(
+            args.ezcon,
+            fingerprint_warning_only=args.fingerprint_warnings,
+            fingerprint_warnings=runner_warnings,
+        )
+        for warning in runner_warnings:
+            _safe_print(warning, file=sys.stderr)
     except (OSError, RuntimeError, ValueError) as exc:
         _safe_print(f"SID反查启动失败: {exc}", file=sys.stderr)
         return 1
@@ -484,9 +496,16 @@ def main(argv: list[str] | None = None) -> int:
                     base_request,
                     slot,
                 )
-                check = validate_runtime(args.ezcon, main_path)
+                check = validate_runtime(
+                    args.ezcon,
+                    main_path,
+                    fingerprint_warning_only=args.fingerprint_warnings,
+                )
                 if not check.ok:
                     raise RuntimeError("\n".join(check.errors))
+                for warning in getattr(check, "warnings", ()):
+                    if warning.startswith("高级模式指纹警告："):
+                        _safe_print(warning, file=sys.stderr)
                 command = build_run_command(
                     runner,
                     main_path,

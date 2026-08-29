@@ -540,6 +540,8 @@ def write_tid_starter_flow_bundle(
     plan: TidStarterFlowPlan,
     *,
     starter_source_dir: str | Path,
+    fingerprint_warning_only: bool = False,
+    fingerprint_warnings: list[str] | None = None,
 ) -> Path:
     """Write the ID, lab bridge, and configured existing 1.1.8 starter stage."""
     source_dir = Path(source_dir).resolve()
@@ -553,6 +555,8 @@ def write_tid_starter_flow_bundle(
         id_dir,
         plan.request.to_flow_tid_request(),
         include_flow_marker=True,
+        fingerprint_warning_only=fingerprint_warning_only,
+        fingerprint_warnings=fingerprint_warnings,
     )
     id_template = (id_dir / "main.ecs").read_text(encoding="utf-8")
     if plan.request.accept_any_tid:
@@ -644,9 +648,19 @@ def validate_tid_starter_flow_runtime(
     id_main: str | Path,
     bridge_main: str | Path,
     starter_main: str | Path | None,
+    *,
+    fingerprint_warning_only: bool = False,
 ) -> EasyConRuntimeCheck:
     """Validate available flow stages with pinned EasyCon 1.6.4-a."""
-    base = validate_tid_runtime(ezcon_path, id_main)
+    base = (
+        validate_tid_runtime(
+            ezcon_path,
+            id_main,
+            fingerprint_warning_only=True,
+        )
+        if fingerprint_warning_only
+        else validate_tid_runtime(ezcon_path, id_main)
+    )
     errors = list(base.errors)
     warnings = list(base.warnings)
     ezcon_path = Path(ezcon_path).resolve()
@@ -679,7 +693,15 @@ def validate_tid_starter_flow_runtime(
             "穷举模式将在取得实际TID和SID ADV后生成御三家工程，并在运行前立即预检。"
         )
     else:
-        starter = validate_runtime(ezcon_path, Path(starter_main).resolve())
+        starter = (
+            validate_runtime(
+                ezcon_path,
+                Path(starter_main).resolve(),
+                fingerprint_warning_only=True,
+            )
+            if fingerprint_warning_only
+            else validate_runtime(ezcon_path, Path(starter_main).resolve())
+        )
         errors.extend(starter.errors)
         warnings.extend(starter.warnings)
     return EasyConRuntimeCheck(not errors, tuple(errors), tuple(warnings))

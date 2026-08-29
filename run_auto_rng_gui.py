@@ -1779,7 +1779,7 @@ class AutoRngApp:
         self.advanced_mode_var = tk.BooleanVar(value=False)
         self.advanced_mode_check = ttk.Checkbutton(
             manual_tools,
-            text="高级模式（显示直接脚本测试页）",
+            text="高级模式（直接脚本页；所有指纹仅警告）",
             variable=self.advanced_mode_var,
             command=self._toggle_advanced_mode,
         )
@@ -3189,6 +3189,7 @@ class AutoRngApp:
             return
         source_directory = Path(self.source_var.get()).resolve()
         ezcon_path = Path(self.ezcon_var.get()).resolve()
+        fingerprint_warning_only = self.advanced_mode_var.get()
         self.set_run_log("Seed 表更新日志")
         self.show_run_log_tab()
         self.set_busy(True, "正在检查 Ten Lines 官方 Seed 表……")
@@ -3202,6 +3203,7 @@ class AutoRngApp:
                     source_directory=source_directory,
                     ezcon_path=ezcon_path,
                     progress=progress,
+                    fingerprint_warning_only=fingerprint_warning_only,
                 )
             except Exception as exc:
                 self.root.after(0, lambda error=exc: self.finish_seed_table_update(error=error))
@@ -3300,6 +3302,7 @@ class AutoRngApp:
             continue_capture_after_shiny=self.auto_capture_var.get(),
             home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
         )
+        fingerprint_warning_only = self.advanced_mode_var.get()
         input_fingerprint = self.input_fingerprint()
         self.plan_result = None
         self.egg_request = None
@@ -3339,7 +3342,11 @@ class AutoRngApp:
                             result.plan,
                             easycon_options,
                         )
-                        check = validate_runtime(ezcon_path, project_main)
+                        check = validate_runtime(
+                            ezcon_path,
+                            project_main,
+                            fingerprint_warning_only=fingerprint_warning_only,
+                        )
                     except Exception as exc:
                         generation_error = exc
                 if cancel_event.is_set():
@@ -3363,6 +3370,7 @@ class AutoRngApp:
         script_path = Path(script_text)
         backend = self.script_test_backend_var.get()
         ezcon_path = Path(self.ezcon_var.get())
+        fingerprint_warning_only = self.advanced_mode_var.get()
         input_fingerprint = self.input_fingerprint()
         self.plan_result = None
         self.egg_request = None
@@ -3383,6 +3391,7 @@ class AutoRngApp:
                     ezcon_path,
                     script_path,
                     backend,
+                    fingerprint_warning_only=fingerprint_warning_only,
                 )
                 self.root.after(
                     0,
@@ -3443,6 +3452,7 @@ class AutoRngApp:
         source_path = Path(self.sid_source_var.get())
         ezcon_path = Path(self.ezcon_var.get())
         input_fingerprint = self.input_fingerprint()
+        fingerprint_warning_only = self.advanced_mode_var.get()
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
@@ -3458,7 +3468,11 @@ class AutoRngApp:
             try:
                 output = WRITABLE_ROOT / "runtime" / "sid_reverse"
                 project_main = write_sid_reverse_project(source_path, output, request)
-                check = validate_runtime(ezcon_path, project_main)
+                check = validate_runtime(
+                    ezcon_path,
+                    project_main,
+                    fingerprint_warning_only=fingerprint_warning_only,
+                )
                 self.root.after(
                     0,
                     lambda: self.finish_sid_generation(
@@ -3522,6 +3536,7 @@ class AutoRngApp:
         starter_source_path = Path(self.source_var.get())
         ezcon_path = Path(self.ezcon_var.get())
         input_fingerprint = self.input_fingerprint()
+        fingerprint_warning_only = self.advanced_mode_var.get()
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
@@ -3560,6 +3575,7 @@ class AutoRngApp:
 
         def worker():
             try:
+                fingerprint_warnings: list[str] = []
                 flow_plan = None
                 if flow_request is not None:
                     output = WRITABLE_ROOT / "runtime" / "tid_starter_flow"
@@ -3569,18 +3585,35 @@ class AutoRngApp:
                         output,
                         flow_plan,
                         starter_source_dir=starter_source_path,
+                        fingerprint_warning_only=fingerprint_warning_only,
+                        fingerprint_warnings=fingerprint_warnings,
                     )
                     project_main = output / "01_id" / "main.ecs"
                 else:
                     output = WRITABLE_ROOT / "runtime" / "tid_rng137"
                     project_main = write_configured_tid_project(
-                        source_path, output, replace(request, calibration_check=False)
+                        source_path,
+                        output,
+                        replace(request, calibration_check=False),
+                        fingerprint_warning_only=fingerprint_warning_only,
+                        fingerprint_warnings=fingerprint_warnings,
                     )
                 if request.calibration_check:
-                    write_configured_tid_project(source_path, output / "00_calibration", request)
+                    write_configured_tid_project(
+                        source_path,
+                        output / "00_calibration",
+                        request,
+                        fingerprint_warning_only=fingerprint_warning_only,
+                        fingerprint_warnings=fingerprint_warnings,
+                    )
                 check = validate_tid_plan_runtime(
                     ezcon_path, output, is_flow=flow_plan is not None,
                     calibrate_first=request.calibration_check,
+                    fingerprint_warning_only=fingerprint_warning_only,
+                )
+                check = replace(
+                    check,
+                    warnings=tuple(dict.fromkeys(fingerprint_warnings)) + check.warnings,
                 )
                 plan_dir = WRITABLE_ROOT / "rng_logs" / "plans"
                 plan_dir.mkdir(parents=True, exist_ok=True)
@@ -3720,6 +3753,7 @@ class AutoRngApp:
         source_path = Path(self.source_var.get())
         ezcon_path = Path(self.ezcon_var.get())
         input_fingerprint = self.input_fingerprint()
+        fingerprint_warning_only = self.advanced_mode_var.get()
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
@@ -3735,7 +3769,11 @@ class AutoRngApp:
             try:
                 output = WRITABLE_ROOT / "runtime" / "easycon118"
                 project_main = write_configured_egg_project(source_path, output, request)
-                check = validate_runtime(ezcon_path, project_main)
+                check = validate_runtime(
+                    ezcon_path,
+                    project_main,
+                    fingerprint_warning_only=fingerprint_warning_only,
+                )
                 plan_dir = WRITABLE_ROOT / "rng_logs" / "plans"
                 plan_dir.mkdir(parents=True, exist_ok=True)
                 plan_path = plan_dir / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_egg.json")
@@ -3993,6 +4031,7 @@ class AutoRngApp:
         if not self.port_var.get().strip():
             messagebox.showerror("输入错误", "串口不能为空。")
             return
+        fingerprint_warning_only = self.advanced_mode_var.get()
         self._close_manual_tools()
         try:
             ports, videos, _ = probe_easycon_devices(Path(self.ezcon_var.get()))
@@ -4017,6 +4056,7 @@ class AutoRngApp:
                 Path(self.ezcon_var.get()),
                 Path(self.script_test_path_var.get()),
                 self.script_test_backend_var.get(),
+                fingerprint_warning_only=fingerprint_warning_only,
             )
             self.script_test_preparation = preparation
             self.project_main = preparation.script_path
@@ -4027,9 +4067,14 @@ class AutoRngApp:
                 Path(self.ezcon_var.get()),
                 self.project_main.parents[1] if is_flow else self.project_main.parent,
                 is_flow=is_flow, calibrate_first=self.tid_request.calibration_check,
+                fingerprint_warning_only=fingerprint_warning_only,
             )
         else:
-            check = validate_runtime(Path(self.ezcon_var.get()), self.project_main)
+            check = validate_runtime(
+                Path(self.ezcon_var.get()),
+                self.project_main,
+                fingerprint_warning_only=fingerprint_warning_only,
+            )
         self.runtime_check = check
         if not check.ok:
             messagebox.showerror("预检失败", "\n".join(check.errors))
@@ -4111,6 +4156,17 @@ class AutoRngApp:
             confirmation = (
                 "已开启固定延迟检测：先执行检测，再自动回填四项延迟与实际OP修正，"
                 "重新生成并预检下述计划，通过后自动继续；不会再次询问。\n\n" + confirmation
+            )
+        fingerprint_warnings = [
+            warning for warning in check.warnings
+            if warning.startswith("高级模式指纹警告：")
+        ]
+        if fingerprint_warnings:
+            confirmation = (
+                "高级模式已将以下指纹不一致降级为警告：\n"
+                + "\n".join(f"- {warning}" for warning in fingerprint_warnings)
+                + "\n\n"
+                + confirmation
             )
         if not messagebox.askyesno(
             "开始全自动流程",
@@ -4226,6 +4282,8 @@ class AutoRngApp:
                 "--preview-port",
                 str(preview_port),
             ])
+            if fingerprint_warning_only:
+                command.append("--fingerprint-warnings")
             command_cwd = ROOT
             self.running_mode = "sid"
         elif self.tid_request is not None:
@@ -4253,6 +4311,8 @@ class AutoRngApp:
                 "--preview-port",
                 str(preview_port),
             ])
+            if fingerprint_warning_only:
+                command.append("--fingerprint-warnings")
             if self.tid_request.mode == 0:
                 command.extend(["--tid-progress-dir", str(TID_PROGRESS_DIR),
                                 "--tid-game", self.tid_game_var.get()])
@@ -4273,11 +4333,21 @@ class AutoRngApp:
             command_cwd = ROOT
             self.running_mode = "tid_flow" if is_flow else "tid"
         else:
+            runner_fingerprint_warnings: list[str] = []
             try:
-                runner_path = prepare_compat_runner(Path(self.ezcon_var.get()))
+                runner_path = prepare_compat_runner(
+                    Path(self.ezcon_var.get()),
+                    fingerprint_warning_only=fingerprint_warning_only,
+                    fingerprint_warnings=runner_fingerprint_warnings,
+                )
             except (OSError, ValueError, RuntimeError) as exc:
                 messagebox.showerror("启动后端检查失败", str(exc))
                 return
+            if runner_fingerprint_warnings:
+                messagebox.showwarning(
+                    "高级模式指纹警告",
+                    "\n".join(runner_fingerprint_warnings),
+                )
             preview_port = allocate_preview_port()
             preview_url = f"http://127.0.0.1:{preview_port}/mjpeg"
             easycon_command = build_run_command(

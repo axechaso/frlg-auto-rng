@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from fingerprint_policy import record_fingerprint_mismatch
+
 from .tid_starter_save import (
     TID_STARTER_SAVE_NAME,
     TID_STARTER_SAVE_SUPPORTED_SHA256,
@@ -353,13 +355,22 @@ def inspect_tid_package(source_dir: str | Path) -> dict[str, Any]:
     return {"scripts": scripts, "labels": inspect_label_corpus(label_dir)}
 
 
-def verify_tid_package(source_dir: str | Path) -> dict[str, Any]:
+def verify_tid_package(
+    source_dir: str | Path,
+    *,
+    fingerprint_warning_only: bool = False,
+    fingerprint_warnings: list[str] | None = None,
+) -> dict[str, Any]:
     source_dir = Path(source_dir).resolve()
     manifest = inspect_tid_package(source_dir)
     for language, supported_sha256 in SUPPORTED_TID_SCRIPT_SHA256.items():
         actual = manifest["scripts"][language]["sha256"]
         if actual not in supported_sha256:
-            raise ValueError(f"{language}版 TID 1.3.7 脚本指纹不一致: {actual}")
+            record_fingerprint_mismatch(
+                f"{language}版 TID 1.3.7 脚本指纹不一致: {actual}",
+                warning_only=fingerprint_warning_only,
+                warnings=fingerprint_warnings,
+            )
     labels = manifest["labels"]
     if labels["count"] != EXPECTED_TID_LABEL_COUNT:
         raise ValueError(
@@ -368,7 +379,11 @@ def verify_tid_package(source_dir: str | Path) -> dict[str, Any]:
     if labels["methods"] != EXPECTED_TID_LABEL_METHODS:
         raise ValueError(f"TID 标签方法分布不一致: {labels['methods']}")
     if labels["sha256"] != EXPECTED_TID_LABEL_SHA256:
-        raise ValueError(f"TID 标签指纹不一致: {labels['sha256']}")
+        record_fingerprint_mismatch(
+            f"TID 标签指纹不一致: {labels['sha256']}",
+            warning_only=fingerprint_warning_only,
+            warnings=fingerprint_warnings,
+        )
     return manifest
 
 
@@ -456,10 +471,16 @@ def write_configured_tid_project(
     request: TidRngRequest,
     *,
     include_flow_marker: bool = False,
+    fingerprint_warning_only: bool = False,
+    fingerprint_warnings: list[str] | None = None,
 ) -> Path:
     source_dir = Path(source_dir).resolve()
     output_dir = Path(output_dir).resolve()
-    manifest = verify_tid_package(source_dir)
+    manifest = verify_tid_package(
+        source_dir,
+        fingerprint_warning_only=fingerprint_warning_only,
+        fingerprint_warnings=fingerprint_warnings,
+    )
     template_path = source_dir / manifest["scripts"][request.language]["filename"]
     template_text = template_path.read_text(encoding="utf-8-sig")
     configured = configure_tid_template_text(
@@ -514,6 +535,8 @@ def write_configured_tid_project(
 def validate_tid_runtime(
     ezcon_path: str | Path,
     project_main: str | Path,
+    *,
+    fingerprint_warning_only: bool = False,
 ) -> EasyConRuntimeCheck:
     ezcon_path = Path(ezcon_path).resolve()
     project_main = Path(project_main).resolve()
@@ -523,7 +546,12 @@ def validate_tid_runtime(
     if not ezcon_path.is_file():
         errors.append(f"找不到 ezcon.exe: {ezcon_path}")
     elif _sha256_file(ezcon_path) != EXPECTED_EZCON_SHA256:
-        errors.append("EasyCon 1.6.4-a ezcon.exe 指纹不一致，拒绝运行")
+        record_fingerprint_mismatch(
+            "EasyCon 1.6.4-a ezcon.exe 指纹不一致",
+            warning_only=fingerprint_warning_only,
+            errors=errors,
+            warnings=warnings,
+        )
     if not project_main.is_file():
         errors.append(f"找不到生成脚本: {project_main}")
     label_dir = project_main.parent / "ImgLabel"
@@ -542,7 +570,12 @@ def validate_tid_runtime(
             if labels["methods"] != EXPECTED_TID_LABEL_METHODS:
                 errors.append(f"TID 标签方法分布不一致: {labels['methods']}")
             if labels["sha256"] != EXPECTED_TID_LABEL_SHA256:
-                errors.append("TID 标签包不是已审计的 1.3.7 版本")
+                record_fingerprint_mismatch(
+                    f"TID 标签指纹不一致: {labels['sha256']}",
+                    warning_only=fingerprint_warning_only,
+                    errors=errors,
+                    warnings=warnings,
+                )
 
     run_options = dict(
         capture_output=True,

@@ -13,6 +13,7 @@ from typing import Any
 
 from assets.game_text import CATEGORY_EN_TO_ZH, location_to_zh
 from app_paths import RESOURCE_ROOT
+from fingerprint_policy import record_fingerprint_mismatch
 from tenlines_seed_updater import apply_easycon_seed_table_overrides
 
 from .planner import RunPlan
@@ -2547,6 +2548,8 @@ def write_configured_egg_project(
 def validate_runtime(
     ezcon_path: str | Path,
     project_main: str | Path,
+    *,
+    fingerprint_warning_only: bool = False,
 ) -> EasyConRuntimeCheck:
     ezcon_path = Path(ezcon_path).resolve()
     project_main = Path(project_main).resolve()
@@ -2562,9 +2565,11 @@ def validate_runtime(
             errors.append(f"无法读取 ezcon.exe: {exc}")
         else:
             if ezcon_sha256 != EXPECTED_EZCON_SHA256:
-                errors.append(
-                    "EasyCon 1.6.4a ezcon.exe 指纹不一致，拒绝运行: "
-                    + ezcon_sha256
+                record_fingerprint_mismatch(
+                    "EasyCon 1.6.4a ezcon.exe 指纹不一致: " + ezcon_sha256,
+                    warning_only=fingerprint_warning_only,
+                    errors=errors,
+                    warnings=warnings,
                 )
     if not project_main.is_file():
         errors.append(f"找不到生成脚本: {project_main}")
@@ -2589,9 +2594,12 @@ def validate_runtime(
                     f"1.1.8 标签方法分布不一致: {corpus['methods']}"
                 )
             if corpus["sha256"] != EXPECTED_LABEL_SHA256:
-                errors.append(
+                record_fingerprint_mismatch(
                     "1.1.8 标签指纹不一致，可能不是已审计的完整标签包: "
-                    + corpus["sha256"]
+                    + corpus["sha256"],
+                    warning_only=fingerprint_warning_only,
+                    errors=errors,
+                    warnings=warnings,
                 )
 
     tessdata_dir = ezcon_path.parent / "Tessdata"
@@ -2606,7 +2614,12 @@ def validate_runtime(
             errors.append(f"无法读取 EasyCon Tessdata/{model}: {exc}")
             continue
         if model_sha256 != expected_sha256:
-            errors.append(f"EasyCon Tessdata/{model} 指纹不一致: {model_sha256}")
+            record_fingerprint_mismatch(
+                f"EasyCon Tessdata/{model} 指纹不一致: {model_sha256}",
+                warning_only=fingerprint_warning_only,
+                errors=errors,
+                warnings=warnings,
+            )
 
     if ezcon_path.is_file() and project_main.is_file() and not errors:
         run_options = dict(
@@ -2699,6 +2712,9 @@ def build_run_command(
 def prepare_compat_runner(
     ezcon_path: str | Path,
     runner_path: str | Path = DEFAULT_COMPAT_RUNNER_PATH,
+    *,
+    fingerprint_warning_only: bool = False,
+    fingerprint_warnings: list[str] | None = None,
 ) -> Path:
     """Validate the pinned latest-frame CLI and sync audited local-OCR assets.
 
@@ -2714,8 +2730,14 @@ def prepare_compat_runner(
     runner_path = Path(runner_path).resolve()
     if not ezcon_path.is_file():
         raise FileNotFoundError(f"找不到原始 EasyCon 1.6.4-a ezcon.exe: {ezcon_path}")
-    if hashlib.sha256(ezcon_path.read_bytes()).hexdigest() != EXPECTED_EZCON_SHA256:
-        raise ValueError("原始 EasyCon 1.6.4-a ezcon.exe 指纹不一致，拒绝准备兼容运行器")
+    warnings = fingerprint_warnings if fingerprint_warnings is not None else []
+    ezcon_sha256 = hashlib.sha256(ezcon_path.read_bytes()).hexdigest()
+    if ezcon_sha256 != EXPECTED_EZCON_SHA256:
+        record_fingerprint_mismatch(
+            f"原始 EasyCon 1.6.4-a ezcon.exe 指纹不一致: {ezcon_sha256}",
+            warning_only=fingerprint_warning_only,
+            warnings=warnings,
+        )
     if not runner_path.is_file():
         raise FileNotFoundError(
             "缺少 EasyCon 1.6.4-a GUI 持续采帧兼容运行器；请先运行 "
@@ -2735,7 +2757,11 @@ def prepare_compat_runner(
         raise ValueError("兼容运行器补丁标识不一致")
     runner_sha256 = hashlib.sha256(runner_path.read_bytes()).hexdigest()
     if manifest.get("sha256") != runner_sha256:
-        raise ValueError(f"兼容运行器指纹不一致: {runner_sha256}")
+        record_fingerprint_mismatch(
+            f"兼容运行器指纹不一致: {runner_sha256}",
+            warning_only=fingerprint_warning_only,
+            warnings=warnings,
+        )
 
     try:
         version = subprocess.run(
@@ -2763,8 +2789,13 @@ def prepare_compat_runner(
         source = source_tessdata / model
         if not source.is_file():
             raise FileNotFoundError(f"原始 EasyCon Tessdata 缺少 {model}")
-        if hashlib.sha256(source.read_bytes()).hexdigest() != expected_sha256:
-            raise ValueError(f"原始 EasyCon Tessdata/{model} 指纹不一致")
+        source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+        if source_sha256 != expected_sha256:
+            record_fingerprint_mismatch(
+                f"原始 EasyCon Tessdata/{model} 指纹不一致: {source_sha256}",
+                warning_only=fingerprint_warning_only,
+                warnings=warnings,
+            )
         target = target_tessdata / model
         if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha256:
             shutil.copy2(source, target)
@@ -2777,8 +2808,10 @@ def prepare_compat_runner(
             )
         native_sha256 = hashlib.sha256(native_path.read_bytes()).hexdigest()
         if native_sha256 != expected_sha256:
-            raise ValueError(
-                f"兼容运行器 OCR 原生依赖/{relative_name} 指纹不一致: {native_sha256}"
+            record_fingerprint_mismatch(
+                f"兼容运行器 OCR 原生依赖/{relative_name} 指纹不一致: {native_sha256}",
+                warning_only=fingerprint_warning_only,
+                warnings=warnings,
             )
     return runner_path
 

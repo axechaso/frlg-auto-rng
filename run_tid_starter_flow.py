@@ -95,6 +95,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tid-game", choices=("火红", "叶绿"))
     parser.add_argument("--fresh-exhaustive", action="store_true")
     parser.add_argument("--stop-file", type=Path)
+    parser.add_argument(
+        "--fingerprint-warnings",
+        action="store_true",
+        help="仅将已审计文件的指纹不一致记录为警告",
+    )
     return parser.parse_args()
 
 
@@ -272,6 +277,8 @@ def run_exhaustive_flow(
     flow_dir: Path,
     payload: dict[str, object],
     ezcon_path: Path,
+    *,
+    fingerprint_warning_only: bool = False,
 ) -> int:
     """Continue from an exhaustive TID hit using its real TID and SID ADV."""
     id_main = flow_dir / "01_id" / "main_attempt_000.ecs"
@@ -312,7 +319,15 @@ def run_exhaustive_flow(
         f"ADV={target.advances} / PID={target.pid_hex}"
     )
     try:
-        check = validate_runtime(ezcon_path, starter_main)
+        check = (
+            validate_runtime(
+                ezcon_path,
+                starter_main,
+                fingerprint_warning_only=True,
+            )
+            if fingerprint_warning_only
+            else validate_runtime(ezcon_path, starter_main)
+        )
     except (OSError, ValueError, RuntimeError) as exc:
         flow.output(f"[流程错误] 动态御三家工程预检异常：{exc}")
         return 2
@@ -352,6 +367,7 @@ def run_tid_plan(
     progress_dir: Path | None = None,
     game: str | None = None,
     resume: bool = True,
+    fingerprint_warning_only: bool = False,
 ) -> int:
     """Own calibration and continuation even if the GUI has been closed."""
     try:
@@ -379,7 +395,15 @@ def run_tid_plan(
             initial = tid_request_from_dict(calibration_manifest["tid_request"])
             if not initial.calibration_check or replace(initial, calibration_check=False) != request:
                 raise ValueError("固定延迟检测与正式计划的参数快照不一致，请重新生成")
-            check = validate_tid_runtime(ezcon_path, calibration_dir / "main.ecs")
+            check = (
+                validate_tid_runtime(
+                    ezcon_path,
+                    calibration_dir / "main.ecs",
+                    fingerprint_warning_only=True,
+                )
+                if fingerprint_warning_only
+                else validate_tid_runtime(ezcon_path, calibration_dir / "main.ecs")
+            )
             if not check.ok:
                 raise ValueError("固定延迟脚本预检失败：" + "; ".join(check.errors))
             code = flow.run_stage(0, "固定延迟检测（完成后自动执行计划）", calibration_dir / "main.ecs")
@@ -403,7 +427,14 @@ def run_tid_plan(
                 return 130
             source = Path(calibration_manifest["source"])
             # JSON stringifies numeric label-method keys in the saved manifest.
-            current_manifest = json.loads(json.dumps(verify_tid_package(source)))
+            fingerprint_warnings: list[str] = []
+            current_manifest = json.loads(json.dumps(verify_tid_package(
+                source,
+                fingerprint_warning_only=fingerprint_warning_only,
+                fingerprint_warnings=fingerprint_warnings,
+            )))
+            for warning in fingerprint_warnings:
+                flow.output(warning)
             if current_manifest != calibration_manifest["source_manifest"]:
                 raise ValueError("检测期间TID源包发生变化，请重新生成计划")
             # A new directory protects the original plan and all previous runs.
@@ -413,13 +444,32 @@ def run_tid_plan(
                 write_tid_starter_flow_bundle(
                     source, plan_dir, updated_plan,
                     starter_source_dir=Path(payload["starter_source_dir"]),
+                    fingerprint_warning_only=fingerprint_warning_only,
+                    fingerprint_warnings=fingerprint_warnings,
                 )
                 payload = json.loads((plan_dir / "flow_plan.json").read_text(encoding="utf-8"))
             else:
-                write_configured_tid_project(source, plan_dir, request)
+                write_configured_tid_project(
+                    source,
+                    plan_dir,
+                    request,
+                    fingerprint_warning_only=fingerprint_warning_only,
+                    fingerprint_warnings=fingerprint_warnings,
+                )
             if flow.stop_requested:
                 return 130
-            check = validate_tid_plan_runtime(ezcon_path, plan_dir, is_flow=is_flow)
+            for warning in dict.fromkeys(fingerprint_warnings):
+                flow.output(warning)
+            check = validate_tid_plan_runtime(
+                ezcon_path,
+                plan_dir,
+                is_flow=is_flow,
+                **(
+                    {"fingerprint_warning_only": True}
+                    if fingerprint_warning_only
+                    else {}
+                ),
+            )
             if not check.ok:
                 raise ValueError("测量值回填后的正式计划预检失败：" + "; ".join(check.errors))
             if flow.stop_requested:
@@ -453,7 +503,15 @@ def run_tid_plan(
                 (runtime_dir / "progress_context.json").write_text(
                     json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
-                check = validate_tid_runtime(ezcon_path, main)
+                check = (
+                    validate_tid_runtime(
+                        ezcon_path,
+                        main,
+                        fingerprint_warning_only=True,
+                    )
+                    if fingerprint_warning_only
+                    else validate_tid_runtime(ezcon_path, main)
+                )
                 if not check.ok:
                     raise ValueError("穷举续跑脚本预检失败：" + "; ".join(check.errors))
                 if flow.stop_requested:
@@ -469,7 +527,13 @@ def run_tid_plan(
                 flow.output(f"[TID进度] {progress.path}")
                 try:
                     if is_flow:
-                        return run_exhaustive_flow(flow, plan_dir, payload, ezcon_path)
+                        return run_exhaustive_flow(
+                            flow,
+                            plan_dir,
+                            payload,
+                            ezcon_path,
+                            fingerprint_warning_only=fingerprint_warning_only,
+                        )
                     return flow.run_stage(1, "TID/SID正式计划", main)
                 finally:
                     flow.progress = None
@@ -480,7 +544,13 @@ def run_tid_plan(
         if not corrections:
             raise ValueError("SID ADV重试计划为空")
         if bool(payload.get("deferred_identity")):
-            return run_exhaustive_flow(flow, plan_dir, payload, ezcon_path)
+            return run_exhaustive_flow(
+                flow,
+                plan_dir,
+                payload,
+                ezcon_path,
+                fingerprint_warning_only=fingerprint_warning_only,
+            )
         return run_flow_attempts(flow, plan_dir, corrections)
     except (OSError, KeyError, TypeError, ValueError, RuntimeError, LookupError) as exc:
         flow.output(f"[流程错误] 不启动后续脚本：{exc}")
@@ -498,7 +568,16 @@ def main() -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        runner_path = prepare_compat_runner(Path(args.ezcon))
+        runner_warnings: list[str] = []
+        runner_path = (
+            prepare_compat_runner(
+                Path(args.ezcon),
+                fingerprint_warning_only=True,
+                fingerprint_warnings=runner_warnings,
+            )
+            if args.fingerprint_warnings
+            else prepare_compat_runner(Path(args.ezcon))
+        )
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[流程错误] EasyCon 1.6.4-a 兼容运行器检查失败：{exc}")
         return 2
@@ -528,6 +607,8 @@ def main() -> int:
         signal.signal(signal.SIGINT, flow.request_stop)
         flow.output("TID/SID → 研究所 → 1.1.8 御三家连续流程" if args.flow_dir else "TID/SID计划")
         flow.output(f"日志：{log_path}")
+        for warning in runner_warnings:
+            flow.output(warning)
 
         with StopFileWatcher(args.stop_file, flow.request_stop) as stop:
             if stop.requested:
@@ -538,6 +619,7 @@ def main() -> int:
                 result_path=args.calibration_result,
                 progress_dir=args.tid_progress_dir, game=args.tid_game,
                 resume=not args.fresh_exhaustive,
+                fingerprint_warning_only=args.fingerprint_warnings,
             )
 
 
