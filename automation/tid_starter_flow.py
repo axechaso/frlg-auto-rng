@@ -58,6 +58,11 @@ from .tid_starter_save import (
 )
 
 
+# The starter stage keeps the currently audited formal Seed calibration path.
+# Its startup path remains selectable independently through the GUI request.
+STARTER_SEED_CALIBRATION_SCHEME = 0
+
+
 @dataclass(frozen=True)
 class TidStarterFlowRequest:
     tid_request: TidRngRequest
@@ -72,6 +77,7 @@ class TidStarterFlowRequest:
     starter_seed_button: int = 0
     accept_any_tid: bool = False
     any_tid_require_denoise: bool = True
+    starter_seed_startup_scheme: int = 0
 
     def validate(self) -> None:
         self.tid_request.validate()
@@ -79,6 +85,8 @@ class TidStarterFlowRequest:
             raise ValueError("任意TID衔接开关必须为布尔值")
         if not isinstance(self.any_tid_require_denoise, bool):
             raise ValueError("任意TID去噪开关必须为布尔值")
+        if self.starter_seed_startup_scheme not in {0, 1}:
+            raise ValueError("御三家 Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
         if self.starter_sound not in {0, 1}:
             raise ValueError("御三家 Sound 只能是 MONO 或 STEREO")
         if self.starter_button_mode not in {0, 1, 2}:
@@ -180,6 +188,7 @@ def tid_starter_flow_request_from_dict(payload: dict[str, object]) -> TidStarter
         starter_seed_button=int(payload.get("starter_seed_button", 0)),
         accept_any_tid=payload.get("accept_any_tid", False),
         any_tid_require_denoise=payload.get("any_tid_require_denoise", True),
+        starter_seed_startup_scheme=int(payload.get("starter_seed_startup_scheme", 0)),
     )
 
 
@@ -221,6 +230,7 @@ class TidStarterFlowPlan:
             "request": {
                 **asdict(self.request),
                 "tid_request": self.request.tid_request.to_dict(),
+                "starter_seed_calibration_scheme": STARTER_SEED_CALIBRATION_SCHEME,
             },
             "earliest_sid_chain_advance": self.earliest_sid_chain_advance,
             "runtime_sid_advance_source": "TIDFLOW|ID|SID_ADV= marker",
@@ -620,6 +630,8 @@ def write_tid_starter_flow_bundle(
                 nx_model=plan.request.tid_request.nx_model,
                 continue_capture_after_shiny=False,
                 japanese_starter=plan.request.tid_request.language == "日文",
+                seed_startup_scheme=plan.request.starter_seed_startup_scheme,
+                seed_calibration_scheme=STARTER_SEED_CALIBRATION_SCHEME,
             ),
         )
     elif starter_dir.exists():
@@ -654,6 +666,8 @@ def write_resolved_exhaustive_starter_project(
             nx_model=resolved.request.tid_request.nx_model,
             continue_capture_after_shiny=False,
             japanese_starter=resolved.request.tid_request.language == "日文",
+            seed_startup_scheme=resolved.request.starter_seed_startup_scheme,
+            seed_calibration_scheme=STARTER_SEED_CALIBRATION_SCHEME,
         ),
     )
     (starter_dir.parent / "resolved_identity.json").write_text(

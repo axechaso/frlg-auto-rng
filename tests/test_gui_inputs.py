@@ -59,6 +59,7 @@ class GuiIvInputTests(unittest.TestCase):
             "tid_nx_var",
             "tid_target_var",
             "tid_sid_var",
+            "tid_language_var",
         )
         app = SimpleNamespace(
             **{name: FakeVariable() for name in variable_names},
@@ -67,7 +68,7 @@ class GuiIvInputTests(unittest.TestCase):
             _refresh_save_profile_selector=lambda _profile_id: None,
             invalidate_plan=lambda: None,
         )
-        profile = SaveProfile.create("叶绿档", "叶绿", 123, 456, 2)
+        profile = SaveProfile.create("叶绿档", "叶绿", 123, 456, 2, language="日文")
         AutoRngApp._apply_save_profile(app, profile, persist=False)
 
         self.assertEqual(app.sid_game_var.get(), "叶绿")
@@ -81,6 +82,51 @@ class GuiIvInputTests(unittest.TestCase):
         self.assertEqual(app.tid_nx_var.get(), "Switch 2")
         self.assertEqual(app.tid_target_var.get(), "123")
         self.assertEqual(app.tid_sid_var.get(), "456")
+        self.assertEqual(app.tid_language_var.get(), "日文")
+
+    def test_seed_choices_only_apply_when_advanced_mode_is_enabled(self):
+        class FakeVariable:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        class FakeCombo:
+            def __init__(self):
+                self.configured = {}
+
+            def configure(self, **kwargs):
+                self.configured.update(kwargs)
+
+        app = SimpleNamespace(
+            mode_var=FakeVariable("normal"),
+            advanced_mode_var=FakeVariable(False),
+            seed_calibration_scheme_var=FakeVariable("方案1：实验锁定与毫秒细调"),
+            seed_startup_scheme_var=FakeVariable(SEED_STARTUP_FIXED_USER_HOME),
+            seed_calibration_scheme_combo=FakeCombo(),
+            seed_startup_scheme_combo=FakeCombo(),
+            _seed_options_are_advanced=lambda: app.advanced_mode_var.get(),
+        )
+        AutoRngApp._update_seed_scheme_controls(app)
+        self.assertEqual(
+            app.seed_calibration_scheme_var.get(),
+            "方案0：原始12轮绝对落点众数",
+        )
+        self.assertEqual(app.seed_startup_scheme_var.get(), SEED_STARTUP_HOME_BUFFER)
+        self.assertEqual(app.seed_calibration_scheme_combo.configured["state"], "disabled")
+
+        app.mode_var.set("egg")
+        app.advanced_mode_var.set(True)
+        app.seed_calibration_scheme_var.set("方案1：实验锁定与毫秒细调")
+        app.seed_startup_scheme_var.set(SEED_STARTUP_FIXED_USER_HOME)
+        AutoRngApp._update_seed_scheme_controls(app)
+        self.assertEqual(app.seed_calibration_scheme_combo.configured["state"], "readonly")
+        self.assertEqual(len(app.seed_calibration_scheme_combo.configured["values"]), 3)
+        self.assertEqual(app.seed_startup_scheme_var.get(), SEED_STARTUP_FIXED_USER_HOME)
 
     def test_tid_fixed_delay_log_requires_and_returns_all_four_values(self):
         log = (

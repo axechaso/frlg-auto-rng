@@ -13,6 +13,7 @@ from automation.tid_rng137 import (
 )
 from automation.tid_starter_save import TID_STARTER_SAVE_NAME, is_starter_save_template
 from automation.tid_starter_flow import (
+    STARTER_SEED_CALIBRATION_SCHEME,
     TidStarterFlowRequest,
     enable_any_tid_handoff,
     tid_starter_flow_request_from_dict,
@@ -177,10 +178,42 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertEqual(payload["starter_sound"], 0)
         self.assertEqual(payload["starter_button_mode"], 0)
         self.assertEqual(payload["starter_seed_button"], 0)
+        self.assertEqual(payload["starter_seed_calibration_scheme"], 0)
         restored = tid_starter_flow_request_from_dict(payload)
         self.assertEqual(restored.tid_request.button_mode, 1)
         self.assertEqual(restored.tid_request.seed_button, 2)
         self.assertEqual(restored.to_starter_search_request().setting_key, "mono_h_a")
+
+    @unittest.skipUnless(HAS_TID_ASSETS and SOURCE_118.is_dir(), "requires starter assets")
+    def test_starter_locks_calibration_but_keeps_startup_scheme_selectable(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(
+                language="英文",
+                target_tid=12345,
+                target_sid=8832,
+            ),
+            version="火红",
+            starter="妙蛙种子",
+            starter_seed_startup_scheme=1,
+            starter_max_advances=1600,
+        )
+        plan = build_tid_starter_flow_plan(request)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            write_tid_starter_flow_bundle(
+                DEFAULT_TID_SOURCE_PATH,
+                output,
+                plan,
+                starter_source_dir=SOURCE_118,
+            )
+            starter = (output / "03_starter_118" / "main.ecs").read_text(
+                encoding="utf-8"
+            )
+
+        self.assertIn("$Seed校准方案 = 0", starter)
+        self.assertIn("$Seed启动方案 = 1", starter)
+        self.assertEqual(STARTER_SEED_CALIBRATION_SCHEME, 0)
 
     def test_exhaustive_plan_defers_starter_search_until_actual_identity(self):
         request = TidStarterFlowRequest(

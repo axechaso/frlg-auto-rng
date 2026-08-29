@@ -300,6 +300,7 @@ ENDFUNC
         self.assertEqual(values["队伍空位数量"], 1)
         self.assertEqual(values["目标Seed"], "75D1")
         self.assertEqual(values["Seed启动方案"], 0)
+        self.assertEqual(values["Seed校准方案"], 2)
         self.assertEqual(values["目标消耗帧"], 8021)
         self.assertEqual(values["孵蛋领取目标帧"], 10021)
         self.assertEqual(values["孵蛋双亲A_HP"], 31)
@@ -309,6 +310,12 @@ ENDFUNC
             egg_request_to_user_values(
                 egg_request(seed_startup_scheme=1)
             )["Seed启动方案"],
+            1,
+        )
+        self.assertEqual(
+            egg_request_to_user_values(
+                egg_request(seed_calibration_scheme=1)
+            )["Seed校准方案"],
             1,
         )
 
@@ -381,7 +388,8 @@ ENDFUNC
 
     def test_template_replaces_all_required_egg_inputs(self):
         names = (
-            "游戏版本文本", "Seed模式", "NX机型", "Seed启动方案", "目标Seed", "目标消耗帧",
+            "游戏版本文本", "Seed模式", "NX机型", "Seed校准方案", "Seed启动方案",
+            "目标Seed", "目标消耗帧",
             "目标宝可梦名称", "目标全国图鉴编号", "静态或野生",
             "道具乱数模式", "队伍空位数量",
             "孵蛋同Seed模式", "孵蛋领取目标帧", "孵蛋双亲相性",
@@ -408,13 +416,14 @@ ENDFUNC
         ):
             template += f"\n${name} = 0"
         configured = configure_egg_template_text(
-            template, egg_request(seed_startup_scheme=1)
+            template, egg_request(seed_startup_scheme=1, seed_calibration_scheme=1)
         )
         self.assertIn('$静态或野生 = "孵蛋"', configured)
         self.assertIn("$道具乱数模式 = 0", configured)
         self.assertIn("$队伍空位数量 = 1", configured)
         self.assertIn('$目标Seed = "75D1"', configured)
         self.assertIn('$Seed启动方案 = 1', configured)
+        self.assertIn('$Seed校准方案 = 1', configured)
         self.assertIn('$孵蛋双亲A_DEF = 29', configured)
         self.assertIn('$孵蛋双亲B_SPA = 3', configured)
         self.assertIn('$孵蛋Held无蛋表Seed = "75D1"', configured)
@@ -437,6 +446,7 @@ ENDFUNC
             ({"parent_a_ivs": (31, 31, 31, 31, 31, 32)}, "0-31"),
             ({"start_from_prepared_254": 1}, "布尔值"),
             ({"seed_startup_scheme": 2}, "Seed启动方案"),
+            ({"seed_calibration_scheme": 3}, "Seed校准方案"),
         )
         for changes, message in invalid:
             with self.subTest(changes=changes):

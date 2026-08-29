@@ -55,6 +55,7 @@ from automation import (
     SIDReverseRunRequest,
     ScriptTestPreparation,
     TidRngRequest,
+    STARTER_SEED_CALIBRATION_SCHEME,
     TidStarterFlowPlan,
     TidStarterFlowRequest,
     PLANNER_STATIC_CATEGORIES,
@@ -117,6 +118,19 @@ SEED_STARTUP_SCHEMES = (
 SEED_STARTUP_SCHEME_CODES = {
     SEED_STARTUP_HOME_BUFFER: 0,
     SEED_STARTUP_FIXED_USER_HOME: 1,
+}
+SEED_CALIBRATION_ORIGINAL = "方案0：原始12轮绝对落点众数"
+SEED_CALIBRATION_LOCKED_FINE = "方案1：实验锁定与毫秒细调"
+SEED_CALIBRATION_SHADOW = "方案2：成功参数保持与影子监测（仅孵蛋时间轴）"
+SEED_CALIBRATION_SCHEMES = (
+    SEED_CALIBRATION_ORIGINAL,
+    SEED_CALIBRATION_LOCKED_FINE,
+    SEED_CALIBRATION_SHADOW,
+)
+SEED_CALIBRATION_SCHEME_CODES = {
+    SEED_CALIBRATION_ORIGINAL: 0,
+    SEED_CALIBRATION_LOCKED_FINE: 1,
+    SEED_CALIBRATION_SHADOW: 2,
 }
 TID_SID_MODE_TARGET = "目标 SID（自动计算 ADV）"
 TID_SID_MODE_FIXED_F3 = "固定 F3 延迟（采用实际 SID）"
@@ -417,6 +431,7 @@ def build_egg_full_config_payload(
     start_from_prepared_254=False,
     home_buffer_adaptive_threshold=False,
     seed_startup_scheme=0,
+    seed_calibration_scheme=2,
 ) -> dict:
     """Validate and build a complete egg-page configuration."""
     parent = build_egg_parent_config_payload(
@@ -455,6 +470,12 @@ def build_egg_full_config_payload(
         raise ValueError("Seed启动方案只能是0或1") from exc
     if seed_startup_scheme not in {0, 1}:
         raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
+    try:
+        seed_calibration_scheme = int(seed_calibration_scheme)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Seed校准方案只能是0、1或2") from exc
+    if seed_calibration_scheme not in {0, 1, 2}:
+        raise ValueError("Seed校准方案只能是0（原始12轮众数）、1（实验锁定细调）或2（成功参数保持）")
     game_code = ("fr" if game == "火红" else "lg") + ("_nx2" if nx_model == 2 else "_nx")
     request = EggRunRequest(
         game=game_code,
@@ -471,6 +492,7 @@ def build_egg_full_config_payload(
         start_from_prepared_254=start_from_prepared_254,
         home_buffer_adaptive_threshold=home_buffer_adaptive_threshold,
         seed_startup_scheme=seed_startup_scheme,
+        seed_calibration_scheme=seed_calibration_scheme,
     )
     request.validate()
     return {
@@ -491,6 +513,7 @@ def build_egg_full_config_payload(
         "start_from_prepared_254": start_from_prepared_254,
         "home_buffer_adaptive_threshold": home_buffer_adaptive_threshold,
         "seed_startup_scheme": seed_startup_scheme,
+        "seed_calibration_scheme": seed_calibration_scheme,
     }
 
 
@@ -522,6 +545,7 @@ def parse_egg_full_config_payload(payload) -> dict:
         payload.get("start_from_prepared_254", False),
         payload.get("home_buffer_adaptive_threshold", False),
         payload.get("seed_startup_scheme", 0),
+        payload.get("seed_calibration_scheme", 2),
     )
 
 
@@ -1826,16 +1850,6 @@ class AutoRngApp:
             command=self._toggle_advanced_mode,
         )
         self.advanced_mode_check.pack(side="left", padx=(18, 0))
-        self.seed_startup_scheme_var = tk.StringVar(value=SEED_STARTUP_HOME_BUFFER)
-        ttk.Label(manual_tools, text="Seed启动").pack(side="left", padx=(14, 4))
-        self.seed_startup_scheme_combo = ttk.Combobox(
-            manual_tools,
-            textvariable=self.seed_startup_scheme_var,
-            values=SEED_STARTUP_SCHEMES,
-            width=29,
-            state="readonly",
-        )
-        self.seed_startup_scheme_combo.pack(side="left")
         self.home_buffer_adaptive_var = tk.BooleanVar(value=False)
         self.home_buffer_adaptive_check = ttk.Checkbutton(
             manual_tools,
@@ -1849,6 +1863,33 @@ class AutoRngApp:
             command=self.update_seed_tables,
         )
         self.seed_update_button.pack(side="left", padx=(14, 0))
+
+        seed_options = ttk.Frame(runtime)
+        seed_options.grid(row=4, column=0, columnspan=7, sticky="w", padx=4, pady=(2, 0))
+        self.seed_calibration_scheme_var = tk.StringVar(value=SEED_CALIBRATION_ORIGINAL)
+        ttk.Label(seed_options, text="Seed校准").pack(side="left", padx=(0, 4))
+        self.seed_calibration_scheme_combo = ttk.Combobox(
+            seed_options,
+            textvariable=self.seed_calibration_scheme_var,
+            values=SEED_CALIBRATION_SCHEMES,
+            width=35,
+            state="disabled",
+        )
+        self.seed_calibration_scheme_combo.pack(side="left")
+        ttk.Label(seed_options, text="Seed启动").pack(side="left", padx=(14, 4))
+        self.seed_startup_scheme_var = tk.StringVar(value=SEED_STARTUP_HOME_BUFFER)
+        self.seed_startup_scheme_combo = ttk.Combobox(
+            seed_options,
+            textvariable=self.seed_startup_scheme_var,
+            values=SEED_STARTUP_SCHEMES,
+            width=29,
+            state="disabled",
+        )
+        self.seed_startup_scheme_combo.pack(side="left")
+        ttk.Label(
+            seed_options,
+            text="仅高级模式可改；关闭时普通入口固定方案0，孵蛋入口保留当前方案2。",
+        ).pack(side="left", padx=(12, 0))
 
         actions = ttk.Frame(container)
         actions.pack(fill="x", pady=10)
@@ -1896,7 +1937,7 @@ class AutoRngApp:
     @staticmethod
     def _save_profile_display(profile: SaveProfile) -> str:
         return (
-            f"{profile.name}  ·  {profile.game}  ·  "
+            f"{profile.name}  ·  {profile.game} / {profile.language_name}  ·  "
             f"TID {profile.tid:05d} / SID {profile.sid:05d}  ·  {profile.switch_name}"
         )
 
@@ -1918,7 +1959,7 @@ class AutoRngApp:
         else:
             self.save_profile_var.set(self._save_profile_display(selected))
             self.save_profile_summary_var.set(
-                f"{selected.game}｜TID {selected.tid:05d}｜SID {selected.sid:05d}｜{selected.switch_name}"
+                f"{selected.game}｜{selected.language_name}｜TID {selected.tid:05d}｜SID {selected.sid:05d}｜{selected.switch_name}"
             )
 
     def _on_save_profile_selected(self, _event=None) -> None:
@@ -1951,6 +1992,7 @@ class AutoRngApp:
         switch_name = profile.switch_name
         self._updating = True
         try:
+            language_var = getattr(self, "tid_language_var", None)
             # SID 查找页使用当前存档的 TID；SID 正是该页要反查的目标。
             self.sid_game_var.set(profile.game)
             self.sid_nx_var.set(switch_name)
@@ -1967,6 +2009,8 @@ class AutoRngApp:
             self.tid_nx_var.set(switch_name)
             self.tid_target_var.set(str(profile.tid))
             self.tid_sid_var.set(str(profile.sid))
+            if language_var is not None:
+                language_var.set(profile.language)
             self._on_game_change()
         finally:
             self._updating = False
@@ -1990,12 +2034,15 @@ class AutoRngApp:
             nx_model = 2 if self.nx_var.get() == "Switch 2" else 1
             tid = self.tid_var.get()
             sid = self.sid_var.get()
+        language_variable = getattr(self, "tid_language_var", None)
+        language = language_variable.get() if language_variable is not None else "英文"
         return {
             "name": "新存档",
             "game": game,
             "tid": tid,
             "sid": sid,
             "nx_model": nx_model,
+            "language": language,
         }
 
     def _show_save_profile_editor(
@@ -2015,6 +2062,7 @@ class AutoRngApp:
         game_var = tk.StringVar(value=str(initial.get("game", "火红")))
         tid_var = tk.StringVar(value=str(initial.get("tid", "0")))
         sid_var = tk.StringVar(value=str(initial.get("sid", "0")))
+        language_var = tk.StringVar(value=str(initial.get("language", "英文")))
         nx_var = tk.StringVar(
             value=f"Switch {int(initial.get('nx_model', 1))}"
         )
@@ -2025,17 +2073,33 @@ class AutoRngApp:
         self._labeled_entry(body, "SID", sid_var, 3, 0, width=28)
         self._labeled_combo(
             body,
+            "ROM语言/地区",
+            language_var,
+            ("英文（美版）", "日文（日版）"),
+            4,
+            0,
+            width=26,
+        )
+        language_display_to_code = {
+            "英文（美版）": "英文",
+            "日文（日版）": "日文",
+        }
+        language_var.set(
+            "日文（日版）" if language_var.get() == "日文" else "英文（美版）"
+        )
+        self._labeled_combo(
+            body,
             "主机",
             nx_var,
             ("Switch 1", "Switch 2"),
-            4,
+            5,
             0,
             width=26,
         )
         ttk.Label(
             body,
             text="火红/叶绿没有时钟电池参数；主机字段用于选择对应 NX Seed 表。",
-        ).grid(row=5, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 2))
+        ).grid(row=6, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 2))
 
         result: dict = {}
 
@@ -2047,6 +2111,7 @@ class AutoRngApp:
                     tid_var.get(),
                     sid_var.get(),
                     2 if nx_var.get() == "Switch 2" else 1,
+                    language=language_display_to_code[language_var.get()],
                 )
             except ValueError as exc:
                 messagebox.showerror("存档信息无效", str(exc), parent=dialog)
@@ -2057,11 +2122,12 @@ class AutoRngApp:
                 tid=validated.tid,
                 sid=validated.sid,
                 nx_model=validated.nx_model,
+                language=validated.language,
             )
             dialog.destroy()
 
         buttons = ttk.Frame(body)
-        buttons.grid(row=6, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        buttons.grid(row=7, column=0, columnspan=2, sticky="e", pady=(12, 0))
         ttk.Button(buttons, text="保存", command=accept).pack(side="left")
         ttk.Button(buttons, text="取消", command=dialog.destroy).pack(
             side="left", padx=(8, 0)
@@ -2077,7 +2143,7 @@ class AutoRngApp:
     def open_save_profile_manager(self) -> None:
         manager = tk.Toplevel(self.root)
         manager.title("管理存档信息")
-        manager.geometry("820x390")
+        manager.geometry("940x390")
         manager.minsize(700, 330)
         manager.transient(self.root)
 
@@ -2085,7 +2151,7 @@ class AutoRngApp:
         body.pack(fill="both", expand=True)
         tree = ttk.Treeview(
             body,
-            columns=("name", "game", "tid", "sid", "switch"),
+            columns=("name", "game", "language", "tid", "sid", "switch"),
             show="headings",
             selectmode="browse",
             height=10,
@@ -2093,6 +2159,7 @@ class AutoRngApp:
         headings = (
             ("name", "存档名称", 220),
             ("game", "游戏版本", 90),
+            ("language", "版本/地区", 110),
             ("tid", "TID", 90),
             ("sid", "SID", 90),
             ("switch", "主机", 100),
@@ -2122,6 +2189,7 @@ class AutoRngApp:
                     values=(
                         profile.name,
                         profile.game,
+                        profile.language_name,
                         f"{profile.tid:05d}",
                         f"{profile.sid:05d}",
                         profile.switch_name,
@@ -2261,7 +2329,8 @@ class AutoRngApp:
             self.min_adv_var, self.max_adv_var, self.shiny_var, self.nature_var,
             self.gender_var, self.ability_var, self.hidden_type_var, self.seed_mode_var,
             self.auto_capture_var, self.paralysis_var, self.false_swipe_var,
-            self.home_buffer_adaptive_var, self.seed_startup_scheme_var,
+            self.home_buffer_adaptive_var, self.seed_calibration_scheme_var,
+            self.seed_startup_scheme_var,
             self.source_var, self.ezcon_var,
             self.egg_seed_var, self.egg_held_var, self.egg_pickup_var,
             self.egg_seed_mode_var, self.egg_pokemon_var, self.egg_compatibility_var,
@@ -2560,6 +2629,49 @@ class AutoRngApp:
     def _is_script_test_mode(self):
         return self.mode_var.get() == "script_test"
 
+    def _seed_options_are_advanced(self) -> bool:
+        return bool(getattr(self, "advanced_mode_var", None) and self.advanced_mode_var.get())
+
+    def _selected_seed_startup_scheme(self) -> int:
+        """Return the GUI-selected startup path, or the audited default."""
+        return SEED_STARTUP_SCHEME_CODES[self.seed_startup_scheme_var.get()]
+
+    def _selected_seed_calibration_scheme(self, *, egg: bool) -> int:
+        """Return the selected calibration path with page-specific defaults."""
+        code = SEED_CALIBRATION_SCHEME_CODES[self.seed_calibration_scheme_var.get()]
+        if not egg and code == 2:
+            raise ValueError("正式版 Seed校准方案只能选择方案0或方案1")
+        return code
+
+    def _update_seed_scheme_controls(self) -> None:
+        """Keep advanced Seed choices valid for the active 1.1.8 entry."""
+        combo = getattr(self, "seed_calibration_scheme_combo", None)
+        startup_combo = getattr(self, "seed_startup_scheme_combo", None)
+        calibration_var = getattr(self, "seed_calibration_scheme_var", None)
+        startup_var = getattr(self, "seed_startup_scheme_var", None)
+        if (
+            combo is None
+            or startup_combo is None
+            or calibration_var is None
+            or startup_var is None
+        ):
+            return
+        is_egg = self.mode_var.get() == "egg"
+        values = SEED_CALIBRATION_SCHEMES if is_egg else SEED_CALIBRATION_SCHEMES[:2]
+        combo.configure(values=values)
+        advanced = self._seed_options_are_advanced()
+        if not advanced:
+            desired = SEED_CALIBRATION_SHADOW if is_egg else SEED_CALIBRATION_ORIGINAL
+            if calibration_var.get() != desired:
+                calibration_var.set(desired)
+            if startup_var.get() != SEED_STARTUP_HOME_BUFFER:
+                startup_var.set(SEED_STARTUP_HOME_BUFFER)
+        elif calibration_var.get() not in values:
+            calibration_var.set(values[0])
+        state = "readonly" if advanced else "disabled"
+        combo.configure(state=state)
+        startup_combo.configure(state=state)
+
     def _toggle_advanced_mode(self):
         if self.busy or self._process_running():
             self._updating = True
@@ -2582,6 +2694,7 @@ class AutoRngApp:
                 )
                 self.mode_notebook.select(normal_tab)
             self.mode_notebook.hide(self.script_test_tab)
+        self._update_seed_scheme_controls()
         self.root.after_idle(self._update_page_scrollregion)
 
     def _on_mode_tab_change(self, _event=None):
@@ -2597,6 +2710,7 @@ class AutoRngApp:
             return
         if self.mode_var.get() != mode:
             self.mode_var.set(mode)
+        self._update_seed_scheme_controls()
         is_egg = mode == "egg"
         is_tid = mode == "tid"
         is_sid = mode == "sid"
@@ -2851,7 +2965,8 @@ class AutoRngApp:
             [variable.get() for variable in self.egg_parent_b_iv_vars],
             self.egg_start_mode_var.get() == EGG_START_MODE_PREPARED,
             self.home_buffer_adaptive_var.get(),
-            SEED_STARTUP_SCHEME_CODES[self.seed_startup_scheme_var.get()],
+            self._selected_seed_startup_scheme(),
+            self._selected_seed_calibration_scheme(egg=True),
         )
 
     def _save_egg_json(self, payload: dict, title: str, initialfile: str) -> str | None:
@@ -2995,6 +3110,15 @@ class AutoRngApp:
                     if config["seed_startup_scheme"] == 1
                     else SEED_STARTUP_HOME_BUFFER
                 )
+                calibration_code = int(config.get("seed_calibration_scheme", 2))
+                calibration_labels = {
+                    0: SEED_CALIBRATION_ORIGINAL,
+                    1: SEED_CALIBRATION_LOCKED_FINE,
+                    2: SEED_CALIBRATION_SHADOW,
+                }
+                self.seed_calibration_scheme_var.set(
+                    calibration_labels[calibration_code]
+                )
             finally:
                 self._updating = False
             self.invalidate_plan()
@@ -3036,9 +3160,8 @@ class AutoRngApp:
                 self.egg_start_mode_var.get() == EGG_START_MODE_PREPARED
             ),
             home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
-            seed_startup_scheme=SEED_STARTUP_SCHEME_CODES[
-                self.seed_startup_scheme_var.get()
-            ],
+            seed_startup_scheme=self._selected_seed_startup_scheme(),
+            seed_calibration_scheme=self._selected_seed_calibration_scheme(egg=True),
         )
 
     def collect_tid_request(self) -> TidRngRequest:
@@ -3106,6 +3229,10 @@ class AutoRngApp:
     ) -> TidStarterFlowRequest | None:
         if not self.tid_starter_flow_var.get():
             return None
+        startup_selector = getattr(self, "_selected_seed_startup_scheme", None)
+        starter_seed_startup_scheme = (
+            startup_selector() if callable(startup_selector) else 0
+        )
         request = TidStarterFlowRequest(
             tid_request=replace(tid_request, calibration_check=False),
             version=self.tid_game_var.get(),
@@ -3139,6 +3266,7 @@ class AutoRngApp:
             ),
             accept_any_tid=tid_request.mode == 0 and self.tid_any_tid_var.get(),
             any_tid_require_denoise=self.tid_any_tid_denoise_var.get(),
+            starter_seed_startup_scheme=starter_seed_startup_scheme,
         )
         request.validate()
         return request
@@ -3257,6 +3385,7 @@ class AutoRngApp:
         self.monitor_button.configure(state="normal" if monitor_enabled else "disabled")
         self.advanced_mode_check.configure(state=state)
         self.home_buffer_adaptive_check.configure(state=state)
+        self._update_seed_scheme_controls()
         self.seed_update_button.configure(state=state)
         self.port_combo.configure(state="readonly" if enabled else "disabled")
         self.video_combo.configure(state="readonly" if enabled else "disabled")
@@ -3386,9 +3515,8 @@ class AutoRngApp:
             false_swipe=self.false_swipe_var.get(),
             continue_capture_after_shiny=self.auto_capture_var.get(),
             home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
-            seed_startup_scheme=SEED_STARTUP_SCHEME_CODES[
-                self.seed_startup_scheme_var.get()
-            ],
+            seed_startup_scheme=self._selected_seed_startup_scheme(),
+            seed_calibration_scheme=self._selected_seed_calibration_scheme(egg=False),
         )
         fingerprint_warning_only = self.advanced_mode_var.get()
         input_fingerprint = self.input_fingerprint()
@@ -3787,6 +3915,16 @@ class AutoRngApp:
             if flow_plan.request.accept_any_tid:
                 condition = "通过原版去噪确认" if flow_plan.request.any_tid_require_denoise else "首次完整识别，不等待去噪"
                 lines.append(f"TID接续条件：任意合法TID，{condition}；目标TID和特殊号码均不参与成功判定。")
+            lines.extend(
+                (
+                    f"御三家 Seed校准方案：固定方案{STARTER_SEED_CALIBRATION_SCHEME}（当前正式方案）",
+                    (
+                        "御三家 Seed启动方案：固定用户界面 HOME（方案1）"
+                        if flow_plan.request.starter_seed_startup_scheme == 1
+                        else "御三家 Seed启动方案：当前 HOME_BUFFER（方案0）"
+                    ),
+                )
+            )
             target = flow_plan.starter_target
             if target is None:
                 lines.extend(
@@ -3915,6 +4053,7 @@ class AutoRngApp:
                 if request.seed_startup_scheme == 1
                 else "Seed启动：当前 HOME_BUFFER（原样）"
             ),
+            f"Seed校准方案：{request.seed_calibration_scheme}",
             f"Held/生成帧：{request.held_advances}",
             f"Pickup/领取帧：{request.pickup_advances}",
             f"双亲相性：{request.compatibility}",
@@ -3970,6 +4109,7 @@ class AutoRngApp:
             f"Advance：{plan.initial_seed.advances}",
             f"Seed 模式：{plan.seed_mode}",
             f"Seed启动：{self.seed_startup_scheme_var.get()}",
+            f"Seed校准方案：{self.seed_calibration_scheme_var.get()}",
             (
                 "指定模式：已跳过筛选搜索"
                 if direct_mode

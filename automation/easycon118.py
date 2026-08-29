@@ -833,6 +833,10 @@ class EasyCon118Options:
     # Temporary Japanese starter branch.  It changes only the generated
     # starter project; ordinary English 1.1.8 projects keep their corpus.
     japanese_starter: bool = False
+    # The formal entry supports the two audited Seed calibration paths.  This
+    # is appended after the historical fields to keep positional callers
+    # compatible.
+    seed_calibration_scheme: int = 0
 
 
 @dataclass(frozen=True)
@@ -853,6 +857,10 @@ class EggRunRequest:
     start_from_prepared_254: bool = False
     home_buffer_adaptive_threshold: bool = False
     seed_startup_scheme: int = 0
+    # The timeline entry also exposes its current scheme 2.  Keep that as the
+    # backwards-compatible default while allowing advanced callers to choose
+    # the audited 0/1 A/B paths explicitly.
+    seed_calibration_scheme: int = 2
 
     @property
     def nx_model(self) -> int:
@@ -896,6 +904,10 @@ class EggRunRequest:
             raise ValueError("HOME_BUFFER稳定低分自适应开关必须是布尔值")
         if self.seed_startup_scheme not in {0, 1}:
             raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
+        if self.seed_calibration_scheme not in {0, 1, 2}:
+            raise ValueError(
+                "Seed校准方案只能是0（原始12轮众数）、1（实验锁定细调）或2（成功参数保持）"
+            )
         for label, ivs in (("A", self.parent_a_ivs), ("B", self.parent_b_ivs)):
             if len(ivs) != 6 or any(not 0 <= iv <= 31 for iv in ivs):
                 raise ValueError(f"亲本 {label} 的六项 IV 必须均在 0-31 之间")
@@ -1073,6 +1085,8 @@ def plan_to_user_values(
 
     if options.seed_startup_scheme not in {0, 1}:
         raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
+    if options.seed_calibration_scheme not in {0, 1}:
+        raise ValueError("正式版 Seed校准方案只能是0（原始12轮众数）或1（实验锁定细调）")
     is_wild = _is_wild(plan)
     category_zh = CATEGORY_EN_TO_ZH.get(plan.request.category, plan.request.category)
     location_zh = location_to_zh(plan.request.location)
@@ -1088,6 +1102,7 @@ def plan_to_user_values(
         "游戏版本文本": _game_text(plan.request.game),
         "Seed模式": script_seed_mode,
         "NX机型": nx_model,
+        "Seed校准方案": options.seed_calibration_scheme,
         "Seed启动方案": options.seed_startup_scheme,
         "目标Seed": plan.initial_seed.seed.upper(),
         "目标消耗帧": plan.initial_seed.advances,
@@ -1108,6 +1123,7 @@ def egg_request_to_user_values(request: EggRunRequest) -> dict[str, Any]:
         "游戏版本文本": _game_text(request.game),
         "Seed模式": request.seed_mode,
         "NX机型": request.nx_model,
+        "Seed校准方案": request.seed_calibration_scheme,
         "Seed启动方案": request.seed_startup_scheme,
         "目标Seed": request.normalized_seed,
         "目标消耗帧": request.held_advances,
@@ -1231,10 +1247,19 @@ def configure_template_text(
             + plan.route_support.summary
         )
 
-    return _configure_user_values(template_text, plan_to_user_values(plan, options))
+    return _configure_user_values(
+        template_text,
+        plan_to_user_values(plan, options),
+        optional_names={"Seed校准方案"},
+    )
 
 
-def _configure_user_values(template_text: str, values: dict[str, Any]) -> str:
+def _configure_user_values(
+    template_text: str,
+    values: dict[str, Any],
+    *,
+    optional_names: set[str] | frozenset[str] = frozenset(),
+) -> str:
     template_text = _apply_seed_mode3_help_start_text(template_text)
     marker = "# ============================进阶设置"
     user_section, separator, remainder = template_text.partition(marker)
@@ -1244,6 +1269,8 @@ def _configure_user_values(template_text: str, values: dict[str, Any]) -> str:
     for name, value in values.items():
         pattern = re.compile(rf"(?m)^\s*\${re.escape(name)}\s*=\s*[^\r\n]*$")
         configured, count = pattern.subn(f"${name} = {_ecs_literal(value)}", configured)
+        if count == 0 and name in optional_names:
+            continue
         if count != 1:
             raise ValueError(f"1.1.8 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
     return configured + (separator + remainder if separator else "")
@@ -1511,7 +1538,11 @@ def _apply_japanese_seed_mode10(library_path: Path, game_cn: str, game: str) -> 
 
 def configure_egg_template_text(template_text: str, request: EggRunRequest) -> str:
     """Configure the 1.6.4a-only experimental same-seed egg entry."""
-    configured = _configure_user_values(template_text, egg_request_to_user_values(request))
+    configured = _configure_user_values(
+        template_text,
+        egg_request_to_user_values(request),
+        optional_names={"Seed校准方案"},
+    )
     availability = build_egg_held_availability(request)
     availability_values = egg_held_availability_to_ecs_values(availability)
     missing_fields = tuple(

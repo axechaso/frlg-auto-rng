@@ -64,6 +64,7 @@ from .tid_rng137 import (
     write_configured_tid_project,
 )
 from .tid_starter_flow import (
+    STARTER_SEED_CALIBRATION_SCHEME,
     TidStarterFlowPlan,
     TidStarterFlowRequest,
     build_starter_run_plan,
@@ -106,6 +107,7 @@ __all__ = [
     "TID_SCRIPT_NAMES",
     "TidStarterFlowPlan",
     "TidStarterFlowRequest",
+    "STARTER_SEED_CALIBRATION_SCHEME",
     "build_starter_run_plan",
     "build_tid_starter_flow_plan",
     "render_lab_bridge_ecs",

@@ -11,6 +11,7 @@ from pathlib import Path
 PROFILE_FILE_VERSION = 1
 SUPPORTED_GAMES = ("火红", "叶绿")
 SUPPORTED_NX_MODELS = (1, 2)
+SUPPORTED_LANGUAGES = ("英文", "日文")
 
 
 def _parse_trainer_id(value, label: str) -> int:
@@ -33,6 +34,7 @@ class SaveProfile:
     tid: int
     sid: int
     nx_model: int
+    language: str = "英文"
 
     @classmethod
     def create(
@@ -44,6 +46,7 @@ class SaveProfile:
         nx_model,
         *,
         profile_id: str | None = None,
+        language: str = "英文",
     ) -> "SaveProfile":
         normalized_name = str(name).strip()
         if not normalized_name:
@@ -57,6 +60,9 @@ class SaveProfile:
             raise ValueError("主机只能是 Switch 1 或 Switch 2") from exc
         if normalized_nx not in SUPPORTED_NX_MODELS:
             raise ValueError("主机只能是 Switch 1 或 Switch 2")
+        normalized_language = str(language).strip()
+        if normalized_language not in SUPPORTED_LANGUAGES:
+            raise ValueError("ROM语言/地区只能是英文（美版）或日文（日版）")
         normalized_id = str(profile_id or uuid.uuid4()).strip()
         if not normalized_id:
             raise ValueError("存档 ID 不能为空")
@@ -67,6 +73,7 @@ class SaveProfile:
             tid=_parse_trainer_id(tid, "TID"),
             sid=_parse_trainer_id(sid, "SID"),
             nx_model=normalized_nx,
+            language=normalized_language,
         )
 
     @classmethod
@@ -83,6 +90,7 @@ class SaveProfile:
             payload.get("sid", ""),
             payload.get("nx_model", ""),
             profile_id=profile_id,
+            language=payload.get("language", "英文"),
         )
 
     def to_dict(self) -> dict:
@@ -93,11 +101,16 @@ class SaveProfile:
             "tid": self.tid,
             "sid": self.sid,
             "nx_model": self.nx_model,
+            "language": self.language,
         }
 
     @property
     def switch_name(self) -> str:
         return f"Switch {self.nx_model}"
+
+    @property
+    def language_name(self) -> str:
+        return "美版" if self.language == "英文" else "日版"
 
 
 class SaveProfileStore:
@@ -203,18 +216,45 @@ class SaveProfileStore:
         ):
             raise ValueError(f"已经存在名为“{name}”的存档")
 
-    def add(self, name: str, game: str, tid, sid, nx_model) -> SaveProfile:
-        profile = SaveProfile.create(name, game, tid, sid, nx_model)
+    def add(
+        self,
+        name: str,
+        game: str,
+        tid,
+        sid,
+        nx_model,
+        *,
+        language: str = "英文",
+    ) -> SaveProfile:
+        profile = SaveProfile.create(
+            name, game, tid, sid, nx_model, language=language
+        )
         self._ensure_unique_name(profile.name)
         self._commit([*self.profiles, profile], profile.profile_id)
         return profile
 
-    def update(self, profile_id: str, name: str, game: str, tid, sid, nx_model) -> SaveProfile:
+    def update(
+        self,
+        profile_id: str,
+        name: str,
+        game: str,
+        tid,
+        sid,
+        nx_model,
+        *,
+        language: str = "英文",
+    ) -> SaveProfile:
         current = self.get(profile_id)
         if current is None:
             raise ValueError("要编辑的存档不存在")
         updated = SaveProfile.create(
-            name, game, tid, sid, nx_model, profile_id=current.profile_id
+            name,
+            game,
+            tid,
+            sid,
+            nx_model,
+            profile_id=current.profile_id,
+            language=language,
         )
         self._ensure_unique_name(updated.name, excluding_id=current.profile_id)
         index = self.profiles.index(current)
@@ -234,7 +274,14 @@ class SaveProfileStore:
         while name.casefold() in existing:
             name = f"{base} {suffix}"
             suffix += 1
-        return self.add(name, current.game, current.tid, current.sid, current.nx_model)
+        return self.add(
+            name,
+            current.game,
+            current.tid,
+            current.sid,
+            current.nx_model,
+            language=current.language,
+        )
 
     def delete(self, profile_id: str) -> None:
         current = self.get(profile_id)

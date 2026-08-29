@@ -13,6 +13,13 @@ class SaveProfileTests(unittest.TestCase):
         self.assertEqual(profile.tid, 1)
         self.assertEqual(profile.sid, 65535)
         self.assertEqual(profile.switch_name, "Switch 2")
+        self.assertEqual(profile.language, "英文")
+        self.assertEqual(profile.language_name, "美版")
+
+        japanese = SaveProfile.create(
+            "日版档", "火红", 1, 2, 1, language="日文"
+        )
+        self.assertEqual(japanese.language_name, "日版")
 
         invalid = (
             (("", "火红", 1, 2, 1), "名称"),
@@ -46,12 +53,37 @@ class SaveProfileTests(unittest.TestCase):
                 ["主存档", "叶绿存档"],
             )
             self.assertEqual(reloaded.selected_profile_id, first.profile_id)
+            self.assertEqual(reloaded.get(second.profile_id).language, "英文")
             reloaded.delete(first.profile_id)
             self.assertIsNone(reloaded.selected_profile_id)
 
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(payload["version"], 1)
             self.assertEqual(payload["profiles"][0]["name"], "叶绿存档")
+
+    def test_legacy_profile_without_language_defaults_to_english(self):
+        payload = {
+            "version": 1,
+            "profiles": [
+                {
+                    "id": "legacy",
+                    "name": "旧档",
+                    "game": "火红",
+                    "tid": 1,
+                    "sid": 2,
+                    "nx_model": 1,
+                }
+            ],
+            "selected_profile_id": "legacy",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "save_profiles.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            store = SaveProfileStore(path)
+            store.load()
+
+        self.assertEqual(store.profiles[0].language, "英文")
+        self.assertEqual(store.profiles[0].language_name, "美版")
 
     def test_store_rejects_duplicate_names_and_invalid_documents(self):
         with tempfile.TemporaryDirectory() as temp_dir:
