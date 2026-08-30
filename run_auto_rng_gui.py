@@ -190,21 +190,44 @@ class HoverTooltip:
         self.delay = delay
         self.wraplength = wraplength
         self._after_id = None
+        self._hide_after_id = None
         self._window: tk.Toplevel | None = None
+        self._pointer_in_trigger = False
         self._pointer_in_popup = False
         widget.bind("<Enter>", self._on_enter, add="+")
         widget.bind("<Leave>", self._on_leave, add="+")
         widget.bind("<ButtonPress>", self.hide, add="+")
 
     def _on_enter(self, _event=None) -> None:
-        self._cancel_pending()
-        self._after_id = self.widget.after(self.delay, self.show)
+        self._pointer_in_trigger = True
+        self._cancel_hide()
+        self._schedule_show()
 
     def _on_leave(self, _event=None) -> None:
+        self._pointer_in_trigger = False
         self._cancel_pending()
-        self.widget.after(120, self._hide_if_pointer_left)
+        # Most help markers are never open. Avoid queuing a geometry check for
+        # every marker the pointer crosses while the native window is moving.
+        if self._window is not None:
+            self._schedule_hide()
+
+    def _schedule_show(self) -> None:
+        if self._window is None and self._after_id is None:
+            self._after_id = self.widget.after(self.delay, self._show_from_hover)
+
+    def _show_from_hover(self) -> None:
+        self._after_id = None
+        if self._pointer_in_trigger:
+            self.show()
+
+    def _schedule_hide(self) -> None:
+        self._cancel_hide()
+        self._hide_after_id = self.widget.after(160, self._hide_if_pointer_left)
 
     def _hide_if_pointer_left(self) -> None:
+        self._hide_after_id = None
+        if self._pointer_in_trigger or self._pointer_in_popup:
+            return
         try:
             x, y = self.widget.winfo_pointerxy()
             left = self.widget.winfo_rootx()
@@ -223,6 +246,14 @@ class HoverTooltip:
             except tk.TclError:
                 pass
             self._after_id = None
+
+    def _cancel_hide(self) -> None:
+        if self._hide_after_id is not None:
+            try:
+                self.widget.after_cancel(self._hide_after_id)
+            except tk.TclError:
+                pass
+            self._hide_after_id = None
 
     def show(self) -> None:
         self._after_id = None
@@ -283,18 +314,23 @@ class HoverTooltip:
             window.bind("<Enter>", self._on_popup_enter, add="+")
             window.bind("<Leave>", self._on_popup_leave, add="+")
             window.bind("<ButtonPress>", self.hide, add="+")
+            window.deiconify()
+            window.lift()
         except tk.TclError:
             self.hide()
 
     def _on_popup_enter(self, _event=None) -> None:
         self._pointer_in_popup = True
+        self._cancel_hide()
 
     def _on_popup_leave(self, _event=None) -> None:
         self._pointer_in_popup = False
-        self.hide()
+        self._schedule_hide()
 
     def hide(self, _event=None) -> None:
         self._cancel_pending()
+        self._cancel_hide()
+        self._pointer_in_trigger = False
         self._pointer_in_popup = False
         if self._window is not None:
             try:
@@ -907,6 +943,8 @@ class AutoRngApp:
         self.running_log_snapshot = ""
         self.busy = False
         self._updating = False
+        self._page_scrollregion_job = None
+        self._page_canvas_width = None
         self._tooltips: list[HoverTooltip] = []
         ttk.Style(self.root).configure(
             "Help.TLabel",
@@ -1105,7 +1143,7 @@ class AutoRngApp:
         self.page_window = self.page_canvas.create_window(
             (0, 0), window=container, anchor="nw"
         )
-        container.bind("<Configure>", self._update_page_scrollregion)
+        container.bind("<Configure>", self._schedule_page_scrollregion_update)
         self.page_canvas.bind("<Configure>", self._resize_page_content)
         self.root.bind("<MouseWheel>", self._on_page_mousewheel, add="+")
 
@@ -2077,24 +2115,11 @@ class AutoRngApp:
         self.script_test_entry_status_var = tk.StringVar(value="")
         self.script_test_backend_var = tk.StringVar(value=SCRIPT_TEST_BACKEND_COMPAT)
         self.script_test_verbose_var = tk.BooleanVar(value=False)
-        self._labeled_combo(
-            script_test,
-            "1.1.8 入口",
-            self.script_test_entry_var,
-            SCRIPT_TEST_ENTRY_CHOICES,
-            0,
-            0,
-            width=22,
-            span=2,
-        ).bind(
-            "<<ComboboxSelected>>",
-            lambda _event: self._on_script_test_entry_change(),
-        )
         self._labeled_entry(
             script_test,
             "ECS 文件",
             self.script_test_path_var,
-            1,
+            0,
             0,
             width=78,
             span=5,
@@ -2103,13 +2128,13 @@ class AutoRngApp:
             script_test,
             text="选择脚本",
             command=self.choose_script_test,
-        ).grid(row=1, column=6, padx=4)
+        ).grid(row=0, column=6, padx=4)
         self._labeled_combo(
             script_test,
             "运行后端",
             self.script_test_backend_var,
             SCRIPT_TEST_BACKENDS,
-            2,
+            1,
             0,
             width=42,
             span=3,
@@ -2118,45 +2143,37 @@ class AutoRngApp:
             script_test,
             text="输出 EasyCon 详细日志",
             variable=self.script_test_verbose_var,
-        ).grid(row=2, column=5, columnspan=2, sticky="w", padx=4, pady=4)
-        self._help_marker(
-            script_test,
-            "1.1.8 入口选择",
-            "正式版脚本使用 NS火叶全自动一键乱数1.1.8.ecs；时间轴版脚本使用"
-            " NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs。"
-            "自选 ECS 保留原来的任意脚本测试能力。切换入口会自动更新 ECS 文件路径。",
-            label="?",
-        ).grid(row=0, column=3, columnspan=4, sticky="w", padx=4, pady=4)
+        ).grid(row=1, column=5, columnspan=2, sticky="w", padx=4, pady=4)
         ttk.Button(
             script_test,
             text="准备内置冲浪结束测试",
             command=self.prepare_builtin_surf_menu_probe,
-        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 4))
+        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 4))
         self._help_marker(
             script_test,
             "高级脚本测试",
             "所选 ECS 会原地直接执行，不经过方案搜索、参数替换或正式 main.ecs 生成。"
             "兼容后端等同正式工具；原始 CLI 用于 A/B 对照。",
             label="?",
-        ).grid(row=3, column=2, sticky="w", padx=4, pady=(8, 4))
+        ).grid(row=2, column=2, sticky="w", padx=4, pady=(8, 4))
         self._help_marker(
             script_test,
             "危险操作",
             "测试脚本拥有完整手柄控制权限。开始前请人工核对脚本内容、游戏位置和存档状态；"
             "同目录的 lib 与 ImgLabel 会被 EasyCon 使用。",
             label="?",
-        ).grid(row=4, column=0, columnspan=2, sticky="w", padx=4, pady=(4, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=4, pady=(4, 0))
         ttk.Label(
             script_test,
             text="运行前必须核对脚本内容、游戏位置和存档状态。",
             foreground="#9a3412",
-        ).grid(row=4, column=2, columnspan=5, sticky="w", padx=4, pady=(4, 0))
+        ).grid(row=3, column=2, columnspan=5, sticky="w", padx=4, pady=(4, 0))
         ttk.Label(
             script_test,
             textvariable=self.script_test_entry_status_var,
             wraplength=980,
             justify="left",
-        ).grid(row=5, column=0, columnspan=7, sticky="w", padx=4, pady=(5, 0))
+        ).grid(row=4, column=0, columnspan=7, sticky="w", padx=4, pady=(5, 0))
 
         runtime = ttk.LabelFrame(container, text="EasyCon 共通设置与工具", padding=10)
         runtime.pack(fill="x", pady=(0, 10), before=self.mode_notebook)
@@ -2257,7 +2274,7 @@ class AutoRngApp:
             state="disabled",
         )
         self.seed_calibration_scheme_combo.pack(side="left")
-        ttk.Label(seed_options, text="Seed启动").pack(side="left", padx=(14, 4))
+        ttk.Label(seed_options, text="Seed启动").pack(side="left", padx=(10, 4))
         self.seed_startup_scheme_var = tk.StringVar(value=SEED_STARTUP_HOME_BUFFER)
         self.seed_startup_scheme_combo = ttk.Combobox(
             seed_options,
@@ -2267,12 +2284,39 @@ class AutoRngApp:
             state="disabled",
         )
         self.seed_startup_scheme_combo.pack(side="left")
+        self.script_entry_options = ttk.Frame(seed_options)
+        ttk.Label(self.script_entry_options, text="脚本模板").pack(
+            side="left", padx=(0, 4)
+        )
+        self.script_test_entry_combo = ttk.Combobox(
+            self.script_entry_options,
+            textvariable=self.script_test_entry_var,
+            values=SCRIPT_TEST_ENTRY_CHOICES,
+            width=15,
+            state="readonly",
+        )
+        self.script_test_entry_combo.pack(side="left")
+        self.script_test_entry_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _event: self._on_script_test_entry_change(),
+        )
         self._help_marker(
+            self.script_entry_options,
+            "脚本模板",
+            "正式版脚本使用 NS火叶全自动一键乱数1.1.8.ecs；时间轴版脚本使用"
+            " NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs。"
+            "自选 ECS 保留高级页的任意脚本测试能力。切换模板会自动更新 ECS 文件路径。",
+        ).pack(side="left", padx=(6, 0))
+        self.seed_scheme_help_marker = self._help_marker(
             seed_options,
             "Seed 高级方案",
             "仅高级模式可修改。关闭高级模式时，普通入口固定方案 0；孵蛋入口保留当前方案 2。",
             label="?",
-        ).pack(side="left", padx=(12, 0))
+        )
+        self.seed_scheme_help_marker.pack(side="left", padx=(6, 0))
+        # The selector is an advanced-only control. Start hidden so the
+        # initial layout does not briefly expand and then reflow on startup.
+        self.script_entry_options.pack_forget()
 
         actions = ttk.Frame(container)
         actions.pack(fill="x", pady=10)
@@ -2302,12 +2346,31 @@ class AutoRngApp:
         self.script_test_path_var.trace_add("write", self._on_script_test_path_change)
         self._sync_script_test_entry_path()
 
+    def _schedule_page_scrollregion_update(self, _event=None):
+        if self._page_scrollregion_job is not None:
+            return
+        try:
+            self._page_scrollregion_job = self.root.after_idle(
+                self._update_page_scrollregion
+            )
+        except tk.TclError:
+            self._page_scrollregion_job = None
+
     def _update_page_scrollregion(self, _event=None):
-        self.page_canvas.configure(scrollregion=self.page_canvas.bbox("all"))
+        self._page_scrollregion_job = None
+        try:
+            bbox = self.page_canvas.bbox("all")
+            if bbox is not None:
+                self.page_canvas.configure(scrollregion=bbox)
+        except tk.TclError:
+            pass
 
     def _resize_page_content(self, event):
-        self.page_canvas.itemconfigure(self.page_window, width=event.width)
-        self.root.after_idle(self._update_page_scrollregion)
+        width = int(event.width)
+        if self._page_canvas_width != width:
+            self._page_canvas_width = width
+            self.page_canvas.itemconfigure(self.page_window, width=width)
+        self._schedule_page_scrollregion_update()
 
     def _on_page_mousewheel(self, event):
         # The result box has its own scrollbar; keep the wheel local while the
@@ -2685,8 +2748,10 @@ class AutoRngApp:
         manager.protocol("WM_DELETE_WINDOW", manager.destroy)
         refresh_tree()
 
-    def _add_tooltip(self, widget, title: str, text: str):
-        self._tooltips.append(HoverTooltip(widget, title, text))
+    def _add_tooltip(self, widget, title: str, text: str, **tooltip_options):
+        self._tooltips.append(
+            HoverTooltip(widget, title, text, **tooltip_options)
+        )
         return widget
 
     def _help_marker(self, parent, title: str, text: str, *, label: str = "?"):
@@ -2695,9 +2760,9 @@ class AutoRngApp:
             text=label,
             style="Help.TLabel",
             cursor="question_arrow",
-            padding=(3, 0),
+            padding=(6, 2),
         )
-        return self._add_tooltip(marker, title, text)
+        return self._add_tooltip(marker, title, text, delay=120)
 
     @staticmethod
     def _labeled_entry(parent, label, variable, row, column, width=14, span=1):
@@ -3076,6 +3141,16 @@ class AutoRngApp:
         state = "readonly" if advanced else "disabled"
         combo.configure(state=state)
         startup_combo.configure(state=state)
+        entry_options = getattr(self, "script_entry_options", None)
+        if entry_options is not None:
+            if advanced:
+                entry_options.pack(
+                    side="left",
+                    padx=(8, 0),
+                    before=getattr(self, "seed_scheme_help_marker", None),
+                )
+            else:
+                entry_options.pack_forget()
 
     def _toggle_advanced_mode(self):
         if self.busy or self._process_running():
@@ -3100,18 +3175,18 @@ class AutoRngApp:
                 self.mode_notebook.select(normal_tab)
             self.mode_notebook.hide(self.script_test_tab)
         self._update_seed_scheme_controls()
-        self.root.after_idle(self._update_page_scrollregion)
+        self._schedule_page_scrollregion_update()
 
     def _on_mode_tab_change(self, _event=None):
         mode = self.tab_modes.get(self.mode_notebook.select(), "normal")
         if mode == "tid_records":
             self.refresh_tid_records()
-            self.root.after_idle(self._update_page_scrollregion)
+            self._schedule_page_scrollregion_update()
             return
         if mode == "log":
             if not self.busy and not self._process_running():
                 self.status_var.set("运行日志页会保留当前或最近一次自动流程输出。")
-            self.root.after_idle(self._update_page_scrollregion)
+            self._schedule_page_scrollregion_update()
             return
         if self.mode_var.get() != mode:
             self.mode_var.set(mode)
@@ -3149,7 +3224,7 @@ class AutoRngApp:
                 if is_tid
                 else "填写条件后点击“搜索并生成方案”。"
             )
-        self.root.after_idle(self._update_page_scrollregion)
+        self._schedule_page_scrollregion_update()
 
     def _on_tid_flow_toggle(self, *_):
         self._update_tid_flow_controls()
@@ -3928,7 +4003,7 @@ class AutoRngApp:
     def show_run_log_tab(self) -> None:
         self.mode_notebook.select(self.run_log_tab)
         self.page_canvas.yview_moveto(0.0)
-        self.root.after_idle(self._update_page_scrollregion)
+        self._schedule_page_scrollregion_update()
 
     def set_busy(self, busy, status):
         self.busy = busy
@@ -5689,6 +5764,12 @@ class AutoRngApp:
         if self._tid_pending_job is not None:
             self.root.after_cancel(self._tid_pending_job)
             self._tid_pending_job = None
+        if self._page_scrollregion_job is not None:
+            try:
+                self.root.after_cancel(self._page_scrollregion_job)
+            except tk.TclError:
+                pass
+            self._page_scrollregion_job = None
         self._close_manual_tools()
         self.root.destroy()
 

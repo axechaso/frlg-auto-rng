@@ -740,7 +740,12 @@ class VirtualControllerWindow:
 class CaptureMonitorWindow:
     FRAME_WIDTH = 640
     FRAME_HEIGHT = 360
-    RENDER_INTERVAL_MS = 16
+    # Tk must decode each PhotoImage on its UI thread. Keep both producer and
+    # consumer near 30 FPS so an idle monitor does not compete with the GUI
+    # (or the running EasyCon worker) for CPU/GIL time.
+    RENDER_INTERVAL_MS = 33
+    FRAME_PROCESS_INTERVAL_MS = 33
+    DRAG_PAUSE_MS = 180
 
     def __init__(
         self,
@@ -766,12 +771,22 @@ class CaptureMonitorWindow:
         self._render_error_reported = False
         self._image_only = False
         self._photo = None
+        self._last_window_geometry: tuple[int, int, int, int] | None = None
+        self._last_host_geometry: tuple[int, int, int, int] | None = None
+        self._render_paused_until = 0.0
+        self._host_configure_bind_id = None
 
         self.window = tk.Toplevel(root)
         self.window.title("监视窗口")
         self.window.resizable(True, True)
         self.window.minsize(320, 180)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
+        self.window.bind("<Configure>", self._on_window_configure, add="+")
+        self._host_configure_bind_id = self.root.bind(
+            "<Configure>",
+            self._on_host_window_configure,
+            add="+",
+        )
         self.window.bind("<Escape>", self._restore_normal_view, add="+")
 
         self.toolbar = ttk.Frame(self.window, padding=(8, 8, 8, 5))
@@ -828,6 +843,59 @@ class CaptureMonitorWindow:
 
     def _apply_topmost(self) -> None:
         set_window_topmost(self.window, self.topmost_var.get())
+
+    def _on_window_configure(self, _event=None) -> None:
+        """Temporarily yield the UI thread while the native window is moving."""
+        if self._closed:
+            return
+        if (
+            _event is not None
+            and getattr(_event, "widget", self.window) is not self.window
+        ):
+            return
+        try:
+            geometry = (
+                self.window.winfo_x(),
+                self.window.winfo_y(),
+                self.window.winfo_width(),
+                self.window.winfo_height(),
+            )
+        except tk.TclError:
+            return
+        previous = self._last_window_geometry
+        self._last_window_geometry = geometry
+        if previous is not None and geometry != previous:
+            self._pause_rendering()
+
+    def _on_host_window_configure(self, event=None) -> None:
+        """Pause preview work when the main application window is moving too."""
+        if self._closed:
+            return
+        if event is not None and getattr(event, "widget", self.root) is not self.root:
+            return
+        try:
+            geometry = (
+                self.root.winfo_x(),
+                self.root.winfo_y(),
+                self.root.winfo_width(),
+                self.root.winfo_height(),
+            )
+        except tk.TclError:
+            return
+        previous = self._last_host_geometry
+        self._last_host_geometry = geometry
+        if previous is not None and geometry != previous:
+            self._pause_rendering()
+
+    def _pause_rendering(self) -> None:
+        pause_until = time.monotonic() + self.DRAG_PAUSE_MS / 1000
+        self._render_paused_until = max(
+            self._render_paused_until,
+            pause_until,
+        )
+
+    def _render_is_paused(self) -> bool:
+        return time.monotonic() < self._render_paused_until
 
     def _on_canvas_configure(self, event) -> None:
         if event.width < 16 or event.height < 16:
@@ -921,6 +989,7 @@ class CaptureMonitorWindow:
         from urllib.request import urlopen
 
         sequence = 0
+        next_process_at = 0.0
         retry_reported = False
         while not stop_event.is_set() and generation == self._generation:
             response = None
@@ -954,6 +1023,18 @@ class CaptureMonitorWindow:
                             break
                         jpeg = bytes(buffer[start : end + 2])
                         del buffer[: end + 2]
+                        if self._render_is_paused():
+                            # Do not drain a live MJPEG stream in a tight loop
+                            # while the native window is in a move/resize.
+                            buffer.clear()
+                            stop_event.wait(0.01)
+                            continue
+                        now = time.monotonic()
+                        if now < next_process_at:
+                            # The stream can be faster than Tk can display it;
+                            # discard intermediate frames before JPEG decoding.
+                            continue
+                        next_process_at = now + self.FRAME_PROCESS_INTERVAL_MS / 1000
                         array = __import__("numpy").frombuffer(jpeg, dtype="uint8")
                         frame = cv2.imdecode(array, cv2.IMREAD_COLOR)
                         if frame is None or frame.size == 0:
@@ -1023,6 +1104,7 @@ class CaptureMonitorWindow:
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self._post_status(f"采集卡 {device} 已打开")
         sequence = 0
+        next_process_at = 0.0
         failed_reads = 0
         first_frame = True
         try:
@@ -1036,6 +1118,13 @@ class CaptureMonitorWindow:
                     time.sleep(0.03)
                     continue
                 failed_reads = 0
+                if self._render_is_paused():
+                    stop_event.wait(0.01)
+                    continue
+                now = time.monotonic()
+                if now < next_process_at:
+                    continue
+                next_process_at = now + self.FRAME_PROCESS_INTERVAL_MS / 1000
                 with self._frame_lock:
                     target_width, target_height = self._target_size
                 shrinking = (
@@ -1072,6 +1161,9 @@ class CaptureMonitorWindow:
 
     def _render(self) -> None:
         if self._closed:
+            return
+        if self._render_is_paused():
+            self.window.after(self.RENDER_INTERVAL_MS, self._render)
             return
         with self._frame_lock:
             frame = self._latest_frame
@@ -1121,6 +1213,13 @@ class CaptureMonitorWindow:
             return
         self._closed = True
         self._stop_capture()
+        bind_id = self._host_configure_bind_id
+        self._host_configure_bind_id = None
+        if bind_id:
+            try:
+                self.root.unbind("<Configure>", bind_id)
+            except tk.TclError:
+                pass
         try:
             self.window.destroy()
         finally:

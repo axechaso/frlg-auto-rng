@@ -6,6 +6,7 @@ from automation.easycon118 import parse_easycon_video_devices
 from run_auto_rng_gui import (
     ADVANCED_TAB_LABEL,
     AutoRngApp,
+    HoverTooltip,
     MODE_TAB_ORDER,
     RUN_LOG_TAB_LABEL,
     SEED_STARTUP_FIXED_USER_HOME,
@@ -40,6 +41,95 @@ from save_profiles import SaveProfile
 
 
 class GuiIvInputTests(unittest.TestCase):
+    def test_hover_tooltip_uses_one_enter_callback_without_motion_spam(self):
+        class FakeWidget:
+            def __init__(self):
+                self.bindings = {}
+                self.jobs = {}
+                self.cancelled = []
+                self.next_job = 0
+
+            def bind(self, event, callback, add=None):
+                self.bindings[event] = (callback, add)
+
+            def after(self, _delay, callback):
+                self.next_job += 1
+                job = f"job-{self.next_job}"
+                self.jobs[job] = callback
+                return job
+
+            def after_cancel(self, job):
+                self.cancelled.append(job)
+                self.jobs.pop(job, None)
+
+        widget = FakeWidget()
+        tooltip = HoverTooltip(widget, "标题", "正文", delay=120)
+        shown = []
+
+        def show():
+            tooltip._after_id = None
+            shown.append(True)
+
+        tooltip.show = show
+        self.assertIn("<Enter>", widget.bindings)
+        self.assertNotIn("<Motion>", widget.bindings)
+
+        widget.bindings["<Enter>"][0]()
+        first_job = tooltip._after_id
+        self.assertEqual(len(widget.jobs), 1)
+        widget.bindings["<Enter>"][0]()
+        self.assertEqual(tooltip._after_id, first_job)
+        widget.jobs.pop(first_job)()
+        self.assertEqual(shown, [True])
+
+        widget.bindings["<Leave>"][0]()
+        self.assertIsNone(tooltip._hide_after_id)
+        tooltip._window = object()
+        widget.bindings["<Leave>"][0]()
+        hide_job = tooltip._hide_after_id
+        widget.bindings["<Enter>"][0]()
+        self.assertIn(hide_job, widget.cancelled)
+        self.assertIsNone(tooltip._hide_after_id)
+
+    def test_page_scrollregion_refresh_is_coalesced(self):
+        class FakeRoot:
+            def __init__(self):
+                self.calls = 0
+                self.callbacks = {}
+
+            def after_idle(self, callback):
+                self.calls += 1
+                job = f"job-{self.calls}"
+                self.callbacks[job] = callback
+                return job
+
+        class FakeCanvas:
+            def __init__(self):
+                self.configured = []
+
+            def bbox(self, _item):
+                return (0, 0, 100, 200)
+
+            def configure(self, **kwargs):
+                self.configured.append(kwargs)
+
+        app = SimpleNamespace(
+            root=FakeRoot(),
+            page_canvas=FakeCanvas(),
+            _page_scrollregion_job=None,
+        )
+        app._update_page_scrollregion = lambda: (
+            setattr(app, "_page_scrollregion_job", None),
+            app.page_canvas.configure(scrollregion=app.page_canvas.bbox("all")),
+        )
+        AutoRngApp._schedule_page_scrollregion_update(app)
+        AutoRngApp._schedule_page_scrollregion_update(app)
+        self.assertEqual(app.root.calls, 1)
+        callback = next(iter(app.root.callbacks.values()))
+        callback()
+        self.assertIsNone(app._page_scrollregion_job)
+        self.assertEqual(app.page_canvas.configured, [{"scrollregion": (0, 0, 100, 200)}])
+
     def test_save_profile_applies_to_all_relevant_pages(self):
         class FakeVariable:
             def __init__(self, value=""):
@@ -106,6 +196,18 @@ class GuiIvInputTests(unittest.TestCase):
             def configure(self, **kwargs):
                 self.configured.update(kwargs)
 
+        class FakeFrame:
+            def __init__(self):
+                self.visible = None
+                self.pack_options = {}
+
+            def pack(self, **kwargs):
+                self.visible = True
+                self.pack_options = kwargs
+
+            def pack_forget(self):
+                self.visible = False
+
         app = SimpleNamespace(
             mode_var=FakeVariable("normal"),
             advanced_mode_var=FakeVariable(False),
@@ -113,6 +215,8 @@ class GuiIvInputTests(unittest.TestCase):
             seed_startup_scheme_var=FakeVariable(SEED_STARTUP_FIXED_USER_HOME),
             seed_calibration_scheme_combo=FakeCombo(),
             seed_startup_scheme_combo=FakeCombo(),
+            script_entry_options=FakeFrame(),
+            seed_scheme_help_marker=object(),
             _seed_options_are_advanced=lambda: app.advanced_mode_var.get(),
         )
         AutoRngApp._update_seed_scheme_controls(app)
@@ -122,6 +226,7 @@ class GuiIvInputTests(unittest.TestCase):
         )
         self.assertEqual(app.seed_startup_scheme_var.get(), SEED_STARTUP_HOME_BUFFER)
         self.assertEqual(app.seed_calibration_scheme_combo.configured["state"], "disabled")
+        self.assertFalse(app.script_entry_options.visible)
 
         app.mode_var.set("egg")
         app.advanced_mode_var.set(True)
@@ -131,6 +236,11 @@ class GuiIvInputTests(unittest.TestCase):
         self.assertEqual(app.seed_calibration_scheme_combo.configured["state"], "readonly")
         self.assertEqual(len(app.seed_calibration_scheme_combo.configured["values"]), 3)
         self.assertEqual(app.seed_startup_scheme_var.get(), SEED_STARTUP_FIXED_USER_HOME)
+        self.assertTrue(app.script_entry_options.visible)
+        self.assertIs(
+            app.script_entry_options.pack_options["before"],
+            app.seed_scheme_help_marker,
+        )
 
     def test_tid_fixed_delay_log_requires_and_returns_all_four_values(self):
         log = (

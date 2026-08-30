@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from manual_tools import (
+    CaptureMonitorWindow,
     DEFAULT_GAMEPAD_KEYBOARD_MAP,
     GamePadKey,
     KEYBOARD_GAMEPAD_MAP,
@@ -116,6 +117,56 @@ class ManualToolsTests(unittest.TestCase):
         self.assertEqual(next_monitor_zoom_size(640, 360, -1), (480, 270))
         self.assertEqual(next_monitor_zoom_size(1280, 720, 1), (1280, 720))
         self.assertEqual(next_monitor_zoom_size(320, 180, -1), (320, 180))
+
+    def test_monitor_pauses_expensive_rendering_during_window_move(self):
+        class FakeWindow:
+            def __init__(self):
+                self.geometry = (100, 120, 650, 420)
+
+            def winfo_x(self):
+                return self.geometry[0]
+
+            def winfo_y(self):
+                return self.geometry[1]
+
+            def winfo_width(self):
+                return self.geometry[2]
+
+            def winfo_height(self):
+                return self.geometry[3]
+
+        monitor = object.__new__(CaptureMonitorWindow)
+        monitor.window = FakeWindow()
+        monitor.root = FakeWindow()
+        monitor._closed = False
+        monitor._last_window_geometry = None
+        monitor._last_host_geometry = None
+        monitor._render_paused_until = 0.0
+
+        with patch("manual_tools.time.monotonic", return_value=10.0):
+            monitor._on_window_configure()
+            self.assertFalse(monitor._render_is_paused())
+            monitor.window.geometry = (101, 120, 650, 420)
+            monitor._on_window_configure()
+            self.assertTrue(monitor._render_is_paused())
+            self.assertGreaterEqual(
+                monitor._render_paused_until,
+                10.0 + CaptureMonitorWindow.DRAG_PAUSE_MS / 1000,
+            )
+
+            monitor._render_paused_until = 0.0
+            monitor._on_host_window_configure()
+            self.assertFalse(monitor._render_is_paused())
+            monitor.root.geometry = (100, 121, 650, 420)
+            monitor._on_host_window_configure()
+            self.assertTrue(monitor._render_is_paused())
+
+    def test_monitor_processing_and_rendering_are_bounded_to_live_preview_rate(self):
+        self.assertEqual(CaptureMonitorWindow.RENDER_INTERVAL_MS, 33)
+        self.assertEqual(
+            CaptureMonitorWindow.FRAME_PROCESS_INTERVAL_MS,
+            CaptureMonitorWindow.RENDER_INTERVAL_MS,
+        )
 
     def test_topmost_option_uses_window_attribute(self):
         class FakeWindow:
