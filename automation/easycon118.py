@@ -123,6 +123,9 @@ PREVIOUS_SCRIPT_SHA256S = (
     "c4a1ca509199d1ad3c3589bb019d286b0c2cac5e52a51c0f70e7d297597b2c8a",
     # Download package with the selectable current/fixed-user Seed startup path.
     "e82ed39b65a5b4c8ee39287906d4317e58c84334c656f08a8cad6b31d8fde0f5",
+    # Download package with near-1113 Held recovery, anchor-first parity
+    # calibration, and dense same-parity fallback anchors.
+    "b256082acbc7823d172e0f8124fdd91e51331a08a045ad47209c8bfb950fd8e4",
 )
 EXPECTED_SCRIPT_SHA256 = "39a2f7a5046e2d1c7213b6689158402be8656fc5dd790bb73ed8a77c8390f15b"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -181,6 +184,9 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "a3e6eedb7e35efcf8dc8c0ed0866a96efd66bc7e032411f296d9aa6801115a9c",
     # Local materialized corpus with cross-round Seed hit-range clustering.
     "419b599234a28c23611f60fac558f963d87d12adb641feaef115a8c1e00935bc",
+    # Materialized corpus with generated near/dense Held recovery anchors and
+    # anchor-first parity/numeric calibration before returning to the target.
+    "e3bb467b21f14b7e16838ffdbbb67061c721f3dc5e0410ab0685196782ce1a62",
 )
 
 
@@ -254,6 +260,9 @@ EGG_SEED_CONTROLLER_OVERRIDE_PATH = (
     / "assets"
     / "easycon118_extensions"
     / "egg_seed_controller_main.ecs"
+)
+SEED_LOCK_CONTROLLER_OVERRIDE_PATH = (
+    EASYCON118_EXTENSION_LABEL_DIR / "seed_lock_controller_main.ecs"
 )
 EGG_FORMAL_PARITY_OVERRIDE_PATH = (
     EASYCON118_EXTENSION_LABEL_DIR / "egg_formal_parity_main.ecs"
@@ -348,8 +357,10 @@ EGG_SEED_CONTROLLER_ORIGINAL_FUNCTION = "FUNC 孵蛋流程_按观测Seed校正�
 EGG_SEED_CONTROLLER_NEXT_SECTION = "# -------------------- 蛋个体反查"
 SEED_HOLD_OBSERVATION_MARKER = "# 保持窗口按每次可信Seed反查推进；超出±1只占观察次数，不投方向票。"
 SEED_HOLD_OBSERVATION_FUNCTION = "FUNC 计算Seed锁定众数修正(): INT"
-SEED_HOLD_OBSERVATION_GLOBAL_ANCHOR = "$Seed命中保持样本数 = 10"
+SEED_HOLD_OBSERVATION_OLD_GLOBAL = "$Seed命中保持样本数 = 10"
+SEED_HOLD_OBSERVATION_GLOBAL_ANCHOR = "$Seed命中保持样本数 = 5"
 SEED_HOLD_OBSERVATION_MIN_GLOBAL = "$Seed命中保持最少方向样本数 = 3"
+SEED_HOLD_OBSERVATION_DIRECT_HALF_MARKER = "连续5次未命中，按±1多数方向直接固定半步微调"
 SEED_HOLD_OBSERVATION_OLD_BRANCH = """\
         ELIF $Seed差绝对 == 1
             $Seed锁定本轮样本计入 = 1
@@ -486,6 +497,7 @@ $孵蛋流程本轮奇偶等待MS = 0
 $孵蛋流程Pickup奇偶基准帧 = 0
 $孵蛋流程Pickup菜单奇偶开关 = 0
 $孵蛋流程Pickup菜单推进帧 = 0
+$孵蛋流程Held已稳定 = 0
 """
 EGG_FORMAL_PARITY_REAL_CALL_OLD = "$孵蛋测试结果 = 孵蛋测试_执行同Seed两次命中($Seed模式, $孵蛋Seed等待MS, $时间轴精确尾段MS, $孵蛋奇偶等待MS, $孵蛋封面长按MS, $孵蛋流程TV过帧开关, $孵蛋流程TV等待MS, $孵蛋流程生成目标截止MS, $孵蛋流程领取目标截止MS, $孵蛋出蛋检测阈值, $识图阈值, 1, $孵蛋流程无蛋复核Seed开关)"
 EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU = EGG_FORMAL_PARITY_REAL_CALL_OLD.replace(
@@ -1183,9 +1195,12 @@ def build_egg_held_availability(
         state = (state * 0x41C64E6D + 0x6073) & 0xFFFFFFFF
 
     intervals: list[tuple[int, int]] = []
+    producing_frames: list[int] = []
     interval_start: int | None = None
     for frame in range(range_start, range_end + 1):
         produces_egg = (((state >> 16) * 100) // 65535) < request.compatibility
+        if produces_egg:
+            producing_frames.append(frame)
         if not produces_egg and interval_start is None:
             interval_start = frame
         elif produces_egg and interval_start is not None:
@@ -1195,8 +1210,50 @@ def build_egg_held_availability(
     if interval_start is not None:
         intervals.append((interval_start, range_end))
 
+    produced = set(producing_frames)
+    near_recovery_anchors: list[int] = []
+    for candidate in (request.held_advances - 2, request.held_advances + 2):
+        middle = (candidate + request.held_advances) // 2
+        if (
+            candidate in produced
+            and middle in produced
+            and request.held_advances in produced
+        ):
+            near_recovery_anchors.append(candidate)
+
+    def parity_run(frame: int) -> int:
+        count = 1
+        cursor = frame - 2
+        while cursor in produced:
+            count += 1
+            cursor -= 2
+        cursor = frame + 2
+        while cursor in produced:
+            count += 1
+            cursor += 2
+        return count
+
+    def local_density(frame: int) -> int:
+        return sum(candidate in produced for candidate in range(frame - 2, frame + 3))
+
+    fallback_recovery_anchors = [
+        frame
+        for frame in producing_frames
+        if frame != request.held_advances
+        and frame not in near_recovery_anchors
+        and frame % 2 == request.held_advances % 2
+    ]
+    fallback_recovery_anchors.sort(
+        key=lambda frame: (
+            -local_density(frame),
+            -parity_run(frame),
+            abs(frame - request.held_advances),
+            frame,
+        )
+    )
+
     return {
-        "schema": "frlg-held-availability/v1",
+        "schema": "frlg-held-availability/v2",
         "heldSeed": request.normalized_seed,
         "targetHeld": request.held_advances,
         "compatibility": request.compatibility,
@@ -1207,6 +1264,8 @@ def build_egg_held_availability(
             start <= request.held_advances <= end for start, end in intervals
         ),
         "noEggIntervals": intervals,
+        "nearRecoveryAnchors": near_recovery_anchors,
+        "fallbackRecoveryAnchors": fallback_recovery_anchors,
     }
 
 
@@ -1223,6 +1282,8 @@ def egg_held_availability_to_ecs_values(
         "孵蛋Held无蛋表最大帧": availability["rangeEnd"],
         "孵蛋Held无蛋区间起点表": [start for start, _ in intervals],
         "孵蛋Held无蛋区间终点表": [end for _, end in intervals],
+        "孵蛋Held近邻恢复锚点表": availability["nearRecoveryAnchors"],
+        "孵蛋Held远端恢复锚点表": availability["fallbackRecoveryAnchors"],
     }
 
 
@@ -1960,8 +2021,19 @@ def _apply_egg_seed_controller_runtime_override_text(
 
 
 def _apply_seed_hold_observation_window_text(template_text: str) -> str:
-    """Bound the post-hit hold by ten trusted observations, not ten ±1 votes."""
+    """Install the shared five-consecutive-miss Seed scheme-1 controller."""
     configured = template_text
+    if SEED_HOLD_OBSERVATION_OLD_GLOBAL in configured:
+        if configured.count(SEED_HOLD_OBSERVATION_OLD_GLOBAL) != 1:
+            raise ValueError("主脚本Seed命中保持样本数不唯一，拒绝升级连续未命中窗口")
+        configured = configured.replace(
+            SEED_HOLD_OBSERVATION_OLD_GLOBAL,
+            SEED_HOLD_OBSERVATION_GLOBAL_ANCHOR,
+            1,
+        )
+    elif configured.count(SEED_HOLD_OBSERVATION_GLOBAL_ANCHOR) != 1:
+        raise ValueError("主脚本缺少唯一的Seed命中保持样本数，拒绝升级连续未命中窗口")
+
     if SEED_HOLD_OBSERVATION_MIN_GLOBAL not in configured:
         if configured.count(SEED_HOLD_OBSERVATION_GLOBAL_ANCHOR) != 1:
             raise ValueError("主脚本缺少唯一的Seed命中保持样本数，拒绝升级观察窗口")
@@ -1977,31 +2049,12 @@ def _apply_seed_hold_observation_window_text(template_text: str) -> str:
         raise ValueError("主脚本缺少唯一的Seed锁定修正函数，拒绝升级观察窗口")
     start = configured.index(SEED_HOLD_OBSERVATION_FUNCTION)
     end = configured.index("ENDFUNC", start) + len("ENDFUNC")
-    section = configured[start:end]
-    if (
-        SEED_HOLD_OBSERVATION_MARKER in section
-        and SEED_HOLD_OBSERVATION_CURRENT_DECISION in section
-    ):
-        return configured
-
-    if SEED_HOLD_OBSERVATION_OLD_BRANCH in section:
-        section = section.replace(
-            SEED_HOLD_OBSERVATION_OLD_BRANCH,
-            SEED_HOLD_OBSERVATION_CURRENT_BRANCH,
-            1,
-        )
-    elif SEED_HOLD_OBSERVATION_CURRENT_BRANCH not in section:
-        raise ValueError("Seed锁定修正函数的保持采样分支不受支持")
-
-    if SEED_HOLD_OBSERVATION_OLD_DECISION in section:
-        section = section.replace(
-            SEED_HOLD_OBSERVATION_OLD_DECISION,
-            SEED_HOLD_OBSERVATION_CURRENT_DECISION,
-            1,
-        )
-    elif SEED_HOLD_OBSERVATION_CURRENT_DECISION not in section:
-        raise ValueError("Seed锁定修正函数的保持结算分支不受支持")
-    return configured[:start] + section + configured[end:]
+    override_text = SEED_LOCK_CONTROLLER_OVERRIDE_PATH.read_text(encoding="utf-8")
+    override_start = override_text.index(SEED_HOLD_OBSERVATION_FUNCTION)
+    replacement = override_text[override_start:].rstrip()
+    if SEED_HOLD_OBSERVATION_DIRECT_HALF_MARKER not in replacement:
+        raise ValueError("Seed锁定覆盖缺少连续5次未命中固定半步标记")
+    return configured[:start] + replacement + configured[end:]
 
 
 def _apply_egg_formal_parity_runtime_override_text(
@@ -2998,9 +3051,9 @@ def write_configured_egg_project(
     ).hexdigest()
     runtime_overrides["seed_hold_observation_window_sha256"] = hashlib.sha256(
         (
-            SEED_HOLD_OBSERVATION_MIN_GLOBAL
-            + SEED_HOLD_OBSERVATION_CURRENT_BRANCH
-            + SEED_HOLD_OBSERVATION_CURRENT_DECISION
+            SEED_HOLD_OBSERVATION_GLOBAL_ANCHOR
+            + SEED_HOLD_OBSERVATION_MIN_GLOBAL
+            + SEED_LOCK_CONTROLLER_OVERRIDE_PATH.read_text(encoding="utf-8")
         ).encode("utf-8")
     ).hexdigest()
     runtime_overrides["egg_formal_parity_main_sha256"] = hashlib.sha256(

@@ -43,6 +43,7 @@ from automation.easycon118 import (
     PARTY_SUMMARY_NAVIGATION_PATH,
     SEED_HOLD_OBSERVATION_CURRENT_BRANCH,
     SEED_HOLD_OBSERVATION_CURRENT_DECISION,
+    SEED_HOLD_OBSERVATION_DIRECT_HALF_MARKER,
     SEED_HOLD_OBSERVATION_MARKER,
     SEED_HOLD_OBSERVATION_MIN_GLOBAL,
     SEED_HOLD_OBSERVATION_OLD_BRANCH,
@@ -351,6 +352,33 @@ ENDFUNC
         self.assertEqual(values["孵蛋Held无蛋区间起点表"][2], 1116)
         self.assertEqual(values["孵蛋Held无蛋区间终点表"][2], 1120)
 
+    def test_held_availability_ranks_near_recovery_before_dense_fallback(self):
+        request = egg_request(
+            target_seed="EDDE",
+            held_advances=1115,
+            pickup_advances=3405,
+            compatibility=50,
+        )
+        availability = build_egg_held_availability(
+            request,
+            before=7,
+            after=23,
+        )
+
+        self.assertEqual(availability.get("nearRecoveryAnchors"), [1113])
+        self.assertEqual((availability.get("fallbackRecoveryAnchors") or [])[:2], [1129, 1131])
+        self.assertTrue(
+            all(
+                frame % 2 == request.held_advances % 2
+                for frame in availability.get("nearRecoveryAnchors", [])
+                + availability.get("fallbackRecoveryAnchors", [])
+            )
+        )
+
+        values = egg_held_availability_to_ecs_values(availability)
+        self.assertEqual(values["孵蛋Held近邻恢复锚点表"], [1113])
+        self.assertEqual(values["孵蛋Held远端恢复锚点表"][:2], [1129, 1131])
+
     def test_old_cached_template_reports_how_to_refresh_held_table_fields(self):
         old_template = "\n".join(
             f"${name} = 0" for name in egg_request_to_user_values(egg_request())
@@ -416,6 +444,7 @@ ENDFUNC
             "孵蛋Held无蛋表Seed", "孵蛋Held无蛋表目标帧", "孵蛋Held无蛋表相性",
             "孵蛋Held无蛋表Offset", "孵蛋Held无蛋表最小帧", "孵蛋Held无蛋表最大帧",
             "孵蛋Held无蛋区间起点表", "孵蛋Held无蛋区间终点表",
+            "孵蛋Held近邻恢复锚点表", "孵蛋Held远端恢复锚点表",
         ):
             template += f"\n${name} = 0"
         configured = configure_egg_template_text(
@@ -433,6 +462,8 @@ ENDFUNC
         self.assertIn('$孵蛋Held无蛋表目标帧 = 8021', configured)
         self.assertIn('$孵蛋Held无蛋表相性 = 70', configured)
         self.assertRegex(configured, r"\$孵蛋Held无蛋区间起点表 = \[\d")
+        self.assertIn("$孵蛋Held近邻恢复锚点表 = [", configured)
+        self.assertRegex(configured, r"\$孵蛋Held远端恢复锚点表 = \[\d")
         self.assertIn(
             "$孵蛋蛋种名称文本 = 目标中文名称($游戏版本, $孵蛋蛋种族全国图鉴编号)",
             configured,
@@ -1161,10 +1192,10 @@ ENDFUNC
         self.assertIn("$Seed命中保持计数", configured)
         self.assertIn("$Seed预校准索引_NS1", configured)
         self.assertIn("$Seed预校准索引_NS2", configured)
-        self.assertIn("正式版±1五次多数、固定半步与命中后10次可信反查观察窗", configured)
+        self.assertIn("正式版±1五次多数、固定半步与命中后连续5次未命中保持", configured)
         self.assertNotIn("$孵蛋Seed等待MS = $孵蛋Seed等待MS -", configured)
 
-    def test_seed_hold_uses_ten_observations_but_only_plus_minus_one_votes(self):
+    def test_seed_hold_uses_five_consecutive_misses_and_direct_fixed_half(self):
         original = (
             "$Seed命中保持样本数 = 10\n"
             "FUNC 计算Seed锁定众数修正(): INT\n"
@@ -1181,10 +1212,13 @@ ENDFUNC
         configured_again = _apply_seed_hold_observation_window_text(configured)
 
         self.assertEqual(configured_again, configured)
+        self.assertIn("$Seed命中保持样本数 = 5", configured)
         self.assertIn(SEED_HOLD_OBSERVATION_MARKER, configured)
         self.assertIn(SEED_HOLD_OBSERVATION_MIN_GLOBAL, configured)
         self.assertIn(SEED_HOLD_OBSERVATION_CURRENT_BRANCH, configured)
-        self.assertIn(SEED_HOLD_OBSERVATION_CURRENT_DECISION, configured)
+        self.assertIn(SEED_HOLD_OBSERVATION_DIRECT_HALF_MARKER, configured)
+        self.assertIn("$Seed命中保持触发固定半步 = 1", configured)
+        self.assertIn("$Seed命中保持启用 = 0", configured)
         self.assertNotIn(SEED_HOLD_OBSERVATION_OLD_BRANCH, configured)
         self.assertNotIn(SEED_HOLD_OBSERVATION_OLD_DECISION, configured)
         hold_branch = configured.split("ELIF $Seed命中保持启用 == 1", 1)[1]
@@ -1232,6 +1266,10 @@ $孵蛋测试结果 = 孵蛋测试_执行同Seed两次命中($Seed模式, $孵�
         )
         self.assertIn(
             "$孵蛋流程Pickup奇偶基准帧 = $孵蛋流程请求Pickup帧 - $孵蛋流程奇偶F2扣除帧",
+            configured,
+        )
+        self.assertIn(
+            "IF $孵蛋流程Held已稳定 == 1 and $孵蛋流程Pickup奇偶基准帧 % 2 != 0",
             configured,
         )
         self.assertIn(
@@ -1432,11 +1470,15 @@ ENDFUNC
         self.assertIn("FUNC 孵蛋流程_候选个体是否完全一致(): INT", template)
         self.assertIn("FUNC 孵蛋流程_合并当前方法候选($方法: INT): INT", template)
         self.assertIn("FUNC 孵蛋流程_选择校准候选(): INT", template)
+        self.assertIn("FUNC 孵蛋流程_应用多候选锚点跳出(): INT", template)
         self.assertIn(EGG_REVERSE_LOOKUP_POLICY_MARKER, template)
         self.assertIn(
             "$孵蛋流程跨方法候选总数 += $孵蛋流程合并方法总数",
             template,
         )
+        self.assertIn("$孵蛋流程不同Held候选数 += 1", template)
+        self.assertIn("$孵蛋流程不同Pickup候选数 += 1", template)
+        self.assertIn("Held存在多个不同帧值，本轮禁止修改正式Held累计修正", template)
         self.assertIn(
             "$孵蛋流程实际方法 = $孵蛋流程最佳候选方法",
             template,
@@ -1478,6 +1520,10 @@ ENDFUNC
         )
         self.assertIn(
             "$孵蛋流程执行Pickup帧 = $孵蛋流程Pickup奇偶基准帧 - $孵蛋流程Pickup菜单推进帧",
+            template,
+        )
+        self.assertIn(
+            "IF $孵蛋流程Held已稳定 == 1 and $孵蛋流程Pickup奇偶基准帧 % 2 != 0",
             template,
         )
         library = library_path.read_text(encoding="utf-8")

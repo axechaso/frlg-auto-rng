@@ -1,0 +1,280 @@
+# GUI Seed方案1覆盖：精确命中后连续5次未命中保持，随后按±1多数方向固定半步
+# 本文件由 Python 替换到 1.1.8 主脚本，不单独执行。
+
+FUNC 计算Seed锁定众数修正(): INT
+    $Seed锁定本轮新启用 = 0
+    $Seed锁定本轮触发 = 0
+    $Seed锁定本轮样本计入 = 0
+    $Seed锁定众数差 = 0
+    $Seed锁定众数票数 = 0
+    $Seed锁定目标票数 = 0
+    $Seed锁定正方向票数 = 0
+    $Seed锁定负方向票数 = 0
+    $Seed锁定方向 = 0
+    $Seed锁定方向票数 = 0
+    $Seed命中保持本轮刷新 = 0
+    $Seed命中保持触发固定半步 = 0
+    $Seed锁定本轮大波动忽略 = 0
+    $Seed本次修正限幅 = 0
+    $Seed本次修正原始 = 0
+    $Seed本次修正索引 = 0
+    $Seed修正余 = 0
+    $Seed精细本轮更新 = 0
+    $Seed精细本轮新增MS = 0
+    $Seed精细区间收敛 = 0
+    $Seed直接修正触发 = 0
+    $Seed立即夹逼触发 = 0
+
+    IF $Seed锁定启用 == 0 and $Seed差绝对 <= $Seed锁定范围
+        $Seed锁定启用 = 1
+        $Seed锁定本轮新启用 = 1
+        $Seed锁定参数累计修正 = $Seed累计修正索引
+        $Seed锁定参数精细修正MS = $Seed精细修正MS
+        $Seed锁定窗口样本数 = 0
+        $Seed锁定窗口指针 = 0
+        $Seed粗调上次有效 = 0
+        $Seed命中保持启用 = 0
+        $Seed命中保持计数 = 0
+        $Seed命中保持正方向票数 = 0
+        $Seed命中保持负方向票数 = 0
+    ENDIF
+
+    # 尚未收敛时，大偏差仍按当前残差直接靠近并限幅。
+    IF $Seed锁定启用 == 0
+        $Seed精细校准启用 = 0
+        $Seed精细修正MS = 0
+        $Seed精细固定半步MS = 0
+        $Seed粗调上次有效 = 0
+        $Seed本次修正索引 = $命中差索引
+        $Seed本次修正原始 = $Seed本次修正索引
+        IF $Seed本次修正索引 > $Seed冷启动单轮修正上限
+            $Seed本次修正索引 = $Seed冷启动单轮修正上限
+            $Seed本次修正限幅 = 1
+        ELIF $Seed本次修正索引 < 0 - $Seed冷启动单轮修正上限
+            $Seed本次修正索引 = 0 - $Seed冷启动单轮修正上限
+            $Seed本次修正限幅 = 1
+        ENDIF
+        $Seed修正模式文本 = "尚未进入±1锁定范围，按当前大偏差直接靠近，最大修正±" & $Seed冷启动单轮修正上限
+        RETURN $Seed本次修正索引
+    ENDIF
+
+    IF $Seed锁定参数累计修正 != $Seed累计修正索引 or $Seed锁定参数精细修正MS != $Seed精细修正MS
+        $Seed锁定参数累计修正 = $Seed累计修正索引
+        $Seed锁定参数精细修正MS = $Seed精细修正MS
+        $Seed锁定窗口样本数 = 0
+        $Seed锁定窗口指针 = 0
+    ENDIF
+
+    IF $Seed本轮可信 == 1
+        IF $命中差索引 == 0
+            # 每次精确命中都从头刷新5次保持；连续5次未命中前请求参数不动。
+            $Seed命中保持启用 = 1
+            $Seed命中保持计数 = 0
+            $Seed命中保持正方向票数 = 0
+            $Seed命中保持负方向票数 = 0
+            $Seed命中保持本轮刷新 = 1
+            $Seed锁定目标票数 = 1
+            $Seed锁定窗口样本数 = 0
+            $Seed锁定窗口指针 = 0
+            $Seed粗调上次有效 = 0
+            $Seed修正模式文本 = "命中目标Seed，刷新连续5次未命中锁定"
+            RETURN 0
+        ELIF $Seed命中保持启用 == 1
+            # 保持窗口按每次可信Seed反查推进；超出±1只占观察次数，不投方向票。
+            $Seed命中保持计数 = $Seed命中保持计数 + 1
+            IF $Seed差绝对 == 1
+                $Seed锁定本轮样本计入 = 1
+                IF $命中差索引 > 0
+                    $Seed命中保持正方向票数 = $Seed命中保持正方向票数 + 1
+                ELSE
+                    $Seed命中保持负方向票数 = $Seed命中保持负方向票数 + 1
+                ENDIF
+            ELSE
+                $Seed锁定本轮大波动忽略 = 1
+            ENDIF
+        ELIF $Seed差绝对 == 1
+            $Seed锁定本轮样本计入 = 1
+            $Seed锁定窗口[$Seed锁定窗口样本数] = $命中差索引
+            $Seed锁定窗口样本数 = $Seed锁定窗口样本数 + 1
+            $Seed锁定窗口指针 = $Seed锁定窗口样本数
+        ELSE
+            # 非保持期仍只收集±1微调样本；偶发大偏差不修正，也不占5次方向窗口。
+            $Seed锁定本轮大波动忽略 = 1
+            $Seed修正模式文本 = "Seed已锁定，忽略本轮超出±1的机器波动"
+            RETURN 0
+        ENDIF
+    ELSE
+        $Seed修正模式文本 = "Seed已锁定，本轮不可信，不参与微调"
+        RETURN 0
+    ENDIF
+
+    IF $Seed命中保持启用 == 1
+        IF $Seed命中保持计数 < $Seed命中保持样本数
+            IF $Seed锁定本轮大波动忽略 == 1
+                $Seed修正模式文本 = "目标Seed参数保持中：" & $Seed命中保持计数 & "/" & $Seed命中保持样本数 & "；本轮大波动不投方向票"
+            ELSE
+                $Seed修正模式文本 = "目标Seed参数保持中：" & $Seed命中保持计数 & "/" & $Seed命中保持样本数
+            ENDIF
+            RETURN 0
+        ENDIF
+        $Seed锁定方向票数 = $Seed命中保持正方向票数 + $Seed命中保持负方向票数
+        IF $Seed锁定方向票数 < $Seed命中保持最少方向样本数
+            $Seed命中保持启用 = 0
+            $Seed命中保持计数 = 0
+            $Seed命中保持正方向票数 = 0
+            $Seed命中保持负方向票数 = 0
+            $Seed修正模式文本 = "连续5次未命中但±1方向样本不足3，解除参数保持，本轮不修正"
+            RETURN 0
+        ENDIF
+        IF $Seed命中保持正方向票数 == $Seed命中保持负方向票数
+            # 大波动只占未命中次数；方向平票时解除保持但不任意选边。
+            $Seed命中保持启用 = 0
+            $Seed命中保持计数 = 0
+            $Seed命中保持正方向票数 = 0
+            $Seed命中保持负方向票数 = 0
+            $Seed修正模式文本 = "连续5次未命中且±1方向票相同，解除参数保持，本轮不修正"
+            RETURN 0
+        ENDIF
+        IF $Seed命中保持正方向票数 > $Seed命中保持负方向票数
+            $Seed锁定方向 = 1
+            $Seed锁定方向票数 = $Seed命中保持正方向票数
+        ELSE
+            $Seed锁定方向 = -1
+            $Seed锁定方向票数 = $Seed命中保持负方向票数
+        ENDIF
+        $Seed锁定众数差 = $Seed锁定方向
+        $Seed锁定众数票数 = $Seed锁定方向票数
+        $Seed命中保持启用 = 0
+        $Seed命中保持计数 = 0
+        $Seed命中保持正方向票数 = 0
+        $Seed命中保持负方向票数 = 0
+        $Seed锁定本轮触发 = 1
+        $Seed命中保持触发固定半步 = 1
+    ELSE
+        IF $Seed锁定窗口样本数 < $Seed锁定窗口大小
+            $Seed修正模式文本 = "Seed±1微调采样中：" & $Seed锁定窗口样本数 & "/" & $Seed锁定窗口大小
+            RETURN 0
+        ENDIF
+        $Seed锁定有效末索引 = $Seed锁定窗口样本数 - 1
+        FOR $Seed锁定窗口索引 = 0 TO $Seed锁定有效末索引
+            IF $Seed锁定窗口[$Seed锁定窗口索引] > 0
+                $Seed锁定正方向票数 = $Seed锁定正方向票数 + 1
+            ELSE
+                $Seed锁定负方向票数 = $Seed锁定负方向票数 + 1
+            ENDIF
+        NEXT
+        IF $Seed锁定正方向票数 > $Seed锁定负方向票数
+            $Seed锁定方向 = 1
+            $Seed锁定方向票数 = $Seed锁定正方向票数
+        ELSE
+            $Seed锁定方向 = -1
+            $Seed锁定方向票数 = $Seed锁定负方向票数
+        ENDIF
+        $Seed锁定众数差 = $Seed锁定方向
+        $Seed锁定众数票数 = $Seed锁定方向票数
+        $Seed锁定窗口样本数 = 0
+        $Seed锁定窗口指针 = 0
+        $Seed锁定本轮触发 = 1
+    ENDIF
+
+    IF $Seed命中保持触发固定半步 == 1
+        # 命中过目标后连续5次未命中：直接取当前请求与多数方向相邻Seed间隔的一半。
+        # 不先移动整个Seed索引；固定半步一旦建立，后续不再递归缩小。
+        IF $Seed精细固定半步MS <= 0
+            $Seed精细当前索引 = $目标索引 + $Seed累计修正索引
+            $Seed精细相邻索引 = $Seed精细当前索引 + $Seed锁定方向
+            IF $Seed精细当前索引 < 0
+                $Seed精细当前索引 = 0
+            ENDIF
+            IF $Seed精细当前索引 > $Seed最大索引
+                $Seed精细当前索引 = $Seed最大索引
+            ENDIF
+            IF $Seed精细相邻索引 < 0
+                $Seed精细相邻索引 = 0
+            ENDIF
+            IF $Seed精细相邻索引 > $Seed最大索引
+                $Seed精细相邻索引 = $Seed最大索引
+            ENDIF
+            $Seed精细相邻请求偏移MS = 取MS($游戏版本, $Seed精细当前索引) - 取MS($游戏版本, $Seed精细相邻索引)
+            $Seed精细固定半步MS = $Seed精细相邻请求偏移MS
+            IF $Seed精细固定半步MS < 0
+                $Seed精细固定半步MS = 0 - $Seed精细固定半步MS
+            ENDIF
+            $Seed精细固定半步MS = $Seed精细固定半步MS / 2
+            IF $Seed精细固定半步MS < 1
+                $Seed精细固定半步MS = 1
+            ENDIF
+        ENDIF
+        $Seed精细校准启用 = 1
+        $Seed精细基准累计修正 = $Seed累计修正索引
+        $Seed精细本轮新增MS = 0 - $Seed锁定方向 * $Seed精细固定半步MS
+        $Seed精细修正MS = $Seed精细修正MS + $Seed精细本轮新增MS
+        $Seed精细下界MS = 0 - $Seed精细固定半步MS
+        $Seed精细上界MS = $Seed精细固定半步MS
+        $Seed精细本轮更新 = 1
+        $Seed锁定参数精细修正MS = $Seed精细修正MS
+        $Seed粗调上次有效 = 0
+        $Seed命中保持启用 = 1
+        $Seed命中保持计数 = 0
+        $Seed命中保持正方向票数 = 0
+        $Seed命中保持负方向票数 = 0
+        $Seed修正模式文本 = "连续5次未命中，按±1多数方向直接固定半步微调：" & $Seed精细本轮新增MS & " ms（固定半步" & $Seed精细固定半步MS & " ms）"
+        RETURN 0
+    ENDIF
+
+    IF $Seed精细校准启用 == 1
+        # 固定半步只在首次相邻整索引反转时计算；之后不再递归缩小。
+        $Seed精细本轮新增MS = 0 - $Seed锁定方向 * $Seed精细固定半步MS
+        $Seed精细修正MS = $Seed精细修正MS + $Seed精细本轮新增MS
+        $Seed精细本轮更新 = 1
+        $Seed锁定参数精细修正MS = $Seed精细修正MS
+        $Seed修正模式文本 = "Seed±1多数方向固定半步微调：" & $Seed精细本轮新增MS & " ms（固定半步" & $Seed精细固定半步MS & " ms）"
+        RETURN 0
+    ENDIF
+
+    $Seed粗调下一累计修正 = $Seed累计修正索引 + $Seed锁定方向
+    IF $Seed粗调上次有效 == 1 and $Seed粗调上次累计修正 == $Seed粗调下一累计修正 and $Seed粗调上次方向 == 0 - $Seed锁定方向
+        $Seed精细当前索引 = $目标索引 + $Seed累计修正索引
+        $Seed精细相邻索引 = $目标索引 + $Seed粗调上次累计修正
+        IF $Seed精细当前索引 < 0
+            $Seed精细当前索引 = 0
+        ENDIF
+        IF $Seed精细当前索引 > $Seed最大索引
+            $Seed精细当前索引 = $Seed最大索引
+        ENDIF
+        IF $Seed精细相邻索引 < 0
+            $Seed精细相邻索引 = 0
+        ENDIF
+        IF $Seed精细相邻索引 > $Seed最大索引
+            $Seed精细相邻索引 = $Seed最大索引
+        ENDIF
+        $Seed精细相邻请求偏移MS = 取MS($游戏版本, $Seed精细当前索引) - 取MS($游戏版本, $Seed精细相邻索引)
+        $Seed精细固定半步MS = $Seed精细相邻请求偏移MS
+        IF $Seed精细固定半步MS < 0
+            $Seed精细固定半步MS = 0 - $Seed精细固定半步MS
+        ENDIF
+        $Seed精细固定半步MS = $Seed精细固定半步MS / 2
+        IF $Seed精细固定半步MS < 1
+            $Seed精细固定半步MS = 1
+        ENDIF
+        $Seed精细校准启用 = 1
+        $Seed精细基准累计修正 = $Seed累计修正索引
+        $Seed精细本轮新增MS = 0 - $Seed锁定方向 * $Seed精细固定半步MS
+        $Seed精细修正MS = $Seed精细修正MS + $Seed精细本轮新增MS
+        $Seed精细下界MS = 0 - $Seed精细固定半步MS
+        $Seed精细上界MS = $Seed精细固定半步MS
+        $Seed精细本轮更新 = 1
+        $Seed本次修正索引 = 0
+        $Seed粗调上次有效 = 0
+        $Seed修正模式文本 = "相邻整索引多数方向反转，启用固定半步毫秒微调"
+        RETURN 0
+    ENDIF
+
+    $Seed本次修正索引 = $Seed锁定方向
+    $Seed本次修正原始 = $Seed本次修正索引
+    $Seed粗调上次有效 = 1
+    $Seed粗调上次累计修正 = $Seed累计修正索引
+    $Seed粗调上次方向 = $Seed锁定方向
+    $Seed修正模式文本 = "完整5次±1样本多数方向，逐个Seed粗调"
+    RETURN $Seed本次修正索引
+ENDFUNC
