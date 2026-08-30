@@ -43,7 +43,7 @@
 
 - 完整绿色版 ZIP；
 - `update-manifest.json`；
-- 可选的人类可读 `.sha256` 文件。
+- 人类可读 `.sha256` 文件。
 
 `update-manifest.json` 的首版结构：
 
