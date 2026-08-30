@@ -11,6 +11,10 @@ from run_auto_rng_gui import (
     SEED_STARTUP_FIXED_USER_HOME,
     SEED_STARTUP_HOME_BUFFER,
     SEED_STARTUP_SCHEME_CODES,
+    SCRIPT_TEST_ENTRIES,
+    SCRIPT_TEST_ENTRY_CUSTOM,
+    SCRIPT_TEST_ENTRY_FORMAL,
+    SCRIPT_TEST_ENTRY_TIMELINE,
     _install_autocomplete_combo,
     build_egg_config_payload,
     build_egg_full_config_payload,
@@ -450,6 +454,83 @@ class GuiIvInputTests(unittest.TestCase):
         )
         self.assertEqual(ADVANCED_TAB_LABEL, "脚本测试（高级）")
         self.assertEqual(RUN_LOG_TAB_LABEL, "运行日志")
+        self.assertEqual(
+            SCRIPT_TEST_ENTRIES,
+            (
+                SCRIPT_TEST_ENTRY_FORMAL,
+                SCRIPT_TEST_ENTRY_TIMELINE,
+                SCRIPT_TEST_ENTRY_CUSTOM,
+            ),
+        )
+
+    def test_script_test_entry_path_tracks_selection_and_custom_files(self):
+        from pathlib import Path
+        import tempfile
+
+        class FakeVariable:
+            def __init__(self, value=""):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        class FakeApp:
+            pass
+
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            formal = source / "NS火叶全自动一键乱数1.1.8.ecs"
+            timeline = source / "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
+            formal.write_text("", encoding="utf-8")
+            timeline.write_text("", encoding="utf-8")
+            app = FakeApp()
+            app.source_var = FakeVariable(str(source))
+            app.script_test_entry_var = FakeVariable(SCRIPT_TEST_ENTRY_FORMAL)
+            app.script_test_path_var = FakeVariable("")
+            app.script_test_entry_status_var = FakeVariable("")
+            app._updating = False
+            app._sync_script_test_entry_path = lambda: AutoRngApp._sync_script_test_entry_path(app)
+            app.invalidate_plan = lambda: None
+
+            app._sync_script_test_entry_path()
+            self.assertEqual(app.script_test_path_var.get(), str(formal.resolve()))
+            app.script_test_entry_var.set(SCRIPT_TEST_ENTRY_TIMELINE)
+            AutoRngApp._on_script_test_entry_change(app)
+            self.assertEqual(app.script_test_path_var.get(), str(timeline.resolve()))
+
+            custom = source / "custom.ecs"
+            app.script_test_path_var.set(str(custom))
+            AutoRngApp._on_script_test_path_change(app)
+            self.assertEqual(app.script_test_entry_var.get(), SCRIPT_TEST_ENTRY_CUSTOM)
+
+    def test_missing_standard_script_entry_is_reported_without_fallback(self):
+        from pathlib import Path
+        import tempfile
+
+        class FakeVariable:
+            def __init__(self, value=""):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        with tempfile.TemporaryDirectory() as temporary:
+            app = SimpleNamespace(
+                source_var=FakeVariable(temporary),
+                script_test_entry_var=FakeVariable(SCRIPT_TEST_ENTRY_FORMAL),
+                script_test_path_var=FakeVariable("old.ecs"),
+                script_test_entry_status_var=FakeVariable(""),
+                _updating=False,
+            )
+            AutoRngApp._sync_script_test_entry_path(app)
+            self.assertEqual(app.script_test_path_var.get(), "")
+            self.assertIn("入口不可用", app.script_test_entry_status_var.get())
 
     def test_running_log_path_follows_active_mode(self):
         app = SimpleNamespace(

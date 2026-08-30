@@ -15,10 +15,12 @@ from fingerprint_policy import record_fingerprint_mismatch
 
 from .easycon118 import (
     EASYCON118_EXTENSION_LABEL_DIR,
+    EGG_TEMPLATE_NAME,
     EXPECTED_EZCON_SHA256,
     EXPECTED_EZCON_VERSION,
     EXPECTED_TESSDATA_SHA256,
     EasyConRuntimeCheck,
+    STANDARD_TEMPLATE_NAME,
     prepare_compat_runner,
 )
 
@@ -30,6 +32,21 @@ SCRIPT_TEST_BACKENDS = (
     SCRIPT_TEST_BACKEND_ORIGINAL,
 )
 
+SCRIPT_TEST_ENTRY_FORMAL = "正式版脚本"
+SCRIPT_TEST_ENTRY_TIMELINE = "时间轴版脚本"
+SCRIPT_TEST_ENTRY_CUSTOM = "自选 ECS"
+SCRIPT_TEST_ENTRIES = (
+    SCRIPT_TEST_ENTRY_FORMAL,
+    SCRIPT_TEST_ENTRY_TIMELINE,
+    SCRIPT_TEST_ENTRY_CUSTOM,
+)
+# Descriptive alias kept for callers that treat these as immutable choices.
+SCRIPT_TEST_ENTRY_CHOICES = SCRIPT_TEST_ENTRIES
+_SCRIPT_TEST_ENTRY_FILENAMES = {
+    SCRIPT_TEST_ENTRY_FORMAL: STANDARD_TEMPLATE_NAME,
+    SCRIPT_TEST_ENTRY_TIMELINE: EGG_TEMPLATE_NAME,
+}
+
 BUILTIN_EGG_SURF_MENU_PROBE = (
     RESOURCE_ROOT
     / "assets"
@@ -39,6 +56,41 @@ BUILTIN_EGG_SURF_MENU_PROBE = (
 BUILTIN_EGG_SURF_MENU_LABELS = ("冲浪",)
 
 _LABEL_REFERENCE_RE = re.compile(r"@([\w]+)", re.UNICODE)
+
+
+def resolve_script_test_entry(
+    source_dir: str | Path,
+    selection: str,
+    *,
+    require_exists: bool = True,
+) -> Path:
+    """Resolve one of the two audited 1.1.8 entry scripts."""
+    try:
+        filename = _SCRIPT_TEST_ENTRY_FILENAMES[selection]
+    except KeyError as exc:
+        if selection == SCRIPT_TEST_ENTRY_CUSTOM:
+            raise ValueError("自选 ECS 需要在下方指定脚本文件") from exc
+        raise ValueError(f"未知 1.1.8 脚本入口: {selection}") from exc
+    path = (Path(source_dir).expanduser().resolve() / filename).resolve()
+    if require_exists and not path.is_file():
+        raise FileNotFoundError(f"找不到{selection}入口: {path}")
+    return path
+
+
+def identify_script_test_entry(
+    source_dir: str | Path,
+    script_path: str | Path,
+) -> str:
+    """Identify a selected path as formal, timeline, or a custom ECS."""
+    selected = Path(script_path).expanduser().resolve()
+    for entry in (SCRIPT_TEST_ENTRY_FORMAL, SCRIPT_TEST_ENTRY_TIMELINE):
+        if selected == resolve_script_test_entry(
+            source_dir,
+            entry,
+            require_exists=False,
+        ):
+            return entry
+    return SCRIPT_TEST_ENTRY_CUSTOM
 
 
 @dataclass(frozen=True)

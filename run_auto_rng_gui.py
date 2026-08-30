@@ -64,6 +64,11 @@ from automation import (
     SearchCancelledError,
     SCRIPT_TEST_BACKEND_COMPAT,
     SCRIPT_TEST_BACKENDS,
+    SCRIPT_TEST_ENTRIES,
+    SCRIPT_TEST_ENTRY_CHOICES,
+    SCRIPT_TEST_ENTRY_CUSTOM,
+    SCRIPT_TEST_ENTRY_FORMAL,
+    SCRIPT_TEST_ENTRY_TIMELINE,
     SID_REVERSE_TEMPLATE_NAME,
     SIDReverseRunRequest,
     ScriptTestPreparation,
@@ -75,6 +80,7 @@ from automation import (
     build_tid_starter_flow_plan,
     build_run_command,
     prepare_compat_runner,
+    identify_script_test_entry,
     prepare_script_test_runtime,
     probe_easycon_devices,
     search_best_plan,
@@ -87,6 +93,7 @@ from automation import (
     write_sid_reverse_project,
     write_tid_starter_flow_bundle,
     write_builtin_egg_surf_menu_probe,
+    resolve_script_test_entry,
 )
 from rng.tenlines_utils import (
     get_ability_name,
@@ -163,6 +170,138 @@ def clean_terminal_log(text: str) -> str:
     """Remove terminal color/control sequences before showing a saved log in Tk."""
     cleaned = ANSI_ESCAPE_RE.sub("", text)
     return cleaned.replace("\r\n", "\n").replace("\r", "\n")
+
+
+class HoverTooltip:
+    """Small delayed help window used for non-essential UI explanations."""
+
+    def __init__(
+        self,
+        widget: tk.Widget,
+        title: str,
+        text: str,
+        *,
+        delay: int = 350,
+        wraplength: int = 380,
+    ) -> None:
+        self.widget = widget
+        self.title = title
+        self.text = text
+        self.delay = delay
+        self.wraplength = wraplength
+        self._after_id = None
+        self._window: tk.Toplevel | None = None
+        self._pointer_in_popup = False
+        widget.bind("<Enter>", self._on_enter, add="+")
+        widget.bind("<Leave>", self._on_leave, add="+")
+        widget.bind("<ButtonPress>", self.hide, add="+")
+
+    def _on_enter(self, _event=None) -> None:
+        self._cancel_pending()
+        self._after_id = self.widget.after(self.delay, self.show)
+
+    def _on_leave(self, _event=None) -> None:
+        self._cancel_pending()
+        self.widget.after(120, self._hide_if_pointer_left)
+
+    def _hide_if_pointer_left(self) -> None:
+        try:
+            x, y = self.widget.winfo_pointerxy()
+            left = self.widget.winfo_rootx()
+            top = self.widget.winfo_rooty()
+            right = left + self.widget.winfo_width()
+            bottom = top + self.widget.winfo_height()
+            if not (left <= x <= right and top <= y <= bottom) and not self._pointer_in_popup:
+                self.hide()
+        except tk.TclError:
+            self.hide()
+
+    def _cancel_pending(self) -> None:
+        if self._after_id is not None:
+            try:
+                self.widget.after_cancel(self._after_id)
+            except tk.TclError:
+                pass
+            self._after_id = None
+
+    def show(self) -> None:
+        self._after_id = None
+        if self._window is not None:
+            return
+        try:
+            if not self.widget.winfo_exists():
+                return
+            window = tk.Toplevel(self.widget)
+            self._window = window
+            window.overrideredirect(True)
+            window.transient(self.widget.winfo_toplevel())
+            try:
+                window.attributes("-topmost", True)
+            except tk.TclError:
+                pass
+            window.configure(background="#9a9a9a")
+            body = tk.Frame(
+                window,
+                background="#fffdf8",
+                borderwidth=1,
+                relief="solid",
+                padx=7,
+                pady=5,
+            )
+            body.pack(fill="both", expand=True, padx=1, pady=1)
+            tk.Label(
+                body,
+                text=self.title,
+                background="#fffdf8",
+                foreground="#1f2937",
+                font=("Segoe UI", 9, "bold"),
+                anchor="w",
+                justify="left",
+            ).pack(anchor="w", fill="x")
+            tk.Label(
+                body,
+                text=self.text,
+                background="#fffdf8",
+                foreground="#374151",
+                font=("Segoe UI", 9),
+                anchor="w",
+                justify="left",
+                wraplength=self.wraplength,
+            ).pack(anchor="w", fill="x", pady=(2, 0))
+            window.update_idletasks()
+            x = self.widget.winfo_rootx()
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+            width = window.winfo_reqwidth()
+            height = window.winfo_reqheight()
+            screen_width = self.widget.winfo_screenwidth()
+            screen_height = self.widget.winfo_screenheight()
+            if x + width > screen_width - 8:
+                x = max(8, screen_width - width - 8)
+            if y + height > screen_height - 8:
+                y = self.widget.winfo_rooty() - height - 4
+            window.geometry(f"+{max(8, x)}+{max(8, y)}")
+            window.bind("<Enter>", self._on_popup_enter, add="+")
+            window.bind("<Leave>", self._on_popup_leave, add="+")
+            window.bind("<ButtonPress>", self.hide, add="+")
+        except tk.TclError:
+            self.hide()
+
+    def _on_popup_enter(self, _event=None) -> None:
+        self._pointer_in_popup = True
+
+    def _on_popup_leave(self, _event=None) -> None:
+        self._pointer_in_popup = False
+        self.hide()
+
+    def hide(self, _event=None) -> None:
+        self._cancel_pending()
+        self._pointer_in_popup = False
+        if self._window is not None:
+            try:
+                self._window.destroy()
+            except tk.TclError:
+                pass
+            self._window = None
 
 
 def read_display_log_tail(path: Path | None, maximum_chars: int = 20000) -> str:
@@ -768,6 +907,12 @@ class AutoRngApp:
         self.running_log_snapshot = ""
         self.busy = False
         self._updating = False
+        self._tooltips: list[HoverTooltip] = []
+        ttk.Style(self.root).configure(
+            "Help.TLabel",
+            foreground="#1d4ed8",
+            font=("Segoe UI", 9, "bold"),
+        )
         self.manual_tools: ManualToolsManager | None = None
         self.preview_url: str | None = None
         self.tid_calibration_result_path: Path | None = None
@@ -851,7 +996,13 @@ class AutoRngApp:
         entry.bind("<Return>", lambda _event: self.refresh_tid_records())
         ttk.Button(filters, text="查询 / 刷新", command=self.refresh_tid_records).pack(side="left", padx=4)
         ttk.Button(filters, text="导出 CSV", command=self.export_tid_records).pack(side="left", padx=4)
-        ttk.Label(self.tid_records_tab, text="自动记录 TID 页运行得到的有效结果；不同游戏、机型和参数分别统计。不记录 SID 或 SID ADV。").pack(anchor="w")
+        self._help_marker(
+            self.tid_records_tab,
+            "TID 实测表",
+            "自动记录 TID 页运行得到的有效结果；不同游戏、机型和参数分别统计。"
+            "这里只记录 TID，不记录 SID 或 SID ADV。",
+            label="?",
+        ).pack(anchor="w")
         frame = ttk.Frame(self.tid_records_tab)
         frame.pack(fill="both", expand=True, pady=6)
         columns = ("tid", "game", "nx_model", "language", "OP", "F1", "F2", "occurrences", "player_name", "op_correction", "last_seen")
@@ -973,13 +1124,18 @@ class AutoRngApp:
         self.save_profile_combo.bind(
             "<<ComboboxSelected>>", self._on_save_profile_selected
         )
+        self._add_tooltip(
+            self.save_profile_combo,
+            "当前存档",
+            "选择存档会同步各页面的游戏、主机、TID 和 SID；手动输入模式不会自动覆盖现有参数。",
+        )
         ttk.Button(
             profile_frame,
             text="管理存档",
             command=self.open_save_profile_manager,
         ).pack(side="left")
         self.save_profile_summary_var = tk.StringVar(
-            value="手动输入模式：不会自动覆盖各页面参数。"
+            value="手动输入模式"
         )
         ttk.Label(
             profile_frame,
@@ -1050,7 +1206,7 @@ class AutoRngApp:
 
         label_tools = ttk.LabelFrame(
             self.run_log_tab,
-            text="设备标签诊断与覆盖（不修改原始标签包）",
+            text="设备标签诊断与覆盖",
             padding=8,
         )
         label_tools.pack(fill="x", pady=(8, 0))
@@ -1061,7 +1217,12 @@ class AutoRngApp:
             label_tools,
             textvariable=self.label_profile_status_var,
             wraplength=1000,
-        ).grid(row=0, column=0, columnspan=6, sticky="w", padx=3, pady=(0, 5))
+        ).grid(row=0, column=0, columnspan=5, sticky="w", padx=3, pady=(0, 5))
+        self._help_marker(
+            label_tools,
+            "设备标签覆盖",
+            "覆盖按采集设备名称独立保存，只应用到生成工程，不会修改原始标签包。",
+        ).grid(row=0, column=5, sticky="e", padx=3, pady=(0, 5))
         self.label_issue_tree = ttk.Treeview(
             label_tools,
             columns=("label", "score", "threshold", "count", "context"),
@@ -1082,14 +1243,15 @@ class AutoRngApp:
         )
         self.label_drop_target = ttk.Label(
             label_tools,
-            text=(
-                "可把多个 .IL 文件或包含标签的文件夹拖到这里"
-                if DND_FILES is not None
-                else "当前未加载拖放组件；仍可使用下面的多文件/文件夹选择"
-            ),
+            text="拖放 .IL 文件或文件夹" if DND_FILES is not None else "请使用下方按钮选择 .IL 文件或文件夹",
             anchor="center",
             relief="groove",
             padding=7,
+        )
+        self._add_tooltip(
+            self.label_drop_target,
+            "导入设备标签",
+            "可以拖入多个 .IL 文件或包含标签的文件夹；也可以使用下方的多文件/文件夹选择按钮。",
         )
         self.label_drop_target.grid(
             row=2, column=0, columnspan=6, sticky="ew", padx=3, pady=(5, 6)
@@ -1158,9 +1320,12 @@ class AutoRngApp:
         self._labeled_entry(
             sid_identity, "识图阈值", self.sid_threshold_var, 1, 2, width=8
         )
-        ttk.Label(
+        self._help_marker(
             sid_identity,
-            text="支持第三世代 Method 1/2/4；闪光公式只能确定 8 个真实 SID 候选，建档链前10000 ADV有命中时再选最早值。",
+            "SID 反查范围",
+            "支持第三世代 Method 1/2/4。闪光公式只能确定 8 个真实 SID 候选；"
+            "建档链前 10000 ADV 有命中时再选最早值。",
+            label="?",
         ).grid(row=1, column=4, columnspan=4, sticky="w", padx=4, pady=4)
         ttk.Checkbutton(
             sid_identity,
@@ -1259,9 +1424,12 @@ class AutoRngApp:
                 effort_spinbox.grid(row=row, column=stat_index, padx=3, pady=2)
                 row_widgets.append((effort_spinbox, "normal"))
             self.sid_party_row_widgets.append(tuple(row_widgets))
-        ttk.Label(
+        self._help_marker(
             sid_party,
-            text="只处理队伍前 N 位；活动槽位可输入中文名、英文名或全国图鉴编号。孵蛋来源与非 Method 1/2/4 个体暂不支持。",
+            "队伍输入规则",
+            "只处理队伍前 N 位；活动槽位可输入中文名、英文名或全国图鉴编号。"
+            "孵蛋来源与非 Method 1/2/4 个体暂不支持。",
+            label="?",
         ).grid(
             row=7,
             column=0,
@@ -1409,7 +1577,11 @@ class AutoRngApp:
         direct_frame.grid(row=4, column=0, columnspan=8, sticky="w", padx=4, pady=(3, 0))
         self._labeled_entry(direct_frame, "指定初始 Seed", self.direct_seed_var, 0, 0, width=10)
         self._labeled_entry(direct_frame, "指定消耗帧", self.direct_adv_var, 0, 2, width=12)
-        ttk.Label(direct_frame, text="指定模式会跳过筛选搜索，Seed 模式必须手动选择。").grid(
+        self._help_marker(
+            direct_frame,
+            "指定 Seed / 帧数",
+            "指定模式会跳过筛选搜索，Seed 模式必须手动选择。",
+        ).grid(
             row=0, column=4, columnspan=4, sticky="w", padx=4
         )
         self.search_mode_combo = filters.grid_slaves(row=1, column=1)[0]
@@ -1420,7 +1592,11 @@ class AutoRngApp:
         ttk.Checkbutton(capture_options, text="出闪后自动抓捕", variable=self.auto_capture_var).pack(side="left")
         ttk.Checkbutton(capture_options, text="麻痹", variable=self.paralysis_var).pack(side="left", padx=(12, 0))
         ttk.Checkbutton(capture_options, text="点到为止", variable=self.false_swipe_var).pack(side="left", padx=(12, 0))
-        ttk.Label(capture_options, text="未勾自动抓捕时，脚本会在出闪后停给用户处理。").pack(side="left", padx=(18, 0))
+        self._help_marker(
+            capture_options,
+            "出闪后处理",
+            "未勾选自动抓捕时，脚本会在识别到闪光后停止，交给用户处理。",
+        ).pack(side="left", padx=(14, 0))
 
         egg_identity = ttk.LabelFrame(egg_tab, text="1. 孵蛋运行条件", padding=10)
         egg_identity.pack(fill="x")
@@ -1455,9 +1631,10 @@ class AutoRngApp:
             egg_species_choices,
             self.egg_pokemon_var,
         )
-        ttk.Label(
+        self._help_marker(
             egg_identity,
-            text="Seed 模式必须与 Ten Lines Egg 页使用的游戏设置一致。",
+            "孵蛋 Seed 模式",
+            "必须与 Ten Lines Egg 页搜索时使用的游戏设置一致。",
         ).grid(row=1, column=4, columnspan=3, sticky="w", padx=4, pady=4)
         self._labeled_combo(
             egg_identity,
@@ -1469,16 +1646,17 @@ class AutoRngApp:
             width=34,
             span=3,
         )
-        ttk.Label(
+        self._help_marker(
             egg_identity,
-            text="第二项要求当前存档已经完成254步准备；仍会执行所选Seed启动方案与全部校准流程。",
+            "从 254 步基础档开始",
+            "第二项要求当前存档已经完成 254 步准备；仍会执行所选 Seed 启动方案与全部校准流程。",
         ).grid(row=2, column=4, columnspan=3, sticky="w", padx=4, pady=4)
         self.egg_game_combo.bind("<<ComboboxSelected>>", lambda _: self._on_game_change())
         self.egg_nx_combo.bind("<<ComboboxSelected>>", lambda _: self._on_game_change())
 
         egg = ttk.LabelFrame(
             egg_tab,
-            text="2. 孵蛋测试目标（先从 Ten Lines Egg 页取得 Seed / Held / Pickup）",
+            text="2. 孵蛋测试目标",
             padding=8,
         )
         egg.pack(fill="x", pady=(10, 0))
@@ -1536,6 +1714,11 @@ class AutoRngApp:
             text="载入全部配置",
             command=self.load_egg_full_config,
         ).pack(side="left", padx=(8, 0))
+        self._help_marker(
+            egg_config_actions,
+            "目标数据来源",
+            "目标 Seed、Held / 生成帧和 Pickup / 领取帧需要先从 Ten Lines Egg 页取得。",
+        ).pack(side="left", padx=(14, 0))
 
         tid_identity = ttk.LabelFrame(tid_tab, text="1. TID / SID 基本条件", padding=8)
         tid_identity.pack(fill="x")
@@ -1581,12 +1764,19 @@ class AutoRngApp:
         self.tid_calibration_check.grid(
             row=2, column=2, columnspan=4, sticky="w", padx=4, pady=4
         )
+        self._add_tooltip(
+            self.tid_calibration_check,
+            "固定延迟检测",
+            "先测量 OP、F1、F2、F3 和实际 OP 修正；测量完整后自动回填、重新生成并预检计划，"
+            "通过后继续运行，不会再次弹出确认。",
+        )
         self.tid_game_combo = self._labeled_combo(
             tid_identity, "游戏版本", self.tid_game_var, ("火红", "叶绿"), 2, 0
         )
         ttk.Label(
             tid_identity,
             text="脚本会新建存档并自动退出游戏两次；请先确认当前存档与主页状态。",
+            foreground="#9a3412",
         ).grid(row=3, column=0, columnspan=8, sticky="w", padx=4, pady=(3, 0))
         self.tid_language_combo.bind(
             "<<ComboboxSelected>>", lambda _: self._apply_tid_language_defaults()
@@ -1599,7 +1789,7 @@ class AutoRngApp:
         )
 
         tid_frames = ttk.LabelFrame(
-            tid_tab, text="2. 乱数中心 / 穷举范围（脚本帧为游戏帧）", padding=8
+            tid_tab, text="2. 乱数中心 / 穷举范围", padding=8
         )
         tid_frames.pack(fill="x", pady=(8, 0))
         self.tid_op_target_var = tk.StringVar(value="3693")
@@ -1618,6 +1808,11 @@ class AutoRngApp:
         for column, label in enumerate(("OP", "F1", "F2"), 1):
             ttk.Label(tid_frames, text=label).grid(row=0, column=column, padx=18, pady=2)
             tid_frames.columnconfigure(column, weight=1)
+        self._help_marker(
+            tid_frames,
+            "帧数单位",
+            "这里的脚本帧按游戏画面帧填写，不是 1.1.8 / Ten Lines 的 RNG advance。",
+        ).grid(row=0, column=4, padx=5, pady=2)
         frame_rows = (
             ("乱数中心帧", (self.tid_op_target_var, self.tid_f1_target_var, self.tid_f2_target_var)),
             ("乱数搜索半径", (self.tid_op_rng_range_var, self.tid_f1_rng_range_var, self.tid_f2_rng_range_var)),
@@ -1682,12 +1877,20 @@ class AutoRngApp:
         self._labeled_entry(tid_settings, "OP 修正", self.tid_op_correction_var, 2, 4, width=12)
         self._labeled_entry(tid_settings, "SID ADV 修正", self.tid_sid_adv_correction_var, 2, 6, width=12)
         self._labeled_entry(tid_settings, "select 补偿", self.tid_select_correction_var, 3, 0, width=12)
-        ttk.Checkbutton(
+        self.tid_manual_delay_check = ttk.Checkbutton(
             tid_settings,
-            text="手动编辑固定延迟（默认关闭；固定延迟检查完成后自动回填）",
+            text="手动编辑固定延迟",
             variable=self.tid_manual_delay_var,
             command=self._update_tid_delay_controls,
-        ).grid(row=3, column=2, columnspan=6, sticky="w", padx=4, pady=4)
+        )
+        self.tid_manual_delay_check.grid(
+            row=3, column=2, columnspan=5, sticky="w", padx=4, pady=4
+        )
+        self._help_marker(
+            tid_settings,
+            "固定延迟编辑",
+            "默认关闭；固定延迟检查完成后会自动回填 OP、F1、F2、F3。",
+        ).grid(row=3, column=7, sticky="w", padx=4, pady=4)
 
         tid_starter = ttk.LabelFrame(tid_tab, text="4. 御三家连续乱数", padding=8)
         tid_starter.pack(fill="x", pady=(8, 0))
@@ -1703,10 +1906,20 @@ class AutoRngApp:
         self.tid_starter_seed_button_var = tk.StringVar(value="A")
         ttk.Checkbutton(
             tid_starter,
-            text="TID 阶段完成后继续御三家；穷举模式使用实际 TID 与 SID ADV",
+            text="TID 阶段完成后继续御三家",
             variable=self.tid_starter_flow_var,
-        ).grid(row=0, column=0, columnspan=8, sticky="w", padx=4, pady=4)
-        ttk.Label(tid_starter, text="游戏版本使用上方基本条件").grid(row=1, column=0, columnspan=2, padx=4)
+        ).grid(row=0, column=0, columnspan=7, sticky="w", padx=4, pady=4)
+        self._help_marker(
+            tid_starter,
+            "连续御三家流程",
+            "穷举模式会使用实际 TID 与 SID ADV；游戏版本沿用上方 TID / SID 基本条件。",
+        ).grid(row=0, column=7, sticky="w", padx=4, pady=4)
+        self._help_marker(
+            tid_starter,
+            "御三家游戏版本",
+            "游戏版本使用上方 TID / SID 基本条件中的选择。",
+            label="?",
+        ).grid(row=1, column=0, columnspan=2, sticky="e", padx=4)
         self.tid_starter_combo = self._labeled_combo(
             tid_starter,
             "御三家",
@@ -1721,10 +1934,20 @@ class AutoRngApp:
         self.tid_starter_max_adv_entry = self._labeled_entry(
             tid_starter, "最高 ADV", self.tid_starter_max_adv_var, 1, 6, width=12
         )
-        ttk.Label(
+        starter_settings_label = ttk.Label(
             tid_starter,
-            text="御三家游戏设置（独立于 TID 设置）",
-        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=4, pady=4)
+            text="御三家游戏设置",
+            style="Help.TLabel",
+            cursor="question_arrow",
+        )
+        starter_settings_label.grid(
+            row=2, column=0, columnspan=2, sticky="e", padx=4, pady=4
+        )
+        self._add_tooltip(
+            starter_settings_label,
+            "御三家游戏设置",
+            "这些设置独立于上方 TID 阶段的 Sound、Button Mode 和 Seed Button。",
+        )
         self.tid_starter_sound_combo = self._labeled_combo(
             tid_starter, "Sound", self.tid_starter_sound_var,
             ("MONO", "STEREO"), 2, 2,
@@ -1742,17 +1965,27 @@ class AutoRngApp:
         )
         self.tid_any_tid_check = ttk.Checkbutton(
             tid_starter,
-            text="取得任意 TID 后继续（忽略目标 TID / 特殊号码）",
+            text="取得任意 TID 后继续",
             variable=self.tid_any_tid_var,
             command=self._update_tid_flow_controls,
         )
-        self.tid_any_tid_check.grid(row=3, column=2, columnspan=6, sticky="w", padx=4, pady=4)
+        self.tid_any_tid_check.grid(row=3, column=2, columnspan=5, sticky="w", padx=4, pady=4)
+        self._help_marker(
+            tid_starter,
+            "任意 TID 接续",
+            "开启后忽略目标 TID 与特殊号码条件，首次满足完整性要求的 TID 可接续御三家流程。",
+        ).grid(row=3, column=7, sticky="w", padx=4, pady=4)
         self.tid_any_tid_denoise_check = ttk.Checkbutton(
             tid_starter,
-            text="任意 TID 等待去噪确认（默认开启；关闭后首次完整识别即继续）",
+            text="任意 TID 等待去噪确认",
             variable=self.tid_any_tid_denoise_var,
         )
-        self.tid_any_tid_denoise_check.grid(row=4, column=2, columnspan=6, sticky="w", padx=4, pady=4)
+        self.tid_any_tid_denoise_check.grid(row=4, column=2, columnspan=5, sticky="w", padx=4, pady=4)
+        self._help_marker(
+            tid_starter,
+            "任意 TID 去噪",
+            "默认开启。关闭后，首个完整识别且数值合法的 TID 会直接接续；缺位或非法识别仍不会放行。",
+        ).grid(row=4, column=7, sticky="w", padx=4, pady=4)
         self.tid_starter_flow_controls = (
             self.tid_starter_combo,
             self.tid_starter_min_adv_entry,
@@ -1815,13 +2048,19 @@ class AutoRngApp:
         tid_resume = ttk.LabelFrame(tid_tab, text="7. 参数保存与穷举续跑", padding=8)
         tid_resume.pack(fill="x", pady=(8, 0))
         self.tid_resume_var = tk.BooleanVar(value=True)
+        tid_resume_toggle = ttk.Frame(tid_resume)
+        tid_resume_toggle.pack(anchor="w", fill="x")
         ttk.Checkbutton(
-            tid_resume, text="开始时继续同参数的上次穷举进度（默认开启）",
+            tid_resume_toggle, text="继续同参数的上次穷举进度",
             variable=self.tid_resume_var,
-        ).pack(anchor="w")
-        ttk.Label(tid_resume, text="TID参数自动保存。取消勾选则本次从所填起点开始；打开工具不会自动运行游戏。\n"
-                  "续跑会重试停止时的当前点，并重新进行去噪观察；已命中完成的进度不会继续。",
-                  justify="left").pack(anchor="w", pady=4)
+        ).pack(side="left")
+        self._help_marker(
+            tid_resume_toggle,
+            "穷举续跑",
+            "默认开启，TID 参数会自动保存。取消勾选后，本次从所填起点开始；"
+            "打开工具不会自动运行游戏。续跑会重试停止时的当前点并重新去噪，"
+            "已命中完成的进度不会继续。",
+        ).pack(side="left", padx=(6, 0))
         self.tid_progress_status_var = tk.StringVar(value="尚无本次参数的穷举进度。")
         ttk.Label(tid_resume, textvariable=self.tid_progress_status_var, wraplength=950,
                   justify="left").pack(anchor="w")
@@ -1834,13 +2073,28 @@ class AutoRngApp:
         )
         script_test.pack(fill="x")
         self.script_test_path_var = tk.StringVar(value="")
+        self.script_test_entry_var = tk.StringVar(value=SCRIPT_TEST_ENTRY_FORMAL)
+        self.script_test_entry_status_var = tk.StringVar(value="")
         self.script_test_backend_var = tk.StringVar(value=SCRIPT_TEST_BACKEND_COMPAT)
         self.script_test_verbose_var = tk.BooleanVar(value=False)
+        self._labeled_combo(
+            script_test,
+            "1.1.8 入口",
+            self.script_test_entry_var,
+            SCRIPT_TEST_ENTRY_CHOICES,
+            0,
+            0,
+            width=22,
+            span=2,
+        ).bind(
+            "<<ComboboxSelected>>",
+            lambda _event: self._on_script_test_entry_change(),
+        )
         self._labeled_entry(
             script_test,
             "ECS 文件",
             self.script_test_path_var,
-            0,
+            1,
             0,
             width=78,
             span=5,
@@ -1849,42 +2103,60 @@ class AutoRngApp:
             script_test,
             text="选择脚本",
             command=self.choose_script_test,
-        ).grid(row=0, column=6, padx=4)
+        ).grid(row=1, column=6, padx=4)
         self._labeled_combo(
             script_test,
             "运行后端",
             self.script_test_backend_var,
             SCRIPT_TEST_BACKENDS,
-            1,
+            2,
             0,
             width=42,
             span=3,
         )
         ttk.Checkbutton(
             script_test,
-            text="输出 EasyCon 详细日志（--verbose）",
+            text="输出 EasyCon 详细日志",
             variable=self.script_test_verbose_var,
-        ).grid(row=1, column=5, columnspan=2, sticky="w", padx=4, pady=4)
+        ).grid(row=2, column=5, columnspan=2, sticky="w", padx=4, pady=4)
+        self._help_marker(
+            script_test,
+            "1.1.8 入口选择",
+            "正式版脚本使用 NS火叶全自动一键乱数1.1.8.ecs；时间轴版脚本使用"
+            " NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs。"
+            "自选 ECS 保留原来的任意脚本测试能力。切换入口会自动更新 ECS 文件路径。",
+            label="?",
+        ).grid(row=0, column=3, columnspan=4, sticky="w", padx=4, pady=4)
         ttk.Button(
             script_test,
             text="准备内置冲浪结束测试",
             command=self.prepare_builtin_surf_menu_probe,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 4))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 4))
+        self._help_marker(
+            script_test,
+            "高级脚本测试",
+            "所选 ECS 会原地直接执行，不经过方案搜索、参数替换或正式 main.ecs 生成。"
+            "兼容后端等同正式工具；原始 CLI 用于 A/B 对照。",
+            label="?",
+        ).grid(row=3, column=2, sticky="w", padx=4, pady=(8, 4))
+        self._help_marker(
+            script_test,
+            "危险操作",
+            "测试脚本拥有完整手柄控制权限。开始前请人工核对脚本内容、游戏位置和存档状态；"
+            "同目录的 lib 与 ImgLabel 会被 EasyCon 使用。",
+            label="?",
+        ).grid(row=4, column=0, columnspan=2, sticky="w", padx=4, pady=(4, 0))
         ttk.Label(
             script_test,
-            text=(
-                "所选 ECS 会原地直接执行，不经过方案搜索、参数替换或正式 main.ecs 生成。"
-                "兼容后端等同正式工具；原始 CLI 用于 A/B 对照。"
-            ),
-        ).grid(row=2, column=2, columnspan=5, sticky="w", padx=4, pady=(8, 4))
-        ttk.Label(
-            script_test,
-            text=(
-                "警告：测试脚本拥有完整手柄控制权限。开始前请人工核对脚本内容、游戏位置和存档状态；"
-                "同目录的 lib 与 ImgLabel 会被 EasyCon 使用。"
-            ),
+            text="运行前必须核对脚本内容、游戏位置和存档状态。",
             foreground="#9a3412",
-        ).grid(row=3, column=0, columnspan=7, sticky="w", padx=4, pady=(4, 0))
+        ).grid(row=4, column=2, columnspan=5, sticky="w", padx=4, pady=(4, 0))
+        ttk.Label(
+            script_test,
+            textvariable=self.script_test_entry_status_var,
+            wraplength=980,
+            justify="left",
+        ).grid(row=5, column=0, columnspan=7, sticky="w", padx=4, pady=(5, 0))
 
         runtime = ttk.LabelFrame(container, text="EasyCon 共通设置与工具", padding=10)
         runtime.pack(fill="x", pady=(0, 10), before=self.mode_notebook)
@@ -1893,6 +2165,11 @@ class AutoRngApp:
         self.port_var = tk.StringVar(value="COM22")
         self.video_var = tk.StringVar(value="0")
         self.source_entry = self._labeled_entry(runtime, "1.1.8 包（普通/孵蛋）", self.source_var, 0, 0, width=68, span=5)
+        self._add_tooltip(
+            self.source_entry,
+            "1.1.8 包路径",
+            "普通、孵蛋和高级页的正式/时间轴入口都从此目录读取。",
+        )
         ttk.Button(runtime, text="选择", command=self.choose_source).grid(row=0, column=6, padx=4)
         self.ezcon_entry = self._labeled_entry(runtime, "ezcon.exe", self.ezcon_var, 1, 0, width=68, span=5)
         ttk.Button(runtime, text="选择", command=self.choose_ezcon).grid(row=1, column=6, padx=4)
@@ -1938,18 +2215,29 @@ class AutoRngApp:
         self.advanced_mode_var = tk.BooleanVar(value=False)
         self.advanced_mode_check = ttk.Checkbutton(
             manual_tools,
-            text="高级模式（直接脚本页；所有指纹仅警告）",
+            text="高级模式",
             variable=self.advanced_mode_var,
             command=self._toggle_advanced_mode,
         )
         self.advanced_mode_check.pack(side="left", padx=(18, 0))
+        self._add_tooltip(
+            self.advanced_mode_check,
+            "高级模式",
+            "显示直接脚本测试页和 Seed 高级方案；开启后，已登记脚本、标签、EasyCon、"
+            "OCR 与兼容运行器的指纹不一致只警告。文件缺失、语法错误等硬错误仍会阻止运行。",
+        )
         self.home_buffer_adaptive_var = tk.BooleanVar(value=False)
         self.home_buffer_adaptive_check = ttk.Checkbutton(
             manual_tools,
-            text="HOME_BUFFER 稳定低分自适应（1.1.8 + TID + SID，默认关闭）",
+            text="HOME_BUFFER 稳定低分自适应",
             variable=self.home_buffer_adaptive_var,
         )
         self.home_buffer_adaptive_check.pack(side="left", padx=(14, 0))
+        self._add_tooltip(
+            self.home_buffer_adaptive_check,
+            "HOME_BUFFER 稳定低分自适应",
+            "作用于 1.1.8、TID 和 SID，默认关闭。只有同一状态连续稳定命中时才会采用低于 95 的分数。",
+        )
         self.seed_update_button = ttk.Button(
             manual_tools,
             text="检查/更新 Seed 表",
@@ -1979,9 +2267,11 @@ class AutoRngApp:
             state="disabled",
         )
         self.seed_startup_scheme_combo.pack(side="left")
-        ttk.Label(
+        self._help_marker(
             seed_options,
-            text="仅高级模式可改；关闭时普通入口固定方案0，孵蛋入口保留当前方案2。",
+            "Seed 高级方案",
+            "仅高级模式可修改。关闭高级模式时，普通入口固定方案 0；孵蛋入口保留当前方案 2。",
+            label="?",
         ).pack(side="left", padx=(12, 0))
 
         actions = ttk.Frame(container)
@@ -2008,6 +2298,9 @@ class AutoRngApp:
         self.tid_starter_flow_var.trace_add("write", self._on_tid_flow_toggle)
         self._update_tid_flow_controls()
         self._on_mode_tab_change()
+        self.source_var.trace_add("write", self._on_script_test_source_change)
+        self.script_test_path_var.trace_add("write", self._on_script_test_path_change)
+        self._sync_script_test_entry_path()
 
     def _update_page_scrollregion(self, _event=None):
         self.page_canvas.configure(scrollregion=self.page_canvas.bbox("all"))
@@ -2047,7 +2340,7 @@ class AutoRngApp:
         if selected is None:
             self.save_profile_var.set(MANUAL_PROFILE_LABEL)
             self.save_profile_summary_var.set(
-                "手动输入模式：不会自动覆盖各页面参数。"
+                "手动输入模式"
             )
         else:
             self.save_profile_var.set(self._save_profile_display(selected))
@@ -2065,7 +2358,7 @@ class AutoRngApp:
             return
         if profile is None:
             self.save_profile_summary_var.set(
-                "手动输入模式：不会自动覆盖各页面参数。"
+                "手动输入模式"
             )
             return
         self._apply_save_profile(profile, persist=False)
@@ -2189,9 +2482,11 @@ class AutoRngApp:
             0,
             width=26,
         )
-        ttk.Label(
+        self._help_marker(
             body,
-            text="火红/叶绿没有时钟电池参数；主机字段用于选择对应 NX Seed 表。",
+            "存档字段",
+            "火红/叶绿没有时钟电池参数；主机字段用于选择对应 NX Seed 表。",
+            label="?",
         ).grid(row=6, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 2))
 
         result: dict = {}
@@ -2380,13 +2675,29 @@ class AutoRngApp:
         ttk.Button(controls, text="删除", command=delete_profile).pack(side="left", padx=(8, 0))
         ttk.Button(controls, text="设为当前", command=select_current).pack(side="left", padx=(18, 0))
         ttk.Button(controls, text="完成", command=manager.destroy).pack(side="right")
-        ttk.Label(
+        self._help_marker(
             controls,
-            text="选择存档只填写工具参数，不会读写模拟器或游戏存档。",
+            "存档信息边界",
+            "选择存档只填写工具参数，不会读取、写入或删除模拟器或游戏存档。",
+            label="?",
         ).pack(side="right", padx=(0, 14))
         tree.bind("<Double-1>", lambda _event: edit_profile())
         manager.protocol("WM_DELETE_WINDOW", manager.destroy)
         refresh_tree()
+
+    def _add_tooltip(self, widget, title: str, text: str):
+        self._tooltips.append(HoverTooltip(widget, title, text))
+        return widget
+
+    def _help_marker(self, parent, title: str, text: str, *, label: str = "?"):
+        marker = ttk.Label(
+            parent,
+            text=label,
+            style="Help.TLabel",
+            cursor="question_arrow",
+            padding=(3, 0),
+        )
+        return self._add_tooltip(marker, title, text)
 
     @staticmethod
     def _labeled_entry(parent, label, variable, row, column, width=14, span=1):
@@ -2462,7 +2773,8 @@ class AutoRngApp:
             *self.sid_location_vars,
             *(variable for row in self.sid_effort_vars for variable in row),
             self.sid_source_var,
-            self.script_test_path_var, self.script_test_backend_var,
+            self.script_test_entry_var, self.script_test_path_var,
+            self.script_test_backend_var,
             self.script_test_verbose_var,
         )
         for variable in self.tracked_variables:
@@ -3711,6 +4023,81 @@ class AutoRngApp:
         self.set_busy(False, result.message)
         messagebox.showinfo("Seed 表", result.message)
 
+    def _sync_script_test_entry_path(self) -> None:
+        """Keep the advanced-page ECS path tied to the selected audited entry."""
+        selection = self.script_test_entry_var.get()
+        if selection == SCRIPT_TEST_ENTRY_CUSTOM:
+            if self.script_test_path_var.get().strip():
+                self.script_test_entry_status_var.set(
+                    "自选 ECS：请确认脚本、lib 和 ImgLabel 来自同一工程。"
+                )
+            else:
+                self.script_test_entry_status_var.set(
+                    "自选 ECS：请填写或选择要直接运行的 .ecs 文件。"
+                )
+            return
+        try:
+            path = resolve_script_test_entry(self.source_var.get(), selection)
+        except (OSError, ValueError) as exc:
+            self._updating = True
+            try:
+                self.script_test_path_var.set("")
+            finally:
+                self._updating = False
+            self.script_test_entry_status_var.set(f"入口不可用：{exc}")
+            return
+        self._updating = True
+        try:
+            self.script_test_path_var.set(str(path))
+        finally:
+            self._updating = False
+        self.script_test_entry_status_var.set(f"当前入口：{path.name}")
+
+    def _on_script_test_entry_change(self, *_event) -> None:
+        if self._updating:
+            return
+        self._sync_script_test_entry_path()
+        self.invalidate_plan()
+
+    def _on_script_test_source_change(self, *_event) -> None:
+        if self._updating or self.script_test_entry_var.get() == SCRIPT_TEST_ENTRY_CUSTOM:
+            return
+        self._sync_script_test_entry_path()
+
+    def _on_script_test_path_change(self, *_event) -> None:
+        if self._updating:
+            return
+        path_text = self.script_test_path_var.get().strip()
+        if not path_text:
+            if self.script_test_entry_var.get() == SCRIPT_TEST_ENTRY_CUSTOM:
+                self.script_test_entry_status_var.set(
+                    "自选 ECS：请填写或选择要直接运行的 .ecs 文件。"
+                )
+            else:
+                self.script_test_entry_status_var.set("入口路径为空，请重新选择入口。")
+            return
+        try:
+            identified = identify_script_test_entry(
+                self.source_var.get(),
+                path_text,
+            )
+        except (OSError, ValueError):
+            identified = SCRIPT_TEST_ENTRY_CUSTOM
+        if identified != self.script_test_entry_var.get():
+            self._updating = True
+            try:
+                self.script_test_entry_var.set(identified)
+            finally:
+                self._updating = False
+        if identified == SCRIPT_TEST_ENTRY_CUSTOM:
+            self.script_test_entry_status_var.set(
+                "自选 ECS：请确认脚本、lib 和 ImgLabel 来自同一工程。"
+            )
+        else:
+            self.script_test_entry_status_var.set(
+                f"当前入口：{Path(path_text).name}"
+            )
+
     def open_virtual_controller(self) -> None:
         if self.manual_tools is not None:
             self.manual_tools.open_virtual_controller()
@@ -3855,10 +4242,22 @@ class AutoRngApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def generate_script_test_preflight(self):
-        script_text = self.script_test_path_var.get().strip()
-        if not script_text:
-            raise ValueError("请先选择要直接运行的 .ecs 测试脚本")
-        script_path = Path(script_text)
+        entry = self.script_test_entry_var.get()
+        if entry != SCRIPT_TEST_ENTRY_CUSTOM:
+            expected = resolve_script_test_entry(self.source_var.get(), entry)
+            script_text = self.script_test_path_var.get().strip()
+            if not script_text:
+                raise ValueError(f"{entry}路径为空，请重新选择入口")
+            script_path = Path(script_text)
+            if script_path.expanduser().resolve() != expected:
+                raise ValueError(
+                    f"当前 ECS 文件与{entry}不一致，请重新选择入口或切换为“自选 ECS”"
+                )
+        else:
+            script_text = self.script_test_path_var.get().strip()
+            if not script_text:
+                raise ValueError("请先选择要直接运行的 .ecs 测试脚本")
+            script_path = Path(script_text)
         backend = self.script_test_backend_var.get()
         ezcon_path = Path(self.ezcon_var.get())
         fingerprint_warning_only = self.advanced_mode_var.get()
@@ -3914,6 +4313,7 @@ class AutoRngApp:
         self.runtime_check = preparation.check
         lines = [
             "高级模式：直接 ECS 测试",
+            f"1.1.8 入口：{identify_script_test_entry(self.source_var.get(), preparation.script_path)}",
             f"脚本：{preparation.script_path}",
             f"工作目录：{preparation.project_dir}",
             f"运行后端：{preparation.backend}",
@@ -4738,6 +5138,7 @@ class AutoRngApp:
                 metadata_path.write_text(
                     json.dumps(
                         {
+                            "entry": self.script_test_entry_var.get(),
                             "script": str(self.project_main),
                             "script_sha256": hashlib.sha256(
                                 self.project_main.read_bytes()
@@ -5209,6 +5610,9 @@ class AutoRngApp:
         )
         if path:
             self.script_test_path_var.set(path)
+            self.script_test_entry_status_var.set(
+                f"已选择：{Path(path).name}（{self.script_test_entry_var.get()}）"
+            )
 
     def prepare_builtin_surf_menu_probe(self):
         if self.busy or self._process_running():
@@ -5225,7 +5629,15 @@ class AutoRngApp:
                 Path(self.source_var.get()),
                 output_dir,
             )
-            self.script_test_path_var.set(str(main_path))
+            self._updating = True
+            try:
+                self.script_test_entry_var.set(SCRIPT_TEST_ENTRY_CUSTOM)
+                self.script_test_path_var.set(str(main_path))
+            finally:
+                self._updating = False
+            self.script_test_entry_status_var.set(
+                f"自选 ECS：{main_path.name}（内置冲浪结束测试）"
+            )
             self.generate_script_test_preflight()
         except Exception as exc:
             messagebox.showerror("内置测试准备失败", str(exc))

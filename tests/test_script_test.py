@@ -37,6 +37,57 @@ class DirectScriptTestTests(unittest.TestCase):
                 ("三代菜单栏", "火红BAG"),
             )
 
+    def test_resolves_and_identifies_formal_and_timeline_entries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            formal = source / script_test.STANDARD_TEMPLATE_NAME
+            timeline = source / script_test.EGG_TEMPLATE_NAME
+            formal.write_text("PRINT 1\n", encoding="utf-8")
+            timeline.write_text("PRINT 2\n", encoding="utf-8")
+
+            self.assertEqual(
+                script_test.resolve_script_test_entry(
+                    source,
+                    script_test.SCRIPT_TEST_ENTRY_FORMAL,
+                ),
+                formal.resolve(),
+            )
+            self.assertEqual(
+                script_test.resolve_script_test_entry(
+                    source,
+                    script_test.SCRIPT_TEST_ENTRY_TIMELINE,
+                ),
+                timeline.resolve(),
+            )
+            self.assertEqual(
+                script_test.identify_script_test_entry(source, formal),
+                script_test.SCRIPT_TEST_ENTRY_FORMAL,
+            )
+            self.assertEqual(
+                script_test.identify_script_test_entry(source, timeline),
+                script_test.SCRIPT_TEST_ENTRY_TIMELINE,
+            )
+            self.assertEqual(
+                script_test.identify_script_test_entry(source, source / "probe.ecs"),
+                script_test.SCRIPT_TEST_ENTRY_CUSTOM,
+            )
+
+    def test_standard_entry_resolution_reports_missing_and_custom_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            with self.assertRaisesRegex(FileNotFoundError, "正式版脚本"):
+                script_test.resolve_script_test_entry(
+                    source,
+                    script_test.SCRIPT_TEST_ENTRY_FORMAL,
+                )
+            with self.assertRaisesRegex(ValueError, "自选 ECS"):
+                script_test.resolve_script_test_entry(
+                    source,
+                    script_test.SCRIPT_TEST_ENTRY_CUSTOM,
+                )
+            with self.assertRaisesRegex(ValueError, "未知"):
+                script_test.resolve_script_test_entry(source, "不存在的入口")
+
     def test_original_backend_uses_pinned_raw_cli_and_formats_in_place(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
