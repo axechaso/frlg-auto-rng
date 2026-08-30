@@ -13,6 +13,7 @@ from typing import Any
 
 from assets.game_text import CATEGORY_EN_TO_ZH, location_to_zh
 from app_paths import RESOURCE_ROOT
+from device_label_overrides import validate_project_overrides
 from fingerprint_policy import record_fingerprint_mismatch
 from tenlines_seed_updater import (
     apply_easycon_seed_table_overrides,
@@ -57,6 +58,7 @@ DEFAULT_COMPAT_RUNNER_PATH = (
 )
 STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8.ecs"
 EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
+EGG_FORMAL_WAIT_MARKER = "# FORMAL_EGG_WAIT_V1"
 EXPECTED_TEMPLATE_NAMES = (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME)
 EXPECTED_SCRIPT_FILE_COUNT = 33
 # The legacy package is still accepted by the importer, then upgraded in the
@@ -122,10 +124,12 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package with the selectable current/fixed-user Seed startup path.
     "e82ed39b65a5b4c8ee39287906d4317e58c84334c656f08a8cad6b31d8fde0f5",
 )
-EXPECTED_SCRIPT_SHA256 = "36c83915f208741608d278c17754deae7951c3389b3a3f1e450694c687f66003"
+EXPECTED_SCRIPT_SHA256 = "39a2f7a5046e2d1c7213b6689158402be8656fc5dd790bb73ed8a77c8390f15b"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # Canonical corpus before the egg flow was promoted to the formal WAIT entry.
+    "36c83915f208741608d278c17754deae7951c3389b3a3f1e450694c687f66003",
     # Canonical corpus before the fixed user-selection HOME startup A/B was added.
     "bde2ffddbb42b6c71b2494968c2ccfb8d04291ea3f3c6c755fa79ac825aba923",
     # Canonical corpus before the no-egg escape switched from whole-envelope
@@ -320,7 +324,7 @@ $孵蛋库_重启识别尝试 = 0
 $孵蛋库_已请求主页 = 0
 """
 EGG_HOME_BUFFER_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按当前 NX 机型二分查找 HOME_BUFFER 窗口"
-EGG_HOME_BUFFER_ORIGINAL_FUNCTION = "FUNC HOME_BUFFER"
+EGG_HOME_BUFFER_ORIGINAL_FUNCTION = "FUNC HOME_BUFFER\n"
 EGG_HOME_BUFFER_NEXT_FUNCTION = "FUNC 各阶段脚本固定延迟转帧数"
 HOME_BUFFER_ADAPTIVE_CLASSIFIER_MARKER = "# 1.6.4-a HOME_BUFFER 稳定低分自适应"
 STANDARD_HOME_BUFFER_OVERRIDE_MARKER = "# 1.6.4-a 正式版 HOME_BUFFER"
@@ -494,6 +498,10 @@ EGG_FORMAL_PARITY_REAL_CALL_CURRENT = EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU.repla
     "$孵蛋流程领取目标截止MS, $孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",
     1,
 )[:-1] + ", $Seed启动方案)"
+EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE = (
+    EGG_FORMAL_PARITY_REAL_CALL_CURRENT[:-1]
+    + ", $狩猎区TV时间轴测试)"
+)
 EGG_PICKUP_PARITY_MENU_MARKER = "# GUI 孵蛋领取奇偶：确认出蛋后开关菜单增加7 advance"
 EGG_PICKUP_PARITY_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_执行同Seed两次命中"
 EGG_PICKUP_PARITY_SIGNATURE_OLD = "FUNC 孵蛋测试_执行同Seed两次命中($Seed模式: INT, $Seed等待MS: INT, $精确尾段MS: INT, $奇偶等待MS: INT, $封面长按MS: INT, $TV开关: INT, $TV等待MS: INT, $出蛋目标MS: INT, $领蛋目标MS: INT, $出蛋识图阈值: INT, $抓捕识图阈值: INT, $出闪后继续抓捕: INT, $无蛋后复核Seed: INT): INT"
@@ -502,6 +510,11 @@ EGG_PICKUP_PARITY_SIGNATURE_CURRENT = EGG_PICKUP_PARITY_SIGNATURE_OLD.replace(
     "$领蛋目标MS: INT, $Pickup菜单奇偶开关: INT, $出蛋识图阈值",
     1,
 )[:-6] + ", $Seed启动方案: INT): INT"
+EGG_PICKUP_PARITY_SIGNATURE_WAIT_MODE = EGG_PICKUP_PARITY_SIGNATURE_CURRENT.replace(
+    "$Seed启动方案: INT): INT",
+    "$Seed启动方案: INT, $使用绝对时间轴: INT): INT",
+    1,
+)
 EGG_PICKUP_PARITY_VALIDATION_OLD = """\
     IF $无蛋后复核Seed != 0 and $无蛋后复核Seed != 1
         PRINT 孵蛋无蛋后Seed复核开关无效: & $无蛋后复核Seed
@@ -2021,17 +2034,32 @@ def _apply_egg_formal_parity_runtime_override_text(
     end = configured.index(EGG_FORMAL_PARITY_NEXT_FUNCTION, start)
     configured = configured[:start] + override_text.rstrip() + "\n\n" + configured[end:]
 
-    if EGG_FORMAL_PARITY_REAL_CALL_CURRENT not in configured:
-        if configured.count(EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU) == 1:
+    uses_explicit_wait_mode = (
+        EGG_FORMAL_WAIT_MARKER in configured
+        or EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE in configured
+    )
+    desired_call = (
+        EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE
+        if uses_explicit_wait_mode
+        else EGG_FORMAL_PARITY_REAL_CALL_CURRENT
+    )
+    if desired_call not in configured:
+        if uses_explicit_wait_mode and configured.count(EGG_FORMAL_PARITY_REAL_CALL_CURRENT) == 1:
+            configured = configured.replace(
+                EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
+                desired_call,
+                1,
+            )
+        elif configured.count(EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU) == 1:
             configured = configured.replace(
                 EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU,
-                EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
+                desired_call,
                 1,
             )
         elif configured.count(EGG_FORMAL_PARITY_REAL_CALL_OLD) == 1:
             configured = configured.replace(
                 EGG_FORMAL_PARITY_REAL_CALL_OLD,
-                EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
+                desired_call,
                 1,
             )
         else:
@@ -2049,13 +2077,17 @@ def _apply_egg_pickup_parity_menu_text(library_text: str) -> str:
     if EGG_PICKUP_PARITY_MENU_MARKER in section:
         return library_text
 
+    uses_explicit_wait_mode = EGG_PICKUP_PARITY_SIGNATURE_WAIT_MODE in section
     if EGG_PICKUP_PARITY_SIGNATURE_OLD in section:
         section = section.replace(
             EGG_PICKUP_PARITY_SIGNATURE_OLD,
             EGG_PICKUP_PARITY_SIGNATURE_CURRENT,
             1,
         )
-    elif EGG_PICKUP_PARITY_SIGNATURE_CURRENT not in section:
+    elif (
+        EGG_PICKUP_PARITY_SIGNATURE_CURRENT not in section
+        and not uses_explicit_wait_mode
+    ):
         raise ValueError("孵蛋流程库的同Seed两次命中参数签名不受支持")
 
     if EGG_PICKUP_PARITY_VALIDATION_OLD in section:
@@ -2065,7 +2097,12 @@ def _apply_egg_pickup_parity_menu_text(library_text: str) -> str:
             1,
         )
     elif EGG_PICKUP_PARITY_VALIDATION_CURRENT not in section:
-        raise ValueError("孵蛋流程库缺少Pickup菜单奇偶开关校验位置")
+        wait_mode_validation = (
+            "IF $使用绝对时间轴 != 0 and $使用绝对时间轴 != 1" in section
+            and "孵蛋测试_启动并进入存档($Seed模式, $Seed等待MS, $精确尾段MS, $奇偶等待MS, $封面长按MS, $Seed启动方案, $使用绝对时间轴)" in section
+        )
+        if not wait_mode_validation:
+            raise ValueError("孵蛋流程库缺少Pickup菜单奇偶开关校验位置")
 
     if EGG_PICKUP_PARITY_ACTION_OLD in section:
         section = section.replace(
@@ -2821,6 +2858,16 @@ def write_configured_project(
     return main_path
 
 
+def _select_egg_template_path(source_dir: Path) -> Path:
+    """Prefer the promoted formal WAIT entry and retain old-cache compatibility."""
+    formal_path = source_dir / STANDARD_TEMPLATE_NAME
+    if formal_path.is_file() and EGG_FORMAL_WAIT_MARKER in formal_path.read_text(
+        encoding="utf-8"
+    ):
+        return formal_path
+    return source_dir / EGG_TEMPLATE_NAME
+
+
 def write_configured_egg_project(
     source_dir: str | Path,
     output_dir: str | Path,
@@ -2828,7 +2875,7 @@ def write_configured_egg_project(
     *,
     copy_assets: bool = True,
 ) -> Path:
-    """Create a runnable project for the experimental same-seed egg flow."""
+    """Create a formal-WAIT project for the experimental same-seed egg flow."""
     request.validate()
     source_dir = Path(source_dir).resolve()
     output_dir = Path(output_dir).resolve()
@@ -2844,11 +2891,14 @@ def write_configured_egg_project(
             + script_corpus["sha256"],
             file=sys.stderr,
         )
-    template_path = source_dir / EGG_TEMPLATE_NAME
+    template_path = _select_egg_template_path(source_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     configured = configure_egg_template_text(
         template_path.read_text(encoding="utf-8"), request
     )
+    if EGG_FORMAL_WAIT_MARKER in configured:
+        if "$狩猎区TV时间轴测试 = 0" not in configured:
+            raise ValueError("孵蛋正式模板没有固定选择普通WAIT模式")
     configured = _apply_egg_prepared_254_runtime_override_text(
         configured,
         request.start_from_prepared_254,
@@ -2998,6 +3048,11 @@ def write_configured_egg_project(
         "template": template_path.name,
         "egg_request": request.to_dict(),
         "experimental": True,
+        "egg_wait_mode": (
+            "formal_wait"
+            if EGG_FORMAL_WAIT_MARKER in configured
+            else "legacy_timeline"
+        ),
         "runtime_overrides": runtime_overrides,
         "labels": {
             "expected_count": EXPECTED_LABEL_COUNT,
@@ -3068,7 +3123,15 @@ def validate_runtime(
                 errors.append(
                     f"1.1.8 标签方法分布不一致: {corpus['methods']}"
                 )
-            if corpus["sha256"] != EXPECTED_LABEL_SHA256:
+            override_check = validate_project_overrides(
+                label_dir,
+                EXPECTED_LABEL_SHA256,
+                fingerprint_warning_only=fingerprint_warning_only,
+            )
+            if override_check.recognized:
+                errors.extend(override_check.errors)
+                warnings.extend(override_check.warnings)
+            elif corpus["sha256"] != EXPECTED_LABEL_SHA256:
                 record_fingerprint_mismatch(
                     "1.1.8 标签指纹不一致，可能不是已审计的完整标签包: "
                     + corpus["sha256"],

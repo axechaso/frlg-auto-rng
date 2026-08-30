@@ -18,6 +18,12 @@ import sys
 import tempfile
 from typing import TextIO
 
+from device_label_overrides import (
+    PROJECT_OVERRIDE_FILENAME,
+    LabelOverrideProfile,
+    apply_profile_to_projects,
+    load_label_override_profile,
+)
 from tid_records import recording_session
 from process_control import StopFileWatcher, terminate_process_tree
 from tid_session import TidProgressSession, progress_context, progress_lease
@@ -95,6 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tid-game", choices=("火红", "叶绿"))
     parser.add_argument("--fresh-exhaustive", action="store_true")
     parser.add_argument("--stop-file", type=Path)
+    parser.add_argument("--label-override-profile", type=Path)
     parser.add_argument(
         "--fingerprint-warnings",
         action="store_true",
@@ -279,6 +286,7 @@ def run_exhaustive_flow(
     ezcon_path: Path,
     *,
     fingerprint_warning_only: bool = False,
+    label_profile: LabelOverrideProfile | None = None,
 ) -> int:
     """Continue from an exhaustive TID hit using its real TID and SID ADV."""
     id_main = flow_dir / "01_id" / "main_attempt_000.ecs"
@@ -305,6 +313,8 @@ def run_exhaustive_flow(
             starter_main.parent,
             resolved,
         )
+        if label_profile is not None:
+            apply_profile_to_projects(starter_main.parent, label_profile)
     except (KeyError, OSError, TypeError, ValueError, LookupError) as exc:
         flow.output(f"[流程错误] 无法根据实际TID/SID ADV生成御三家目标：{exc}")
         return 2
@@ -368,11 +378,19 @@ def run_tid_plan(
     game: str | None = None,
     resume: bool = True,
     fingerprint_warning_only: bool = False,
+    label_profile: LabelOverrideProfile | None = None,
 ) -> int:
     """Own calibration and continuation even if the GUI has been closed."""
     try:
         if flow.stop_requested:
             return 130
+        if label_profile is not None:
+            applied = apply_profile_to_projects(plan_dir, label_profile)
+            if applied:
+                flow.output(
+                    f"[设备标签] 已验证并应用 {label_profile.capture_device}："
+                    f"{sum(len(item.installed) for item in applied)} 个工程标签覆盖"
+                )
         if is_flow:
             payload = json.loads((plan_dir / "flow_plan.json").read_text(encoding="utf-8"))
             flow_request = tid_starter_flow_request_from_dict(payload["request"])
@@ -456,6 +474,8 @@ def run_tid_plan(
                     fingerprint_warning_only=fingerprint_warning_only,
                     fingerprint_warnings=fingerprint_warnings,
                 )
+            if label_profile is not None:
+                apply_profile_to_projects(plan_dir, label_profile)
             if flow.stop_requested:
                 return 130
             for warning in dict.fromkeys(fingerprint_warnings):
@@ -500,6 +520,12 @@ def run_tid_plan(
                 main = runtime_dir / "main.ecs"
                 main.write_text(configured, encoding="utf-8")
                 shutil.copytree(id_dir / "ImgLabel", runtime_dir / "ImgLabel")
+                override_sidecar = id_dir / PROJECT_OVERRIDE_FILENAME
+                if override_sidecar.is_file():
+                    shutil.copy2(
+                        override_sidecar,
+                        runtime_dir / PROJECT_OVERRIDE_FILENAME,
+                    )
                 (runtime_dir / "progress_context.json").write_text(
                     json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
@@ -533,6 +559,7 @@ def run_tid_plan(
                             payload,
                             ezcon_path,
                             fingerprint_warning_only=fingerprint_warning_only,
+                            label_profile=label_profile,
                         )
                     return flow.run_stage(1, "TID/SID正式计划", main)
                 finally:
@@ -550,6 +577,7 @@ def run_tid_plan(
                 payload,
                 ezcon_path,
                 fingerprint_warning_only=fingerprint_warning_only,
+                label_profile=label_profile,
             )
         return run_flow_attempts(flow, plan_dir, corrections)
     except (OSError, KeyError, TypeError, ValueError, RuntimeError, LookupError) as exc:
@@ -568,6 +596,11 @@ def main() -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
+        label_profile = (
+            load_label_override_profile(args.label_override_profile)
+            if args.label_override_profile is not None
+            else None
+        )
         runner_warnings: list[str] = []
         runner_path = (
             prepare_compat_runner(
@@ -620,6 +653,7 @@ def main() -> int:
                 progress_dir=args.tid_progress_dir, game=args.tid_game,
                 resume=not args.fresh_exhaustive,
                 fingerprint_warning_only=args.fingerprint_warnings,
+                label_profile=label_profile,
             )
 
 

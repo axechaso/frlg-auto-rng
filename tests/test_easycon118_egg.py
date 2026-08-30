@@ -12,6 +12,8 @@ from automation.easycon118 import (
     EGG_FORMAL_PARITY_OVERRIDE_MARKER,
     EGG_FORMAL_PARITY_OVERRIDE_PATH,
     EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
+    EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE,
+    EGG_FORMAL_WAIT_MARKER,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
     EGG_PICKUP_PARITY_MENU_MARKER,
@@ -78,6 +80,7 @@ from automation.easycon118 import (
     _apply_standard_home_buffer_runtime_override_text,
     _apply_togepi_hatch_cycle_override_text,
     _apply_wild_pid_retry_limit_text,
+    _select_egg_template_path,
     configure_egg_template_text,
     egg_held_availability_to_ecs_values,
     egg_request_to_user_values,
@@ -1370,20 +1373,24 @@ ENDFUNC
 
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]
-        template_path = root / "local_assets" / "easycon118" / "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
+        source_dir = root / "local_assets" / "easycon118"
+        template_path = _select_egg_template_path(source_dir)
         library_path = root / "local_assets" / "easycon118" / "lib" / "27_孵蛋测试流程.ecs"
         if not template_path.is_file() or not library_path.is_file():
             self.skipTest("requires the imported 1.1.8 egg runtime")
         template = template_path.read_text(encoding="utf-8")
+        self.assertEqual(template_path.name, "NS火叶全自动一键乱数1.1.8.ecs")
+        self.assertIn(EGG_FORMAL_WAIT_MARKER, template)
+        self.assertIn("$狩猎区TV时间轴测试 = 0", template)
         self.assertIn("$调试日志输出 = 1", template)
         self.assertIn(EGG_TRANSIENT_RETRY_OVERRIDE_MARKER, template)
         self.assertIn(EGG_TERMINAL_STOP_OVERRIDE_MARKER, template)
-        self.assertIn(EGG_FORMAL_PARITY_OVERRIDE_MARKER, template)
+        self.assertIn("FUNC 孵蛋流程_计算两次命中时间(): INT", template)
         self.assertIn("$Seed启动方案 = 0", template)
         self.assertIn("FUNC 准备Seed启动原点", template)
         self.assertIn("CALL 关闭游戏", template.split("FUNC 准备Seed启动原点", 1)[1].split("ENDFUNC", 1)[0])
         self.assertIn("PRINT Seed启动方案: 固定用户界面HOME", template)
-        self.assertIn(EGG_FORMAL_PARITY_REAL_CALL_CURRENT, template)
+        self.assertIn(EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE, template)
         self.assertIn("A#固定方案：恢复游戏后再建立Seed计时原点，与参考脚本一致", template)
         self.assertIn("抓捕失败，关闭游戏并继续下一轮", template)
         self.assertIn("RETURN 2", template)
@@ -1475,8 +1482,8 @@ ENDFUNC
         )
         library = library_path.read_text(encoding="utf-8")
         self.assertIn("$Seed启动方案: INT", library)
-        self.assertIn(EGG_PICKUP_PARITY_SIGNATURE_CURRENT, library)
-        self.assertIn(EGG_PICKUP_PARITY_VALIDATION_CURRENT, library)
+        self.assertIn("$使用绝对时间轴: INT", library)
+        self.assertIn("FUNC 孵蛋测试_按模式等待到", library)
         self.assertIn(
             "IF $Seed启动方案 == 1\n        A\n        $孵蛋库_Seed时间轴原点 = TIME()",
             library,
@@ -1487,7 +1494,9 @@ ENDFUNC
             "$孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",
             template,
         )
-        library = library_path.read_text(encoding="utf-8")
+        library = _apply_egg_pickup_parity_menu_text(
+            library_path.read_text(encoding="utf-8")
+        )
         self.assertIn(EGG_PICKUP_PARITY_MENU_MARKER, library)
         self.assertIn("出培育屋后开关一次菜单，物理增加7 advance", library)
         self.assertIn("识别冲浪结束后再打开菜单", library)

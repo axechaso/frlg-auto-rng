@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from device_label_overrides import validate_project_overrides
 from fingerprint_policy import record_fingerprint_mismatch
 
 from .tid_starter_save import (
@@ -569,7 +570,15 @@ def validate_tid_runtime(
                 )
             if labels["methods"] != EXPECTED_TID_LABEL_METHODS:
                 errors.append(f"TID 标签方法分布不一致: {labels['methods']}")
-            if labels["sha256"] != EXPECTED_TID_LABEL_SHA256:
+            override_check = validate_project_overrides(
+                label_dir,
+                EXPECTED_TID_LABEL_SHA256,
+                fingerprint_warning_only=fingerprint_warning_only,
+            )
+            if override_check.recognized:
+                errors.extend(override_check.errors)
+                warnings.extend(override_check.warnings)
+            elif labels["sha256"] != EXPECTED_TID_LABEL_SHA256:
                 record_fingerprint_mismatch(
                     f"TID 标签指纹不一致: {labels['sha256']}",
                     warning_only=fingerprint_warning_only,

@@ -16,7 +16,20 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+except ImportError:  # File/folder pickers remain available without drag support.
+    DND_FILES = None
+    TkinterDnD = None
+
 from app_paths import DATA_ROOT, RESOURCE_ROOT, USER_DATA_ROOT
+from device_label_overrides import (
+    LabelIssue,
+    LabelOverrideProfile,
+    LabelOverrideStore,
+    apply_profile_to_projects,
+    diagnose_label_log,
+)
 from save_profiles import SaveProfile, SaveProfileStore
 from tid_records import TidRecordContext, TidRecordStore
 from tid_session import load_tid_settings, write_json_atomic, progress_context, read_progress
@@ -106,6 +119,7 @@ TID_SETTINGS_PATH = USER_DATA_ROOT / "tid_settings.json"
 TID_PROGRESS_DIR = USER_DATA_ROOT / "tid_progress"
 MANUAL_PROFILE_LABEL = "未选择（手动输入）"
 SAVE_PROFILE_PATH = USER_DATA_ROOT / "save_profiles.json"
+DEVICE_LABEL_ROOT = USER_DATA_ROOT / "device_label_overrides"
 EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
 EGG_START_MODE_PREPARED = "从已完成254步准备开始"
 EGG_START_MODES = (EGG_START_MODE_FULL, EGG_START_MODE_PREPARED)
@@ -121,7 +135,7 @@ SEED_STARTUP_SCHEME_CODES = {
 }
 SEED_CALIBRATION_ORIGINAL = "方案0：原始12轮绝对落点众数"
 SEED_CALIBRATION_LOCKED_FINE = "方案1：实验锁定与毫秒细调"
-SEED_CALIBRATION_SHADOW = "方案2：成功参数保持与影子监测（仅孵蛋时间轴）"
+SEED_CALIBRATION_SHADOW = "方案2：成功参数保持与影子监测（仅孵蛋实验流程）"
 SEED_CALIBRATION_SCHEMES = (
     SEED_CALIBRATION_ORIGINAL,
     SEED_CALIBRATION_LOCKED_FINE,
@@ -764,6 +778,8 @@ class AutoRngApp:
         self.close_when_stopped = False
         self.stop_request_path: Path | None = None
         self.profile_store = SaveProfileStore(SAVE_PROFILE_PATH)
+        self.label_override_store = LabelOverrideStore(DEVICE_LABEL_ROOT)
+        self.label_issues: tuple[LabelIssue, ...] = ()
         self.tid_record_store = TidRecordStore(TID_RECORD_PATH)
         self.profile_load_error: str | None = None
         try:
@@ -1031,6 +1047,80 @@ class AutoRngApp:
         log_frame.rowconfigure(0, weight=1)
         log_frame.columnconfigure(0, weight=1)
         self.set_run_log("尚未开始运行。点击“开始运行”后会自动切换到本页。")
+
+        label_tools = ttk.LabelFrame(
+            self.run_log_tab,
+            text="设备标签诊断与覆盖（不修改原始标签包）",
+            padding=8,
+        )
+        label_tools.pack(fill="x", pady=(8, 0))
+        self.label_profile_status_var = tk.StringVar(
+            value="检测并选择采集卡后，可为该设备导入同名 .IL 标签。"
+        )
+        ttk.Label(
+            label_tools,
+            textvariable=self.label_profile_status_var,
+            wraplength=1000,
+        ).grid(row=0, column=0, columnspan=6, sticky="w", padx=3, pady=(0, 5))
+        self.label_issue_tree = ttk.Treeview(
+            label_tools,
+            columns=("label", "score", "threshold", "count", "context"),
+            show="headings",
+            height=5,
+        )
+        for column, heading, width in (
+            ("label", "疑似标签", 330),
+            ("score", "最高分", 70),
+            ("threshold", "门槛", 65),
+            ("count", "连续次数", 75),
+            ("context", "出错阶段与原因", 480),
+        ):
+            self.label_issue_tree.heading(column, text=heading)
+            self.label_issue_tree.column(column, width=width, anchor="w")
+        self.label_issue_tree.grid(
+            row=1, column=0, columnspan=6, sticky="ew", padx=3, pady=3
+        )
+        self.label_drop_target = ttk.Label(
+            label_tools,
+            text=(
+                "可把多个 .IL 文件或包含标签的文件夹拖到这里"
+                if DND_FILES is not None
+                else "当前未加载拖放组件；仍可使用下面的多文件/文件夹选择"
+            ),
+            anchor="center",
+            relief="groove",
+            padding=7,
+        )
+        self.label_drop_target.grid(
+            row=2, column=0, columnspan=6, sticky="ew", padx=3, pady=(5, 6)
+        )
+        if DND_FILES is not None and hasattr(self.label_drop_target, "drop_target_register"):
+            self.label_drop_target.drop_target_register(DND_FILES)
+            self.label_drop_target.dnd_bind("<<Drop>>", self._on_label_drop)
+        self.label_import_files_button = ttk.Button(
+            label_tools,
+            text="选择标签文件（可多选）",
+            command=self.choose_device_label_files,
+        )
+        self.label_import_files_button.grid(row=3, column=0, padx=3, pady=3, sticky="w")
+        self.label_import_folder_button = ttk.Button(
+            label_tools,
+            text="选择标签文件夹",
+            command=self.choose_device_label_folder,
+        )
+        self.label_import_folder_button.grid(row=3, column=1, padx=3, pady=3, sticky="w")
+        self.label_clear_button = ttk.Button(
+            label_tools,
+            text="清除当前设备覆盖",
+            command=self.clear_device_label_overrides,
+        )
+        self.label_clear_button.grid(row=3, column=2, padx=3, pady=3, sticky="w")
+        ttk.Button(
+            label_tools,
+            text="清空诊断列表",
+            command=lambda: self._show_label_issues(()),
+        ).grid(row=3, column=3, padx=3, pady=3, sticky="w")
+        label_tools.columnconfigure(5, weight=1)
 
         sid_identity = ttk.LabelFrame(sid_tab, text="1. SID 查找条件", padding=10)
         sid_identity.pack(fill="x")
@@ -1421,7 +1511,7 @@ class AutoRngApp:
         )
         ttk.Checkbutton(
             egg,
-            text="允许生成并运行实验性的同 Seed 孵蛋时间轴（尚未完成本机实机验收）",
+            text="允许生成并运行实验性的同 Seed 孵蛋正式 WAIT 流程（尚未完成本机实机验收）",
             variable=self.egg_ack_var,
         ).grid(row=4, column=0, columnspan=8, sticky="w", padx=6, pady=(5, 0))
         egg_config_actions = ttk.Frame(egg)
@@ -1825,6 +1915,9 @@ class AutoRngApp:
         )
         self.video_combo.grid(
             row=2, column=3, columnspan=3, sticky="w", padx=4, pady=4
+        )
+        self.video_combo.bind(
+            "<<ComboboxSelected>>", lambda _event: self._on_capture_device_changed()
         )
         self.device_button = ttk.Button(runtime, text="检测端口/采集卡", command=self.check_devices)
         self.device_button.grid(row=2, column=6, padx=8)
@@ -2331,7 +2424,7 @@ class AutoRngApp:
             self.auto_capture_var, self.paralysis_var, self.false_swipe_var,
             self.home_buffer_adaptive_var, self.seed_calibration_scheme_var,
             self.seed_startup_scheme_var,
-            self.source_var, self.ezcon_var,
+            self.source_var, self.ezcon_var, self.video_var,
             self.egg_seed_var, self.egg_held_var, self.egg_pickup_var,
             self.egg_seed_mode_var, self.egg_pokemon_var, self.egg_compatibility_var,
             self.egg_start_mode_var,
@@ -3139,7 +3232,7 @@ class AutoRngApp:
         if self.egg_seed_mode_var.get() == "请选择":
             raise ValueError("孵蛋测试必须选择与 Ten Lines 结果一致的 Seed 模式")
         if not self.egg_ack_var.get():
-            raise ValueError("请先确认允许运行尚未完成实机验收的孵蛋测试时间轴")
+            raise ValueError("请先确认允许运行尚未完成实机验收的孵蛋正式 WAIT 流程")
         return EggRunRequest(
             game=self._game_code(),
             seed_mode=int(self.egg_seed_mode_var.get().split(":", 1)[0]),
@@ -3351,6 +3444,175 @@ class AutoRngApp:
         self.run_log_text.see("end")
         self.run_log_text.configure(state="disabled")
 
+    def _known_device_label_dirs(self) -> tuple[Path, ...]:
+        candidates = [ROOT / "assets" / "easycon118_extensions"]
+        for variable_name in ("source_var", "sid_source_var", "tid_source_var"):
+            variable = getattr(self, variable_name, None)
+            if variable is None:
+                continue
+            value = variable.get().strip()
+            if value:
+                candidates.append(Path(value) / "ImgLabel")
+        if self.project_main is not None:
+            candidates.append(self.project_main.parent / "ImgLabel")
+        return tuple(dict.fromkeys(path.resolve() for path in candidates if path.is_dir()))
+
+    def _current_label_profile(self) -> LabelOverrideProfile:
+        return self.label_override_store.profile(self.video_var.get())
+
+    def _active_label_profile(self) -> LabelOverrideProfile | None:
+        try:
+            profile = self._current_label_profile()
+            return profile if self.label_override_store.list_overrides(self.video_var.get()) else None
+        except ValueError:
+            raise
+
+    def _on_capture_device_changed(self) -> None:
+        self.refresh_device_label_profile()
+
+    def refresh_device_label_profile(self) -> None:
+        try:
+            profile = self._current_label_profile()
+            overrides = self.label_override_store.list_overrides(self.video_var.get())
+        except ValueError as exc:
+            self.label_profile_status_var.set(str(exc))
+            return
+        self.label_profile_status_var.set(
+            f"当前采集设备：{profile.capture_device}；设备覆盖标签 {len(overrides)} 个。"
+            "导入后须重新生成方案；原始标签包不会被修改，也不需要开启高级模式。"
+        )
+
+    def _show_label_issues(self, issues: tuple[LabelIssue, ...]) -> None:
+        self.label_issues = issues
+        for item in self.label_issue_tree.get_children():
+            self.label_issue_tree.delete(item)
+        for issue in issues:
+            self.label_issue_tree.insert(
+                "",
+                "end",
+                values=(
+                    " / ".join(issue.labels),
+                    "未输出" if issue.score is None else issue.score,
+                    "未输出" if issue.threshold is None else issue.threshold,
+                    issue.occurrences,
+                    f"{issue.context}：{issue.reason}",
+                ),
+            )
+
+    def _update_label_diagnostics(self, log_text: str, *, notify: bool = False) -> None:
+        issues = diagnose_label_log(log_text)
+        self._show_label_issues(issues)
+        if not issues:
+            return
+        exact = [
+            issue for issue in issues
+            if any(label.lower().endswith(".il") for label in issue.labels)
+        ]
+        if exact:
+            first = exact[0]
+            score = (
+                f"{first.score}/{first.threshold}"
+                if first.score is not None and first.threshold is not None
+                else "未输出分数"
+            )
+            self.label_profile_status_var.set(
+                f"检测到 {len(issues)} 组疑似标签问题；最可能是 "
+                f"{' / '.join(first.labels)}（{score}，连续{first.occurrences}次）。"
+                "可在下方选择或拖入重做后的同名标签。"
+            )
+        if notify:
+            lines = []
+            for issue in issues[:8]:
+                score = (
+                    f"{issue.score}/{issue.threshold}"
+                    if issue.score is not None and issue.threshold is not None
+                    else "日志未输出组内分数"
+                )
+                lines.append(
+                    f"- {issue.context}: {' / '.join(issue.labels)}，{score}，"
+                    f"连续{issue.occurrences}次"
+                )
+            messagebox.showwarning(
+                "可能由标签匹配造成停止或卡住",
+                "工具从日志中定位到以下疑似标签：\n\n"
+                + "\n".join(lines)
+                + "\n\n请只导入在正确画面上重新制作的同名 .IL；"
+                  "工具会保存为当前采集设备的覆盖层，不修改原包。",
+            )
+
+    def _import_device_label_paths(self, paths: tuple[str, ...]) -> None:
+        if self.busy or self._process_running():
+            messagebox.showerror("正在运行", "请先停止当前流程，再修改设备标签覆盖。")
+            return
+        try:
+            result = self.label_override_store.import_paths(
+                self.video_var.get(),
+                paths,
+                self._known_device_label_dirs(),
+            )
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("标签导入失败", str(exc))
+            return
+        self.invalidate_plan()
+        self.refresh_device_label_profile()
+        self.set_result(
+            f"已为采集设备 {result.profile.capture_device} 导入 "
+            f"{len(result.imported)} 个标签：\n"
+            + "\n".join(result.imported)
+            + f"\n\n当前设备覆盖共 {result.total} 个；请重新搜索/生成方案后再运行。"
+        )
+        messagebox.showinfo(
+            "设备标签已导入",
+            f"已导入 {len(result.imported)} 个同名标签。\n"
+            "原始标签包未修改；请重新生成方案，让运行工程应用覆盖层。",
+        )
+
+    def choose_device_label_files(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="选择当前采集设备重做后的 EasyCon 标签",
+            filetypes=(("EasyCon 标签", "*.IL"), ("所有文件", "*.*")),
+        )
+        if paths:
+            self._import_device_label_paths(tuple(paths))
+
+    def choose_device_label_folder(self) -> None:
+        path = filedialog.askdirectory(title="选择包含重做标签的文件夹")
+        if path:
+            self._import_device_label_paths((path,))
+
+    def _on_label_drop(self, event):
+        try:
+            paths = tuple(self.root.tk.splitlist(event.data))
+        except tk.TclError as exc:
+            messagebox.showerror("拖入失败", f"无法解析拖入路径：{exc}")
+            return "break"
+        self._import_device_label_paths(paths)
+        return "copy"
+
+    def clear_device_label_overrides(self) -> None:
+        if self.busy or self._process_running():
+            messagebox.showerror("正在运行", "请先停止当前流程，再清除设备标签覆盖。")
+            return
+        try:
+            profile = self._current_label_profile()
+            count = len(self.label_override_store.list_overrides(self.video_var.get()))
+        except ValueError as exc:
+            messagebox.showerror("无法清除", str(exc))
+            return
+        if count == 0:
+            messagebox.showinfo("没有设备覆盖", "当前采集设备尚未导入自定义标签。")
+            return
+        if not messagebox.askyesno(
+            "清除当前设备覆盖",
+            f"删除 {profile.capture_device} 的 {count} 个设备标签覆盖？\n"
+            "原始标签包不会受影响。",
+        ):
+            return
+        self.label_override_store.clear(self.video_var.get())
+        self.invalidate_plan()
+        self.refresh_device_label_profile()
+        self.set_result("已清除当前采集设备的标签覆盖；后续生成恢复使用原始标签包。")
+
     def show_run_log_tab(self) -> None:
         self.mode_notebook.select(self.run_log_tab)
         self.page_canvas.yview_moveto(0.0)
@@ -3389,6 +3651,12 @@ class AutoRngApp:
         self.seed_update_button.configure(state=state)
         self.port_combo.configure(state="readonly" if enabled else "disabled")
         self.video_combo.configure(state="readonly" if enabled else "disabled")
+        for button in (
+            self.label_import_files_button,
+            self.label_import_folder_button,
+            self.label_clear_button,
+        ):
+            button.configure(state=state)
 
     def update_seed_tables(self) -> None:
         if self.busy or self._process_running():
@@ -3519,6 +3787,11 @@ class AutoRngApp:
             seed_calibration_scheme=self._selected_seed_calibration_scheme(egg=False),
         )
         fingerprint_warning_only = self.advanced_mode_var.get()
+        try:
+            label_profile = self._active_label_profile()
+        except ValueError as exc:
+            messagebox.showerror("设备标签配置错误", str(exc))
+            return
         input_fingerprint = self.input_fingerprint()
         self.plan_result = None
         self.egg_request = None
@@ -3558,6 +3831,8 @@ class AutoRngApp:
                             result.plan,
                             easycon_options,
                         )
+                        if label_profile is not None:
+                            apply_profile_to_projects(output, label_profile)
                         check = validate_runtime(
                             ezcon_path,
                             project_main,
@@ -3669,6 +3944,7 @@ class AutoRngApp:
         ezcon_path = Path(self.ezcon_var.get())
         input_fingerprint = self.input_fingerprint()
         fingerprint_warning_only = self.advanced_mode_var.get()
+        label_profile = self._active_label_profile()
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
@@ -3684,6 +3960,8 @@ class AutoRngApp:
             try:
                 output = WRITABLE_ROOT / "runtime" / "sid_reverse"
                 project_main = write_sid_reverse_project(source_path, output, request)
+                if label_profile is not None:
+                    apply_profile_to_projects(output, label_profile)
                 check = validate_runtime(
                     ezcon_path,
                     project_main,
@@ -3753,6 +4031,7 @@ class AutoRngApp:
         ezcon_path = Path(self.ezcon_var.get())
         input_fingerprint = self.input_fingerprint()
         fingerprint_warning_only = self.advanced_mode_var.get()
+        label_profile = self._active_label_profile()
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
@@ -3822,6 +4101,8 @@ class AutoRngApp:
                         fingerprint_warning_only=fingerprint_warning_only,
                         fingerprint_warnings=fingerprint_warnings,
                     )
+                if label_profile is not None:
+                    apply_profile_to_projects(output, label_profile)
                 check = validate_tid_plan_runtime(
                     ezcon_path, output, is_flow=flow_plan is not None,
                     calibrate_first=request.calibration_check,
@@ -3987,6 +4268,7 @@ class AutoRngApp:
         ezcon_path = Path(self.ezcon_var.get())
         input_fingerprint = self.input_fingerprint()
         fingerprint_warning_only = self.advanced_mode_var.get()
+        label_profile = self._active_label_profile()
         self.plan_result = None
         self.egg_request = None
         self.tid_request = None
@@ -4002,6 +4284,8 @@ class AutoRngApp:
             try:
                 output = WRITABLE_ROOT / "runtime" / "easycon118"
                 project_main = write_configured_egg_project(source_path, output, request)
+                if label_profile is not None:
+                    apply_profile_to_projects(output, label_profile)
                 check = validate_runtime(
                     ezcon_path,
                     project_main,
@@ -4040,7 +4324,7 @@ class AutoRngApp:
         self.runtime_check = check
         pokemon = get_species_name(request.species_id)
         lines = [
-            "孵蛋模式：同 Seed 时间轴测试版（实验性）",
+            "孵蛋模式：同 Seed 正式 WAIT 版（实验性）",
             (
                 "启动准备：从已完成254步的基础存档开始"
                 if request.start_from_prepared_254
@@ -4061,7 +4345,7 @@ class AutoRngApp:
             f"亲本B：{request.parent_b_gender} {request.parent_b_ivs}",
             f"计划文件：{plan_path}",
             f"生成脚本：{project_main}",
-            "注意：该入口来自 1.1.8 的 TV 时间轴测试脚本，尚未完成本机实机验收。",
+            "注意：该入口来自 1.1.8 正式脚本，使用普通 WAIT；尚未完成本机实机验收。",
         ]
         if check.ok:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
@@ -4235,6 +4519,7 @@ class AutoRngApp:
             self.video_var.set(selected_video)
         else:
             self.video_var.set("")
+        self.refresh_device_label_profile()
 
         selections = []
         if selected_port:
@@ -4380,7 +4665,7 @@ class AutoRngApp:
                 else "本次会自动完成254步走位、设置检查并建立基础存档。"
             )
             confirmation = (
-                "将启动 1.1.8 的实验性同 Seed 孵蛋时间轴。\n"
+                "将启动 1.1.8 的实验性同 Seed 孵蛋正式 WAIT 流程。\n"
                 f"Seed {self.egg_request.normalized_seed} / Held {self.egg_request.held_advances} / "
                 f"Pickup {self.egg_request.pickup_advances}\n"
                 f"{preparation}\n"
@@ -4554,6 +4839,16 @@ class AutoRngApp:
             ])
             if fingerprint_warning_only:
                 command.append("--fingerprint-warnings")
+            try:
+                label_profile = self._active_label_profile()
+            except ValueError as exc:
+                self.running_mode = None
+                messagebox.showerror("设备标签配置错误", str(exc))
+                return
+            if label_profile is not None:
+                command.extend(
+                    ["--label-override-profile", str(label_profile.directory)]
+                )
             if self.tid_request.mode == 0:
                 command.extend(["--tid-progress-dir", str(TID_PROGRESS_DIR),
                                 "--tid-game", self.tid_game_var.get()])
@@ -4607,6 +4902,10 @@ class AutoRngApp:
                     str(self.egg_log_path),
                     "--cwd",
                     str(self.project_main.parent),
+                    "--expected-marker",
+                    "孵蛋流程完成",
+                    "--expected-marker",
+                    "孵蛋流程失败",
                     "--expected-marker",
                     "孵蛋流程测试完成",
                     "--expected-marker",
@@ -4751,6 +5050,7 @@ class AutoRngApp:
             if log_text and log_text != self.running_log_snapshot:
                 self.running_log_snapshot = log_text
                 self.set_run_log(log_text)
+                self._update_label_diagnostics(log_text)
             self.root.after(1000, self.poll_process)
             return
         completed_mode = self.running_mode
@@ -4768,6 +5068,7 @@ class AutoRngApp:
         )
         if completed_log_text:
             self.set_run_log(completed_log_text)
+            self._update_label_diagnostics(completed_log_text, notify=True)
         self.process = None
         self.running_mode = None
         self.preview_url = None
@@ -4821,9 +5122,9 @@ class AutoRngApp:
             if egg_log_path is not None and egg_log_path.is_file():
                 log_text = egg_log_path.read_text(encoding="utf-8", errors="replace")
                 self.set_result("孵蛋运行日志：\n\n" + log_text[-16000:])
-            if code == 0 and "孵蛋流程测试完成" in log_text:
-                self.status_var.set(f"孵蛋流程测试完成{detail}")
-            elif "孵蛋流程测试失败" in log_text:
+            if code == 0 and ("孵蛋流程完成" in log_text or "孵蛋流程测试完成" in log_text):
+                self.status_var.set(f"孵蛋流程完成{detail}")
+            elif "孵蛋流程失败" in log_text or "孵蛋流程测试失败" in log_text:
                 self.status_var.set(f"孵蛋流程在检查或执行阶段停止{detail}")
             elif "[EASYCON_DIAGNOSTIC]" in log_text:
                 self.status_var.set(f"孵蛋流程被取消或异常提前退出，不能视为正常完成{detail}")
@@ -4981,7 +5282,7 @@ class AutoRngApp:
 
 
 def main():
-    root = tk.Tk()
+    root = TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
     try:
         ttk.Style().theme_use("vista")
     except tk.TclError:

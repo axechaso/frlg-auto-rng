@@ -57,8 +57,12 @@ if (-not $EasyConPublish -or -not (Test-Path -LiteralPath (Join-Path $EasyConPub
     throw "找不到 EasyCon publish 目录。请用 -EasyConPublish 指定包含 ezcon.exe 的目录。"
 }
 
-& $Python -m pip install --disable-pip-version-check "pyinstaller==6.15.0"
-if ($LASTEXITCODE -ne 0) { throw "PyInstaller 安装失败" }
+& $Python -m pip install --disable-pip-version-check "pyinstaller==6.15.0" "tkinterdnd2==0.6.2"
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller / tkinterdnd2 安装失败" }
+$TkinterDndHookDir = Join-Path $Root "tools"
+if (-not (Test-Path -LiteralPath (Join-Path $TkinterDndHookDir "hook-tkinterdnd2.py"))) {
+    throw "缺少 tkinterdnd2 PyInstaller hook，无法保证打包版拖放组件完整"
+}
 
 $PyInstallerWork = Join-Path $BuildRoot "pyinstaller"
 $PyInstallerDist = Join-Path $BuildRoot "dist"
@@ -76,6 +80,8 @@ $args = @(
     "--hidden-import", "cv2",
     "--hidden-import", "tkinter",
     "--hidden-import", "_tkinter",
+    "--hidden-import", "tkinterdnd2",
+    "--additional-hooks-dir", $TkinterDndHookDir,
     "--add-binary", "$TkinterBinary;.",
     "--add-binary", "$TclBinary;.",
     "--add-binary", "$TkBinary;.",
