@@ -30,6 +30,7 @@ rng/dev/
 .env
 .venv/
 .build/
+.worktrees/
 .tools/
 local_assets/
 runtime/
