@@ -78,7 +78,7 @@ python tools/tid_ocr_jp_capture.py --preview-port 19080 --brightness dim
 
 ### 4.3 数据目录
 
-真实截图含用户实机画面，且数据量会持续增长，因此默认保存在 Git 忽略目录：
+真实截图含用户实机画面，且数据量会持续增长，因此默认保存在 D 盘工具工作区的 Git 忽略目录 `D:\Codex\火叶乱数\frlg-auto-rng\runtime\tid_ocr_jp_dataset\`，不写入 C 盘下载包：
 
 ```text
 runtime/tid_ocr_jp_dataset/
@@ -94,7 +94,7 @@ runtime/tid_ocr_jp_dataset/
     split-manifest.json
 ```
 
-训练和校验代码进入 Git；真实截图默认不提交。若以后需要发布公共训练集，应另行审查隐私、授权和体积。
+训练和校验代码进入 Git；真实截图默认不提交。后续训练缓存、检查点和候选模型也放在 D 盘工作区的 `runtime/tid_ocr_jp_training/`，不复制到 C 盘；只有模型通过验证并进入明确的部署阶段后，才按部署计划复制最终产物。若以后需要发布公共训练集，应另行审查隐私、授权和体积。
 
 ### 4.4 清单字段
 
