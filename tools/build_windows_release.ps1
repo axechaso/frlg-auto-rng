@@ -168,11 +168,16 @@ try {
     Pop-Location
 }
 
-$versionProbe = Join-Path $BuildRoot "version-probe.json"
 $frozenMain = Join-Path $ReleaseRoot "FRLG-Auto-RNG.exe"
-& $frozenMain --version-json-file $versionProbe
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $versionProbe)) {
-    throw "冻结主程序版本探针失败"
+# PyInstaller's windowed bootloader can lose non-ASCII command-line paths on
+# some Windows hosts.  Keep the probe in a temporary path and use a separate
+# process so its real exit code is available even without a console.
+$probeTempRoot = [IO.Path]::GetTempPath()
+$versionProbe = Join-Path $probeTempRoot ("frlg-auto-rng-version-" + [guid]::NewGuid().ToString("N") + ".json")
+$probeProcess = Start-Process -FilePath $frozenMain -ArgumentList @("--version-json-file", $versionProbe) -Wait -PassThru -WindowStyle Hidden
+if ($probeProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $versionProbe -PathType Leaf)) {
+    Remove-Item -Force -LiteralPath $versionProbe -ErrorAction SilentlyContinue
+    throw "冻结主程序版本探针失败（退出码 $($probeProcess.ExitCode)）"
 }
 $probe = Get-Content -LiteralPath $versionProbe -Raw | ConvertFrom-Json
 if ($probe.version -ne $AppVersion -or $probe.repository -ne "axechaso/frlg-auto-rng") {
