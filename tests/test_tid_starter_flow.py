@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation.easycon118 import EasyConRuntimeCheck
+from automation.easycon118 import EGG_TEMPLATE_NAME, EasyConRuntimeCheck
 from automation.tid_rng137 import (
     DEFAULT_TID_SOURCE_PATH, TID_LEGACY_SCRIPT_NAMES, TID_SCRIPT_NAMES, TidRngRequest,
 )
@@ -183,6 +183,32 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertEqual(restored.tid_request.button_mode, 1)
         self.assertEqual(restored.tid_request.seed_button, 2)
         self.assertEqual(restored.to_starter_search_request().setting_key, "mono_h_a")
+
+    def test_starter_template_and_precalibration_options_survive_plan_reload(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(
+                language="英文",
+                target_tid=12345,
+                target_sid=8832,
+            ),
+            version="火红",
+            starter="妙蛙种子",
+            starter_seed_startup_scheme=1,
+            starter_template_name=EGG_TEMPLATE_NAME,
+            update_precalibration=True,
+            starter_max_advances=1600,
+        )
+
+        payload = build_tid_starter_flow_plan(request).to_dict()["request"]
+        restored = tid_starter_flow_request_from_dict(payload)
+
+        self.assertEqual(payload["starter_seed_startup_scheme"], 1)
+        self.assertEqual(payload["starter_template_name"], EGG_TEMPLATE_NAME)
+        self.assertTrue(payload["update_precalibration"])
+        self.assertEqual(restored.starter_seed_startup_scheme, 1)
+        self.assertEqual(restored.starter_template_name, EGG_TEMPLATE_NAME)
+        self.assertTrue(restored.update_precalibration)
+        restored.validate()
 
     @unittest.skipUnless(HAS_TID_ASSETS and SOURCE_118.is_dir(), "requires starter assets")
     def test_starter_locks_calibration_but_keeps_startup_scheme_selectable(self):

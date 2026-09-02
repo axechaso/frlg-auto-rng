@@ -18,6 +18,10 @@ def main() -> int:
             from run_sid_reverse_capture import main as worker_main
 
             return int(worker_main(worker_argv) or 0)
+        if worker == "sid-traversal":
+            from run_sid_traversal import main as worker_main
+
+            return int(worker_main(worker_argv) or 0)
         if worker == "tid-flow":
             from run_tid_starter_flow import main as worker_main
 

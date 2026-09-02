@@ -141,7 +141,7 @@ def main() -> int:
     except Exception as exc:
         print(f"导入失败: {exc}", file=sys.stderr)
         return 1
-    print(f"已导入 1.1.8 正式/孵蛋/SID采集脚本与 {EXPECTED_LABEL_COUNT} 标签: {result}")
+    print(f"已导入 2.0 正式/时间轴/SID采集脚本与 {EXPECTED_LABEL_COUNT} 标签: {result}")
     return 0
 
 

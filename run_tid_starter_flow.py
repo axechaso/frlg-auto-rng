@@ -37,6 +37,10 @@ from automation.tid_calibration import (
 from automation.tid_rng137 import validate_tid_runtime, verify_tid_package, write_configured_tid_project
 
 from automation.easycon118 import build_run_command, prepare_compat_runner, validate_runtime
+from automation.precalibration import (
+    DEFAULT_STORE_PATH as DEFAULT_PRECALIBRATION_STORE_PATH,
+    update_from_manifest as update_precalibration_from_manifest,
+)
 from automation.tid_starter_flow import (
     build_tid_starter_flow_plan,
     resolve_exhaustive_starter_plan,
@@ -236,6 +240,29 @@ class FlowRunner:
         return 0
 
 
+def update_starter_precalibration(flow: FlowRunner, starter_main: Path) -> None:
+    """Persist an opt-in stage-3 marker without changing the game result."""
+    try:
+        record = update_precalibration_from_manifest(
+            DEFAULT_PRECALIBRATION_STORE_PATH,
+            starter_main.parent / "plan.json",
+            "\n".join(flow.stage_lines),
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        flow.output(f"[预校准更新失败] 御三家命中结果保留，但记录未写入：{exc}")
+        return
+    if record is None:
+        return
+    context = record["context"]
+    seed_field = "seed_ns1" if context["nx_model"] == 1 else "seed_ns2"
+    frame_field = "frame_ns1" if context["nx_model"] == 1 else "frame_ns2"
+    flow.output(
+        "[预校准已更新] 御三家独立上下文 "
+        f"{context['entry']} / 启动方案{context['seed_startup_scheme']} / "
+        f"Seed索引={record.get(seed_field)} / 帧修正={record.get(frame_field)}"
+    )
+
+
 def run_flow_attempts(flow: FlowRunner, flow_dir: Path, corrections: list[int]) -> int:
     """Run complete save attempts until 1.1.8 confirms a shiny starter."""
     bridge_main = flow_dir / "02_lab_bridge" / "main.ecs"
@@ -256,6 +283,7 @@ def run_flow_attempts(flow: FlowRunner, flow_dir: Path, corrections: list[int]) 
         code = flow.run_stage(3, "1.1.8 御三家全自动乱数", starter_main)
         if code != 0:
             return code
+        update_starter_precalibration(flow, starter_main)
 
         starter_result = classify_starter_output(flow.stage_lines)
         if starter_result == "shiny":
@@ -352,6 +380,7 @@ def run_exhaustive_flow(
     code = flow.run_stage(3, "1.1.8 御三家全自动乱数", starter_main)
     if code != 0:
         return code
+    update_starter_precalibration(flow, starter_main)
     starter_result = classify_starter_output(flow.stage_lines)
     if starter_result == "shiny":
         flow.output("[流程完成] 已按穷举获得的实际TID/SID确认闪光御三家。")

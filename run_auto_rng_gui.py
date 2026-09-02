@@ -35,6 +35,10 @@ from tid_records import TidRecordContext, TidRecordStore
 from tid_session import load_tid_settings, write_json_atomic, progress_context, read_progress
 from process_control import terminate_process_tree
 from automation.tid_rng137 import resolve_tid_template
+from automation.precalibration import (
+    DEFAULT_STORE_PATH as DEFAULT_PRECALIBRATION_STORE_PATH,
+    update_from_manifest as update_precalibration_from_manifest,
+)
 from automation.tid_calibration import (
     calibrated_tid_request,
     parse_tid_calibration_result,
@@ -58,8 +62,10 @@ from automation import (
     AutoSearchRequest,
     DEFAULT_EZCON_PATH,
     DEFAULT_TID_SOURCE_PATH,
+    EGG_TEMPLATE_NAME,
     EggRunRequest,
     EasyCon118Options,
+    EasyConRuntimeCheck,
     SEED_MODE_CHOICES,
     SearchCancelledError,
     SCRIPT_TEST_BACKEND_COMPAT,
@@ -71,6 +77,7 @@ from automation import (
     SCRIPT_TEST_ENTRY_TIMELINE,
     SID_REVERSE_TEMPLATE_NAME,
     SIDReverseRunRequest,
+    STANDARD_TEMPLATE_NAME,
     ScriptTestPreparation,
     TidRngRequest,
     STARTER_SEED_CALIBRATION_SCHEME,
@@ -106,6 +113,16 @@ from rng.tenlines_utils import (
 from rng.tenlines import clear_frlg_seed_cache
 from manual_tools import ManualToolsManager, parse_video_device
 from tenlines_seed_updater import update_seed_tables as run_seed_table_update
+from sid_traversal import (
+    DEFAULT_MAX_ADVANCES as SID_TRAVERSAL_DEFAULT_MAX_ADVANCES,
+    DEFAULT_START_ADVANCE as SID_TRAVERSAL_DEFAULT_START_ADVANCE,
+    DEFAULT_TARGET_MAX_ADVANCES as SID_TRAVERSAL_DEFAULT_TARGET_MAX_ADVANCES,
+    NAMED_RIVAL_START_ADVANCE as SID_TRAVERSAL_NAMED_RIVAL_START_ADVANCE,
+    progress_path as sid_traversal_progress_path,
+    read_progress as read_sid_traversal_progress,
+    sid_traversal_start_advance,
+    traversal_context,
+)
 
 
 ROOT = RESOURCE_ROOT
@@ -124,6 +141,8 @@ TID_RECORD_TAB_LABEL = "TID 实测表"
 TID_RECORD_PATH = USER_DATA_ROOT / "tid_records.sqlite3"
 TID_SETTINGS_PATH = USER_DATA_ROOT / "tid_settings.json"
 TID_PROGRESS_DIR = USER_DATA_ROOT / "tid_progress"
+SID_TRAVERSAL_PROGRESS_DIR = USER_DATA_ROOT / "sid_traversal_progress"
+SID_TRAVERSAL_TARGET_MAX_ADVANCES = SID_TRAVERSAL_DEFAULT_TARGET_MAX_ADVANCES
 MANUAL_PROFILE_LABEL = "未选择（手动输入）"
 SAVE_PROFILE_PATH = USER_DATA_ROOT / "save_profiles.json"
 DEVICE_LABEL_ROOT = USER_DATA_ROOT / "device_label_overrides"
@@ -350,6 +369,16 @@ def read_display_log_tail(path: Path | None, maximum_chars: int = 20000) -> str:
     return clean_terminal_log(text)[-maximum_chars:]
 
 
+def read_full_run_log(path: Path | None) -> str:
+    """Read the complete worker log used for durable success markers."""
+    if path is None or not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def describe_sid_log_failure(log_text: str) -> str:
     if not log_text.strip():
         return "没有读到 SID 运行日志；流程可能在日志文件建立前被强制终止。"
@@ -374,6 +403,7 @@ def build_worker_command(worker: str, arguments: list[str]) -> list[str]:
         return [sys.executable, "--worker", worker, *arguments]
     worker_scripts = {
         "sid-capture": "run_sid_reverse_capture.py",
+        "sid-traversal": "run_sid_traversal.py",
         "tid-flow": "run_tid_starter_flow.py",
         "easycon-log": "run_easycon_logged.py",
     }
@@ -927,6 +957,11 @@ class AutoRngApp:
         self.tid_request: TidRngRequest | None = None
         self.tid_flow_plan: TidStarterFlowPlan | None = None
         self.sid_request: SIDReverseRunRequest | None = None
+        self.sid_traversal_request: AutoSearchRequest | None = None
+        self.sid_traversal_options: EasyCon118Options | None = None
+        self.sid_traversal_named_rival = False
+        self.sid_traversal_context: dict | None = None
+        self.sid_traversal_plan_path: Path | None = None
         self.project_main: Path | None = None
         self.runtime_check = None
         self.script_test_preparation: ScriptTestPreparation | None = None
@@ -935,6 +970,8 @@ class AutoRngApp:
         self.running_mode: str | None = None
         self.sid_report_path: Path | None = None
         self.sid_log_path: Path | None = None
+        self.sid_traversal_log_path: Path | None = None
+        self.sid_traversal_report_path: Path | None = None
         self.tid_flow_log_path: Path | None = None
         self.tid_log_path: Path | None = None
         self.egg_log_path: Path | None = None
@@ -1537,6 +1574,13 @@ class AutoRngApp:
         self.auto_capture_var = tk.BooleanVar(value=False)
         self.paralysis_var = tk.BooleanVar(value=False)
         self.false_swipe_var = tk.BooleanVar(value=False)
+        self.item_rng_mode_var = tk.BooleanVar(value=False)
+        self.party_empty_slots_var = tk.StringVar(value="1")
+        self.sid_traversal_var = tk.BooleanVar(value=False)
+        self.sid_traversal_max_adv_var = tk.StringVar(
+            value=str(SID_TRAVERSAL_DEFAULT_MAX_ADVANCES)
+        )
+        self.sid_traversal_start_adv_var = tk.StringVar(value="")
 
         iv_frame = ttk.LabelFrame(filters, text="个体值范围", padding=(8, 5))
         iv_frame.grid(row=0, column=0, columnspan=8, sticky="we", padx=4, pady=(0, 6))
@@ -1630,11 +1674,88 @@ class AutoRngApp:
         ttk.Checkbutton(capture_options, text="出闪后自动抓捕", variable=self.auto_capture_var).pack(side="left")
         ttk.Checkbutton(capture_options, text="麻痹", variable=self.paralysis_var).pack(side="left", padx=(12, 0))
         ttk.Checkbutton(capture_options, text="点到为止", variable=self.false_swipe_var).pack(side="left", padx=(12, 0))
+        self.item_rng_mode_check = ttk.Checkbutton(
+            capture_options,
+            text="道具乱数模式",
+            variable=self.item_rng_mode_var,
+            command=self._update_item_rng_controls,
+        )
+        self.item_rng_mode_check.pack(side="left", padx=(12, 0))
+        ttk.Label(capture_options, text="队伍空位").pack(side="left", padx=(8, 2))
+        self.party_empty_slots_spin = ttk.Spinbox(
+            capture_options,
+            from_=1,
+            to=5,
+            width=4,
+            justify="center",
+            textvariable=self.party_empty_slots_var,
+        )
+        self.party_empty_slots_spin.pack(side="left")
         self._help_marker(
             capture_options,
             "出闪后处理",
             "未勾选自动抓捕时，脚本会在识别到闪光后停止，交给用户处理。",
         ).pack(side="left", padx=(14, 0))
+        self._help_marker(
+            capture_options,
+            "道具乱数模式",
+            "仅野生目标可用。开启后，物种正确且“无道具”标签不匹配时计为一次命中；"
+            "脚本按队伍空位数保存对应次数的携带道具目标，支持 1-5 个空位。",
+        ).pack(side="left", padx=(6, 0))
+        traversal_options = ttk.Frame(filters)
+        traversal_options.grid(
+            row=6, column=0, columnspan=8, sticky="w", padx=6, pady=(2, 0)
+        )
+        self.sid_traversal_check = ttk.Checkbutton(
+            traversal_options,
+            text="SID遍历模式",
+            variable=self.sid_traversal_var,
+            command=self._update_item_rng_controls,
+        )
+        self.sid_traversal_check.pack(side="left")
+        ttk.Label(traversal_options, text="遍历上限").pack(side="left", padx=(8, 2))
+        self.sid_traversal_max_adv_spin = ttk.Spinbox(
+            traversal_options,
+            from_=0,
+            to=65535,
+            width=7,
+            justify="center",
+            textvariable=self.sid_traversal_max_adv_var,
+        )
+        self.sid_traversal_max_adv_spin.pack(side="left")
+        self._help_marker(
+            traversal_options,
+            "SID遍历模式",
+            "仅野生目标可用。生成前会确认当前 TID 是否正确，并询问是否给劲敌取名；"
+            "未取名从 ADV 1901 开始，取名从 ADV 1900 开始。每个 SID 候选都会先搜索低帧闪光目标；"
+            "明确未出闪才推进并保存下一起点，中途停止会保留当前候选，下一次从断点继续。",
+        ).pack(side="left", padx=(8, 0))
+        self.sid_traversal_start_label = ttk.Label(
+            traversal_options, text="高级起点"
+        )
+        self.sid_traversal_start_label.pack(side="left", padx=(10, 2))
+        self.sid_traversal_start_adv_entry = ttk.Entry(
+            traversal_options,
+            textvariable=self.sid_traversal_start_adv_var,
+            width=7,
+        )
+        self.sid_traversal_start_adv_entry.pack(side="left")
+        self._help_marker(
+            traversal_options,
+            "自定义 SID 起点",
+            "仅高级模式可用。留空使用 1901（未给劲敌取名）或 1900（给劲敌取名）；"
+            "填写后会作为新的任务起点并使用独立断点，不会覆盖其它起点的进度。",
+        ).pack(side="left", padx=(6, 0))
+        self.sid_traversal_progress_var = tk.StringVar(
+            value="尚无 SID 遍历断点；生成后会显示保存的起点。"
+        )
+        ttk.Label(
+            traversal_options,
+            textvariable=self.sid_traversal_progress_var,
+            wraplength=760,
+            justify="left",
+        ).pack(side="left", padx=(10, 0))
+        self._update_item_rng_controls()
 
         egg_identity = ttk.LabelFrame(egg_tab, text="1. 孵蛋运行条件", padding=10)
         egg_identity.pack(fill="x")
@@ -2303,8 +2424,8 @@ class AutoRngApp:
         self._help_marker(
             self.script_entry_options,
             "脚本模板",
-            "正式版脚本使用 NS火叶全自动一键乱数1.1.8.ecs；时间轴版脚本使用"
-            " NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs。"
+            "正式版脚本使用 NS火叶全自动一键乱数2.0.ecs；时间轴版脚本使用"
+            " NS火叶全自动一键乱数2.0-时间轴.ecs。"
             "自选 ECS 保留高级页的任意脚本测试能力。切换模板会自动更新 ECS 文件路径。",
         ).pack(side="left", padx=(6, 0))
         self.seed_scheme_help_marker = self._help_marker(
@@ -2317,6 +2438,31 @@ class AutoRngApp:
         # The selector is an advanced-only control. Start hidden so the
         # initial layout does not briefly expand and then reflow on startup.
         self.script_entry_options.pack_forget()
+
+        precalibration_options = ttk.Frame(runtime)
+        precalibration_options.grid(
+            row=5,
+            column=0,
+            columnspan=7,
+            sticky="w",
+            padx=4,
+            pady=(2, 0),
+        )
+        self.update_precalibration_var = tk.BooleanVar(value=False)
+        self.update_precalibration_check = ttk.Checkbutton(
+            precalibration_options,
+            text="命中后更新预校准",
+            variable=self.update_precalibration_var,
+        )
+        self.update_precalibration_check.pack(side="left")
+        self._help_marker(
+            precalibration_options,
+            "自动更新预校准",
+            "默认关闭。完整命中目标后保存本次 Seed 与可用的帧修正；记录按游戏、"
+            "Switch机型、Seed模式、Seed启动方案、正式/时间轴入口和流程类型隔离。"
+            "正式版普通定点只复用Seed；时间轴定点及野生、孵蛋、御三家可复用帧修正。"
+            "TID与SID阶段不使用这些记录。",
+        ).pack(side="left", padx=(6, 0))
 
         actions = ttk.Frame(container)
         actions.pack(fill="x", pady=10)
@@ -2798,8 +2944,11 @@ class AutoRngApp:
             self.min_adv_var, self.max_adv_var, self.shiny_var, self.nature_var,
             self.gender_var, self.ability_var, self.hidden_type_var, self.seed_mode_var,
             self.auto_capture_var, self.paralysis_var, self.false_swipe_var,
+            self.item_rng_mode_var, self.party_empty_slots_var,
+            self.sid_traversal_var, self.sid_traversal_max_adv_var,
+            self.sid_traversal_start_adv_var,
             self.home_buffer_adaptive_var, self.seed_calibration_scheme_var,
-            self.seed_startup_scheme_var,
+            self.seed_startup_scheme_var, self.update_precalibration_var,
             self.source_var, self.ezcon_var, self.video_var,
             self.egg_seed_var, self.egg_held_var, self.egg_pickup_var,
             self.egg_seed_mode_var, self.egg_pokemon_var, self.egg_compatibility_var,
@@ -3007,6 +3156,10 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
@@ -3086,6 +3239,168 @@ class AutoRngApp:
 
     def _on_method_change(self):
         self._populate_categories()
+        self._update_item_rng_controls()
+
+    def _update_item_rng_controls(self):
+        """Limit wild-only modes and keep item/SID traversal mutually exclusive."""
+        is_wild = self.method_var.get() == "野生"
+        item_var = getattr(self, "item_rng_mode_var", None)
+        traversal_var = getattr(self, "sid_traversal_var", None)
+        item_enabled = bool(item_var is not None and item_var.get())
+        traversal_enabled = bool(traversal_var is not None and traversal_var.get())
+        if not is_wild and (item_enabled or traversal_enabled):
+            self._updating = True
+            try:
+                if item_var is not None:
+                    item_var.set(False)
+                if traversal_var is not None:
+                    traversal_var.set(False)
+            finally:
+                self._updating = False
+        if is_wild and item_enabled and traversal_enabled:
+            # A traversal must stop on a shiny marker, while item mode keeps
+            # scanning held-item outcomes; accepting both would make the
+            # worker unable to classify a candidate safely.
+            self._updating = True
+            try:
+                item_var.set(False)
+            finally:
+                self._updating = False
+        item_enabled = is_wild and bool(item_var is not None and item_var.get())
+        traversal_enabled = is_wild and bool(
+            traversal_var is not None and traversal_var.get()
+        )
+        item_check = getattr(self, "item_rng_mode_check", None)
+        if item_check is not None:
+            item_check.configure(state="normal" if is_wild else "disabled")
+        traversal_check = getattr(self, "sid_traversal_check", None)
+        if traversal_check is not None:
+            traversal_check.configure(
+                state="normal" if is_wild and not item_enabled else "disabled"
+            )
+        party_slots = getattr(self, "party_empty_slots_spin", None)
+        if party_slots is not None:
+            party_slots.configure(state="normal" if item_enabled else "disabled")
+        max_adv = getattr(self, "sid_traversal_max_adv_spin", None)
+        if max_adv is not None:
+            max_adv.configure(state="normal" if traversal_enabled else "disabled")
+        start_entry = getattr(self, "sid_traversal_start_adv_entry", None)
+        if start_entry is not None:
+            start_entry.configure(
+                state=(
+                    "normal"
+                    if traversal_enabled
+                    and bool(
+                        getattr(
+                            getattr(self, "advanced_mode_var", None),
+                            "get",
+                            lambda: False,
+                        )()
+                    )
+                    else "disabled"
+                )
+            )
+
+    def _sid_traversal_start_override(self) -> int | None:
+        """Parse the advanced-only manual SID traversal start, if present."""
+        text = self.sid_traversal_start_adv_var.get().strip()
+        if not text or not self.advanced_mode_var.get():
+            return None
+        try:
+            value = int(text)
+        except ValueError as exc:
+            raise ValueError("SID遍历自定义起点必须是整数") from exc
+        if not 0 <= value <= 65535:
+            raise ValueError("SID遍历自定义起点必须在0-65535之间")
+        return value
+
+    def _ask_sid_traversal_confirmation(self, request: AutoSearchRequest) -> bool | None:
+        """Confirm identity inputs before a destructive SID traversal run."""
+        if not messagebox.askyesno(
+            "确认 TID",
+            f"当前填写的 TID 是 {request.tid:05d}。请确认它与游戏内 TID 完全一致，是否继续？",
+        ):
+            return None
+        override = self._sid_traversal_start_override()
+        start_hint = (
+            f"当前高级起点为 ADV {override}，会覆盖默认起点。"
+            if override is not None
+            else "选择“是”从 ADV 1900 开始；选择“否”从 ADV 1901 开始。"
+        )
+        return messagebox.askyesno(
+            "劲敌名称",
+            "开始 SID 遍历前，请确认是否给劲敌取名。\n\n"
+            + start_hint
+            + "\n劲敌名称只影响默认起点；已填写的高级起点优先。是否给劲敌取名？",
+        )
+
+    def _sid_traversal_progress_text(self, context: dict | None) -> str:
+        if context is None:
+            return "尚无 SID 遍历断点；生成后会显示保存的起点。"
+        path = sid_traversal_progress_path(SID_TRAVERSAL_PROGRESS_DIR, context)
+        try:
+            payload = read_sid_traversal_progress(SID_TRAVERSAL_PROGRESS_DIR, context)
+        except ValueError as exc:
+            return f"断点读取失败（原文件保留）：{exc}"
+        if payload is None:
+            return (
+                f"无既有断点，将从 ADV {context['start_sid_advance']} 开始；"
+                f"断点：{path}"
+            )
+        state = payload["state"]
+        status = payload.get("status", state.get("status"))
+        if status == "completed":
+            detail = f"已确认出闪 ADV {state.get('hit_sid_advance')} / SID {state.get('hit_sid')}"
+        elif status == "exhausted":
+            detail = f"已遍历到上限 {context['max_advances']}，未发现闪光"
+        elif state.get("current_sid_advance") is not None:
+            detail = (
+                f"将重试当前 ADV {state['current_sid_advance']} / SID "
+                f"{state.get('current_sid')}"
+            )
+        else:
+            detail = f"下次从 ADV {state.get('next_sid_advance')} 继续"
+        return f"SID遍历断点：{detail}；尝试 {state.get('attempt_count', 0)} 次；文件：{path}"
+
+    @staticmethod
+    def _sid_traversal_report_text(path: Path | None) -> tuple[str, str | None]:
+        """Render the worker report and return its terminal status, if readable."""
+        if path is None or not path.is_file():
+            return "", None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            return f"SID遍历报告读取失败：{exc}\n报告文件：{path}", None
+        if not isinstance(payload, dict):
+            return f"SID遍历报告格式无效\n报告文件：{path}", None
+        context = payload.get("context")
+        state = payload.get("state")
+        status = payload.get("status")
+        lines = ["SID遍历运行报告", f"状态：{status or '未知'}"]
+        if isinstance(context, dict):
+            lines.append(
+                f"起点/上限：ADV {context.get('start_sid_advance', '?')}"
+                f"-{context.get('max_advances', '?')}；低帧搜索上限："
+                f"{context.get('target_max_advances', '?')}"
+            )
+        if isinstance(state, dict):
+            current = state.get("current_sid_advance")
+            if current is not None:
+                lines.append(
+                    f"当前候选：ADV {current} / SID {state.get('current_sid', '?')}"
+                )
+            elif state.get("next_sid_advance") is not None:
+                lines.append(f"下一起点：ADV {state.get('next_sid_advance')}")
+            if state.get("hit_sid") is not None:
+                lines.append(
+                    f"确认 SID：{state.get('hit_sid')}（ADV {state.get('hit_sid_advance')}）"
+                )
+            lines.append(f"尝试次数：{state.get('attempt_count', 0)}")
+        candidates = payload.get("candidates")
+        if isinstance(candidates, list):
+            lines.append(f"本次候选数：{len(candidates)}")
+        lines.append(f"报告文件：{path}")
+        return "\n".join(lines), str(status) if status is not None else None
 
     def _is_egg_mode(self):
         return self.mode_var.get() == "egg"
@@ -3105,6 +3420,15 @@ class AutoRngApp:
     def _selected_seed_startup_scheme(self) -> int:
         """Return the GUI-selected startup path, or the audited default."""
         return SEED_STARTUP_SCHEME_CODES[self.seed_startup_scheme_var.get()]
+
+    def _selected_generation_template_name(self) -> str:
+        """Return the audited 2.0 entry selected for generated projects."""
+        selection = self.script_test_entry_var.get()
+        if selection == SCRIPT_TEST_ENTRY_FORMAL:
+            return STANDARD_TEMPLATE_NAME
+        if selection == SCRIPT_TEST_ENTRY_TIMELINE:
+            return EGG_TEMPLATE_NAME
+        raise ValueError("自选 ECS 仅用于直接脚本测试；自动生成请选择正式版或时间轴版")
 
     def _selected_seed_calibration_scheme(self, *, egg: bool) -> int:
         """Return the selected calibration path with page-specific defaults."""
@@ -3141,6 +3465,18 @@ class AutoRngApp:
         state = "readonly" if advanced else "disabled"
         combo.configure(state=state)
         startup_combo.configure(state=state)
+        entry_combo = getattr(self, "script_test_entry_combo", None)
+        entry_var = getattr(self, "script_test_entry_var", None)
+        if entry_combo is not None and entry_var is not None:
+            entry_choices = (
+                SCRIPT_TEST_ENTRY_CHOICES
+                if self._is_script_test_mode()
+                else (SCRIPT_TEST_ENTRY_FORMAL, SCRIPT_TEST_ENTRY_TIMELINE)
+            )
+            entry_combo.configure(values=entry_choices)
+            if not advanced or entry_var.get() not in entry_choices:
+                entry_var.set(SCRIPT_TEST_ENTRY_FORMAL)
+                self._sync_script_test_entry_path()
         entry_options = getattr(self, "script_entry_options", None)
         if entry_options is not None:
             if advanced:
@@ -3175,6 +3511,7 @@ class AutoRngApp:
                 self.mode_notebook.select(normal_tab)
             self.mode_notebook.hide(self.script_test_tab)
         self._update_seed_scheme_controls()
+        self._update_item_rng_controls()
         self._schedule_page_scrollregion_update()
 
     def _on_mode_tab_change(self, _event=None):
@@ -3642,6 +3979,7 @@ class AutoRngApp:
             home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
             seed_startup_scheme=self._selected_seed_startup_scheme(),
             seed_calibration_scheme=self._selected_seed_calibration_scheme(egg=True),
+            update_precalibration=self.update_precalibration_var.get(),
         )
 
     def collect_tid_request(self) -> TidRngRequest:
@@ -3713,6 +4051,11 @@ class AutoRngApp:
         starter_seed_startup_scheme = (
             startup_selector() if callable(startup_selector) else 0
         )
+        template_selector = getattr(self, "_selected_generation_template_name", None)
+        starter_template_name = (
+            template_selector() if callable(template_selector) else STANDARD_TEMPLATE_NAME
+        )
+        update_precalibration_var = getattr(self, "update_precalibration_var", None)
         request = TidStarterFlowRequest(
             tid_request=replace(tid_request, calibration_check=False),
             version=self.tid_game_var.get(),
@@ -3747,6 +4090,12 @@ class AutoRngApp:
             accept_any_tid=tid_request.mode == 0 and self.tid_any_tid_var.get(),
             any_tid_require_denoise=self.tid_any_tid_denoise_var.get(),
             starter_seed_startup_scheme=starter_seed_startup_scheme,
+            starter_template_name=starter_template_name,
+            update_precalibration=(
+                bool(update_precalibration_var.get())
+                if update_precalibration_var is not None
+                else False
+            ),
         )
         request.validate()
         return request
@@ -3812,6 +4161,112 @@ class AutoRngApp:
         self.result_text.delete("1.0", "end")
         self.result_text.insert("1.0", text)
         self.result_text.configure(state="disabled")
+
+    def append_result_note(self, text: str) -> None:
+        if not text:
+            return
+        self.result_text.configure(state="normal")
+        if self.result_text.index("end-1c") != "1.0":
+            self.result_text.insert("end", "\n")
+        self.result_text.insert("end", text.rstrip("\r\n"))
+        self.result_text.configure(state="disabled")
+
+    @staticmethod
+    def _precalibration_plan_lines(project_main: Path | None) -> list[str]:
+        if project_main is None:
+            return []
+        manifest_path = project_main.parent / "plan.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return []
+        config = manifest.get("precalibration")
+        if not isinstance(config, dict):
+            return []
+        if config.get("enabled") is not True:
+            return ["自动更新预校准：关闭"]
+        context = config.get("context")
+        if not isinstance(context, dict):
+            return ["自动更新预校准：已开启，但生成清单缺少上下文"]
+        kind_text = {
+            "STATIC": "普通定点",
+            "WILD": "野生",
+            "EGG": "孵蛋",
+            "STARTER": "御三家",
+        }.get(str(context.get("kind")), str(context.get("kind", "?")))
+        entry_text = "正式版" if context.get("entry") == "FORMAL" else "时间轴版"
+        lines = [
+            "自动更新预校准：开启（"
+            f"{kind_text} / {entry_text} / Seed启动方案{context.get('seed_startup_scheme', '?')}）"
+        ]
+        if config.get("frame_enabled") is False:
+            lines.append("本流程只复用Seed预校准；正式版普通定点不复用帧预校准。")
+        loaded = config.get("loaded")
+        if isinstance(loaded, dict):
+            nx = int(context.get("nx_model", 1))
+            seed_value = loaded.get("seed_ns1" if nx == 1 else "seed_ns2")
+            if context.get("kind") == "EGG":
+                frame_text = (
+                    f"Held={loaded.get('held_pre')} / Pickup={loaded.get('pickup_pre')}"
+                )
+            elif config.get("frame_enabled") is False:
+                frame_text = "帧=不加载"
+            else:
+                frame_text = f"帧={loaded.get('frame_ns1' if nx == 1 else 'frame_ns2')}"
+            lines.append(f"已载入同上下文记录：Seed索引={seed_value} / {frame_text}")
+        else:
+            lines.append("未找到同上下文历史记录，本次使用模板初值。")
+        return lines
+
+    @staticmethod
+    def _update_completed_precalibration(
+        project_main: Path | None,
+        log_path: Path | None,
+        exit_code: int,
+    ) -> str | None:
+        if project_main is None or exit_code != 0:
+            return None
+        manifest_path = project_main.parent / "plan.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        config = manifest.get("precalibration")
+        if not isinstance(config, dict) or config.get("enabled") is not True:
+            return None
+        full_log = read_full_run_log(log_path)
+        try:
+            record = update_precalibration_from_manifest(
+                DEFAULT_PRECALIBRATION_STORE_PATH,
+                manifest_path,
+                full_log,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            return f"预校准更新失败，原记录保留：{exc}"
+        if record is None:
+            return "预校准未更新：本轮日志没有完整的目标命中标记。"
+        context = record["context"]
+        nx = int(context["nx_model"])
+        seed_value = record.get("seed_ns1" if nx == 1 else "seed_ns2")
+        if context["kind"] == "EGG":
+            frame_text = (
+                f"Held={record.get('held_pre')} / Pickup={record.get('pickup_pre')}"
+            )
+        else:
+            frame_value = record.get("frame_ns1" if nx == 1 else "frame_ns2")
+            frame_allowed = not (
+                context["entry"] == "FORMAL" and context["kind"] == "STATIC"
+            )
+            frame_text = (
+                f"帧={frame_value}"
+                if frame_allowed and frame_value is not None
+                else "帧=不适用"
+            )
+        return (
+            "预校准已更新："
+            f"{context['kind']} / {context['entry']} / 启动方案{context['seed_startup_scheme']} / "
+            f"Seed索引={seed_value} / {frame_text}"
+        )
 
     def set_run_log(self, text: str) -> None:
         self.run_log_text.configure(state="normal")
@@ -4020,6 +4475,7 @@ class AutoRngApp:
         return {
             "script_test": self.script_test_log_path,
             "sid": self.sid_log_path,
+            "sid_traversal": getattr(self, "sid_traversal_log_path", None),
             "tid_flow": self.tid_flow_log_path,
             "tid": self.tid_log_path,
             "egg": self.egg_log_path,
@@ -4034,6 +4490,7 @@ class AutoRngApp:
         self.monitor_button.configure(state="normal" if monitor_enabled else "disabled")
         self.advanced_mode_check.configure(state=state)
         self.home_buffer_adaptive_check.configure(state=state)
+        self.update_precalibration_check.configure(state=state)
         self._update_seed_scheme_controls()
         self.seed_update_button.configure(state=state)
         self.port_combo.configure(state="readonly" if enabled else "disabled")
@@ -4202,6 +4659,7 @@ class AutoRngApp:
                 or self.egg_request
                 or tid_can_start
                 or self.sid_request
+                or self.sid_traversal_request
                 or script_test_can_start
             )
             and self.project_main
@@ -4234,6 +4692,27 @@ class AutoRngApp:
                 self.generate_tid_project(tid_request, flow_request)
                 return
             request = self.collect_request()
+            if self.method_var.get() == "野生" and self.sid_traversal_var.get():
+                if self.item_rng_mode_var.get():
+                    raise ValueError("SID遍历模式不能与道具乱数模式同时开启")
+                named_rival = self._ask_sid_traversal_confirmation(request)
+                if named_rival is None:
+                    return
+                self.generate_sid_traversal_plan(
+                    replace(request, sid=0),
+                    bool(named_rival),
+                )
+                return
+            item_rng_enabled = (
+                self.method_var.get() == "野生" and self.item_rng_mode_var.get()
+            )
+            if item_rng_enabled:
+                party_empty_slots = int(self.party_empty_slots_var.get())
+                if not 1 <= party_empty_slots <= 5:
+                    raise ValueError("队伍空位数量必须在 1-5 之间")
+            else:
+                party_empty_slots = 1
+            template_name = self._selected_generation_template_name()
         except Exception as exc:
             messagebox.showerror("输入错误", str(exc))
             return
@@ -4247,6 +4726,9 @@ class AutoRngApp:
             home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
             seed_startup_scheme=self._selected_seed_startup_scheme(),
             seed_calibration_scheme=self._selected_seed_calibration_scheme(egg=False),
+            item_rng_mode=item_rng_enabled,
+            party_empty_slots=party_empty_slots,
+            update_precalibration=self.update_precalibration_var.get(),
         )
         fingerprint_warning_only = self.advanced_mode_var.get()
         try:
@@ -4260,6 +4742,10 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
@@ -4292,6 +4778,7 @@ class AutoRngApp:
                             output,
                             result.plan,
                             easycon_options,
+                            template_name=template_name,
                         )
                         if label_profile is not None:
                             apply_profile_to_projects(output, label_profile)
@@ -4315,6 +4802,172 @@ class AutoRngApp:
                 self.root.after(0, lambda error=exc: self.fail_search(error))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def generate_sid_traversal_plan(
+        self,
+        request: AutoSearchRequest,
+        named_rival: bool,
+    ) -> None:
+        """Prepare a resumable wild SID traversal without choosing one SID."""
+        source_path = Path(self.source_var.get()).resolve()
+        ezcon_path = Path(self.ezcon_var.get()).resolve()
+        try:
+            max_advances = int(self.sid_traversal_max_adv_var.get())
+            start_override = self._sid_traversal_start_override()
+            start_advance = sid_traversal_start_advance(named_rival, start_override)
+        except (TypeError, ValueError) as exc:
+            messagebox.showerror("SID遍历输入错误", str(exc))
+            return
+        if max_advances < start_advance:
+            messagebox.showerror(
+                "SID遍历输入错误",
+                f"遍历上限必须不小于起点 ADV {start_advance}。",
+            )
+            return
+        try:
+            label_profile = self._active_label_profile()
+        except ValueError as exc:
+            messagebox.showerror("设备标签配置错误", str(exc))
+            return
+        options = EasyCon118Options(
+            nx_model=2 if request.game.endswith("nx2") else 1,
+            paralysis=self.paralysis_var.get(),
+            false_swipe=self.false_swipe_var.get(),
+            # Traversal must be able to distinguish the shiny-stop marker.
+            continue_capture_after_shiny=False,
+            home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
+            seed_startup_scheme=self._selected_seed_startup_scheme(),
+            seed_calibration_scheme=self._selected_seed_calibration_scheme(egg=False),
+            item_rng_mode=False,
+            party_empty_slots=1,
+        )
+        input_fingerprint = self.input_fingerprint()
+        fingerprint_warning_only = self.advanced_mode_var.get()
+        self.plan_result = None
+        self.egg_request = None
+        self.tid_request = None
+        self.tid_flow_plan = None
+        self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
+        self.script_test_preparation = None
+        self.project_main = None
+        self.runtime_check = None
+        self.set_busy(True, "正在准备 SID 遍历计划并预检 1.1.8 入口……")
+        self.set_result(
+            f"TID {request.tid:05d} 已确认；"
+            f"将从 ADV {start_advance} 遍历到 {max_advances}，正在检查脚本和运行后端。"
+        )
+
+        def worker() -> None:
+            try:
+                corpus = inspect_script_corpus(source_path)
+                context = traversal_context(
+                    tid=request.tid,
+                    named_rival=named_rival,
+                    wild_request=asdict(request),
+                    easycon_options=asdict(options),
+                    source_sha256=corpus["sha256"],
+                    max_advances=max_advances,
+                    start_advance=start_override,
+                    target_max_advances=SID_TRAVERSAL_TARGET_MAX_ADVANCES,
+                )
+                preparation = prepare_script_test_runtime(
+                    ezcon_path,
+                    source_path / STANDARD_TEMPLATE_NAME,
+                    SCRIPT_TEST_BACKEND_COMPAT,
+                    fingerprint_warning_only=fingerprint_warning_only,
+                )
+                plan_dir = WRITABLE_ROOT / "rng_logs" / "plans"
+                plan_dir.mkdir(parents=True, exist_ok=True)
+                plan_path = plan_dir / (
+                    datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    + "_sid_traversal.json"
+                )
+                payload = {
+                    "mode": "sid_traversal",
+                    "version": 1,
+                    "source": str(source_path),
+                    "request": asdict(request),
+                    "easycon_options": asdict(options),
+                    "named_rival": bool(named_rival),
+                    "start_sid_advance": context["start_sid_advance"],
+                    "max_advances": max_advances,
+                    "target_max_advances": SID_TRAVERSAL_TARGET_MAX_ADVANCES,
+                    "traversal_context": context,
+                }
+                plan_path.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                self.root.after(
+                    0,
+                    lambda: self.finish_sid_traversal_generation(
+                        request,
+                        options,
+                        named_rival,
+                        context,
+                        plan_path,
+                        preparation,
+                        input_fingerprint,
+                        label_profile,
+                    ),
+                )
+            except Exception as exc:
+                self.root.after(0, lambda error=exc: self.fail_search(error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_sid_traversal_generation(
+        self,
+        request: AutoSearchRequest,
+        options: EasyCon118Options,
+        named_rival: bool,
+        context: dict,
+        plan_path: Path,
+        preparation,
+        input_fingerprint,
+        label_profile=None,
+    ) -> None:
+        del label_profile  # Applied by the worker to each generated candidate.
+        if input_fingerprint != self.input_fingerprint():
+            self.fail_search(ValueError("生成期间输入发生变化，请按当前 SID 遍历条件重新准备。"))
+            return
+        self.plan_result = None
+        self.egg_request = None
+        self.tid_request = None
+        self.tid_flow_plan = None
+        self.sid_request = None
+        self.sid_traversal_request = request
+        self.sid_traversal_options = options
+        self.sid_traversal_named_rival = bool(named_rival)
+        self.sid_traversal_context = context
+        self.sid_traversal_plan_path = plan_path
+        self.script_test_preparation = None
+        self.project_main = Path(self.source_var.get()).resolve() / STANDARD_TEMPLATE_NAME
+        self.runtime_check = preparation.check
+        self.sid_traversal_progress_var.set(self._sid_traversal_progress_text(context))
+        lines = [
+            "野生 SID 遍历模式：可续跑",
+            f"目标宝可梦：{request.pokemon}；遭遇：{request.category} / {request.location}",
+            f"TID：{request.tid:05d}（SID 输入不参与遍历）",
+            f"劲敌取名：{'是' if named_rival else '否'}；起点 ADV：{context['start_sid_advance']}",
+            f"遍历上限：{context['max_advances']}；低帧目标搜索上限：{SID_TRAVERSAL_TARGET_MAX_ADVANCES}",
+            f"计划文件：{plan_path}",
+            f"断点文件：{sid_traversal_progress_path(SID_TRAVERSAL_PROGRESS_DIR, context)}",
+            self._sid_traversal_progress_text(context),
+        ]
+        if preparation.check.ok:
+            lines.extend(f"预检提示：{warning}" for warning in preparation.check.warnings)
+            lines.append("开始运行后，每个明确未出闪候选都会落盘更新下一起点；停止会保留当前候选。")
+            status = "SID遍历计划已准备，可以开始；已有断点会自动续跑。"
+        else:
+            lines.extend(f"预检失败：{error}" for error in preparation.check.errors)
+            status = "SID遍历计划已生成，但预检不允许启动。"
+        self.set_result("\n".join(lines))
+        self.set_busy(False, status)
 
     def generate_script_test_preflight(self):
         entry = self.script_test_entry_var.get()
@@ -4342,6 +4995,10 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
@@ -4425,6 +5082,10 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
@@ -4464,6 +5125,10 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = request
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = project_main
         self.runtime_check = check
@@ -4512,6 +5177,10 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
@@ -4630,6 +5299,10 @@ class AutoRngApp:
         self.tid_request = request
         self.tid_flow_plan = flow_plan
         self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = project_main
         self.runtime_check = check
@@ -4679,6 +5352,16 @@ class AutoRngApp:
                         if flow_plan.request.starter_seed_startup_scheme == 1
                         else "御三家 Seed启动方案：当前 HOME_BUFFER（方案0）"
                     ),
+                    (
+                        "御三家脚本入口：正式版"
+                        if flow_plan.request.starter_template_name == STANDARD_TEMPLATE_NAME
+                        else "御三家脚本入口：时间轴版"
+                    ),
+                    (
+                        "御三家自动更新预校准：开启（独立于普通定点和TID/SID）"
+                        if flow_plan.request.update_precalibration
+                        else "御三家自动更新预校准：关闭"
+                    ),
                 )
             )
             target = flow_plan.starter_target
@@ -4722,6 +5405,11 @@ class AutoRngApp:
                         f"1.1.8 御三家：{project_main.parents[1] / '03_starter_118' / 'main.ecs'}",
                     )
                 )
+                lines.extend(
+                    self._precalibration_plan_lines(
+                        project_main.parents[1] / "03_starter_118" / "main.ecs"
+                    )
+                )
         if check.ok and flow_plan is None:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
             status = "TID/SID 脚本已生成，可以在确认会新建存档后开始。"
@@ -4741,6 +5429,7 @@ class AutoRngApp:
     def generate_egg_project(self, request: EggRunRequest):
         source_path = Path(self.source_var.get())
         ezcon_path = Path(self.ezcon_var.get())
+        template_name = self._selected_generation_template_name()
         input_fingerprint = self.input_fingerprint()
         fingerprint_warning_only = self.advanced_mode_var.get()
         label_profile = self._active_label_profile()
@@ -4749,6 +5438,10 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
@@ -4758,7 +5451,12 @@ class AutoRngApp:
         def worker():
             try:
                 output = WRITABLE_ROOT / "runtime" / "easycon118"
-                project_main = write_configured_egg_project(source_path, output, request)
+                project_main = write_configured_egg_project(
+                    source_path,
+                    output,
+                    request,
+                    template_name=template_name,
+                )
                 if label_profile is not None:
                     apply_profile_to_projects(output, label_profile)
                 check = validate_runtime(
@@ -4794,12 +5492,25 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = project_main
         self.runtime_check = check
         pokemon = get_species_name(request.species_id)
+        generated_manifest = json.loads(
+            (project_main.parent / "plan.json").read_text(encoding="utf-8")
+        )
+        selected_template = generated_manifest.get("template")
+        entry_description = (
+            "正式 WAIT 版"
+            if selected_template == STANDARD_TEMPLATE_NAME
+            else "时间轴版"
+        )
         lines = [
-            "孵蛋模式：同 Seed 正式 WAIT 版（实验性）",
+            f"孵蛋模式：同 Seed {entry_description}（实验性）",
             (
                 "启动准备：从已完成254步的基础存档开始"
                 if request.start_from_prepared_254
@@ -4820,8 +5531,13 @@ class AutoRngApp:
             f"亲本B：{request.parent_b_gender} {request.parent_b_ivs}",
             f"计划文件：{plan_path}",
             f"生成脚本：{project_main}",
-            "注意：该入口来自 1.1.8 正式脚本，使用普通 WAIT；尚未完成本机实机验收。",
+            (
+                "注意：当前使用正式脚本的普通 WAIT；尚未完成本机实机验收。"
+                if selected_template == STANDARD_TEMPLATE_NAME
+                else "注意：当前使用时间轴脚本；尚未完成本机实机验收。"
+            ),
         ]
+        lines.extend(self._precalibration_plan_lines(project_main))
         if check.ok:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
             status = "孵蛋测试脚本已生成，可以在确认存档准备后开始。"
@@ -4848,6 +5564,10 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = project_main
         self.runtime_check = check
@@ -4869,6 +5589,7 @@ class AutoRngApp:
             f"Seed 模式：{plan.seed_mode}",
             f"Seed启动：{self.seed_startup_scheme_var.get()}",
             f"Seed校准方案：{self.seed_calibration_scheme_var.get()}",
+            f"脚本入口：{self.script_test_entry_var.get()}",
             (
                 "指定模式：已跳过筛选搜索"
                 if direct_mode
@@ -4876,8 +5597,14 @@ class AutoRngApp:
             ),
             f"路线状态：{plan.route_support.level.value}",
             f"出闪后处理：{'自动抓捕' if self.auto_capture_var.get() else '停止并交给用户'}",
+            (
+                f"道具乱数：开启（队伍空位 {self.party_empty_slots_var.get()}）"
+                if self.method_var.get() == "野生" and self.item_rng_mode_var.get()
+                else "道具乱数：关闭"
+            ),
             f"计划文件：{plan_path}",
         ]
+        lines.extend(self._precalibration_plan_lines(project_main))
         lines.extend(f"注意：{warning}" for warning in plan.warnings)
         if not plan.route_support.can_start:
             lines.append("此路线仅允许搜索，初版已阻止自动启动。")
@@ -4906,6 +5633,10 @@ class AutoRngApp:
         self.tid_request = None
         self.tid_flow_plan = None
         self.sid_request = None
+        self.sid_traversal_request = None
+        self.sid_traversal_options = None
+        self.sid_traversal_context = None
+        self.sid_traversal_plan_path = None
         self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
@@ -5021,6 +5752,7 @@ class AutoRngApp:
             or self.egg_request
             or self.tid_request
             or self.sid_request
+            or self.sid_traversal_request
             or self.script_test_preparation
         ) or not self.project_main:
             return
@@ -5062,6 +5794,14 @@ class AutoRngApp:
             self.script_test_preparation = preparation
             self.project_main = preparation.script_path
             check = preparation.check
+        elif self.sid_traversal_request is not None:
+            preparation = prepare_script_test_runtime(
+                Path(self.ezcon_var.get()),
+                Path(self.source_var.get()).resolve() / STANDARD_TEMPLATE_NAME,
+                SCRIPT_TEST_BACKEND_COMPAT,
+                fingerprint_warning_only=fingerprint_warning_only,
+            )
+            check = preparation.check
         elif self.tid_request is not None:
             is_flow = self.tid_flow_plan is not None
             check = validate_tid_plan_runtime(
@@ -5088,6 +5828,18 @@ class AutoRngApp:
                 f"后端：{self.script_test_preparation.backend}\n"
                 f"串口 {selected_port} / 采集卡 {video_device} / DSHOW\n"
                 "测试脚本拥有完整手柄控制权限；确认已检查脚本内容、游戏位置和存档状态，是否继续？"
+            )
+        elif self.sid_traversal_request is not None:
+            context = self.sid_traversal_context or {}
+            progress = self._sid_traversal_progress_text(context)
+            confirmation = (
+                "将按已保存断点逐个尝试野生闪光目标，直到确认闪光并反推出正确 SID。\n"
+                f"TID {self.sid_traversal_request.tid:05d} / "
+                f"劲敌取名 {'是' if self.sid_traversal_named_rival else '否'} / "
+                f"ADV {context.get('start_sid_advance', '?')}-{context.get('max_advances', '?')}\n"
+                f"{progress}\n"
+                "每个候选会从当前存档重新执行；明确未出闪才推进起点，停止或异常会保留当前候选。"
+                "请确认存档、路线、宝可梦和 TID 均正确，是否继续？"
             )
         elif self.sid_request is not None:
             confirmation = (
@@ -5245,6 +5997,61 @@ class AutoRngApp:
             ])
             command_cwd = ROOT
             self.running_mode = "script_test"
+        elif self.sid_traversal_request is not None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            output_dir = WRITABLE_ROOT / "runtime" / "sid_traversal"
+            self.sid_traversal_log_path = output_dir / f"sid-traversal-{timestamp}.log"
+            self.sid_traversal_report_path = output_dir / f"sid-traversal-{timestamp}.json"
+            self.running_log_snapshot = ""
+            preview_port = allocate_preview_port()
+            preview_url = f"http://127.0.0.1:{preview_port}/mjpeg"
+            plan_path = self.sid_traversal_plan_path
+            context = self.sid_traversal_context or {}
+            if plan_path is None:
+                messagebox.showerror("SID遍历启动失败", "缺少 SID 遍历计划文件，请重新生成。")
+                return
+            command = build_worker_command("sid-traversal", [
+                "--request-json",
+                str(plan_path),
+                "--source",
+                self.source_var.get(),
+                "--ezcon",
+                self.ezcon_var.get(),
+                "--output",
+                str(output_dir),
+                "--progress-dir",
+                str(SID_TRAVERSAL_PROGRESS_DIR),
+                "--port",
+                selected_port,
+                "--video",
+                str(video_device),
+                "--log-path",
+                str(self.sid_traversal_log_path),
+                "--report-path",
+                str(self.sid_traversal_report_path),
+                "--max-advances",
+                str(context.get("max_advances", SID_TRAVERSAL_DEFAULT_MAX_ADVANCES)),
+                "--target-max-advances",
+                str(context.get("target_max_advances", SID_TRAVERSAL_TARGET_MAX_ADVANCES)),
+                "--preview-port",
+                str(preview_port),
+            ])
+            if self.sid_traversal_named_rival:
+                command.append("--named-rival")
+            if context.get("start_sid_advance") is not None:
+                command.extend(["--start-advance", str(context["start_sid_advance"])])
+            if fingerprint_warning_only:
+                command.append("--fingerprint-warnings")
+            try:
+                label_profile = self._active_label_profile()
+            except ValueError as exc:
+                self.running_mode = None
+                messagebox.showerror("设备标签配置错误", str(exc))
+                return
+            if label_profile is not None:
+                command.extend(["--label-override-profile", str(label_profile.directory)])
+            command_cwd = ROOT
+            self.running_mode = "sid_traversal"
         elif self.sid_request is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_dir = self.project_main.parent
@@ -5455,15 +6262,19 @@ class AutoRngApp:
             else f"SID 正在逐只采集；日志实时保存到 {self.sid_log_path}。"
             if self.running_mode == "sid"
             else (
-                "TID/SID → 研究所 → 1.1.8 御三家流程正在运行；详细日志见新打开的终端。"
-                if self.running_mode == "tid_flow"
+                f"SID 遍历正在运行；日志将保存到 {self.sid_traversal_log_path}。"
+                if self.running_mode == "sid_traversal"
                 else (
-                    f"TID/SID 正在运行；日志将保存到 {self.tid_log_path}。"
-                    if self.running_mode == "tid"
+                    "TID/SID → 研究所 → 1.1.8 御三家流程正在运行；详细日志见新打开的终端。"
+                    if self.running_mode == "tid_flow"
                     else (
-                        f"孵蛋流程正在运行；日志将保存到 {self.egg_log_path}。"
-                        if self.running_mode == "egg"
-                        else f"EasyCon 正在运行；日志将保存到 {self.easycon_log_path}。"
+                        f"TID/SID 正在运行；日志将保存到 {self.tid_log_path}。"
+                        if self.running_mode == "tid"
+                        else (
+                            f"孵蛋流程正在运行；日志将保存到 {self.egg_log_path}。"
+                            if self.running_mode == "egg"
+                            else f"EasyCon 正在运行；日志将保存到 {self.easycon_log_path}。"
+                        )
                     )
                 )
             )
@@ -5531,12 +6342,14 @@ class AutoRngApp:
             return
         completed_mode = self.running_mode
         report_path = self.sid_report_path
+        sid_traversal_report_path = self.sid_traversal_report_path
         log_path = self.sid_log_path
         tid_flow_log_path = self.tid_flow_log_path
         tid_log_path = self.tid_log_path
         egg_log_path = self.egg_log_path
         script_test_log_path = self.script_test_log_path
         easycon_log_path = self.easycon_log_path
+        completed_project_main = self.project_main
         completed_log_path = self._current_running_log_path()
         completed_log_text = read_display_log_tail(
             completed_log_path,
@@ -5545,6 +6358,13 @@ class AutoRngApp:
         if completed_log_text:
             self.set_run_log(completed_log_text)
             self._update_label_diagnostics(completed_log_text, notify=True)
+        precalibration_update_note = None
+        if completed_mode in {"easycon", "egg"}:
+            precalibration_update_note = self._update_completed_precalibration(
+                completed_project_main,
+                completed_log_path,
+                code,
+            )
         self.process = None
         self.running_mode = None
         self.preview_url = None
@@ -5580,6 +6400,25 @@ class AutoRngApp:
                 self.set_result(result)
                 detail = f"；日志：{log_path}" if log_path is not None else ""
                 self.status_var.set(f"SID 查找已退出，退出码 {code}{detail}")
+        elif completed_mode == "sid_traversal":
+            report_text, report_status = self._sid_traversal_report_text(
+                sid_traversal_report_path
+            )
+            if report_text:
+                self.set_result(report_text)
+            detail = (
+                f"；报告：{sid_traversal_report_path}"
+                if sid_traversal_report_path is not None
+                else ""
+            )
+            if code == 0 and report_status == "completed":
+                self.status_var.set(f"SID 遍历已确认正确 SID{detail}")
+            elif code == 0 and report_status == "exhausted":
+                self.status_var.set(f"SID 遍历达到上限，未发现闪光{detail}")
+            elif report_status == "paused" or code == 130:
+                self.status_var.set(f"SID 遍历已暂停，当前起点已保留{detail}")
+            else:
+                self.status_var.set(f"SID 遍历已退出，退出码 {code}{detail}")
         elif completed_mode == "tid":
             detail = f"；日志：{tid_log_path}" if tid_log_path is not None else ""
             log_text = read_display_log_tail(tid_log_path, maximum_chars=30000)
@@ -5609,6 +6448,12 @@ class AutoRngApp:
         else:
             detail = f"；日志：{easycon_log_path}" if easycon_log_path is not None else ""
             self.status_var.set(f"EasyCon 已退出，退出码 {code}{detail}")
+
+        if precalibration_update_note:
+            self.append_result_note("预校准结果：" + precalibration_update_note)
+            self.status_var.set(
+                self.status_var.get() + "；" + precalibration_update_note
+            )
 
         self._refresh_tid_progress()
         if self.close_when_stopped:

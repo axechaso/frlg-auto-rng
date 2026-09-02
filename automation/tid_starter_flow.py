@@ -38,6 +38,8 @@ from rng.tenlines_utils import (
 )
 
 from .easycon118 import (
+    EGG_TEMPLATE_NAME,
+    STANDARD_TEMPLATE_NAME,
     EasyCon118Options,
     EasyConRuntimeCheck,
     validate_runtime,
@@ -78,6 +80,8 @@ class TidStarterFlowRequest:
     accept_any_tid: bool = False
     any_tid_require_denoise: bool = True
     starter_seed_startup_scheme: int = 0
+    starter_template_name: str = STANDARD_TEMPLATE_NAME
+    update_precalibration: bool = False
 
     def validate(self) -> None:
         self.tid_request.validate()
@@ -87,6 +91,10 @@ class TidStarterFlowRequest:
             raise ValueError("任意TID去噪开关必须为布尔值")
         if self.starter_seed_startup_scheme not in {0, 1}:
             raise ValueError("御三家 Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
+        if self.starter_template_name not in {STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME}:
+            raise ValueError("御三家脚本模板只能选择正式版或时间轴版入口")
+        if not isinstance(self.update_precalibration, bool):
+            raise ValueError("御三家更新预校准开关必须是布尔值")
         if self.starter_sound not in {0, 1}:
             raise ValueError("御三家 Sound 只能是 MONO 或 STEREO")
         if self.starter_button_mode not in {0, 1, 2}:
@@ -189,6 +197,10 @@ def tid_starter_flow_request_from_dict(payload: dict[str, object]) -> TidStarter
         accept_any_tid=payload.get("accept_any_tid", False),
         any_tid_require_denoise=payload.get("any_tid_require_denoise", True),
         starter_seed_startup_scheme=int(payload.get("starter_seed_startup_scheme", 0)),
+        starter_template_name=str(
+            payload.get("starter_template_name", STANDARD_TEMPLATE_NAME)
+        ),
+        update_precalibration=payload.get("update_precalibration", False),
     )
 
 
@@ -570,6 +582,7 @@ def write_tid_starter_flow_bundle(
     starter_source_dir: str | Path,
     fingerprint_warning_only: bool = False,
     fingerprint_warnings: list[str] | None = None,
+    precalibration_store_path: str | Path | None = None,
 ) -> Path:
     """Write the ID, lab bridge, and configured existing 1.1.8 starter stage."""
     source_dir = Path(source_dir).resolve()
@@ -632,7 +645,11 @@ def write_tid_starter_flow_bundle(
                 japanese_starter=plan.request.tid_request.language == "日文",
                 seed_startup_scheme=plan.request.starter_seed_startup_scheme,
                 seed_calibration_scheme=STARTER_SEED_CALIBRATION_SCHEME,
+                update_precalibration=plan.request.update_precalibration,
+                precalibration_context_kind="STARTER",
             ),
+            template_name=plan.request.starter_template_name,
+            precalibration_store_path=precalibration_store_path,
         )
     elif starter_dir.exists():
         shutil.rmtree(starter_dir)
@@ -655,6 +672,8 @@ def write_resolved_exhaustive_starter_project(
     starter_source_dir: str | Path,
     starter_dir: str | Path,
     resolved: ResolvedTidStarterPlan,
+    *,
+    precalibration_store_path: str | Path | None = None,
 ) -> Path:
     """Materialize the 1.1.8 starter stage after stage 1 reveals the IDs."""
     starter_dir = Path(starter_dir).resolve()
@@ -668,7 +687,11 @@ def write_resolved_exhaustive_starter_project(
             japanese_starter=resolved.request.tid_request.language == "日文",
             seed_startup_scheme=resolved.request.starter_seed_startup_scheme,
             seed_calibration_scheme=STARTER_SEED_CALIBRATION_SCHEME,
+            update_precalibration=resolved.request.update_precalibration,
+            precalibration_context_kind="STARTER",
         ),
+        template_name=resolved.request.starter_template_name,
+        precalibration_store_path=precalibration_store_path,
     )
     (starter_dir.parent / "resolved_identity.json").write_text(
         json.dumps(resolved.to_dict(), ensure_ascii=False, indent=2),

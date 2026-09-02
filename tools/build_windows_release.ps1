@@ -74,6 +74,7 @@ $args = @(
     "--name", "FRLG-Auto-RNG", "--distpath", $PyInstallerDist,
     "--workpath", $PyInstallerWork, "--specpath", $BuildRoot,
     "--hidden-import", "run_sid_reverse_capture",
+    "--hidden-import", "run_sid_traversal",
     "--hidden-import", "run_tid_starter_flow",
     "--hidden-import", "run_easycon_logged",
     "--hidden-import", "calibration_bind",

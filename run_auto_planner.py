@@ -86,6 +86,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--auto-capture", action="store_true")
     parser.add_argument("--paralysis", action="store_true")
     parser.add_argument("--false-swipe", action="store_true")
+    parser.add_argument(
+        "--item-rng",
+        action="store_true",
+        help="野生目标启用道具乱数模式",
+    )
+    parser.add_argument(
+        "--party-empty-slots",
+        type=int,
+        choices=range(1, 6),
+        default=1,
+        metavar="1-5",
+        help="道具乱数模式下队伍预留的空位数量",
+    )
 
     parser.add_argument("--ezcon", type=Path, default=DEFAULT_EZCON)
     parser.add_argument("--port", default="COM22")
@@ -180,6 +193,8 @@ def main(argv=None) -> int:
         paralysis=args.paralysis,
         false_swipe=args.false_swipe,
         continue_capture_after_shiny=args.auto_capture,
+        item_rng_mode=args.item_rng,
+        party_empty_slots=args.party_empty_slots,
     )
     try:
         main_path = write_configured_project(

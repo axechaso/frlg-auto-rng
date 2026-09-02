@@ -7,7 +7,7 @@ import shutil
 import struct
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,12 @@ from tenlines_seed_updater import (
 )
 
 from .planner import RunPlan
+from .precalibration import (
+    DEFAULT_STORE_PATH as DEFAULT_PRECALIBRATION_STORE_PATH,
+    PrecalibrationContext,
+    normalize_kind as normalize_precalibration_kind,
+    read_record as read_precalibration_record,
+)
 from .seed_common_regions import apply_seed_common_regions
 
 
@@ -56,10 +62,11 @@ DEFAULT_COMPAT_RUNNER_PATH = (
     / "easycon164a-cli-gui-rounding-selfcontained"
     / "EasyCon2.CLI.PreviewV5.exe"
 )
-STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8.ecs"
-EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
+STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数2.0.ecs"
+EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数2.0-时间轴.ecs"
 EGG_FORMAL_WAIT_MARKER = "# FORMAL_EGG_WAIT_V1"
 EXPECTED_TEMPLATE_NAMES = (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME)
+PRECALIBRATION_RUNTIME_MARKER = "# GUI_PRECALIBRATION_V1"
 EXPECTED_SCRIPT_FILE_COUNT = 33
 # The legacy package is still accepted by the importer, then upgraded in the
 # ignored local cache.  Generators only run against the materialized corpus so
@@ -126,6 +133,16 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package with near-1113 Held recovery, anchor-first parity
     # calibration, and dense same-parity fallback anchors.
     "b256082acbc7823d172e0f8124fdd91e51331a08a045ad47209c8bfb950fd8e4",
+    # Version 2.0 package: formal/timeline entry logs now identify their
+    # version and script type explicitly.
+    "71dcb35840422e97ce64652ec801e771ee57524271bd84033ddd89a1f0fe160e",
+    # Version 2.0 package after renaming both entry filenames.
+    "f0a14ad634c8a00d9c9d74c8afee05a59721b72618952128582acd38061c37bf",
+    # Version 2.0 package with the direct timeline entry filename.
+    "531bd08e5ed39abaac7d694b2ec01ff429e5e0be5df5c279fc50dc067e2b7482",
+    # Version 2.0 package with the timeline-only entry removing the legacy TV
+    # runtime switch from both main entry paths.
+    "ac4481ebd8f0b3fd456a489b8ecf357f6fb4b583b37ac7e3ffdda66e2b5cfc1f",
 )
 EXPECTED_SCRIPT_SHA256 = "39a2f7a5046e2d1c7213b6689158402be8656fc5dd790bb73ed8a77c8390f15b"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -187,6 +204,18 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # Materialized corpus with generated near/dense Held recovery anchors and
     # anchor-first parity/numeric calibration before returning to the target.
     "e3bb467b21f14b7e16838ffdbbb67061c721f3dc5e0410ab0685196782ce1a62",
+    # Materialized corpus with the static Togepi-only 14-step bicycle cycle
+    # and Dex-only starter classification.
+    "4a0417d61a379275e14fd6fc3df92cf9036cda8a5f8022384c96ae7043699983",
+    # Version 2.0 materialized corpus with explicit formal/timeline log tags.
+    "79d375baf43d0086947af4f395108ebd1ba023dee0a33e69b8b3d08060d6eb33",
+    # Version 2.0 materialized corpus after renaming both entry filenames.
+    "6c009e75c468e0ad224ce392c8912c2ff286f9882994055afc2b8103a12b2e59",
+    # Version 2.0 materialized corpus with the direct timeline entry filename.
+    "9c6d8804a76f305ae848498280c8e48d8444b288cd22a4be4bd3074f48c3294a",
+    # Version 2.0 materialized corpus with the timeline-only entry removing
+    # the legacy TV runtime switch from both main entry paths.
+    "f307167e9c9e19e9de6910caf21f28fd83e54fd3b5f16144b78b92393a06bece",
 )
 
 
@@ -457,7 +486,7 @@ EGG_FORMAL_PARITY_NEXT_FUNCTION = "FUNC 孵蛋流程_执行Seed预校准轮(): I
 EGG_HATCH_EXIT_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：孵化骑车前可靠退出能力页、队伍菜单和主菜单"
 EGG_HATCH_EXIT_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_执行骑车孵化"
 EGG_HATCH_EXIT_NEXT_FUNCTION = "FUNC 孵蛋测试_使用神奇糖果指定槽"
-TOGEPI_HATCH_CYCLE_OVERRIDE_MARKER = "# 1.6.4-a 共享孵化执行：定点波克比按孵化周期骑车，不再读取蛋孵化标签。"
+TOGEPI_HATCH_CYCLE_OVERRIDE_MARKER = "# 1.6.4-a 波克比专用孵化执行：按14步循环骑车，不再读取蛋孵化标签。"
 TOGEPI_HATCH_CYCLE_ORIGINAL_FUNCTION = "FUNC 获取波克比"
 TOGEPI_HATCH_CYCLE_NEXT_FUNCTION = "FUNC 获取游走"
 PARTY_SUMMARY_NAVIGATION_MARKER = "# 1.6.4-a 共享反查导航：队伍页按上移次数选择目标。"
@@ -512,7 +541,7 @@ EGG_FORMAL_PARITY_REAL_CALL_CURRENT = EGG_FORMAL_PARITY_REAL_CALL_PRE_MENU.repla
 )[:-1] + ", $Seed启动方案)"
 EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE = (
     EGG_FORMAL_PARITY_REAL_CALL_CURRENT[:-1]
-    + ", $狩猎区TV时间轴测试)"
+    + ", $孵蛋使用绝对时间轴)"
 )
 EGG_PICKUP_PARITY_MENU_MARKER = "# GUI 孵蛋领取奇偶：确认出蛋后开关菜单增加7 advance"
 EGG_PICKUP_PARITY_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_执行同Seed两次命中"
@@ -862,6 +891,21 @@ class EasyCon118Options:
     # is appended after the historical fields to keep positional callers
     # compatible.
     seed_calibration_scheme: int = 0
+    # Wild encounters can optionally target held-item outcomes.  The ECS
+    # runtime uses the number of empty party slots as the number of item hits
+    # to collect before stopping.
+    item_rng_mode: bool = False
+    party_empty_slots: int = 1
+    # Persist a successful run's calibration for the matching game/NX/entry.
+    # These fields are appended to preserve positional callers from older tools.
+    update_precalibration: bool = False
+    precalibration_seed_ns1: int | None = None
+    precalibration_seed_ns2: int | None = None
+    precalibration_frame_ns1: int | None = None
+    precalibration_frame_ns2: int | None = None
+    # ``STARTER`` keeps the TID -> rival starter route separate from ordinary
+    # static encounters, whose preceding menu/bridge flow is different.
+    precalibration_context_kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -886,6 +930,11 @@ class EggRunRequest:
     # backwards-compatible default while allowing advanced callers to choose
     # the audited 0/1 A/B paths explicitly.
     seed_calibration_scheme: int = 2
+    update_precalibration: bool = False
+    precalibration_seed_ns1: int | None = None
+    precalibration_seed_ns2: int | None = None
+    precalibration_held: int | None = None
+    precalibration_pickup: int | None = None
 
     @property
     def nx_model(self) -> int:
@@ -933,6 +982,15 @@ class EggRunRequest:
             raise ValueError(
                 "Seed校准方案只能是0（原始12轮众数）、1（实验锁定细调）或2（成功参数保持）"
             )
+        if not isinstance(self.update_precalibration, bool):
+            raise ValueError("更新预校准开关必须是布尔值")
+        for name, value in (
+            ("Seed预校准索引_NS1", self.precalibration_seed_ns1),
+            ("Seed预校准索引_NS2", self.precalibration_seed_ns2),
+            ("孵蛋Held动态预校准帧", self.precalibration_held),
+            ("孵蛋Pickup动态预校准帧", self.precalibration_pickup),
+        ):
+            _validated_optional_int(name, value)
         for label, ivs in (("A", self.parent_a_ivs), ("B", self.parent_b_ivs)):
             if len(ivs) != 6 or any(not 0 <= iv <= 31 for iv in ivs):
                 raise ValueError(f"亲本 {label} 的六项 IV 必须均在 0-31 之间")
@@ -1082,6 +1140,353 @@ def _is_wild(plan: RunPlan) -> bool:
     return "wild" in key
 
 
+def _validated_optional_int(name: str, value: object) -> int | None:
+    """Normalize an optional pre-calibration value before writing ECS."""
+    if value is None:
+        return None
+    if type(value) is not int:
+        raise ValueError(f"预校准值{name}必须是整数")
+    if name.startswith("Seed预校准索引_") and not -10000 <= value <= 10000:
+        raise ValueError(f"预校准值{name}超出允许范围")
+    if name.startswith("消耗帧预校准修正_") and not -1_000_000 <= value <= 1_000_000:
+        raise ValueError(f"预校准值{name}超出允许范围")
+    if name.startswith("孵蛋") and not -1_000_000 <= value <= 1_000_000:
+        raise ValueError(f"预校准值{name}超出允许范围")
+    return value
+
+
+def _normalized_template_name(template_name: str | None, *, default: str) -> str:
+    selected = default if template_name is None else str(template_name).strip()
+    if selected not in EXPECTED_TEMPLATE_NAMES:
+        raise ValueError(
+            "脚本模板只能选择正式版或时间轴版入口，当前为 " + repr(selected)
+        )
+    return selected
+
+
+def _precalibration_entry(template_name: str) -> str:
+    return "FORMAL" if template_name == STANDARD_TEMPLATE_NAME else "TIMELINE"
+
+
+def _precalibration_frame_enabled(context: PrecalibrationContext) -> bool:
+    # The ordinary formal static route has target-specific preparation whose
+    # frame correction must not leak to another static target. Starter runs
+    # have their own isolated context and may therefore retain their frame.
+    return context.entry == "TIMELINE" or context.kind in {"WILD", "EGG", "STARTER"}
+
+
+def _plan_precalibration_context(
+    plan: RunPlan,
+    options: EasyCon118Options,
+    template_name: str,
+) -> PrecalibrationContext:
+    nx_model = options.nx_model
+    if nx_model is None:
+        nx_model = 2 if plan.request.game.endswith("nx2") else 1
+    expected_kind = "WILD" if _is_wild(plan) else "STATIC"
+    kind = normalize_precalibration_kind(
+        options.precalibration_context_kind or expected_kind
+    )
+    if kind == "STARTER":
+        if expected_kind != "STATIC" or plan.species_id not in {1, 4, 7}:
+            raise ValueError("御三家预校准上下文只允许用于图鉴1/4/7的静态流程")
+    elif kind != expected_kind:
+        raise ValueError("预校准流程类型与当前生成计划不一致")
+    return PrecalibrationContext(
+        game=plan.request.game,
+        nx_model=nx_model,
+        seed_mode=10 if options.japanese_starter else plan.seed_mode,
+        seed_startup_scheme=options.seed_startup_scheme,
+        entry=_precalibration_entry(template_name),
+        kind=kind,
+    )
+
+
+def _egg_precalibration_context(
+    request: EggRunRequest,
+    template_name: str,
+) -> PrecalibrationContext:
+    return PrecalibrationContext(
+        game=request.game,
+        nx_model=request.nx_model,
+        seed_mode=request.seed_mode,
+        seed_startup_scheme=request.seed_startup_scheme,
+        entry=_precalibration_entry(template_name),
+        kind="EGG",
+    )
+
+
+def _precalibration_store_path(path: str | Path | None) -> Path:
+    selected = DEFAULT_PRECALIBRATION_STORE_PATH if path is None else Path(path)
+    return selected.expanduser().resolve()
+
+
+def _load_plan_precalibration(
+    plan: RunPlan,
+    options: EasyCon118Options,
+    template_name: str,
+    store_path: Path,
+) -> tuple[EasyCon118Options, dict[str, Any]]:
+    if not isinstance(options.update_precalibration, bool):
+        raise ValueError("更新预校准开关必须是布尔值")
+    context = _plan_precalibration_context(plan, options, template_name)
+    frame_enabled = _precalibration_frame_enabled(context)
+    loaded = (
+        read_precalibration_record(store_path, context)
+        if options.update_precalibration
+        else None
+    )
+    effective = options
+    if loaded is not None:
+        replacements: dict[str, Any] = {}
+        seed_field = "seed_ns1" if context.nx_model == 1 else "seed_ns2"
+        seed_value = loaded.get(seed_field)
+        if seed_value is not None:
+            replacements[f"precalibration_{seed_field}"] = seed_value
+        if frame_enabled:
+            frame_field = "frame_ns1" if context.nx_model == 1 else "frame_ns2"
+            frame_value = loaded.get(frame_field)
+            if frame_value is not None:
+                replacements[f"precalibration_{frame_field}"] = frame_value
+        if replacements:
+            effective = replace(options, **replacements)
+    manifest = {
+        "enabled": bool(options.update_precalibration),
+        "context": context.to_dict(),
+        "source_path": str(store_path),
+        "frame_enabled": frame_enabled,
+        "loaded": loaded,
+    }
+    return effective, manifest
+
+
+def _load_egg_precalibration(
+    request: EggRunRequest,
+    template_name: str,
+    store_path: Path,
+) -> tuple[EggRunRequest, dict[str, Any]]:
+    context = _egg_precalibration_context(request, template_name)
+    loaded = (
+        read_precalibration_record(store_path, context)
+        if request.update_precalibration
+        else None
+    )
+    effective = request
+    if loaded is not None:
+        replacements: dict[str, Any] = {}
+        seed_field = "seed_ns1" if context.nx_model == 1 else "seed_ns2"
+        seed_value = loaded.get(seed_field)
+        if seed_value is not None:
+            replacements[f"precalibration_{seed_field}"] = seed_value
+        if loaded.get("held_pre") is not None:
+            replacements["precalibration_held"] = loaded["held_pre"]
+        if loaded.get("pickup_pre") is not None:
+            replacements["precalibration_pickup"] = loaded["pickup_pre"]
+        if replacements:
+            effective = replace(request, **replacements)
+    manifest = {
+        "enabled": bool(request.update_precalibration),
+        "context": context.to_dict(),
+        "source_path": str(store_path),
+        "frame_enabled": True,
+        "loaded": loaded,
+    }
+    return effective, manifest
+
+
+def _function_block(text: str, signature: str) -> tuple[int, int, str]:
+    if text.count(signature) != 1:
+        raise ValueError(f"1.1.8 模板缺少唯一函数: {signature}")
+    start = text.index(signature)
+    end_marker = "\nENDFUNC"
+    end = text.index(end_marker, start) + len(end_marker)
+    return start, end, text[start:end]
+
+
+def _replace_function_block(text: str, signature: str, block: str) -> str:
+    start, end, _ = _function_block(text, signature)
+    return text[:start] + block + text[end:]
+
+
+def _insert_precalibration_globals(text: str, lines: list[str]) -> str:
+    if PRECALIBRATION_RUNTIME_MARKER in text:
+        raise ValueError("生成脚本已经包含预校准运行时覆盖，拒绝重复注入")
+    pattern = re.compile(r"(?m)^(\$Seed预校准索引_NS2\s*=\s*[^\r\n]*)$")
+    addition = "\n" + PRECALIBRATION_RUNTIME_MARKER + "\n" + "\n".join(lines)
+    configured, count = pattern.subn(r"\1" + addition, text, count=1)
+    if count != 1:
+        raise ValueError("1.1.8 模板缺少唯一的NS2 Seed预校准字段")
+    return configured
+
+
+def _apply_seed_precalibration_globals(
+    text: str,
+    *,
+    seed_ns1: int | None,
+    seed_ns2: int | None,
+) -> str:
+    """Replace the two audited advanced globals outside the user section."""
+    configured = text
+    for name, value in (
+        ("Seed预校准索引_NS1", seed_ns1),
+        ("Seed预校准索引_NS2", seed_ns2),
+    ):
+        normalized = _validated_optional_int(name, value)
+        if normalized is None:
+            continue
+        pattern = re.compile(rf"(?m)^\${re.escape(name)}\s*=\s*[^\r\n]*$")
+        configured, count = pattern.subn(f"${name} = {normalized}", configured)
+        if count != 1:
+            raise ValueError(f"1.1.8 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
+    return configured
+
+
+def _precalibration_marker_head(context: PrecalibrationContext) -> str:
+    return (
+        "PRECALIBRATION_UPDATE|V=1"
+        f"|GAME={context.game.upper()}"
+        f"|NX={context.nx_model}"
+        f"|MODE={context.seed_mode}"
+        f"|STARTUP={context.seed_startup_scheme}"
+        f"|ENTRY={context.entry}"
+        f"|KIND={context.kind}"
+        "|SEED_INDEX="
+    )
+
+
+def _apply_regular_precalibration_runtime_text(
+    text: str,
+    options: EasyCon118Options,
+    config: dict[str, Any],
+) -> str:
+    context = PrecalibrationContext(**config["context"])
+    text = _apply_seed_precalibration_globals(
+        text,
+        seed_ns1=options.precalibration_seed_ns1,
+        seed_ns2=options.precalibration_seed_ns2,
+    )
+    frame_enabled = bool(config["frame_enabled"])
+    frame_ns1 = options.precalibration_frame_ns1 if frame_enabled else 0
+    frame_ns2 = options.precalibration_frame_ns2 if frame_enabled else 0
+    frame_ns1 = 0 if frame_ns1 is None else frame_ns1
+    frame_ns2 = 0 if frame_ns2 is None else frame_ns2
+    frame_ns1 = _validated_optional_int("消耗帧预校准修正_NS1", frame_ns1)
+    frame_ns2 = _validated_optional_int("消耗帧预校准修正_NS2", frame_ns2)
+    text = _insert_precalibration_globals(
+        text,
+        [
+            f"$更新预校准 = {1 if config['enabled'] else 0}",
+            f"$消耗帧预校准修正_NS1 = {frame_ns1}",
+            f"$消耗帧预校准修正_NS2 = {frame_ns2}",
+            "$消耗帧预校准修正 = 0",
+        ],
+    )
+    ns1_anchor = "    $Seed预校准索引 = $Seed预校准索引_NS1"
+    ns2_anchor = "    $Seed预校准索引 = $Seed预校准索引_NS2"
+    if text.count(ns1_anchor) != 1 or text.count(ns2_anchor) != 1:
+        raise ValueError("1.1.8 模板的NX Seed预校准选择分支数量异常")
+    text = text.replace(
+        ns1_anchor,
+        ns1_anchor + "\n    $消耗帧预校准修正 = $消耗帧预校准修正_NS1",
+        1,
+    ).replace(
+        ns2_anchor,
+        ns2_anchor + "\n    $消耗帧预校准修正 = $消耗帧预校准修正_NS2",
+        1,
+    )
+
+    signature = "FUNC 记录固定延迟并开始自动乱数(): INT"
+    _, _, block = _function_block(text, signature)
+    recalc_anchor = "    $校准成功 = 重新计算等待参数()"
+    if block.count(recalc_anchor) != 1:
+        raise ValueError("1.1.8 固定延迟函数缺少唯一的等待参数重算入口")
+    block = block.replace(
+        recalc_anchor,
+        "    $消耗帧实际执行修正量 += $消耗帧预校准修正\n"
+        "    $消耗帧本次新增修正量 += $消耗帧预校准修正\n"
+        + recalc_anchor,
+        1,
+    )
+    text = _replace_function_block(text, signature, block)
+
+    if not config["enabled"]:
+        return text
+    marker_line = (
+        f'        PRINT "{_precalibration_marker_head(context)}" & '
+        '$Seed累计修正索引 & "|FRAME_PRE=" & $消耗帧实际执行修正量 & '
+        f'"|FRAME_ENABLED={1 if frame_enabled else 0}"'
+    )
+    signature = "FUNC 执行自动校准与等待更新(): INT"
+    _, _, block = _function_block(text, signature)
+    terminal_anchor = "        PRINT 已命中目标，脚本停止"
+    if block.count(terminal_anchor) != 1:
+        raise ValueError("1.1.8 自动校准函数缺少唯一的完整目标命中分支")
+    block = block.replace(terminal_anchor, marker_line + "\n" + terminal_anchor, 1)
+    shadow_anchor = (
+        "        PRINT Seed与消耗帧精确命中，但本轮不是目标闪光；"
+        "刷新成功参数保持并继续运行"
+    )
+    if shadow_anchor in block:
+        block = block.replace(shadow_anchor, marker_line + "\n" + shadow_anchor, 1)
+    return _replace_function_block(text, signature, block)
+
+
+def _apply_egg_precalibration_runtime_text(
+    text: str,
+    request: EggRunRequest,
+    config: dict[str, Any],
+) -> str:
+    text = _apply_seed_precalibration_globals(
+        text,
+        seed_ns1=request.precalibration_seed_ns1,
+        seed_ns2=request.precalibration_seed_ns2,
+    )
+    held = 0 if request.precalibration_held is None else request.precalibration_held
+    pickup = 0 if request.precalibration_pickup is None else request.precalibration_pickup
+    held = _validated_optional_int("孵蛋Held动态预校准帧", held)
+    pickup = _validated_optional_int("孵蛋Pickup动态预校准帧", pickup)
+    text = _insert_precalibration_globals(
+        text,
+        [
+            f"$更新预校准 = {1 if config['enabled'] else 0}",
+            f"$孵蛋Held动态预校准帧 = {held}",
+            f"$孵蛋Pickup动态预校准帧 = {pickup}",
+        ],
+    )
+    signature = "FUNC 孵蛋流程_执行(): INT"
+    _, _, block = _function_block(text, signature)
+    init_anchor = (
+        "    $孵蛋流程Seed已预校准 = 0\n"
+        "    $孵蛋Held执行修正帧 = 0\n"
+        "    $孵蛋Pickup执行修正帧 = 0"
+    )
+    init_replacement = (
+        "    $孵蛋流程Seed已预校准 = 0\n"
+        "    $孵蛋Held执行修正帧 = $孵蛋Held动态预校准帧\n"
+        "    $孵蛋Pickup执行修正帧 = $孵蛋Pickup动态预校准帧"
+    )
+    if block.count(init_anchor) != 1:
+        raise ValueError("1.1.8 孵蛋总控缺少唯一的Held/Pickup动态修正初始化")
+    block = block.replace(init_anchor, init_replacement, 1)
+    text = _replace_function_block(text, signature, block)
+
+    if not config["enabled"]:
+        return text
+    context = PrecalibrationContext(**config["context"])
+    marker_line = (
+        f'    PRINT "{_precalibration_marker_head(context)}" & '
+        '$Seed累计修正索引 & "|FRAME_PRE=0|FRAME_ENABLED=1|HELD_PRE=" & '
+        '$孵蛋Held执行修正帧 & "|PICKUP_PRE=" & $孵蛋Pickup执行修正帧'
+    )
+    signature = "FUNC 孵蛋流程_执行孵化与个体反查(): INT"
+    _, _, block = _function_block(text, signature)
+    success_anchor = "    PRINT 孵蛋目标Seed、Held帧和Pickup帧全部命中，流程完成"
+    if block.count(success_anchor) != 1:
+        raise ValueError("1.1.8 孵蛋完成函数缺少唯一的完整目标命中分支")
+    block = block.replace(success_anchor, marker_line + "\n" + success_anchor, 1)
+    return _replace_function_block(text, signature, block)
+
+
 def _game_text(game: str) -> str:
     if game.startswith("fr"):
         return "火红"
@@ -1113,6 +1518,20 @@ def plan_to_user_values(
     if options.seed_calibration_scheme not in {0, 1}:
         raise ValueError("正式版 Seed校准方案只能是0（原始12轮众数）或1（实验锁定细调）")
     is_wild = _is_wild(plan)
+    if not isinstance(options.item_rng_mode, bool):
+        raise ValueError("道具乱数模式必须是布尔值")
+    if options.item_rng_mode and not is_wild:
+        raise ValueError("道具乱数模式当前仅支持野生目标")
+    item_rng_enabled = options.item_rng_mode and is_wild
+    if item_rng_enabled:
+        try:
+            party_empty_slots = int(options.party_empty_slots)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("队伍空位数量必须是 1-5 的整数") from exc
+        if not 1 <= party_empty_slots <= 5:
+            raise ValueError("队伍空位数量必须在 1-5 之间")
+    else:
+        party_empty_slots = 1
     category_zh = CATEGORY_EN_TO_ZH.get(plan.request.category, plan.request.category)
     location_zh = location_to_zh(plan.request.location)
     if options.japanese_starter and (
@@ -1123,7 +1542,7 @@ def plan_to_user_values(
     # planner's logical setting at mode 0, but materialize it as the
     # generated-project-only mode 10 so the English table cannot be reused.
     script_seed_mode = 10 if options.japanese_starter else plan.seed_mode
-    return {
+    values = {
         "游戏版本文本": _game_text(plan.request.game),
         "Seed模式": script_seed_mode,
         "NX机型": nx_model,
@@ -1138,7 +1557,12 @@ def plan_to_user_values(
         "麻痹": int(options.paralysis),
         "点到为止": int(options.false_swipe),
         "出闪后继续抓捕": int(options.continue_capture_after_shiny),
+        # Static and ordinary wild runs always materialize the safe defaults;
+        # item mode is only meaningful for wild encounters.
+        "道具乱数模式": int(item_rng_enabled),
+        "队伍空位数量": party_empty_slots,
     }
+    return values
 
 
 def egg_request_to_user_values(request: EggRunRequest) -> dict[str, Any]:
@@ -2336,7 +2760,7 @@ def _apply_togepi_hatch_cycle_override_text(
     library_text: str,
     override_text: str,
 ) -> str:
-    """Use the shared fixed-cycle hatch execution for the static Togepi gift."""
+    """Use the Togepi-only 14-step bicycle cycle for the static gift."""
     if TOGEPI_HATCH_CYCLE_OVERRIDE_MARKER in library_text:
         start = library_text.index(TOGEPI_HATCH_CYCLE_OVERRIDE_MARKER)
     else:
@@ -2786,6 +3210,8 @@ def write_configured_project(
     options: EasyCon118Options | None = None,
     *,
     copy_assets: bool = True,
+    template_name: str | None = None,
+    precalibration_store_path: str | Path | None = None,
 ) -> Path:
     """Create an EasyCon CLI project with ``main.ecs``, ``lib`` and labels."""
     options = options or EasyCon118Options()
@@ -2803,7 +3229,20 @@ def write_configured_project(
             + script_corpus["sha256"],
             file=sys.stderr,
         )
-    template_path = source_dir / STANDARD_TEMPLATE_NAME
+    selected_template = _normalized_template_name(
+        template_name,
+        default=STANDARD_TEMPLATE_NAME,
+    )
+    template_path = source_dir / selected_template
+    if not template_path.is_file():
+        raise FileNotFoundError(f"1.1.8 包缺少所选入口: {template_path}")
+    store_path = _precalibration_store_path(precalibration_store_path)
+    options, precalibration = _load_plan_precalibration(
+        plan,
+        options,
+        selected_template,
+        store_path,
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     configured = configure_template_text(
@@ -2826,6 +3265,12 @@ def write_configured_project(
     configured = _apply_seed_hold_observation_window_text(configured)
     if options.japanese_starter:
         configured = _apply_japanese_starter_runtime_text(configured)
+    if precalibration["enabled"]:
+        configured = _apply_regular_precalibration_runtime_text(
+            configured,
+            options,
+            precalibration,
+        )
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
     wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
@@ -2869,7 +3314,8 @@ def write_configured_project(
         "source": str(source_dir.resolve()),
         "template": template_path.name,
         "plan": plan.to_dict(),
-        "easycon118_options": asdict(options or EasyCon118Options()),
+        "easycon118_options": asdict(options),
+        "precalibration": precalibration,
         "labels": {
             "expected_count": EXPECTED_LABEL_COUNT,
             "expected_methods": EXPECTED_LABEL_METHODS,
@@ -2927,8 +3373,10 @@ def write_configured_egg_project(
     request: EggRunRequest,
     *,
     copy_assets: bool = True,
+    template_name: str | None = None,
+    precalibration_store_path: str | Path | None = None,
 ) -> Path:
-    """Create a formal-WAIT project for the experimental same-seed egg flow."""
+    """Create a configured project for the experimental same-seed egg flow."""
     request.validate()
     source_dir = Path(source_dir).resolve()
     output_dir = Path(output_dir).resolve()
@@ -2944,13 +3392,26 @@ def write_configured_egg_project(
             + script_corpus["sha256"],
             file=sys.stderr,
         )
-    template_path = _select_egg_template_path(source_dir)
+    default_template = _select_egg_template_path(source_dir).name
+    selected_template = _normalized_template_name(
+        template_name,
+        default=default_template,
+    )
+    template_path = source_dir / selected_template
+    if not template_path.is_file():
+        raise FileNotFoundError(f"1.1.8 包缺少所选入口: {template_path}")
+    store_path = _precalibration_store_path(precalibration_store_path)
+    request, precalibration = _load_egg_precalibration(
+        request,
+        selected_template,
+        store_path,
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     configured = configure_egg_template_text(
         template_path.read_text(encoding="utf-8"), request
     )
     if EGG_FORMAL_WAIT_MARKER in configured:
-        if "$狩猎区TV时间轴测试 = 0" not in configured:
+        if "$孵蛋使用绝对时间轴 = 0" not in configured:
             raise ValueError("孵蛋正式模板没有固定选择普通WAIT模式")
     configured = _apply_egg_prepared_254_runtime_override_text(
         configured,
@@ -2999,6 +3460,12 @@ def write_configured_egg_project(
     configured = _apply_egg_no_egg_seed_gate_text(configured)
     configured = _apply_egg_wild_seed_fallback_text(configured)
     configured = _apply_egg_terminal_stop_policy_text(configured)
+    if precalibration["enabled"]:
+        configured = _apply_egg_precalibration_runtime_text(
+            configured,
+            request,
+            precalibration,
+        )
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
     wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
@@ -3100,6 +3567,7 @@ def write_configured_egg_project(
         "source": str(source_dir),
         "template": template_path.name,
         "egg_request": request.to_dict(),
+        "precalibration": precalibration,
         "experimental": True,
         "egg_wait_mode": (
             "formal_wait"

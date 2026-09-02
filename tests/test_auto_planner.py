@@ -289,6 +289,7 @@ class CompatibilityTests(unittest.TestCase):
             "游戏版本文本", "Seed模式", "NX机型", "Seed启动方案", "目标Seed", "目标消耗帧",
             "目标全国图鉴编号", "静态或野生", "宝可梦遭遇方法",
             "宝可梦遭遇地点", "麻痹", "点到为止", "出闪后继续抓捕",
+            "道具乱数模式", "队伍空位数量",
         )
         template = "\n".join(f'${name} = "old"' for name in names)
         template += "\n# ============================进阶设置\n$内部参数 = 1"
@@ -305,6 +306,61 @@ class CompatibilityTests(unittest.TestCase):
 
         values = plan_to_user_values(result.plan)
         self.assertEqual(values["目标全国图鉴编号"], 25)
+
+    def test_wild_item_rng_options_are_written_with_party_slot_count(self):
+        item = target("12345678", (31, 31, 31, 31, 31, 31))
+        result = search_best_plan(
+            request(seed_mode=6, max_advances=200000),
+            target_search=lambda **_: [item],
+            seed_search=lambda **_: [route("9C76", 100020, mode=6)],
+        )
+        values = plan_to_user_values(
+            result.plan,
+            EasyCon118Options(
+                nx_model=1,
+                item_rng_mode=True,
+                party_empty_slots=4,
+            ),
+        )
+        self.assertEqual(values["道具乱数模式"], 1)
+        self.assertEqual(values["队伍空位数量"], 4)
+
+    def test_item_rng_mode_is_rejected_for_static_targets(self):
+        item = target("12345678", (31, 31, 31, 31, 31, 31))
+        static_result = search_best_plan(
+            request(
+                method="Static 1",
+                category="Starter",
+                location="Starter",
+                pokemon="Bulbasaur",
+                seed_mode=6,
+                max_advances=200000,
+            ),
+            target_search=lambda **_: [item],
+            seed_search=lambda **_: [route("9C76", 100020, mode=6)],
+        )
+        with self.assertRaisesRegex(ValueError, "仅支持野生"):
+            plan_to_user_values(
+                static_result.plan,
+                EasyCon118Options(nx_model=1, item_rng_mode=True),
+            )
+
+    def test_party_empty_slots_must_be_between_one_and_five(self):
+        item = target("12345678", (31, 31, 31, 31, 31, 31))
+        result = search_best_plan(
+            request(seed_mode=6, max_advances=200000),
+            target_search=lambda **_: [item],
+            seed_search=lambda **_: [route("9C76", 100020, mode=6)],
+        )
+        with self.assertRaisesRegex(ValueError, "1-5"):
+            plan_to_user_values(
+                result.plan,
+                EasyCon118Options(
+                    nx_model=1,
+                    item_rng_mode=True,
+                    party_empty_slots=6,
+                ),
+            )
 
     def test_118_template_requires_marker_and_matching_nx_model(self):
         item = target("12345678", (31,) * 6)
@@ -344,8 +400,8 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(
             manifest["templates"],
             [
-                "NS火叶全自动一键乱数1.1.8.ecs",
-                "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs",
+                "NS火叶全自动一键乱数2.0.ecs",
+                "NS火叶全自动一键乱数2.0-时间轴.ecs",
             ],
         )
 

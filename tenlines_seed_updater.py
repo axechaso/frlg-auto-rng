@@ -41,8 +41,8 @@ LG_BINARY_NAME = "lg_eng_nx.bin"
 FR_ECS_NAME = "02_Seed表_火红_NX.ecs"
 LG_ECS_NAME = "03_Seed表_叶绿_NX.ecs"
 MANIFEST_NAME = "manifest.json"
-STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8.ecs"
-EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
+STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数2.0.ecs"
+EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数2.0-时间轴.ecs"
 
 CANONICAL_NX_ENGLISH_MODES = (
     "mono_h_a",

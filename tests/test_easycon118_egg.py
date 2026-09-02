@@ -1373,7 +1373,7 @@ ENDFUNC
         )[0]
         self.assertIn("RETURN 孵蛋测试_执行周期骑车与孵化收尾", wrapper)
 
-    def test_static_togepi_uses_the_shared_fixed_cycle_hatch(self):
+    def test_static_togepi_uses_its_own_14_step_cycle_hatch(self):
         original = """\
 # 175: 波克比 / Togepi
 FUNC 获取波克比($F2: INT, $目标全国图鉴编号: INT, $进入TV: INT): INT
@@ -1401,13 +1401,30 @@ ENDFUNC
         )
 
         self.assertEqual(configured_again, configured)
-        togepi = configured.split("FUNC 获取波克比", 1)[1].split("ENDFUNC", 1)[0]
+        togepi = configured.split("FUNC 获取波克比(", 1)[1].split("ENDFUNC", 1)[0]
         self.assertNotIn("@蛋孵化", togepi)
         self.assertNotIn("FOR\n        LEFT DOWN", togepi)
-        self.assertIn(
-            "RETURN 孵蛋测试_执行周期骑车与孵化收尾($目标全国图鉴编号, 0, 38, 1)",
-            togepi,
-        )
+        self.assertIn("FUNC 获取波克比_执行专用骑车", configured)
+        self.assertIn("RETURN 获取波克比_执行专用骑车($目标全国图鉴编号)", togepi)
+        togepi_cycle = configured.split("FUNC 获取波克比_执行专用骑车", 1)[1].split(
+            "ENDFUNC", 1
+        )[0]
+        self.assertIn("($目标全国图鉴编号, 0, 14, 1)", togepi_cycle)
+        self.assertIn("LS UP\n        1300\n        LS RESET\n        WAIT 300\n        LS DOWN\n        1300\n        LS RESET", togepi_cycle)
+
+    def test_static_togepi_cycle_does_not_replace_shared_egg_cycle(self):
+        library = Path(
+            Path(__file__).resolve().parents[1]
+            / "local_assets"
+            / "easycon118"
+            / "lib"
+            / "27_孵蛋测试流程.ecs"
+        ).read_text(encoding="utf-8")
+        shared = library.split("FUNC 孵蛋测试_执行周期骑车与孵化收尾", 1)[1].split(
+            "ENDFUNC", 1
+        )[0]
+        self.assertIn("LS LEFT\n        WAIT 2400", shared)
+        self.assertIn("LS RIGHT\n        WAIT 2400", shared)
 
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]
@@ -1417,9 +1434,9 @@ ENDFUNC
         if not template_path.is_file() or not library_path.is_file():
             self.skipTest("requires the imported 1.1.8 egg runtime")
         template = template_path.read_text(encoding="utf-8")
-        self.assertEqual(template_path.name, "NS火叶全自动一键乱数1.1.8.ecs")
+        self.assertEqual(template_path.name, "NS火叶全自动一键乱数2.0.ecs")
         self.assertIn(EGG_FORMAL_WAIT_MARKER, template)
-        self.assertIn("$狩猎区TV时间轴测试 = 0", template)
+        self.assertIn("$孵蛋使用绝对时间轴 = 0", template)
         self.assertIn("$调试日志输出 = 1", template)
         self.assertIn(EGG_TRANSIENT_RETRY_OVERRIDE_MARKER, template)
         self.assertIn(EGG_TERMINAL_STOP_OVERRIDE_MARKER, template)
@@ -1558,11 +1575,11 @@ ENDFUNC
         static_library = (
             root / "local_assets" / "easycon118" / "lib" / "16_获取_静态目标.ecs"
         ).read_text(encoding="utf-8")
-        togepi = static_library.split("FUNC 获取波克比", 1)[1].split(
+        togepi = static_library.split("FUNC 获取波克比(", 1)[1].split(
             "ENDFUNC", 1
         )[0]
         self.assertNotIn("@蛋孵化", togepi)
-        self.assertIn("孵蛋测试_执行周期骑车与孵化收尾", togepi)
+        self.assertIn("获取波克比_执行专用骑车", togepi)
         soft_reset = library.split(
             "FUNC 孵蛋测试_软重启并跳过回忆", 1
         )[1].split("ENDFUNC", 1)[0]

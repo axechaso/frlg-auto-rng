@@ -5,7 +5,7 @@ import sys
 
 ROOT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).resolve().parents[1]
 LIB = (ROOT / "lib/25_校准_投票决策.ecs").read_text(encoding="utf-8")
-ENTRIES = ("NS火叶全自动一键乱数1.1.8.ecs", "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs")
+ENTRIES = ("NS火叶全自动一键乱数2.0.ecs", "NS火叶全自动一键乱数2.0-时间轴.ecs")
 blocks = []
 for name in ENTRIES:
     text = (ROOT / name).read_text(encoding="utf-8")

@@ -2,7 +2,11 @@ import unittest
 from types import SimpleNamespace
 
 from assets.game_text import ABILITY_ZH_TO_EN
-from automation.easycon118 import parse_easycon_video_devices
+from automation.easycon118 import (
+    EGG_TEMPLATE_NAME,
+    STANDARD_TEMPLATE_NAME,
+    parse_easycon_video_devices,
+)
 from run_auto_rng_gui import (
     ADVANCED_TAB_LABEL,
     AutoRngApp,
@@ -573,6 +577,88 @@ class GuiIvInputTests(unittest.TestCase):
             ),
         )
 
+    def test_generation_template_selector_maps_both_audited_entries(self):
+        class FakeVariable:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+        app = SimpleNamespace(script_test_entry_var=FakeVariable(SCRIPT_TEST_ENTRY_FORMAL))
+        self.assertEqual(
+            AutoRngApp._selected_generation_template_name(app),
+            STANDARD_TEMPLATE_NAME,
+        )
+        app.script_test_entry_var.value = SCRIPT_TEST_ENTRY_TIMELINE
+        self.assertEqual(
+            AutoRngApp._selected_generation_template_name(app),
+            EGG_TEMPLATE_NAME,
+        )
+        app.script_test_entry_var.value = SCRIPT_TEST_ENTRY_CUSTOM
+        with self.assertRaisesRegex(ValueError, "自选 ECS"):
+            AutoRngApp._selected_generation_template_name(app)
+
+    def test_item_rng_controls_are_limited_to_wild_mode(self):
+        class FakeVariable:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        class FakeControl:
+            def __init__(self):
+                self.states = []
+
+            def configure(self, **kwargs):
+                self.states.append(kwargs["state"])
+
+        app = SimpleNamespace(
+            method_var=FakeVariable("静态"),
+            item_rng_mode_var=FakeVariable(True),
+            item_rng_mode_check=FakeControl(),
+            party_empty_slots_spin=FakeControl(),
+            _updating=False,
+        )
+        AutoRngApp._update_item_rng_controls(app)
+        self.assertFalse(app.item_rng_mode_var.get())
+        self.assertEqual(app.item_rng_mode_check.states[-1], "disabled")
+        self.assertEqual(app.party_empty_slots_spin.states[-1], "disabled")
+
+        app.method_var.set("野生")
+        AutoRngApp._update_item_rng_controls(app)
+        self.assertEqual(app.item_rng_mode_check.states[-1], "normal")
+        self.assertEqual(app.party_empty_slots_spin.states[-1], "disabled")
+        app.item_rng_mode_var.set(True)
+        AutoRngApp._update_item_rng_controls(app)
+        self.assertEqual(app.party_empty_slots_spin.states[-1], "normal")
+
+    def test_sid_traversal_custom_start_is_advanced_only_and_validated(self):
+        class FakeVariable:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        app = SimpleNamespace(
+            sid_traversal_start_adv_var=FakeVariable("2450"),
+            advanced_mode_var=FakeVariable(False),
+        )
+        self.assertIsNone(AutoRngApp._sid_traversal_start_override(app))
+        app.advanced_mode_var.set(True)
+        self.assertEqual(AutoRngApp._sid_traversal_start_override(app), 2450)
+        app.sid_traversal_start_adv_var.set("-1")
+        with self.assertRaisesRegex(ValueError, "0-65535"):
+            AutoRngApp._sid_traversal_start_override(app)
+
     def test_script_test_entry_path_tracks_selection_and_custom_files(self):
         from pathlib import Path
         import tempfile
@@ -592,8 +678,8 @@ class GuiIvInputTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary)
-            formal = source / "NS火叶全自动一键乱数1.1.8.ecs"
-            timeline = source / "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs"
+            formal = source / "NS火叶全自动一键乱数2.0.ecs"
+            timeline = source / "NS火叶全自动一键乱数2.0-时间轴.ecs"
             formal.write_text("", encoding="utf-8")
             timeline.write_text("", encoding="utf-8")
             app = FakeApp()

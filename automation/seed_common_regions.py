@@ -12,7 +12,7 @@ from app_paths import RESOURCE_ROOT
 
 ASSET = RESOURCE_ROOT / "assets/easycon118_extensions/seed_common_regions.ecs"
 LIBRARY = "lib/25_校准_投票决策.ecs"
-ENTRIES = ("NS火叶全自动一键乱数1.1.8.ecs", "NS火叶全自动一键乱数1.1.8-TV时间轴测试.ecs")
+ENTRIES = ("NS火叶全自动一键乱数2.0.ecs", "NS火叶全自动一键乱数2.0-时间轴.ecs")
 
 
 def _function(text: str, name: str) -> str:
