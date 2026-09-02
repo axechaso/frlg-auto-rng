@@ -91,7 +91,7 @@ class UpdateInstallerTests(unittest.TestCase):
             self.assertFalse(stage.exists())
             self.assertEqual((install / "FRLG-Auto-RNG.exe").read_bytes(), b"new")
             self.assertFalse(request.backup_dir.exists())
-            self.assertEqual(launched[0][0], install / "FRLG-Auto-RNG.exe")
+            self.assertEqual(launched[0][0], install.resolve() / "FRLG-Auto-RNG.exe")
             self.assertIn("--update-health-file", launched[0][1])
 
     def test_launch_failure_rolls_back_old_version(self):
