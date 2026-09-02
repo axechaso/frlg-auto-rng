@@ -1412,19 +1412,12 @@ ENDFUNC
         self.assertIn("($目标全国图鉴编号, 0, 14, 1)", togepi_cycle)
         self.assertIn("LS UP\n        1300\n        LS RESET\n        WAIT 300\n        LS DOWN\n        1300\n        LS RESET", togepi_cycle)
 
-    def test_static_togepi_cycle_does_not_replace_shared_egg_cycle(self):
-        library = Path(
-            Path(__file__).resolve().parents[1]
-            / "local_assets"
-            / "easycon118"
-            / "lib"
-            / "27_孵蛋测试流程.ecs"
-        ).read_text(encoding="utf-8")
-        shared = library.split("FUNC 孵蛋测试_执行周期骑车与孵化收尾", 1)[1].split(
-            "ENDFUNC", 1
-        )[0]
-        self.assertIn("LS LEFT\n        WAIT 2400", shared)
-        self.assertIn("LS RIGHT\n        WAIT 2400", shared)
+    def test_static_togepi_override_does_not_define_shared_egg_cycle(self):
+        override = Path(TOGEPI_HATCH_CYCLE_OVERRIDE_PATH).read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("FUNC 获取波克比_执行专用骑车", override)
+        self.assertNotIn("FUNC 孵蛋测试_执行周期骑车与孵化收尾", override)
 
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]
