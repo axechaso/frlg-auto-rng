@@ -25,6 +25,32 @@ foreach ($path in @($Package, $Manifest, $ShaFile)) {
     }
 }
 
+function Get-ReleaseByTag {
+    param([Parameter(Mandatory = $true)][string]$ReleaseTag)
+
+    # GitHub's tag endpoint does not return draft releases.  List releases and
+    # match the tag instead, so draft verification and final asset checks use
+    # the same release object and ID.
+    $raw = (& gh api "repos/$Repository/releases?per_page=100" --paginate --slurp | Out-String)
+    $apiExit = $LASTEXITCODE
+    if ($apiExit -ne 0) {
+        throw "无法读取 GitHub Release 列表，退出码 $apiExit"
+    }
+    try {
+        $pages = $raw | ConvertFrom-Json
+    } catch {
+        throw "GitHub Release 列表不是有效 JSON"
+    }
+    foreach ($page in @($pages)) {
+        foreach ($release in @($page)) {
+            if ($release.tag_name -eq $ReleaseTag) {
+                return $release
+            }
+        }
+    }
+    return $null
+}
+
 Push-Location $RepoRoot
 try {
     $branch = (& git branch --show-current).Trim()
@@ -70,8 +96,8 @@ try {
 
     $tagExists = & git ls-remote --exit-code origin "refs/tags/$Tag" 2>$null
     if ($LASTEXITCODE -eq 0 -and $tagExists) { throw "远程标签已存在：$Tag，不自动覆盖" }
-    $releaseView = & gh release view $Tag --repo $Repository 2>$null
-    if ($LASTEXITCODE -eq 0 -and $releaseView) { throw "GitHub Release 已存在：$Tag，不自动覆盖" }
+    $existingRelease = Get-ReleaseByTag $Tag
+    if ($existingRelease) { throw "GitHub Release 已存在：$Tag，不自动覆盖" }
 
     $assetNames = @(
         [IO.Path]::GetFileName($Package),
@@ -88,7 +114,8 @@ try {
     try {
         & gh release upload $Tag $Package $Manifest $ShaFile --repo $Repository
         if ($LASTEXITCODE -ne 0) { throw "上传 Release 资产失败；草稿已保留" }
-        $release = (& gh api "repos/$Repository/releases/tags/$Tag" | Out-String) | ConvertFrom-Json
+        $release = Get-ReleaseByTag $Tag
+        if (-not $release) { throw "创建后找不到 Release：$Tag；草稿已保留" }
         $actual = @($release.assets | ForEach-Object { $_.name })
         foreach ($name in $assetNames) {
             if ($actual -notcontains $name) { throw "Release 缺少资产：$name；草稿已保留" }
