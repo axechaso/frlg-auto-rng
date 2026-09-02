@@ -2,11 +2,59 @@
 
 from __future__ import annotations
 
+import json
+import os
+import re
 import sys
+import uuid
+from pathlib import Path
+
+from app_version import APP_VERSION_CODE, version_payload
 
 
-def main() -> int:
-    argv = sys.argv[1:]
+def _atomic_json(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".{uuid.uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def _write_stdout(text: str) -> bool:
+    if sys.stdout is not None:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+        return True
+    try:
+        os.write(1, text.encode("utf-8"))
+        return True
+    except OSError:
+        return False
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv == ["--version-json"]:
+        return 0 if _write_stdout(json.dumps(version_payload(), sort_keys=True) + "\n") else 1
+    if argv[:1] == ["--version-json-file"]:
+        if len(argv) != 2:
+            return 2
+        _atomic_json(Path(argv[1]).resolve(), version_payload())
+        return 0
+    if argv[:1] == ["--update-health-file"]:
+        if (
+            len(argv) != 4
+            or argv[2] != "--update-health-token"
+            or re.fullmatch(r"[0-9a-f]{32}", argv[3]) is None
+        ):
+            return 2
+        _atomic_json(
+            Path(argv[1]).resolve(),
+            {"token": argv[3], "version_code": APP_VERSION_CODE},
+        )
+        argv = []
     if argv[:1] == ["--worker"]:
         if len(argv) < 2:
             print("缺少后台工作模式", file=sys.stderr)

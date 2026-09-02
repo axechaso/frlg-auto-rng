@@ -1,7 +1,7 @@
 param(
     [string]$Python = "",
     [string]$EasyConPublish = "",
-    [string]$OutputName = "FRLG-Auto-RNG-绿色版",
+    [string]$OutputName = "",
     [string]$BuildTag = "",
     [string]$LocalAssets = ""
 )
@@ -13,6 +13,16 @@ if (-not $Python) {
 }
 if (-not (Test-Path -LiteralPath $Python)) {
     throw "找不到 Python 构建环境：$Python"
+}
+$AppVersion = (& $Python -c "import sys; sys.path.insert(0, r'$Root'); from app_version import APP_VERSION; print(APP_VERSION)" | Select-Object -Last 1).Trim()
+if (-not $AppVersion -or $AppVersion -notmatch '^[0-9]+\.[0-9]+(?:\.[0-9]+){0,2}$') {
+    throw "无法读取 app_version.py 中的应用版本"
+}
+if (-not $OutputName) {
+    $OutputName = "FRLG-Auto-RNG-$AppVersion-windows-x64"
+}
+if ($OutputName -ne "FRLG-Auto-RNG-$AppVersion-windows-x64") {
+    throw "0.2 发布包必须使用标准名称 FRLG-Auto-RNG-$AppVersion-windows-x64"
 }
 if ($BuildTag -and $BuildTag -notmatch '^[a-zA-Z0-9-]+$') {
     throw "BuildTag 只能包含字母、数字和短横线"
@@ -66,6 +76,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $TkinterDndHookDir "hook-tkinterdnd2
 
 $PyInstallerWork = Join-Path $BuildRoot "pyinstaller"
 $PyInstallerDist = Join-Path $BuildRoot "dist"
+$UpdaterWork = Join-Path $BuildRoot "updater-pyinstaller"
+$UpdaterDist = Join-Path $BuildRoot "updater-dist"
 $ReleaseRoot = Join-Path $BuildRoot $OutputName
 New-Item -ItemType Directory -Path $BuildRoot | Out-Null
 
@@ -106,6 +118,20 @@ try {
     Pop-Location
 }
 
+$updaterArgs = @(
+    "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
+    "--name", "FRLG-Auto-RNG-Updater", "--distpath", $UpdaterDist,
+    "--workpath", $UpdaterWork, "--specpath", $BuildRoot,
+    (Join-Path $Root 'updater_entry.py')
+)
+Push-Location $Root
+try {
+    & $Python @updaterArgs
+    if ($LASTEXITCODE -ne 0) { throw "独立更新器打包失败" }
+} finally {
+    Pop-Location
+}
+
 New-Item -ItemType Directory -Path (Join-Path $PyInstallerDist "FRLG-Auto-RNG\easycon\publish") -Force | Out-Null
 $InternalRoot = Join-Path $PyInstallerDist "FRLG-Auto-RNG\_internal"
 New-Item -ItemType Directory -Path (Join-Path $InternalRoot "easycon\publish") -Force | Out-Null
@@ -113,6 +139,7 @@ Copy-Item -Force -Recurse -Path (Join-Path $EasyConPublish "*") -Destination (Jo
 
 New-Item -ItemType Directory -Path $ReleaseRoot | Out-Null
 Copy-Item -Force -Recurse -Path (Join-Path $PyInstallerDist "FRLG-Auto-RNG\*") -Destination $ReleaseRoot
+Copy-Item -Force -LiteralPath (Join-Path $UpdaterDist "FRLG-Auto-RNG-Updater.exe") -Destination (Join-Path $ReleaseRoot "FRLG-Auto-RNG-Updater.exe")
 Set-Content -LiteralPath (Join-Path $ReleaseRoot "启动-FRLG-Auto-RNG.bat") -Encoding UTF8 -Value @('@echo off','chcp 65001 >nul','cd /d "%~dp0"','start "FRLG Auto RNG" "%~dp0FRLG-Auto-RNG.exe"')
 Set-Content -LiteralPath (Join-Path $ReleaseRoot "使用说明.txt") -Encoding UTF8 -Value @(
     "FRLG Auto RNG 绿色版",
@@ -127,11 +154,32 @@ $ZipPath = Join-Path $BuildRoot "$OutputName.zip"
 # The release folder is self-contained. Remove PyInstaller's temporary copy
 # before compression so the archive does not require another full package's
 # worth of free disk space.
-foreach ($IntermediatePath in @($PyInstallerDist, $PyInstallerWork, (Join-Path $BuildRoot "FRLG-Auto-RNG.spec"))) {
+foreach ($IntermediatePath in @($PyInstallerDist, $PyInstallerWork, $UpdaterDist, $UpdaterWork, (Join-Path $BuildRoot "FRLG-Auto-RNG.spec"), (Join-Path $BuildRoot "FRLG-Auto-RNG-Updater.spec"))) {
     if (Test-Path -LiteralPath $IntermediatePath) {
         Remove-Item -Force -Recurse -LiteralPath $IntermediatePath
     }
 }
 Compress-Archive -Force -Path (Join-Path $ReleaseRoot "*") -DestinationPath $ZipPath
+Push-Location $Root
+try {
+    & $Python -m tools.create_update_manifest --package $ZipPath --unpacked-root $ReleaseRoot
+    if ($LASTEXITCODE -ne 0) { throw "更新清单生成失败" }
+} finally {
+    Pop-Location
+}
+
+$versionProbe = Join-Path $BuildRoot "version-probe.json"
+$frozenMain = Join-Path $ReleaseRoot "FRLG-Auto-RNG.exe"
+& $frozenMain --version-json-file $versionProbe
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $versionProbe)) {
+    throw "冻结主程序版本探针失败"
+}
+$probe = Get-Content -LiteralPath $versionProbe -Raw | ConvertFrom-Json
+if ($probe.version -ne $AppVersion -or $probe.repository -ne "axechaso/frlg-auto-rng") {
+    throw "冻结主程序内嵌版本与构建版本不一致"
+}
+Remove-Item -Force -LiteralPath $versionProbe
 Write-Host "发布目录：$ReleaseRoot"
 Write-Host "发布压缩包：$ZipPath"
+Write-Host "更新清单：$(Join-Path $BuildRoot 'update-manifest.json')"
+Write-Host "SHA-256：$(Join-Path $BuildRoot "$OutputName.zip.sha256")"

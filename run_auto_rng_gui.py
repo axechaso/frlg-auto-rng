@@ -3,7 +3,9 @@
 
 import hashlib
 import json
+import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -23,6 +25,18 @@ except ImportError:  # File/folder pickers remain available without drag support
     TkinterDnD = None
 
 from app_paths import DATA_ROOT, RESOURCE_ROOT, USER_DATA_ROOT
+from app_version import APP_VERSION, APP_VERSION_CODE, UPDATER_EXECUTABLE
+from app_updater import (
+    PreparedUpdate,
+    UpdateCancelled,
+    UpdateCandidate,
+    UpdateCheckResult,
+    UpdateError,
+    check_for_update,
+    is_frozen_build,
+    prepare_update,
+    write_install_request,
+)
 from device_label_overrides import (
     LabelIssue,
     LabelOverrideProfile,
@@ -949,7 +963,7 @@ def preferred_detected_video(
 class AutoRngApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("火红/叶绿全自动乱数 - 初步实现")
+        self.root.title(f"火红/叶绿全自动乱数 {APP_VERSION}")
         self.root.geometry("1100x880")
         self.root.minsize(900, 620)
         self.plan_result = None
@@ -996,6 +1010,11 @@ class AutoRngApp:
         self.tid_calibration_applied = False
         self.running_tid_exhaustive = False
         self.close_when_stopped = False
+        self._closing_for_update = False
+        self._app_update_checking = False
+        self._app_update_manual_check = False
+        self._app_update_cancel: threading.Event | None = None
+        self._app_update_candidate: UpdateCandidate | None = None
         self.stop_request_path: Path | None = None
         self.profile_store = SaveProfileStore(SAVE_PROFILE_PATH)
         self.label_override_store = LabelOverrideStore(DEVICE_LABEL_ROOT)
@@ -1042,6 +1061,8 @@ class AutoRngApp:
             )
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(250, lambda: self.check_devices(initial=True))
+        if is_frozen_build():
+            self.root.after(1800, lambda: self.check_app_update(force=False))
 
     @staticmethod
     def _load_locations() -> dict[str, list[str]]:
@@ -2463,6 +2484,44 @@ class AutoRngApp:
             "正式版普通定点只复用Seed；时间轴定点及野生、孵蛋、御三家可复用帧修正。"
             "TID与SID阶段不使用这些记录。",
         ).pack(side="left", padx=(6, 0))
+
+        app_update_options = ttk.Frame(runtime)
+        app_update_options.grid(
+            row=6,
+            column=0,
+            columnspan=7,
+            sticky="w",
+            padx=4,
+            pady=(5, 0),
+        )
+        ttk.Label(app_update_options, text=f"程序版本 {APP_VERSION}").pack(side="left")
+        self.app_update_button = ttk.Button(
+            app_update_options,
+            text="检查程序更新",
+            command=lambda: self.check_app_update(force=True),
+        )
+        self.app_update_button.pack(side="left", padx=(10, 0))
+        self.app_update_status_var = tk.StringVar(
+            value=(
+                "尚未检查程序更新。"
+                if is_frozen_build()
+                else "源码模式不使用程序自更新。"
+            )
+        )
+        ttk.Label(
+            app_update_options,
+            textvariable=self.app_update_status_var,
+            wraplength=690,
+        ).pack(side="left", padx=(10, 0))
+        self._help_marker(
+            app_update_options,
+            "整包程序更新",
+            "绿色版每天最多自动检查一次稳定版。发现新版后会先询问，完整下载 ZIP 并校验"
+            "大小和 SHA-256，再退出程序完成目录交换；失败会恢复旧版。用户配置和日志不在"
+            "程序目录中，不会被替换。首个带更新器的 0.2 版本仍需手动安装。",
+        ).pack(side="left", padx=(6, 0))
+        if not is_frozen_build():
+            self.app_update_button.configure(state="disabled")
 
         actions = ttk.Frame(container)
         actions.pack(fill="x", pady=10)
@@ -4493,6 +4552,14 @@ class AutoRngApp:
         self.update_precalibration_check.configure(state=state)
         self._update_seed_scheme_controls()
         self.seed_update_button.configure(state=state)
+        update_button = getattr(self, "app_update_button", None)
+        if update_button is not None:
+            if not is_frozen_build() or getattr(self, "_app_update_checking", False):
+                update_button.configure(state="disabled")
+            elif getattr(self, "_app_update_cancel", None) is not None:
+                update_button.configure(state="normal", text="取消程序更新")
+            else:
+                update_button.configure(state=state, text="检查程序更新")
         self.port_combo.configure(state="readonly" if enabled else "disabled")
         self.video_combo.configure(state="readonly" if enabled else "disabled")
         for button in (
@@ -4501,6 +4568,207 @@ class AutoRngApp:
             self.label_clear_button,
         ):
             button.configure(state=state)
+
+    @staticmethod
+    def _app_update_description(candidate: UpdateCandidate) -> str:
+        manifest = candidate.manifest
+        size_mib = manifest.bytes / (1024 * 1024)
+        notes = manifest.notes.strip() or "本版未提供额外更新说明。"
+        return (
+            f"当前版本：{APP_VERSION}\n"
+            f"新版本：{manifest.version}\n"
+            f"发布时间：{candidate.published_at}\n"
+            f"下载大小：{size_mib:.1f} MiB\n\n"
+            f"{notes}\n\n"
+            "将下载完整绿色版、校验后退出并安装。是否下载并安装？"
+        )
+
+    def check_app_update(self, *, force: bool = True) -> None:
+        cancel_event = getattr(self, "_app_update_cancel", None)
+        if cancel_event is not None:
+            cancel_event.set()
+            self.app_update_status_var.set("正在取消程序更新……")
+            self.app_update_button.configure(state="disabled")
+            return
+        if not is_frozen_build():
+            self.app_update_status_var.set("源码模式不使用程序自更新。")
+            return
+        if getattr(self, "_app_update_checking", False):
+            return
+        self._app_update_checking = True
+        self._app_update_manual_check = force
+        self.app_update_status_var.set("正在检查程序更新……")
+        self._refresh_manual_tools_buttons()
+
+        def worker() -> None:
+            try:
+                result = check_for_update(
+                    current_version_code=APP_VERSION_CODE,
+                    cache_dir=USER_DATA_ROOT / "updates",
+                    force=force,
+                )
+            except Exception as exc:
+                self.root.after(
+                    0,
+                    lambda error=exc: self._finish_app_update_check(error=error),
+                )
+            else:
+                self.root.after(
+                    0,
+                    lambda value=result: self._finish_app_update_check(result=value),
+                )
+
+        threading.Thread(target=worker, daemon=True, name="app-update-check").start()
+
+    def _finish_app_update_check(
+        self,
+        result: UpdateCheckResult | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        manual = self._app_update_manual_check
+        self._app_update_checking = False
+        self._refresh_manual_tools_buttons()
+        if error is not None:
+            self.app_update_status_var.set(f"程序更新检查失败：{error}")
+            if manual:
+                messagebox.showerror("程序更新检查失败", str(error), parent=self.root)
+            return
+        if result is None:
+            return
+        self.app_update_status_var.set(result.message)
+        self._app_update_candidate = result.candidate
+        if result.status == "error":
+            if manual:
+                messagebox.showerror("程序更新检查失败", result.message, parent=self.root)
+            return
+        if result.status != "available" or result.candidate is None:
+            if manual:
+                messagebox.showinfo("程序更新", result.message, parent=self.root)
+            return
+        if self.busy or self._process_running():
+            self.app_update_status_var.set(
+                f"发现新版本 {result.candidate.manifest.version}；当前任务结束后可手动更新。"
+            )
+            return
+        if messagebox.askyesno(
+            "发现程序更新",
+            self._app_update_description(result.candidate),
+            parent=self.root,
+        ):
+            self.download_app_update(result.candidate)
+
+    def download_app_update(self, candidate: UpdateCandidate | None = None) -> None:
+        candidate = candidate or self._app_update_candidate
+        if candidate is None:
+            self.check_app_update(force=True)
+            return
+        if self.busy or self._process_running():
+            messagebox.showerror(
+                "正在运行",
+                "请先等待当前操作结束并停止 EasyCon，再安装程序更新。",
+                parent=self.root,
+            )
+            return
+        cancel_event = threading.Event()
+        self._app_update_cancel = cancel_event
+        self.set_busy(True, "正在下载并验证程序更新……")
+        self.app_update_status_var.set("正在下载完整绿色版：0%")
+        self._refresh_manual_tools_buttons()
+        last_percent = [-1]
+
+        def progress(received: int, total: int) -> None:
+            percent = min(100, int(received * 100 / total)) if total else 0
+            if percent == last_percent[0]:
+                return
+            last_percent[0] = percent
+            self.root.after(
+                0,
+                lambda value=percent: self.app_update_status_var.set(
+                    f"正在下载完整绿色版：{value}%"
+                ),
+            )
+
+        def worker() -> None:
+            try:
+                install_dir = Path(sys.executable).resolve().parent
+                prepared = prepare_update(
+                    candidate,
+                    install_dir=install_dir,
+                    updates_root=USER_DATA_ROOT / "updates",
+                    progress=progress,
+                    cancelled=cancel_event.is_set,
+                )
+            except Exception as exc:
+                self.root.after(
+                    0,
+                    lambda error=exc: self._finish_app_update_download(error=error),
+                )
+            else:
+                self.root.after(
+                    0,
+                    lambda value=prepared: self._finish_app_update_download(prepared=value),
+                )
+
+        threading.Thread(target=worker, daemon=True, name="app-update-download").start()
+
+    def _finish_app_update_download(
+        self,
+        prepared: PreparedUpdate | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        self._app_update_cancel = None
+        if error is not None:
+            if isinstance(error, UpdateCancelled):
+                status = "程序更新已取消；当前版本未改变。"
+            else:
+                status = f"程序更新准备失败：{error}"
+            self.app_update_status_var.set(status)
+            self.set_busy(False, status)
+            if not isinstance(error, UpdateCancelled):
+                messagebox.showerror("程序更新失败", str(error), parent=self.root)
+            return
+        if prepared is None:
+            self.set_busy(False, "程序更新没有生成可安装内容。")
+            return
+        self.app_update_status_var.set("更新包验证通过，正在启动独立更新器……")
+        self.install_prepared_update(prepared)
+
+    def install_prepared_update(self, prepared: PreparedUpdate) -> None:
+        if self._process_running():
+            self.set_busy(False, "EasyCon 仍在运行，程序更新未安装。")
+            messagebox.showerror(
+                "无法安装程序更新",
+                "EasyCon 仍在运行，请停止后重新检查更新。",
+                parent=self.root,
+            )
+            return
+        try:
+            request_path = write_install_request(
+                prepared,
+                current_pid=os.getpid(),
+                updates_root=USER_DATA_ROOT / "updates",
+            )
+            source_updater = prepared.install_dir / UPDATER_EXECUTABLE
+            if not source_updater.is_file():
+                raise UpdateError(f"当前绿色版缺少独立更新器：{source_updater}")
+            copied_updater = request_path.parent / UPDATER_EXECUTABLE
+            shutil.copy2(source_updater, copied_updater)
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.Popen(
+                [str(copied_updater), "--request", str(request_path)],
+                cwd=request_path.parent,
+                creationflags=flags,
+                close_fds=True,
+            )
+        except (OSError, UpdateError) as exc:
+            self.set_busy(False, f"独立更新器启动失败：{exc}")
+            self.app_update_status_var.set(f"独立更新器启动失败：{exc}")
+            messagebox.showerror("程序更新失败", str(exc), parent=self.root)
+            return
+        self._closing_for_update = True
+        self.app_update_status_var.set("独立更新器已启动，正在退出当前版本……")
+        self.status_var.set("正在退出当前版本并安装程序更新……")
+        self.root.after(100, self._finish_close)
 
     def update_seed_tables(self) -> None:
         if self.busy or self._process_running():
@@ -6577,6 +6845,9 @@ class AutoRngApp:
             self.sid_source_var.set(path)
 
     def on_close(self):
+        if getattr(self, "_closing_for_update", False):
+            self._finish_close()
+            return
         if self.busy:
             if self.search_cancel is not None:
                 self.cancel_search()
