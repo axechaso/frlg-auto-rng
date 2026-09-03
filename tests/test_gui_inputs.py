@@ -73,7 +73,9 @@ class GuiIvInputTests(unittest.TestCase):
                 lambda _main: None,
                 lambda _main: check,
             )
-            self.assertEqual(final, output / "main.ecs")
+            # Windows may expand the runner's 8.3 temp-directory alias during
+            # Path.resolve(); compare canonical paths rather than spellings.
+            self.assertEqual(final, (output / "main.ecs").resolve())
             self.assertIs(actual_check, check)
             self.assertEqual((output / "main.ecs").read_text(encoding="utf-8"), "new")
             self.assertEqual(
