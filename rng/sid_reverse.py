@@ -30,6 +30,22 @@ METHOD_NAMES = {
     METHOD_4: "Method4",
 }
 DEFAULT_SID_SEARCH_ADVANCES = 10_000
+# TID target-SID planning and the 6V shiny-SID helper use a much wider but
+# bounded window.  A full 32-bit LCG cycle is technically supported by passing
+# ``None``, but it can take too long when a caller supplies unreachable test
+# data.  The legacy SID reverse report keeps its 10,000-ADV default.
+DEFAULT_TID_SID_SEARCH_ADVANCES = 1_000_000
+UNBOUNDED_SID_SEARCH_ADVANCES: int | None = None
+LCG_FULL_PERIOD = 1 << 32
+TID_FRAME_NUMERATOR = 750_009
+TID_FRAME_DENOMINATOR = 6_250_000
+# The SID ADV reported by the TID script starts before the configurable F3
+# wait.  These are the audited language-specific prefixes that the script
+# subtracts before converting the remaining ADV to an F3 delay.
+SID_ADV_COMPENSATION_BY_LANGUAGE = {
+    "英文": 245 * 2,
+    "日文": 190 * 2,
+}
 
 
 @dataclass(frozen=True, order=True)
@@ -92,6 +108,69 @@ def pid_to_psv(pid: int) -> int:
     return (((pid >> 16) ^ (pid & 0xFFFF)) >> 3) & 0x1FFF
 
 
+def parse_pid_hex(value: str) -> int:
+    """Parse a user-entered Gen 3 PID written in hexadecimal notation."""
+    text = str(value).strip()
+    if text.lower().startswith("0x"):
+        text = text[2:]
+    if not text or len(text) > 8:
+        raise ValueError("PID必须是00000000-FFFFFFFF范围内的十六进制数")
+    if any(character not in "0123456789abcdefABCDEF" for character in text):
+        raise ValueError("PID必须是00000000-FFFFFFFF范围内的十六进制数")
+    return int(text, 16)
+
+
+def fixed_delay_to_frames(delay_ms: int) -> int:
+    """Convert a TID fixed delay to the inclusive ECS frame lower bound."""
+    if isinstance(delay_ms, bool):
+        raise ValueError("固定延迟必须是非负整数")
+    try:
+        delay_ms = int(delay_ms)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("固定延迟必须是非负整数") from exc
+    if delay_ms < 0:
+        raise ValueError("固定延迟必须是非负整数")
+    return (
+        delay_ms * TID_FRAME_NUMERATOR + TID_FRAME_DENOMINATOR - 1
+    ) // TID_FRAME_DENOMINATOR
+
+
+def sid_min_advances_for_f3(
+    f3_delay_ms: int,
+    *,
+    language: str = "英文",
+    sid_advance_correction: int = 0,
+) -> int:
+    """Return the first raw SID ADV that the TID script can execute.
+
+    The raw LCG ADV includes the language-specific SID prefix, while the
+    user-facing F3 delay only covers the remaining wait.  ``SID_ADV修正`` is
+    subtracted by ECS, so a positive correction moves the raw lower bound up.
+    The explicit F3 frame floor is retained even when a negative correction
+    would otherwise move the executable bound below it.
+    """
+    if language not in SID_ADV_COMPENSATION_BY_LANGUAGE:
+        raise ValueError("ROM 语言必须是英文或日文")
+    if isinstance(sid_advance_correction, bool):
+        raise ValueError("SID ADV修正必须是整数")
+    try:
+        correction = int(sid_advance_correction)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("SID ADV修正必须是整数") from exc
+    if correction != sid_advance_correction and not isinstance(
+        sid_advance_correction, str
+    ):
+        raise ValueError("SID ADV修正必须是整数")
+
+    f3_frames = fixed_delay_to_frames(f3_delay_ms)
+    executable_floor = (
+        f3_frames
+        + SID_ADV_COMPENSATION_BY_LANGUAGE[language]
+        + correction
+    )
+    return max(f3_frames, executable_floor)
+
+
 def sid_candidates_for_psv(tid: int, psv: int) -> tuple[int, ...]:
     """Return all SIDs whose shifted TSV equals ``psv`` for ``tid``."""
     if not 0 <= tid <= 0xFFFF:
@@ -114,32 +193,71 @@ def first_sid_advances(
     tid: int,
     sid_candidates: Sequence[int],
     *,
-    max_advances: int = DEFAULT_SID_SEARCH_ADVANCES,
+    max_advances: int | None = DEFAULT_SID_SEARCH_ADVANCES,
+    min_advances: int = 0,
 ) -> tuple[SIDAdvanceCandidate, ...]:
     """Return candidates first seen in the configured TID-seed ADV window.
 
     This follows the TID/SID 1.3.7 convention: the 32-bit LCG starts at
     ``seed = TID``; after one forward call its high 16 bits are checked as
-    the SID at ADV 0.
+    the SID at ADV 0. ``min_advances`` is inclusive and lets callers reserve
+    a fixed prefix of the script before accepting a SID result.
     """
     if not 0 <= tid <= 0xFFFF:
         raise ValueError("TID must be in 0-65535")
-    if max_advances <= 0:
-        raise ValueError("max_advances must be positive")
+    if max_advances is not None and max_advances <= 0:
+        raise ValueError("max_advances must be positive or None")
+    if min_advances < 0:
+        raise ValueError("min_advances must be non-negative")
     remaining = {int(sid) for sid in sid_candidates}
     if any(not 0 <= sid <= 0xFFFF for sid in remaining):
         raise ValueError("SID candidates must be in 0-65535")
     found: list[SIDAdvanceCandidate] = []
     seed = tid
-    for advance in range(max_advances):
+    advance = 0
+    while remaining:
+        if max_advances is not None and advance >= max_advances:
+            break
         seed = pokerng_next(seed)
         sid = seed >> 16
-        if sid in remaining:
+        if advance >= min_advances and sid in remaining:
             found.append(SIDAdvanceCandidate(sid, advance))
             remaining.remove(sid)
-            if not remaining:
-                break
+        advance += 1
+        # The multiplier/addend satisfy the full-period conditions modulo
+        # 2**32.  This check also makes a mocked shorter cycle terminate in
+        # tests instead of looping forever when an unbounded search is used.
+        if max_advances is None and (seed == tid or advance >= LCG_FULL_PERIOD):
+            break
     return tuple(sorted(found, key=lambda item: (item.advance, item.sid)))
+
+
+def find_earliest_shiny_sid(
+    tid: int,
+    pid: int,
+    *,
+    max_advances: int | None = DEFAULT_TID_SID_SEARCH_ADVANCES,
+    min_advances: int = 0,
+) -> SIDAdvanceCandidate | None:
+    """Return the earliest SID making ``pid`` shiny for ``tid``.
+
+    A Gen 3 shiny PID leaves eight possible low-three-bit SID variants.  The
+    returned candidate is selected by the earliest TID-seeded LCG ADV at or
+    after ``min_advances`` (and then by SID for deterministic ties), not by the
+    numerically smallest SID.
+    The default one-million-ADV window avoids the old 10,000-ADV false
+    negative without risking a full-cycle scan. ``max_advances=None`` remains
+    available to explicit callers that need the complete generated chain.
+    """
+    psv = pid_to_psv(pid)
+    candidates = sid_candidates_for_psv(tid, psv)
+    hits = first_sid_advances(
+        tid,
+        candidates,
+        max_advances=max_advances,
+        min_advances=min_advances,
+    )
+    return hits[0] if hits else None
 
 
 def sid_at_advance(tid: int, advance: int) -> int:
@@ -152,7 +270,11 @@ def sid_at_advance(tid: int, advance: int) -> int:
         raise ValueError("TID must be in 0-65535")
     if advance < 0:
         raise ValueError("SID advance must be non-negative")
-    seed = pokerng_jump(tid, advance + 1)
+    # ``pokerng_jump`` accepts a 32-bit bitset of jump powers.  Normalize the
+    # unbounded search result to the full LCG period before passing it in so
+    # the final state at ADV 2**32-1 is represented correctly.
+    jump = (int(advance) + 1) % LCG_FULL_PERIOD
+    seed = pokerng_jump(tid, jump)
     return (seed >> 16) & 0xFFFF
 
 

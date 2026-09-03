@@ -2,16 +2,21 @@ import hashlib
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from automation.easycon118 import (
+    EGG_HOME_BUFFER_OVERRIDE_MARKER,
     EGG_TEMPLATE_NAME,
+    STANDARD_HOME_BUFFER_OVERRIDE_MARKER,
     STANDARD_TEMPLATE_NAME,
     EggRunRequest,
     EasyCon118Options,
     write_configured_egg_project,
     write_configured_project,
+    validate_generated_egg_project_consistency,
+    validate_generated_project_consistency,
 )
 from automation.planner import AutoSearchRequest, search_best_plan
 from automation.precalibration import (
@@ -268,6 +273,12 @@ class PrecalibrationGenerationTests(unittest.TestCase):
             self.assertIn("$消耗帧预校准修正_NS1 = 0", text)
             self.assertIn("|ENTRY=FORMAL|KIND=STATIC|SEED_INDEX=", text)
             self.assertIn('"|FRAME_ENABLED=0"', text)
+            self.assertIn(STANDARD_HOME_BUFFER_OVERRIDE_MARKER, text)
+            self.assertNotIn(EGG_HOME_BUFFER_OVERRIDE_MARKER, text)
+            self.assertEqual(
+                manifest["runtime_overrides"]["home_buffer_controller"],
+                "FORMAL",
+            )
             self.assertFalse(manifest["precalibration"]["frame_enabled"])
             self.assertEqual(manifest["precalibration"]["loaded"]["frame_ns1"], 91)
 
@@ -295,7 +306,54 @@ class PrecalibrationGenerationTests(unittest.TestCase):
             self.assertIn("$Seed预校准索引_NS1 = 8", text)
             self.assertIn("$消耗帧预校准修正_NS1 = -17", text)
             self.assertIn("|STARTUP=1|ENTRY=TIMELINE|KIND=STATIC|", text)
+            self.assertIn(EGG_HOME_BUFFER_OVERRIDE_MARKER, text)
+            self.assertNotIn(STANDARD_HOME_BUFFER_OVERRIDE_MARKER, text)
+            self.assertEqual(
+                manifest["runtime_overrides"]["home_buffer_controller"],
+                "TIMELINE",
+            )
             self.assertTrue(manifest["precalibration"]["frame_enabled"])
+
+    def test_formal_and_timeline_projects_match_their_selected_parameters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = make_plan(static=True)
+            for template_name in (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME):
+                with self.subTest(template_name=template_name):
+                    main = write_configured_project(
+                        SOURCE_118,
+                        root / template_name,
+                        plan,
+                        EasyCon118Options(nx_model=1),
+                        template_name=template_name,
+                    )
+                    validate_generated_project_consistency(
+                        main,
+                        plan,
+                        EasyCon118Options(nx_model=1),
+                        template_name=template_name,
+                    )
+
+    def test_togepi_static_generation_clears_stale_name_and_writes_dex(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = make_plan(static=True)
+            plan = replace(
+                plan,
+                request=replace(plan.request, pokemon="Togepi"),
+                target=replace(plan.target, pokemon="Togepi"),
+            )
+            main = write_configured_project(
+                SOURCE_118,
+                root / "project",
+                plan,
+                EasyCon118Options(nx_model=1),
+                template_name=EGG_TEMPLATE_NAME,
+            )
+            text = main.read_text(encoding="utf-8")
+            self.assertIn('$目标宝可梦名称 = ""', text)
+            self.assertIn("$目标全国图鉴编号 = 175", text)
+            self.assertNotIn('$目标宝可梦名称 = "哈克龙"', text)
 
     def test_egg_loads_dynamic_held_pickup_and_manifest_updates(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -334,6 +392,24 @@ class PrecalibrationGenerationTests(unittest.TestCase):
             self.assertEqual(updated["seed_ns1"], 10)
             self.assertEqual(updated["held_pre"], -13)
             self.assertEqual(updated["pickup_pre"], 22)
+
+    def test_egg_formal_and_timeline_projects_match_selected_parameters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            request = make_egg_request()
+            for template_name in (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME):
+                with self.subTest(template_name=template_name):
+                    main = write_configured_egg_project(
+                        SOURCE_118,
+                        root / template_name,
+                        request,
+                        template_name=template_name,
+                    )
+                    validate_generated_egg_project_consistency(
+                        main,
+                        request,
+                        template_name=template_name,
+                    )
 
 
 if __name__ == "__main__":

@@ -14,7 +14,11 @@ import re
 import shutil
 import subprocess
 
-from rng.sid_reverse import first_sid_advances, sid_at_advance
+from rng.sid_reverse import (
+    DEFAULT_TID_SID_SEARCH_ADVANCES,
+    first_sid_advances,
+    sid_at_advance,
+)
 from rng.tenlines import get_hidden_power, pokerng_jump
 from rng.starter_sid_verification import (
     StarterSearchRequest,
@@ -72,7 +76,11 @@ class TidStarterFlowRequest:
     starter: str
     starter_min_advances: int = 1500
     starter_max_advances: int = 10_000
-    sid_chain_search_advances: int = 10_000
+    # The previous 10,000-ADV cutoff rejected valid later SIDs. One million is
+    # wide enough for normal use while avoiding a potentially multi-billion
+    # iteration full-cycle scan. Explicit programmatic callers may still pass
+    # ``None`` to request the complete TID-seeded LCG chain.
+    sid_chain_search_advances: int | None = DEFAULT_TID_SID_SEARCH_ADVANCES
     sid_retry_radius: int = 20
     starter_sound: int = 0
     starter_button_mode: int = 0
@@ -105,8 +113,6 @@ class TidStarterFlowRequest:
             raise ValueError("任意TID衔接仅适用于穷举模式")
         if self.tid_request.calibration_check:
             raise ValueError("连续流程不能同时启用TID固定延迟检查")
-        if self.tid_request.mode == 1 and self.tid_request.sid_random:
-            raise ValueError("目标TID乱数连续流程必须使用目标SID")
         if self.tid_request.mode == 0 and not self.tid_request.sid_random:
             raise ValueError("穷举连续流程必须使用固定F3延迟取得实际SID")
         if self.tid_request.language == "日文":
@@ -114,16 +120,24 @@ class TidStarterFlowRequest:
                 raise ValueError(
                     "日文版御三家临时分支目前只支持 MONO + HELP + A（Seed模式10）"
                 )
-        if self.sid_chain_search_advances <= 0:
-            raise ValueError("SID生成链搜索上限必须大于0")
+        if (
+            self.sid_chain_search_advances is not None
+            and self.sid_chain_search_advances <= 0
+        ):
+            raise ValueError("SID生成链搜索上限必须大于0，或留空使用完整链")
         if self.sid_retry_radius < 0:
             raise ValueError("SID ADV扫描半径不能为负数")
         self.to_starter_search_request().validate()
 
     @property
     def deferred_identity(self) -> bool:
-        """Whether starter search must wait for the TID produced by stage 1."""
-        return self.tid_request.mode == 0
+        """Whether the starter search needs the stage-1 runtime SID.
+
+        Exhaustive mode does not know either identity in advance.  Random TID
+        mode with SID randomization disabled likewise knows the target TID but
+        only obtains the actual SID after its fixed-F3 stage has run.
+        """
+        return self.tid_request.mode == 0 or self.tid_request.sid_random
 
     @property
     def starter_settings(self) -> GameSettings:
@@ -189,7 +203,18 @@ def tid_starter_flow_request_from_dict(payload: dict[str, object]) -> TidStarter
         starter=str(payload["starter"]),
         starter_min_advances=int(payload.get("starter_min_advances", 1500)),
         starter_max_advances=int(payload.get("starter_max_advances", 10_000)),
-        sid_chain_search_advances=int(payload.get("sid_chain_search_advances", 10_000)),
+        sid_chain_search_advances=(
+            None
+            if payload.get(
+                "sid_chain_search_advances", DEFAULT_TID_SID_SEARCH_ADVANCES
+            )
+            is None
+            else int(
+                payload.get(
+                    "sid_chain_search_advances", DEFAULT_TID_SID_SEARCH_ADVANCES
+                )
+            )
+        ),
         sid_retry_radius=int(payload.get("sid_retry_radius", 20)),
         starter_sound=int(payload.get("starter_sound", 0)),
         starter_button_mode=int(payload.get("starter_button_mode", 0)),
@@ -357,9 +382,11 @@ def build_tid_starter_flow_plan(request: TidStarterFlowRequest) -> TidStarterFlo
         max_advances=request.sid_chain_search_advances,
     )
     if not sid_hits:
-        raise LookupError(
-            f"目标SID未出现在TID生成链前{request.sid_chain_search_advances} ADV"
-        )
+        if request.sid_chain_search_advances is None:
+            detail = "完整TID生成链"
+        else:
+            detail = f"前{request.sid_chain_search_advances} ADV"
+        raise LookupError(f"目标SID未出现在{detail}")
     starter_target = find_earliest_shiny_starter(request.to_starter_search_request())
     starter_run_plan = build_starter_run_plan(request, starter_target)
     base_correction = request.tid_request.sid_advance_correction
@@ -403,10 +430,10 @@ def resolve_exhaustive_starter_plan(
     actual_tid: int,
     sid_advance: int,
 ) -> ResolvedTidStarterPlan:
-    """Resolve the real SID and starter target after exhaustive stage 1."""
+    """Resolve the real SID and starter target after a deferred ID stage."""
     request.validate()
     if not request.deferred_identity:
-        raise ValueError("只有穷举连续流程需要运行时解析实际TID/SID")
+        raise ValueError("当前连续流程不需要运行时解析实际TID/SID")
     actual_sid = sid_at_advance(actual_tid, sid_advance)
     runtime_tid_request = replace(
         request.tid_request,

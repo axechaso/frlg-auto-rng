@@ -1,5 +1,8 @@
 import unittest
+import tempfile
 from types import SimpleNamespace
+from unittest.mock import patch
+from pathlib import Path
 
 from assets.game_text import ABILITY_ZH_TO_EN
 from automation.easycon118 import (
@@ -10,6 +13,7 @@ from automation.easycon118 import (
 from run_auto_rng_gui import (
     ADVANCED_TAB_LABEL,
     AutoRngApp,
+    DEFAULT_TID_SHINY_PID,
     HoverTooltip,
     MODE_TAB_ORDER,
     RUN_LOG_TAB_LABEL,
@@ -20,7 +24,11 @@ from run_auto_rng_gui import (
     SCRIPT_TEST_ENTRY_CUSTOM,
     SCRIPT_TEST_ENTRY_FORMAL,
     SCRIPT_TEST_ENTRY_TIMELINE,
+    TID_SID_MODE_NO_RANDOM,
+    TID_SID_MODE_TARGET,
+    TID_SID_MODES,
     _install_autocomplete_combo,
+    _generate_runtime_project_atomically,
     build_egg_config_payload,
     build_egg_full_config_payload,
     build_egg_parent_config_payload,
@@ -45,6 +53,203 @@ from save_profiles import SaveProfile
 
 
 class GuiIvInputTests(unittest.TestCase):
+    def test_runtime_project_success_swaps_only_after_validation_and_keeps_logs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "runtime" / "easycon118"
+            output.mkdir(parents=True)
+            (output / "main.ecs").write_text("old", encoding="utf-8")
+            (output / "easycon-previous.log").write_text("keep", encoding="utf-8")
+
+            def generate(staging):
+                main = staging / "main.ecs"
+                main.write_text("new", encoding="utf-8")
+                return main
+
+            check = SimpleNamespace(ok=True, errors=(), warnings=())
+            final, actual_check = _generate_runtime_project_atomically(
+                output,
+                generate,
+                lambda _main: None,
+                lambda _main: check,
+            )
+            self.assertEqual(final, output / "main.ecs")
+            self.assertIs(actual_check, check)
+            self.assertEqual((output / "main.ecs").read_text(encoding="utf-8"), "new")
+            self.assertEqual(
+                (output / "easycon-previous.log").read_text(encoding="utf-8"),
+                "keep",
+            )
+            self.assertFalse(any(output.parent.glob(".easycon118.pending-*")))
+
+    def test_runtime_project_preflight_failure_keeps_old_project_and_does_not_promote(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "runtime" / "easycon118"
+            output.mkdir(parents=True)
+            old_main = output / "main.ecs"
+            old_main.write_text("old", encoding="utf-8")
+            (output / "easycon-previous.log").write_text("keep", encoding="utf-8")
+
+            def generate(staging):
+                main = staging / "main.ecs"
+                main.write_text("bad-new", encoding="utf-8")
+                return main
+
+            check = SimpleNamespace(ok=False, errors=("format failed",), warnings=())
+            final, actual_check = _generate_runtime_project_atomically(
+                output,
+                generate,
+                lambda _main: None,
+                lambda _main: check,
+            )
+            self.assertIsNone(final)
+            self.assertIs(actual_check, check)
+            self.assertEqual(old_main.read_text(encoding="utf-8"), "old")
+            self.assertEqual(
+                (output / "easycon-previous.log").read_text(encoding="utf-8"),
+                "keep",
+            )
+            self.assertFalse(any(output.parent.glob(".easycon118.pending-*")))
+
+    def test_generation_waits_for_startup_device_probe(self):
+        app = SimpleNamespace(
+            busy=False,
+            process=None,
+            _device_check_in_progress=True,
+        )
+        with patch("run_auto_rng_gui.messagebox.showerror") as showerror:
+            AutoRngApp.search_and_generate(app)
+        showerror.assert_called_once_with(
+            "设备检测中",
+            "启动时的端口/采集卡检测尚未完成，请等待检测结束后再生成方案。",
+        )
+
+    def test_tid_shiny_pid_is_default_and_editable_only_in_advanced_mode(self):
+        class FakeVariable:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        class FakeEntry:
+            def __init__(self):
+                self.states = []
+
+            def configure(self, **kwargs):
+                self.states.append(kwargs["state"])
+
+        app = SimpleNamespace(
+            tid_shiny_pid_var=FakeVariable("DEADBEEF"),
+            tid_shiny_pid_entry=FakeEntry(),
+            advanced_mode_var=FakeVariable(False),
+            _updating=False,
+        )
+        AutoRngApp._update_tid_shiny_pid_controls(app)
+        self.assertEqual(app.tid_shiny_pid_var.get(), DEFAULT_TID_SHINY_PID)
+        self.assertEqual(app.tid_shiny_pid_entry.states[-1], "disabled")
+
+        app.advanced_mode_var.set(True)
+        app.tid_shiny_pid_var.set("02B01D8B")
+        AutoRngApp._update_tid_shiny_pid_controls(app)
+        self.assertEqual(app.tid_shiny_pid_var.get(), "02B01D8B")
+        self.assertEqual(app.tid_shiny_pid_entry.states[-1], "normal")
+
+    def test_tid_shiny_sid_button_uses_default_or_advanced_pid(self):
+        class FakeVariable:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        def make_app(advanced, pid):
+            app = SimpleNamespace(
+                busy=False,
+                tid_language_var=FakeVariable("英文"),
+                tid_target_var=FakeVariable("1"),
+                tid_f3_delay_var=FakeVariable("14900"),
+                tid_sid_adv_correction_var=FakeVariable("0"),
+                tid_shiny_pid_var=FakeVariable(pid),
+                tid_sid_var=FakeVariable("0"),
+                advanced_mode_var=FakeVariable(advanced),
+                _updating=False,
+                root=object(),
+                status_var=FakeVariable(""),
+                notes=[],
+            )
+            app._process_running = lambda: False
+            app._seed_options_are_advanced = lambda: app.advanced_mode_var.get()
+            app.invalidate_plan = lambda: None
+            app.append_result_note = app.notes.append
+            return app
+
+        normal = make_app(False, "DEADBEEF")
+        with patch("run_auto_rng_gui.messagebox.showerror") as showerror:
+            AutoRngApp.calculate_tid_shiny_sid(normal)
+        showerror.assert_not_called()
+        self.assertEqual(normal.tid_shiny_pid_var.get(), DEFAULT_TID_SHINY_PID)
+        self.assertEqual(normal.tid_sid_var.get(), "38449")
+        self.assertTrue(normal.notes)
+
+        advanced = make_app(True, "02B0100B")
+        with patch("run_auto_rng_gui.messagebox.showerror") as showerror:
+            AutoRngApp.calculate_tid_shiny_sid(advanced)
+        showerror.assert_not_called()
+        self.assertEqual(advanced.tid_shiny_pid_var.get(), "02B0100B")
+        self.assertEqual(advanced.tid_sid_var.get(), "04795")
+
+    def test_tid_shiny_sid_button_starts_at_f3_fixed_frame(self):
+        class FakeVariable:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        app = SimpleNamespace(
+            busy=False,
+            tid_language_var=FakeVariable("英文"),
+            tid_target_var=FakeVariable("12345"),
+            tid_f3_delay_var=FakeVariable("14900"),
+            tid_sid_adv_correction_var=FakeVariable("0"),
+            tid_shiny_pid_var=FakeVariable("02B0100B"),
+            tid_sid_var=FakeVariable("0"),
+            advanced_mode_var=FakeVariable(True),
+            _updating=False,
+            root=object(),
+            status_var=FakeVariable(""),
+            notes=[],
+        )
+        app._process_running = lambda: False
+        app._seed_options_are_advanced = lambda: True
+        app.invalidate_plan = lambda: None
+        app.append_result_note = app.notes.append
+        hit = SimpleNamespace(sid=8839, advance=8461)
+        with patch("run_auto_rng_gui.find_earliest_shiny_sid", return_value=hit) as search:
+            with patch("run_auto_rng_gui.messagebox.showerror") as showerror:
+                AutoRngApp.calculate_tid_shiny_sid(app)
+        showerror.assert_not_called()
+        self.assertEqual(search.call_args.args, (12345, 0x02B0100B))
+        self.assertEqual(search.call_args.kwargs["min_advances"], 2279)
+        self.assertEqual(search.call_args.kwargs["max_advances"], 1_000_000)
+        self.assertEqual(app.tid_sid_var.get(), "08839")
+        self.assertIn("F3固定延迟：14900 ms = 1789 ADV", app.notes[-1])
+        self.assertIn("实际最低搜索 ADV：2279", app.notes[-1])
+
+    def test_tid_sid_mode_choices_include_unrandomized_sid(self):
+        self.assertEqual(TID_SID_MODES, (TID_SID_MODE_TARGET, TID_SID_MODE_NO_RANDOM))
+
     def test_hover_tooltip_uses_one_enter_callback_without_motion_spam(self):
         class FakeWidget:
             def __init__(self):
@@ -186,11 +391,13 @@ class GuiIvInputTests(unittest.TestCase):
         class FakeVariable:
             def __init__(self, value):
                 self.value = value
+                self.set_calls = 0
 
             def get(self):
                 return self.value
 
             def set(self, value):
+                self.set_calls += 1
                 self.value = value
 
         class FakeCombo:
@@ -219,9 +426,13 @@ class GuiIvInputTests(unittest.TestCase):
             seed_startup_scheme_var=FakeVariable(SEED_STARTUP_FIXED_USER_HOME),
             seed_calibration_scheme_combo=FakeCombo(),
             seed_startup_scheme_combo=FakeCombo(),
+            script_test_entry_combo=FakeCombo(),
+            script_test_entry_var=FakeVariable(SCRIPT_TEST_ENTRY_FORMAL),
             script_entry_options=FakeFrame(),
             seed_scheme_help_marker=object(),
             _seed_options_are_advanced=lambda: app.advanced_mode_var.get(),
+            _is_script_test_mode=lambda: False,
+            _sync_script_test_entry_path=lambda: None,
         )
         AutoRngApp._update_seed_scheme_controls(app)
         self.assertEqual(
@@ -229,6 +440,7 @@ class GuiIvInputTests(unittest.TestCase):
             "方案0：原始12轮绝对落点众数",
         )
         self.assertEqual(app.seed_startup_scheme_var.get(), SEED_STARTUP_HOME_BUFFER)
+        self.assertEqual(app.script_test_entry_var.set_calls, 0)
         self.assertEqual(app.seed_calibration_scheme_combo.configured["state"], "disabled")
         self.assertFalse(app.script_entry_options.visible)
 

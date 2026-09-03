@@ -77,7 +77,7 @@ try {
     if ($manifestObject.schema -ne 1 -or $manifestObject.version -ne $AppVersion -or
         $manifestObject.version_code -le 0 -or
         $manifestObject.package -ne [IO.Path]::GetFileName($Package)) {
-        throw "更新清单与当前 0.2 发布包不一致"
+        throw "更新清单与当前 $AppVersion 发布包不一致"
     }
     $hash = (Get-FileHash -LiteralPath $Package -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($hash -ne $manifestObject.sha256 -or (Get-Item -LiteralPath $Package).Length -ne $manifestObject.bytes) {

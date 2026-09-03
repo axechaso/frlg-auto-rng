@@ -39,6 +39,8 @@ from .easycon118 import (
     probe_easycon_devices,
     prepare_compat_runner,
     validate_runtime,
+    validate_generated_project_consistency,
+    validate_generated_egg_project_consistency,
     write_configured_egg_project,
     write_configured_project,
 )
@@ -172,6 +174,8 @@ __all__ = [
     "search_best_plan",
     "settings_to_seed_mode",
     "validate_runtime",
+    "validate_generated_project_consistency",
+    "validate_generated_egg_project_consistency",
     "validate_tid_runtime",
     "write_configured_egg_project",
     "write_configured_project",

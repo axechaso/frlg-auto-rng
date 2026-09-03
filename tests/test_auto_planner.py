@@ -287,7 +287,7 @@ class CompatibilityTests(unittest.TestCase):
         )
         names = (
             "游戏版本文本", "Seed模式", "NX机型", "Seed启动方案", "目标Seed", "目标消耗帧",
-            "目标全国图鉴编号", "静态或野生", "宝可梦遭遇方法",
+            "目标宝可梦名称", "目标全国图鉴编号", "静态或野生", "宝可梦遭遇方法",
             "宝可梦遭遇地点", "麻痹", "点到为止", "出闪后继续抓捕",
             "道具乱数模式", "队伍空位数量",
         )
@@ -302,9 +302,12 @@ class CompatibilityTests(unittest.TestCase):
         self.assertIn('$Seed启动方案 = 1', configured)
         self.assertIn('$目标Seed = "9C76"', configured)
         self.assertIn('$目标消耗帧 = 100020', configured)
+        self.assertIn('$目标宝可梦名称 = ""', configured)
+        self.assertIn('$目标全国图鉴编号 = 25', configured)
         self.assertIn('$静态或野生 = "野生"', configured)
 
         values = plan_to_user_values(result.plan)
+        self.assertEqual(values["目标宝可梦名称"], "")
         self.assertEqual(values["目标全国图鉴编号"], 25)
 
     def test_wild_item_rng_options_are_written_with_party_slot_count(self):

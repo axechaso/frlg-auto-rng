@@ -13,6 +13,7 @@ from automation.tid_rng137 import (
 )
 from automation.tid_starter_save import TID_STARTER_SAVE_NAME, is_starter_save_template
 from automation.tid_starter_flow import (
+    DEFAULT_TID_SID_SEARCH_ADVANCES,
     STARTER_SEED_CALIBRATION_SCHEME,
     TidStarterFlowRequest,
     enable_any_tid_handoff,
@@ -32,6 +33,49 @@ HAS_TID_ASSETS = any(
 
 
 class TidStarterFlowTests(unittest.TestCase):
+    def test_random_mode_can_leave_sid_unrandomized_and_defer_starter_identity(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(
+                language="英文",
+                mode=1,
+                target_tid=12345,
+                target_sid=8832,
+                sid_random=True,
+            ),
+            version="火红",
+            starter="妙蛙种子",
+            starter_max_advances=1600,
+        )
+        plan = build_tid_starter_flow_plan(request)
+
+        self.assertTrue(plan.request.deferred_identity)
+        self.assertIsNone(plan.starter_target)
+        self.assertIsNone(plan.starter_run_plan)
+        self.assertTrue(plan.request.to_flow_tid_request().sid_random)
+        payload = plan.to_dict()["request"]
+        self.assertEqual(
+            payload["sid_chain_search_advances"], DEFAULT_TID_SID_SEARCH_ADVANCES
+        )
+        restored = tid_starter_flow_request_from_dict(payload)
+        self.assertTrue(restored.deferred_identity)
+        self.assertEqual(
+            restored.sid_chain_search_advances, DEFAULT_TID_SID_SEARCH_ADVANCES
+        )
+
+    def test_explicit_unbounded_sid_chain_remains_available_for_api_callers(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(mode=1, sid_random=True),
+            version="火红",
+            starter="妙蛙种子",
+            sid_chain_search_advances=None,
+        )
+        payload = build_tid_starter_flow_plan(request).to_dict()["request"]
+        self.assertIsInstance(payload, dict)
+        restored = tid_starter_flow_request_from_dict(
+            {**payload, "sid_chain_search_advances": None}
+        )
+        self.assertIsNone(restored.sid_chain_search_advances)
+
     def test_any_tid_is_opt_in_exhaustive_only_and_survives_plan_reload(self):
         request = TidStarterFlowRequest(TidRngRequest(mode=0, sid_random=True), "火红", "妙蛙种子")
         self.assertFalse(request.accept_any_tid)

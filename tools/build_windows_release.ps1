@@ -22,7 +22,7 @@ if (-not $OutputName) {
     $OutputName = "FRLG-Auto-RNG-$AppVersion-windows-x64"
 }
 if ($OutputName -ne "FRLG-Auto-RNG-$AppVersion-windows-x64") {
-    throw "0.2 发布包必须使用标准名称 FRLG-Auto-RNG-$AppVersion-windows-x64"
+    throw "$AppVersion 发布包必须使用标准名称 FRLG-Auto-RNG-$AppVersion-windows-x64"
 }
 if ($BuildTag -and $BuildTag -notmatch '^[a-zA-Z0-9-]+$') {
     throw "BuildTag 只能包含字母、数字和短横线"

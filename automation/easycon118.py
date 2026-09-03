@@ -1550,6 +1550,10 @@ def plan_to_user_values(
         "Seed启动方案": options.seed_startup_scheme,
         "目标Seed": plan.initial_seed.seed.upper(),
         "目标消耗帧": plan.initial_seed.advances,
+        # The ECS resolves the name before the numeric Dex field.  Generated
+        # plans are authoritative, so clear any stale template name instead
+        # of letting a previous target override the generated Dex number.
+        "目标宝可梦名称": "",
         "目标全国图鉴编号": plan.species_id,
         "静态或野生": "野生" if is_wild else "静态",
         "宝可梦遭遇方法": category_zh if is_wild else "草丛",
@@ -1772,6 +1776,150 @@ def _configure_user_values(
         if count != 1:
             raise ValueError(f"1.1.8 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
     return configured + (separator + remainder if separator else "")
+
+
+def _configured_user_assignments(project_main: str | Path) -> dict[str, str]:
+    """Read the generated ECS user-input assignments for consistency checks."""
+    project_main = Path(project_main)
+    text = project_main.read_text(encoding="utf-8-sig")
+    user_section, separator, _ = text.partition("# ============================进阶设置")
+    if not separator:
+        raise ValueError("生成脚本缺少进阶设置分界标记，无法核对写入参数")
+    assignments: dict[str, str] = {}
+    pattern = re.compile(r"^\s*\$([^\s=]+)\s*=\s*(.*?)\s*$")
+    for line in user_section.splitlines():
+        match = pattern.match(line)
+        if match:
+            assignments[match.group(1)] = match.group(2)
+    return assignments
+
+
+def _assert_configured_user_values(
+    project_main: str | Path,
+    values: dict[str, Any],
+) -> None:
+    assignments = _configured_user_assignments(project_main)
+    for name, value in values.items():
+        expected = _ecs_literal(value)
+        actual = assignments.get(name)
+        if actual != expected:
+            raise ValueError(
+                f"生成脚本参数不一致: ${name} 应为 {expected}，实际为 {actual!r}"
+            )
+
+
+def _manifest(project_main: str | Path) -> dict[str, Any]:
+    path = Path(project_main).parent / "plan.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"生成项目缺少有效 plan.json: {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"生成项目 plan.json 根结构无效: {path}")
+    return payload
+
+
+def validate_generated_project_consistency(
+    project_main: str | Path,
+    plan: RunPlan,
+    options: EasyCon118Options | None = None,
+    *,
+    template_name: str | None = None,
+) -> None:
+    """Reject a generated normal project whose manifest/ECS values disagree."""
+    options = options or EasyCon118Options()
+    selected_template = _normalized_template_name(
+        template_name,
+        default=STANDARD_TEMPLATE_NAME,
+    )
+    manifest = _manifest(project_main)
+    if manifest.get("template") != selected_template:
+        raise ValueError(
+            "生成脚本入口不一致: "
+            f"应为 {selected_template}，实际为 {manifest.get('template')!r}"
+        )
+    manifest_plan = manifest.get("plan")
+    if not isinstance(manifest_plan, dict):
+        raise ValueError("生成项目 plan.json 缺少 plan")
+    request = manifest_plan.get("request")
+    target = manifest_plan.get("target")
+    initial = manifest_plan.get("initial_seed")
+    execution = manifest_plan.get("execution")
+    if not all(isinstance(item, dict) for item in (request, target, initial, execution)):
+        raise ValueError("生成项目 plan.json 的计划结构不完整")
+    checks = (
+        ("目标宝可梦", request.get("pokemon"), plan.request.pokemon),
+        ("目标结果宝可梦", target.get("pokemon"), plan.target.pokemon),
+        ("目标Seed", str(target.get("target_seed", "")).upper(), plan.target.target_seed.upper()),
+        ("初始Seed", str(initial.get("seed", "")).upper(), plan.initial_seed.seed.upper()),
+        ("Advance", initial.get("advances"), plan.initial_seed.advances),
+        ("Seed模式", execution.get("seed_mode"), plan.seed_mode),
+    )
+    for label, actual, expected in checks:
+        if actual != expected:
+            raise ValueError(f"生成项目{label}不一致: 应为 {expected!r}，实际为 {actual!r}")
+    runtime_overrides = manifest.get("runtime_overrides")
+    expected_controller = (
+        "FORMAL" if selected_template == STANDARD_TEMPLATE_NAME else "TIMELINE"
+    )
+    if not isinstance(runtime_overrides, dict) or runtime_overrides.get(
+        "home_buffer_controller"
+    ) != expected_controller:
+        raise ValueError(
+            "生成项目 HOME_BUFFER 控制器与脚本入口不一致: "
+            f"应为 {expected_controller}"
+        )
+    _assert_configured_user_values(project_main, plan_to_user_values(plan, options))
+
+
+def validate_generated_egg_project_consistency(
+    project_main: str | Path,
+    request: EggRunRequest,
+    *,
+    template_name: str | None = None,
+) -> None:
+    """Reject a generated egg project whose manifest/ECS values disagree."""
+    selected_template = _normalized_template_name(
+        template_name,
+        default=EGG_TEMPLATE_NAME,
+    )
+    manifest = _manifest(project_main)
+    if manifest.get("template") != selected_template:
+        raise ValueError(
+            "孵蛋生成脚本入口不一致: "
+            f"应为 {selected_template}，实际为 {manifest.get('template')!r}"
+        )
+    manifest_request = manifest.get("egg_request")
+    if not isinstance(manifest_request, dict):
+        raise ValueError("孵蛋生成项目 plan.json 缺少 egg_request")
+    expected_request = request.to_dict()
+    for key in (
+        "game", "seed_mode", "target_seed", "held_advances", "pickup_advances",
+        "species_id", "compatibility", "parent_a_gender", "parent_b_gender",
+        "parent_a_ivs", "parent_b_ivs", "seed_startup_scheme",
+        "seed_calibration_scheme",
+    ):
+        actual = manifest_request.get(key)
+        expected = expected_request.get(key)
+        if key == "target_seed":
+            actual = str(actual or "").upper()
+            expected = str(expected or "").upper()
+        elif key in {"parent_a_ivs", "parent_b_ivs"}:
+            actual = tuple(actual) if isinstance(actual, (list, tuple)) else actual
+            expected = tuple(expected) if isinstance(expected, (list, tuple)) else expected
+        if actual != expected:
+            raise ValueError(
+                f"孵蛋生成项目{key}不一致: 应为 {expected!r}，实际为 {actual!r}"
+            )
+    expected_wait_mode = (
+        "formal_wait" if selected_template == STANDARD_TEMPLATE_NAME else "legacy_timeline"
+    )
+    if manifest.get("egg_wait_mode") != expected_wait_mode:
+        raise ValueError(
+            "孵蛋生成项目等待模式与脚本入口不一致: "
+            f"应为 {expected_wait_mode}，实际为 {manifest.get('egg_wait_mode')!r}"
+        )
+    _assert_configured_user_values(project_main, egg_request_to_user_values(request))
 
 
 def _apply_seed_mode3_help_start_text(text: str) -> str:
@@ -3250,10 +3398,23 @@ def write_configured_project(
         plan,
         options,
     )
-    configured = _apply_standard_home_buffer_runtime_override_text(
-        configured,
-        STANDARD_HOME_BUFFER_OVERRIDE_PATH.read_text(encoding="utf-8"),
-    )
+    # The two audited entries share the rest of the generator, but their
+    # HOME_BUFFER controllers are intentionally different.  Applying the
+    # formal controller to the timeline entry leaves the timeline marker in
+    # place while replacing its implementation, which is exactly the stale
+    # mixed-controller state that makes direct timeline runs unreliable.
+    if selected_template == STANDARD_TEMPLATE_NAME:
+        configured = _apply_standard_home_buffer_runtime_override_text(
+            configured,
+            STANDARD_HOME_BUFFER_OVERRIDE_PATH.read_text(encoding="utf-8"),
+        )
+        home_buffer_controller = "FORMAL"
+    else:
+        configured = _apply_egg_home_buffer_runtime_override_text(
+            configured,
+            EGG_HOME_BUFFER_OVERRIDE_PATH.read_text(encoding="utf-8"),
+        )
+        home_buffer_controller = "TIMELINE"
     classifier_text = HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH.read_text(
         encoding="utf-8"
     )
@@ -3326,6 +3487,7 @@ def write_configured_project(
             "expected_sha256": EXPECTED_SCRIPT_SHA256,
         },
         "runtime_overrides": {
+            "home_buffer_controller": home_buffer_controller,
             "ocr_unavailable_fallback_sha256": ocr_fallback_sha256,
             "wild_pid_retry_limit_sha256": wild_pid_retry_limit_sha256,
             "home_buffer_adaptive_classifier_sha256": hashlib.sha256(

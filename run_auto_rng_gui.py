@@ -107,6 +107,8 @@ from automation import (
     search_best_plan,
     get_static_targets,
     validate_runtime,
+    validate_generated_project_consistency,
+    validate_generated_egg_project_consistency,
     write_configured_egg_project,
     write_configured_project,
     write_configured_tid_project,
@@ -125,6 +127,16 @@ from rng.tenlines_utils import (
     load_frlg_encounters,
 )
 from rng.tenlines import clear_frlg_seed_cache
+from rng.sid_reverse import (
+    DEFAULT_TID_SID_SEARCH_ADVANCES,
+    SID_ADV_COMPENSATION_BY_LANGUAGE,
+    fixed_delay_to_frames,
+    find_earliest_shiny_sid,
+    parse_pid_hex,
+    pid_to_psv,
+    sid_min_advances_for_f3,
+    sid_candidates_for_psv,
+)
 from manual_tools import ManualToolsManager, parse_video_device
 from tenlines_seed_updater import update_seed_tables as run_seed_table_update
 from sid_traversal import (
@@ -187,8 +199,13 @@ SEED_CALIBRATION_SCHEME_CODES = {
     SEED_CALIBRATION_SHADOW: 2,
 }
 TID_SID_MODE_TARGET = "目标 SID（自动计算 ADV）"
-TID_SID_MODE_FIXED_F3 = "固定 F3 延迟（采用实际 SID）"
-TID_SID_MODES = (TID_SID_MODE_TARGET, TID_SID_MODE_FIXED_F3)
+TID_SID_MODE_NO_RANDOM = "不乱数 SID（固定 F3，采用实际 SID）"
+# Keep the old symbol and persisted label as compatibility aliases.  New UI
+# state uses the explicit wording above so the SID behavior is unambiguous.
+TID_SID_MODE_FIXED_F3_LEGACY = "固定 F3 延迟（采用实际 SID）"
+TID_SID_MODE_FIXED_F3 = TID_SID_MODE_NO_RANDOM
+TID_SID_MODES = (TID_SID_MODE_TARGET, TID_SID_MODE_NO_RANDOM)
+DEFAULT_TID_SHINY_PID = "7942EF72"
 ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 
@@ -197,6 +214,77 @@ def allocate_preview_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
+
+
+def _new_runtime_staging_dir(output_dir: Path) -> Path:
+    """Create an empty sibling directory for a generated runtime project."""
+    output_dir = output_dir.resolve()
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(10):
+        candidate = output_dir.parent / f".{output_dir.name}.pending-{uuid.uuid4().hex}"
+        try:
+            candidate.mkdir()
+        except FileExistsError:
+            continue
+        return candidate
+    raise OSError(f"无法创建生成暂存目录：{output_dir.parent}")
+
+
+def _preserve_runtime_logs(previous_dir: Path, staging_dir: Path) -> None:
+    """Copy old runtime logs into a new project before the directory swap."""
+    if not previous_dir.is_dir():
+        return
+    for source in previous_dir.iterdir():
+        if not source.is_file() or ".log" not in source.name.lower():
+            continue
+        destination = staging_dir / source.name
+        if destination.exists():
+            destination = staging_dir / f"previous-{uuid.uuid4().hex}-{source.name}"
+        shutil.copy2(source, destination)
+
+
+def _promote_runtime_project(staging_dir: Path, output_dir: Path) -> Path:
+    """Atomically make a validated staging project the active runtime project."""
+    staging_dir = staging_dir.resolve()
+    output_dir = output_dir.resolve()
+    if not (staging_dir / "main.ecs").is_file():
+        raise FileNotFoundError(f"生成暂存项目缺少 main.ecs：{staging_dir}")
+    _preserve_runtime_logs(output_dir, staging_dir)
+    backup_dir: Path | None = None
+    if output_dir.exists():
+        backup_dir = output_dir.parent / f".{output_dir.name}.previous-{uuid.uuid4().hex}"
+        output_dir.rename(backup_dir)
+    try:
+        staging_dir.rename(output_dir)
+    except Exception:
+        if backup_dir is not None and backup_dir.is_dir() and not output_dir.exists():
+            backup_dir.rename(output_dir)
+        raise
+    if backup_dir is not None:
+        shutil.rmtree(backup_dir, ignore_errors=True)
+    return output_dir / "main.ecs"
+
+
+def _generate_runtime_project_atomically(
+    output_dir: Path,
+    generate_project,
+    verify_project,
+    validate_project,
+):
+    """Generate, verify, preflight, and promote one runtime project safely."""
+    staging_dir = _new_runtime_staging_dir(output_dir)
+    try:
+        staged_main = generate_project(staging_dir)
+        verify_project(staged_main)
+        check = validate_project(staged_main)
+        if not check.ok:
+            return None, check
+        return _promote_runtime_project(staging_dir, output_dir), check
+    finally:
+        # Validation failures and exceptions must never leave a stale staging
+        # project that a later GUI action could accidentally execute.
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 def clean_terminal_log(text: str) -> str:
@@ -1015,6 +1103,11 @@ class AutoRngApp:
         self._app_update_manual_check = False
         self._app_update_cancel: threading.Event | None = None
         self._app_update_candidate: UpdateCandidate | None = None
+        # Device probing runs asynchronously during startup.  Generation
+        # captures the selected capture device in its input fingerprint, so a
+        # late startup callback must not race a search and invalidate its
+        # result halfway through.
+        self._device_check_in_progress = True
         self.stop_request_path: Path | None = None
         self.profile_store = SaveProfileStore(SAVE_PROFILE_PATH)
         self.label_override_store = LabelOverrideStore(DEVICE_LABEL_ROOT)
@@ -1909,6 +2002,7 @@ class AutoRngApp:
         self.tid_gender_var = tk.StringVar(value="女性")
         self.tid_target_var = tk.StringVar(value="0")
         self.tid_sid_var = tk.StringVar(value="38449")
+        self.tid_shiny_pid_var = tk.StringVar(value=DEFAULT_TID_SHINY_PID)
         self.tid_name_var = tk.StringVar(value="Alxe")
         self.tid_sid_mode_var = tk.StringVar(value=TID_SID_MODE_TARGET)
         self.tid_calibration_var = tk.BooleanVar(value=False)
@@ -1936,6 +2030,13 @@ class AutoRngApp:
             tid_identity, "SID 处理", self.tid_sid_mode_var,
             TID_SID_MODES, 1, 6,
         )
+        self._help_marker(
+            tid_identity,
+            "SID 处理",
+            "目标 SID 模式会按目标 SID 自动计算最低可用 ADV；不乱数 SID 模式固定 F3，"
+            "由实际生成链决定 SID。目标 SID 搜索上限为 1,000,000 ADV；连续御三家流程在"
+            "后一种模式下会取得实际 SID 后再动态生成目标。",
+        ).grid(row=3, column=4, columnspan=2, sticky="e", padx=4, pady=(0, 3))
         self.tid_calibration_check = ttk.Checkbutton(
             tid_identity,
             text="先检测固定延迟，完成后自动运行计划",
@@ -1953,11 +2054,46 @@ class AutoRngApp:
         self.tid_game_combo = self._labeled_combo(
             tid_identity, "游戏版本", self.tid_game_var, ("火红", "叶绿"), 2, 0
         )
+        self.tid_shiny_pid_entry = self._labeled_entry(
+            tid_identity,
+            "6V闪 PID",
+            self.tid_shiny_pid_var,
+            2,
+            6,
+            width=12,
+        )
+        self.tid_shiny_sid_button = ttk.Button(
+            tid_identity,
+            text="6V闪SID",
+            command=self.calculate_tid_shiny_sid,
+        )
+        self.tid_shiny_sid_button.grid(
+            row=3,
+            column=6,
+            columnspan=2,
+            sticky="w",
+            padx=4,
+            pady=(0, 3),
+        )
+        self._add_tooltip(
+            self.tid_shiny_pid_entry,
+            "6V闪 SID",
+            "按当前 TID 和指定 PID 计算闪光 PSV，搜索至少从 F3 固定延迟换算帧起，"
+            "并计入当前语言脚本的 SID 前置补偿和 SID ADV 修正；在 1,000,000 ADV 上限内"
+            "选择最早可执行的合法 SID。普通模式固定使用 7942EF72；开启高级模式后可编辑 PID。",
+        )
+        self._add_tooltip(
+            self.tid_shiny_sid_button,
+            "6V闪SID",
+            "只计算并回填目标 SID，不启动游戏。搜索起点不能早于 F3 固定延迟对应帧，"
+            "并会计入当前语言的 SID 前置补偿和 SID ADV 修正；结果按最低可执行 ADV，"
+            "而不是 SID 数值大小。",
+        )
         ttk.Label(
             tid_identity,
             text="脚本会新建存档并自动退出游戏两次；请先确认当前存档与主页状态。",
             foreground="#9a3412",
-        ).grid(row=3, column=0, columnspan=8, sticky="w", padx=4, pady=(3, 0))
+        ).grid(row=4, column=0, columnspan=8, sticky="w", padx=4, pady=(3, 0))
         self.tid_language_combo.bind(
             "<<ComboboxSelected>>", lambda _: self._apply_tid_language_defaults()
         )
@@ -2518,7 +2654,7 @@ class AutoRngApp:
             "整包程序更新",
             "绿色版每天最多自动检查一次稳定版。发现新版后会先询问，完整下载 ZIP 并校验"
             "大小和 SHA-256，再退出程序完成目录交换；失败会恢复旧版。用户配置和日志不在"
-            "程序目录中，不会被替换。首个带更新器的 0.2 版本仍需手动安装。",
+            "程序目录中，不会被替换。首次安装 0.2.1 仍需手动解压，之后可使用应用内更新。",
         ).pack(side="left", padx=(6, 0))
         if not is_frozen_build():
             self.app_update_button.configure(state="disabled")
@@ -2546,6 +2682,7 @@ class AutoRngApp:
         self.mode_notebook.bind("<<NotebookTabChanged>>", self._on_mode_tab_change)
         self.tid_starter_flow_var.trace_add("write", self._on_tid_flow_toggle)
         self._update_tid_flow_controls()
+        self._update_tid_shiny_pid_controls()
         self._on_mode_tab_change()
         self.source_var.trace_add("write", self._on_script_test_source_change)
         self.script_test_path_var.trace_add("write", self._on_script_test_path_change)
@@ -3017,6 +3154,7 @@ class AutoRngApp:
             self.egg_ack_var,
             self.tid_language_var, self.tid_mode_var, self.tid_nx_var,
             self.tid_gender_var, self.tid_target_var, self.tid_sid_var,
+            self.tid_shiny_pid_var,
             self.tid_name_var, self.tid_sid_mode_var,
             self.tid_calibration_var,
             self.tid_op_target_var, self.tid_f1_target_var, self.tid_f2_target_var,
@@ -3515,12 +3653,26 @@ class AutoRngApp:
         advanced = self._seed_options_are_advanced()
         if not advanced:
             desired = SEED_CALIBRATION_SHADOW if is_egg else SEED_CALIBRATION_ORIGINAL
-            if calibration_var.get() != desired:
-                calibration_var.set(desired)
-            if startup_var.get() != SEED_STARTUP_HOME_BUFFER:
-                startup_var.set(SEED_STARTUP_HOME_BUFFER)
+            if (
+                calibration_var.get() != desired
+                or startup_var.get() != SEED_STARTUP_HOME_BUFFER
+            ):
+                updating = getattr(self, "_updating", False)
+                self._updating = True
+                try:
+                    if calibration_var.get() != desired:
+                        calibration_var.set(desired)
+                    if startup_var.get() != SEED_STARTUP_HOME_BUFFER:
+                        startup_var.set(SEED_STARTUP_HOME_BUFFER)
+                finally:
+                    self._updating = updating
         elif calibration_var.get() not in values:
-            calibration_var.set(values[0])
+            updating = getattr(self, "_updating", False)
+            self._updating = True
+            try:
+                calibration_var.set(values[0])
+            finally:
+                self._updating = updating
         state = "readonly" if advanced else "disabled"
         combo.configure(state=state)
         startup_combo.configure(state=state)
@@ -3534,8 +3686,17 @@ class AutoRngApp:
             )
             entry_combo.configure(values=entry_choices)
             if not advanced or entry_var.get() not in entry_choices:
-                entry_var.set(SCRIPT_TEST_ENTRY_FORMAL)
-                self._sync_script_test_entry_path()
+                # Tk variable traces treat setting the same value as a write.
+                # Avoid invalidating a freshly generated plan during the
+                # busy-state refresh that runs immediately after generation.
+                if entry_var.get() != SCRIPT_TEST_ENTRY_FORMAL:
+                    updating = getattr(self, "_updating", False)
+                    self._updating = True
+                    try:
+                        entry_var.set(SCRIPT_TEST_ENTRY_FORMAL)
+                        self._sync_script_test_entry_path()
+                    finally:
+                        self._updating = updating
         entry_options = getattr(self, "script_entry_options", None)
         if entry_options is not None:
             if advanced:
@@ -3570,8 +3731,14 @@ class AutoRngApp:
                 self.mode_notebook.select(normal_tab)
             self.mode_notebook.hide(self.script_test_tab)
         self._update_seed_scheme_controls()
+        self._update_tid_shiny_pid_controls()
         self._update_item_rng_controls()
         self._schedule_page_scrollregion_update()
+        # Advanced mode changes which Seed/entry settings are effective.  The
+        # normalization above is protected from Tk traces, so invalidate once
+        # here for the actual user action instead of relying on incidental
+        # variable writes.
+        self.invalidate_plan()
 
     def _on_mode_tab_change(self, _event=None):
         mode = self.tab_modes.get(self.mode_notebook.select(), "normal")
@@ -3632,21 +3799,47 @@ class AutoRngApp:
         for entry in self.tid_delay_entries:
             entry.configure(state=state)
 
+    def _update_tid_shiny_pid_controls(self):
+        """Keep the optional shiny-PID input restricted to advanced mode."""
+        entry = getattr(self, "tid_shiny_pid_entry", None)
+        variable = getattr(self, "tid_shiny_pid_var", None)
+        if entry is None or variable is None:
+            return
+        advanced_var = getattr(self, "advanced_mode_var", None)
+        advanced = bool(advanced_var is not None and advanced_var.get())
+        if not advanced and variable.get() != DEFAULT_TID_SHINY_PID:
+            self._updating = True
+            try:
+                variable.set(DEFAULT_TID_SHINY_PID)
+            finally:
+                self._updating = False
+        entry.configure(state="normal" if advanced else "disabled")
+
     def _update_tid_flow_controls(self):
         enabled = self.tid_starter_flow_var.get()
         exhaustive = self.tid_mode_var.get() == "穷举模式"
         any_tid = enabled and exhaustive and self.tid_any_tid_var.get()
-        if enabled:
+        if enabled and exhaustive:
             self._updating = True
             try:
-                self.tid_sid_mode_var.set(
-                    TID_SID_MODE_FIXED_F3 if exhaustive else TID_SID_MODE_TARGET
-                )
+                self.tid_sid_mode_var.set(TID_SID_MODE_FIXED_F3)
             finally:
                 self._updating = False
-        fixed_f3 = self.tid_sid_mode_var.get() == TID_SID_MODE_FIXED_F3
+        if self.tid_sid_mode_var.get() == TID_SID_MODE_FIXED_F3_LEGACY:
+            self._updating = True
+            try:
+                self.tid_sid_mode_var.set(TID_SID_MODE_FIXED_F3)
+            finally:
+                self._updating = False
+        fixed_f3 = self.tid_sid_mode_var.get() in {
+            TID_SID_MODE_FIXED_F3,
+            TID_SID_MODE_FIXED_F3_LEGACY,
+            TID_SID_MODE_NO_RANDOM,
+        }
         self.tid_mode_combo.configure(state="readonly")
-        self.tid_sid_mode_combo.configure(state="disabled" if enabled else "readonly")
+        self.tid_sid_mode_combo.configure(
+            state="disabled" if enabled and exhaustive else "readonly"
+        )
         self.tid_sid_entry.configure(state="disabled" if fixed_f3 else "normal")
         self.tid_calibration_check.configure(state="normal")
         self.tid_any_tid_check.configure(state="normal" if enabled and exhaustive else "disabled")
@@ -3659,9 +3852,12 @@ class AutoRngApp:
                 "normal" if enabled else "disabled"
             )
             widget.configure(state=state)
-        if enabled and exhaustive:
+        if enabled and (exhaustive or fixed_f3):
             self.tid_sid_retry_radius_entry.configure(state="disabled")
         self._update_tid_delay_controls()
+        shiny_pid_update = getattr(self, "_update_tid_shiny_pid_controls", None)
+        if callable(shiny_pid_update):
+            shiny_pid_update()
 
     def _apply_tid_language_defaults(self):
         japanese = self.tid_language_var.get() == "日文"
@@ -4041,6 +4237,91 @@ class AutoRngApp:
             update_precalibration=self.update_precalibration_var.get(),
         )
 
+    def calculate_tid_shiny_sid(self) -> None:
+        """Find and apply the earliest SID that makes the configured PID shiny."""
+        if self.busy or self._process_running():
+            messagebox.showerror("正在运行", "请先等待当前流程结束，再计算6V闪SID。")
+            return
+        try:
+            tid_text = str(self.tid_target_var.get()).strip()
+            if not re.fullmatch(r"[0-9]+", tid_text):
+                raise ValueError("TID必须是十进制整数")
+            tid = int(tid_text, 10)
+            if not 0 <= tid <= 0xFFFF:
+                raise ValueError("TID必须在0-65535之间")
+            f3_delay_var = getattr(self, "tid_f3_delay_var", None)
+            f3_delay_text = f3_delay_var.get() if f3_delay_var is not None else "0"
+            if not re.fullmatch(r"[0-9]+", str(f3_delay_text).strip()):
+                raise ValueError("F3固定延迟必须是非负整数")
+            f3_delay_ms = int(str(f3_delay_text).strip(), 10)
+            f3_frame_floor = fixed_delay_to_frames(f3_delay_ms)
+            language_var = getattr(self, "tid_language_var", None)
+            language = (
+                str(language_var.get()).strip()
+                if language_var is not None
+                else "英文"
+            )
+            sid_correction_var = getattr(self, "tid_sid_adv_correction_var", None)
+            sid_correction_text = (
+                str(sid_correction_var.get()).strip()
+                if sid_correction_var is not None
+                else "0"
+            )
+            if not re.fullmatch(r"[+-]?[0-9]+", sid_correction_text):
+                raise ValueError("SID ADV修正必须是整数")
+            sid_correction = int(sid_correction_text, 10)
+            f3_min_advances = sid_min_advances_for_f3(
+                f3_delay_ms,
+                language=language,
+                sid_advance_correction=sid_correction,
+            )
+            sid_prefix = SID_ADV_COMPENSATION_BY_LANGUAGE[language]
+            advanced = self._seed_options_are_advanced()
+            pid_text = (
+                self.tid_shiny_pid_var.get()
+                if advanced
+                else DEFAULT_TID_SHINY_PID
+            )
+            pid = parse_pid_hex(pid_text)
+            psv = pid_to_psv(pid)
+            sid_candidates = sid_candidates_for_psv(tid, psv)
+            hit = find_earliest_shiny_sid(
+                tid,
+                pid,
+                min_advances=f3_min_advances,
+                max_advances=DEFAULT_TID_SID_SEARCH_ADVANCES,
+            )
+            if hit is None:
+                raise LookupError(
+                    f"TID生成链 ADV {f3_min_advances:,}-"
+                    f"{DEFAULT_TID_SID_SEARCH_ADVANCES - 1:,} 中没有找到"
+                    "该PID对应的闪光SID"
+                )
+        except (ValueError, LookupError) as exc:
+            messagebox.showerror("6V闪SID计算失败", str(exc), parent=self.root)
+            return
+
+        self._updating = True
+        try:
+            self.tid_shiny_pid_var.set(f"{pid:08X}")
+            self.tid_sid_var.set(f"{hit.sid:05d}")
+        finally:
+            self._updating = False
+        self.invalidate_plan()
+        self.append_result_note(
+            "6V闪SID计算完成："
+            f"TID {tid:05d} / PID {pid:08X} / PSV {psv:04d}\n"
+            f"合法SID候选：{', '.join(f'{sid:05d}' for sid in sid_candidates)}\n"
+            f"F3固定延迟：{f3_delay_ms} ms = {f3_frame_floor} ADV；"
+            f"{language}版SID前置补偿：{sid_prefix} ADV；SID修正：{sid_correction:+d}；"
+            f"实际最低搜索 ADV：{f3_min_advances}；"
+            f"最低 SID ADV：{hit.advance}；目标 SID 已设置为 {hit.sid:05d}。"
+        )
+        self.status_var.set(
+            f"6V闪SID已回填：SID {hit.sid:05d}（ADV {hit.advance}，"
+            f"最低可执行 ADV {f3_min_advances}）；请重新生成计划。"
+        )
+
     def collect_tid_request(self) -> TidRngRequest:
         sid_mode = self.tid_sid_mode_var.get()
         any_tid = self.tid_starter_flow_var.get() and self.tid_mode_var.get() == "穷举模式" and self.tid_any_tid_var.get()
@@ -4072,7 +4353,12 @@ class AutoRngApp:
             button_mode={"HELP": 0, "LR": 1, "L=A": 2}[self.tid_button_mode_var.get()],
             seed_button={"A": 0, "START": 1, "L(L=A)": 2}[self.tid_seed_button_var.get()],
             name_entry_button=0 if self.tid_name_entry_var.get() == "A" else 1,
-            sid_random=sid_mode == TID_SID_MODE_FIXED_F3,
+            sid_random=sid_mode
+            in {
+                TID_SID_MODE_NO_RANDOM,
+                TID_SID_MODE_FIXED_F3,
+                TID_SID_MODE_FIXED_F3_LEGACY,
+            },
             f3_random_range=0,
             op_rng_range=int(self.tid_op_rng_range_var.get()),
             f1_rng_range=int(self.tid_f1_rng_range_var.get()),
@@ -4942,6 +5228,12 @@ class AutoRngApp:
         if self.process is not None and self.process.poll() is None:
             messagebox.showerror("正在运行", "请先停止当前 EasyCon 进程，再生成新方案。")
             return
+        if getattr(self, "_device_check_in_progress", False):
+            messagebox.showerror(
+                "设备检测中",
+                "启动时的端口/采集卡检测尚未完成，请等待检测结束后再生成方案。",
+            )
+            return
         try:
             if self._is_script_test_mode():
                 self.generate_script_test_preflight()
@@ -5041,19 +5333,32 @@ class AutoRngApp:
                 if result.plan.route_support.can_start:
                     try:
                         output = WRITABLE_ROOT / "runtime" / "easycon118"
-                        project_main = write_configured_project(
-                            source_path,
+                        def generate(staging_dir):
+                            staged_main = write_configured_project(
+                                source_path,
+                                staging_dir,
+                                result.plan,
+                                easycon_options,
+                                template_name=template_name,
+                            )
+                            if label_profile is not None:
+                                apply_profile_to_projects(staging_dir, label_profile)
+                            return staged_main
+
+                        project_main, check = _generate_runtime_project_atomically(
                             output,
-                            result.plan,
-                            easycon_options,
-                            template_name=template_name,
-                        )
-                        if label_profile is not None:
-                            apply_profile_to_projects(output, label_profile)
-                        check = validate_runtime(
-                            ezcon_path,
-                            project_main,
-                            fingerprint_warning_only=fingerprint_warning_only,
+                            generate,
+                            lambda staged_main: validate_generated_project_consistency(
+                                staged_main,
+                                result.plan,
+                                easycon_options,
+                                template_name=template_name,
+                            ),
+                            lambda staged_main: validate_runtime(
+                                ezcon_path,
+                                staged_main,
+                                fingerprint_warning_only=fingerprint_warning_only,
+                            ),
                         )
                     except Exception as exc:
                         generation_error = exc
@@ -5454,7 +5759,7 @@ class AutoRngApp:
         self.runtime_check = None
         status = (
             (
-                "正在生成穷举TID阶段；御三家目标将在取得实际TID/SID后搜索……"
+                "正在生成延后身份解析的 TID 阶段；御三家目标将在取得实际TID/SID后搜索……"
                 if flow_request is not None and flow_request.deferred_identity
                 else "正在搜索御三家目标并生成 TID/SID 连续流程计划……"
             )
@@ -5465,8 +5770,14 @@ class AutoRngApp:
         self.set_result(
             (
                 (
-                    "穷举阶段将输出实际TID和SID ADV；运行时计算实际SID后，"
-                    "再搜索最早可达闪光御三家并生成1.1.8第三阶段。"
+                    (
+                        (
+                            "穷举阶段将输出实际TID和SID ADV；运行时计算实际SID后，"
+                            if flow_request.tid_request.mode == 0
+                            else "不乱数SID阶段将输出实际TID和SID ADV；运行时计算实际SID后，"
+                        )
+                        + "再搜索最早可达闪光御三家并生成1.1.8第三阶段。"
+                    )
                     if flow_request.deferred_identity
                     else (
                         "正在搜索 ADV "
@@ -5634,9 +5945,14 @@ class AutoRngApp:
             )
             target = flow_plan.starter_target
             if target is None:
+                deferred_label = (
+                    "穷举动态衔接"
+                    if flow_plan.request.tid_request.mode == 0
+                    else "不乱数SID动态衔接"
+                )
                 lines.extend(
                     (
-                        f"连续流程：{flow_plan.request.version} / {flow_plan.request.starter} / 穷举动态衔接",
+                        f"连续流程：{flow_plan.request.version} / {flow_plan.request.starter} / {deferred_label}",
                         f"御三家游戏设置：{flow_plan.request.starter_settings}",
                         (
                             "御三家搜索：取得实际TID和SID ADV后计算实际SID，再在 ADV "
@@ -5684,7 +6000,11 @@ class AutoRngApp:
         elif check.ok:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
             status = (
-                "穷举连续流程前两阶段已通过预检；第三阶段将在取得实际TID/SID后生成并预检。"
+                (
+                    "穷举连续流程前两阶段已通过预检；第三阶段将在取得实际TID/SID后生成并预检。"
+                    if flow_plan.request.tid_request.mode == 0
+                    else "不乱数SID连续流程前两阶段已通过预检；第三阶段将在取得实际TID/SID后生成并预检。"
+                )
                 if flow_plan.starter_target is None
                 else "连续流程三阶段均已生成并通过预检，可以开始运行。"
             )
@@ -5719,18 +6039,30 @@ class AutoRngApp:
         def worker():
             try:
                 output = WRITABLE_ROOT / "runtime" / "easycon118"
-                project_main = write_configured_egg_project(
-                    source_path,
+                def generate(staging_dir):
+                    staged_main = write_configured_egg_project(
+                        source_path,
+                        staging_dir,
+                        request,
+                        template_name=template_name,
+                    )
+                    if label_profile is not None:
+                        apply_profile_to_projects(staging_dir, label_profile)
+                    return staged_main
+
+                project_main, check = _generate_runtime_project_atomically(
                     output,
-                    request,
-                    template_name=template_name,
-                )
-                if label_profile is not None:
-                    apply_profile_to_projects(output, label_profile)
-                check = validate_runtime(
-                    ezcon_path,
-                    project_main,
-                    fingerprint_warning_only=fingerprint_warning_only,
+                    generate,
+                    lambda staged_main: validate_generated_egg_project_consistency(
+                        staged_main,
+                        request,
+                        template_name=template_name,
+                    ),
+                    lambda staged_main: validate_runtime(
+                        ezcon_path,
+                        staged_main,
+                        fingerprint_warning_only=fingerprint_warning_only,
+                    ),
                 )
                 plan_dir = WRITABLE_ROOT / "rng_logs" / "plans"
                 plan_dir.mkdir(parents=True, exist_ok=True)
@@ -5765,13 +6097,11 @@ class AutoRngApp:
         self.sid_traversal_context = None
         self.sid_traversal_plan_path = None
         self.script_test_preparation = None
-        self.project_main = project_main
+        usable_project = project_main if project_main is not None and check and check.ok else None
+        self.project_main = usable_project
         self.runtime_check = check
         pokemon = get_species_name(request.species_id)
-        generated_manifest = json.loads(
-            (project_main.parent / "plan.json").read_text(encoding="utf-8")
-        )
-        selected_template = generated_manifest.get("template")
+        selected_template = self._selected_generation_template_name()
         entry_description = (
             "正式 WAIT 版"
             if selected_template == STANDARD_TEMPLATE_NAME
@@ -5798,20 +6128,23 @@ class AutoRngApp:
             f"亲本A：{request.parent_a_gender} {request.parent_a_ivs}",
             f"亲本B：{request.parent_b_gender} {request.parent_b_ivs}",
             f"计划文件：{plan_path}",
-            f"生成脚本：{project_main}",
             (
                 "注意：当前使用正式脚本的普通 WAIT；尚未完成本机实机验收。"
                 if selected_template == STANDARD_TEMPLATE_NAME
                 else "注意：当前使用时间轴脚本；尚未完成本机实机验收。"
             ),
         ]
-        lines.extend(self._precalibration_plan_lines(project_main))
-        if check.ok:
+        if usable_project is not None:
+            lines.insert(-1, f"生成脚本：{usable_project}")
+            lines.extend(self._precalibration_plan_lines(usable_project))
+        if check and check.ok and usable_project is not None:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
             status = "孵蛋测试脚本已生成，可以在确认存档准备后开始。"
-        else:
+        elif check:
             lines.extend(f"预检失败：{error}" for error in check.errors)
             status = "孵蛋脚本已生成，但预检不允许启动。"
+        else:
+            status = "孵蛋脚本生成失败，未启用旧运行项目。"
         self.set_result("\n".join(lines))
         self.set_busy(False, status)
 
@@ -5837,7 +6170,10 @@ class AutoRngApp:
         self.sid_traversal_context = None
         self.sid_traversal_plan_path = None
         self.script_test_preparation = None
-        self.project_main = project_main
+        usable_project = project_main
+        if generation_error is not None or not (check and check.ok):
+            usable_project = None
+        self.project_main = usable_project
         self.runtime_check = check
         plan = result.plan
         ivs = plan.target.ivs
@@ -5881,14 +6217,14 @@ class AutoRngApp:
         elif check and not check.ok:
             lines.extend(f"预检失败：{error}" for error in check.errors)
         else:
-            lines.append(f"生成脚本：{project_main}")
+            lines.append(f"生成脚本：{usable_project}")
             if check:
                 lines.extend(f"预检提示：{warning}" for warning in check.warnings)
             if plan.request.category.endswith("Rod") and "Safari Zone" in plan.request.location:
                 lines.append("启动前确认：所选钓竿已登录到 Y；1.1.8 实际复用中央钓点路线。")
         self.set_result("\n".join(lines))
         can_start = bool(
-            project_main and check and check.ok
+            usable_project and check and check.ok
             and generation_error is None and plan.route_support.can_start
         )
         self.set_busy(False, "方案已生成，可以开始。" if can_start else "方案已生成，但当前路线/预检不允许启动。")
@@ -5932,6 +6268,7 @@ class AutoRngApp:
         self._close_manual_tools()
         ezcon = Path(self.ezcon_var.get())
         if not ezcon.is_file():
+            self._device_check_in_progress = False
             if initial:
                 self.fail_device_check(FileNotFoundError(f"找不到 {ezcon}"))
             else:
@@ -5939,6 +6276,7 @@ class AutoRngApp:
             return
         current_port = self.port_var.get()
         current_video = self.video_var.get()
+        self._device_check_in_progress = True
         self.set_busy(True, "正在读取端口和采集设备……")
 
         def worker():
@@ -5972,6 +6310,7 @@ class AutoRngApp:
         selected_port,
         selected_video,
     ):
+        self._device_check_in_progress = False
         port_choices = sorted(
             ports,
             key=lambda port: (
@@ -6011,6 +6350,7 @@ class AutoRngApp:
         self.set_busy(False, status)
 
     def fail_device_check(self, error):
+        self._device_check_in_progress = False
         self.set_result(f"设备检测失败：{error}")
         self.set_busy(False, "设备检测失败，现有乱数方案未被清除。")
 
@@ -6119,6 +6459,11 @@ class AutoRngApp:
         elif self.tid_flow_plan is not None:
             target = self.tid_flow_plan.starter_target
             if target is None:
+                deferred_stage = (
+                    "穷举TID"
+                    if self.tid_flow_plan.request.tid_request.mode == 0
+                    else "不乱数SID的TID乱数"
+                )
                 condition = (
                     ("第一阶段取得任意合法TID后（忽略目标TID及特殊号码；"
                      + ("等待去噪确认" if self.tid_flow_plan.request.any_tid_require_denoise else "首次完整识别即继续，不等待去噪")
@@ -6127,7 +6472,7 @@ class AutoRngApp:
                     else "第一阶段命中启用的TID条件后，"
                 )
                 confirmation = (
-                    "将运行穷举TID → 动态计算实际SID → 研究所桥接 → 1.1.8御三家流程。\n"
+                    f"将运行{deferred_stage} → 动态计算实际SID → 研究所桥接 → 1.1.8御三家流程。\n"
                     + condition + "工具读取实际TID和SID ADV，"
                     "计算实际SID并搜索最早闪光御三家；第三阶段届时生成并预检。\n"
                     f"{self.tid_flow_plan.request.version} / {self.tid_flow_plan.request.starter} / "

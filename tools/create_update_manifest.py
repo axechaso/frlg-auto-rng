@@ -36,7 +36,7 @@ def create_manifest(
     package: Path,
     unpacked_root: Path,
     *,
-    notes: str = "FRLG Auto RNG 0.2：整包更新器与近期乱数流程更新。",
+    notes: str = "FRLG Auto RNG 0.2.1：参数生成修复与近期乱数流程更新。",
     release_url: str | None = None,
 ) -> dict[str, object]:
     package = Path(package).resolve()
@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--package", required=True, type=Path)
     parser.add_argument("--unpacked-root", required=True, type=Path)
-    parser.add_argument("--notes", default="FRLG Auto RNG 0.2：整包更新器与近期乱数流程更新。")
+    parser.add_argument("--notes", default="FRLG Auto RNG 0.2.1：参数生成修复与近期乱数流程更新。")
     args = parser.parse_args(argv)
     manifest = create_manifest(args.package, args.unpacked_root, notes=args.notes)
     print(json.dumps(manifest, ensure_ascii=False, sort_keys=True))

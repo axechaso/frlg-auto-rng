@@ -316,20 +316,38 @@ def run_exhaustive_flow(
     fingerprint_warning_only: bool = False,
     label_profile: LabelOverrideProfile | None = None,
 ) -> int:
-    """Continue from an exhaustive TID hit using its real TID and SID ADV."""
+    """Continue after a stage whose SID is resolved from its runtime ADV."""
     id_main = flow_dir / "01_id" / "main_attempt_000.ecs"
     bridge_main = flow_dir / "02_lab_bridge" / "main.ecs"
     starter_main = flow_dir / "03_starter_118" / "main.ecs"
 
-    code = flow.run_stage(1, "TID 1.3.7穷举", id_main, required_marker=ID_MARKER)
-    if code != 0:
-        return code
     try:
-        actual_tid, sid_advance = parse_id_identity(flow.stage_lines)
         request_payload = payload["request"]
         if not isinstance(request_payload, dict):
             raise ValueError("flow_plan.json中的request格式无效")
         request = tid_starter_flow_request_from_dict(request_payload)
+        # Keep stage-1 startup tolerant of lightweight test/integration
+        # request objects; the full request is validated when resolving the
+        # runtime identity after that stage completes.
+        tid_request = getattr(request, "tid_request", None)
+        request_mode = getattr(tid_request, "mode", 0)
+        handoff_label = (
+            "穷举衔接" if request_mode == 0 else "不乱数SID衔接"
+        )
+        stage_name = (
+            "TID 1.3.7穷举"
+            if request_mode == 0
+            else "TID 1.3.7乱数（不乱数SID）"
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        flow.output(f"[流程错误] 无法读取延后身份解析计划：{exc}")
+        return 2
+
+    code = flow.run_stage(1, stage_name, id_main, required_marker=ID_MARKER)
+    if code != 0:
+        return code
+    try:
+        actual_tid, sid_advance = parse_id_identity(flow.stage_lines)
         resolved = resolve_exhaustive_starter_plan(
             request,
             actual_tid=actual_tid,
@@ -349,11 +367,11 @@ def run_exhaustive_flow(
 
     target = resolved.starter_target
     flow.output(
-        f"[穷举衔接] 实际TID={resolved.tid:05d} / SID ADV={resolved.sid_advance} / "
+        f"[{handoff_label}] 实际TID={resolved.tid:05d} / SID ADV={resolved.sid_advance} / "
         f"计算SID={resolved.sid:05d}"
     )
     flow.output(
-        f"[穷举衔接] 御三家目标 Seed={target.seed_hex} / "
+        f"[{handoff_label}] 御三家目标 Seed={target.seed_hex} / "
         f"ADV={target.advances} / PID={target.pid_hex}"
     )
     try:
@@ -383,7 +401,11 @@ def run_exhaustive_flow(
     update_starter_precalibration(flow, starter_main)
     starter_result = classify_starter_output(flow.stage_lines)
     if starter_result == "shiny":
-        flow.output("[流程完成] 已按穷举获得的实际TID/SID确认闪光御三家。")
+        flow.output(
+            "[流程完成] 已按"
+            + ("穷举" if request_mode == 0 else "不乱数SID")
+            + "获得的实际TID/SID确认闪光御三家。"
+        )
         return 0
     if starter_result == "sid_miss":
         flow.output(
