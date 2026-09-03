@@ -150,6 +150,18 @@ Set-Content -LiteralPath (Join-Path $ReleaseRoot "使用说明.txt") -Encoding U
     "使用前仍需连接 EasyCon 兼容单片机和采集卡，并在界面检测设备。"
 )
 
+# The generator has a local_assets fallback for Windows builds where
+# PyInstaller mangles non-ASCII names under assets.  Keep the fallback a hard
+# release invariant so a package can never ship without the exact EasyCon
+# label names required by the generated ECS project.
+$BundledLabelDir = Join-Path $ReleaseRoot "_internal\local_assets\easycon118\ImgLabel"
+foreach ($RequiredLabel in @("闪公图标.IL", "冲浪.IL")) {
+    $RequiredLabelPath = Join-Path $BundledLabelDir $RequiredLabel
+    if (-not (Test-Path -LiteralPath $RequiredLabelPath -PathType Leaf)) {
+        throw "发布包缺少 EasyCon 扩展标签：$RequiredLabelPath"
+    }
+}
+
 $ZipPath = Join-Path $BuildRoot "$OutputName.zip"
 # The release folder is self-contained. Remove PyInstaller's temporary copy
 # before compression so the archive does not require another full package's

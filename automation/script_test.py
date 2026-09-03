@@ -15,6 +15,7 @@ from fingerprint_policy import record_fingerprint_mismatch
 
 from .easycon118 import (
     EASYCON118_EXTENSION_LABEL_DIR,
+    EASYCON118_LOCAL_LABEL_DIR,
     EGG_TEMPLATE_NAME,
     EXPECTED_EZCON_SHA256,
     EXPECTED_EZCON_VERSION,
@@ -303,7 +304,11 @@ def write_builtin_egg_surf_menu_probe(
     for name in BUILTIN_EGG_SURF_MENU_LABELS:
         label_path = EASYCON118_EXTENSION_LABEL_DIR / f"{name}.IL"
         if not label_path.is_file():
-            raise FileNotFoundError(f"仓库缺少内置测试标签: {label_path.name}")
+            fallback = EASYCON118_LOCAL_LABEL_DIR / f"{name}.IL"
+            if fallback.is_file():
+                label_path = fallback
+            else:
+                raise FileNotFoundError(f"仓库缺少内置测试标签: {label_path.name}")
         label_sources.append(label_path)
 
     output_dir.mkdir(parents=True, exist_ok=True)

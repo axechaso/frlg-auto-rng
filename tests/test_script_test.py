@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from automation import script_test
+from automation import easycon118
 
 
 class DirectScriptTestTests(unittest.TestCase):
@@ -296,6 +297,34 @@ class DirectScriptTestTests(unittest.TestCase):
                 (output / "script-test.json").read_text(encoding="utf-8")
             )
             self.assertEqual(manifest["kind"], "builtin_egg_surf_menu_probe")
+
+    def test_extension_labels_fall_back_to_bundled_local_assets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            broken_extensions = root / "assets"
+            broken_extensions.mkdir()
+            fallback_labels = root / "local_assets" / "ImgLabel"
+            fallback_labels.mkdir(parents=True)
+            output_labels = root / "output" / "ImgLabel"
+            output_labels.mkdir(parents=True)
+            for name in easycon118.EASYCON118_EXTENSION_LABEL_NAMES:
+                (fallback_labels / name).write_bytes(name.encode("utf-8"))
+
+            with mock.patch.object(
+                easycon118,
+                "EASYCON118_EXTENSION_LABEL_DIR",
+                broken_extensions,
+            ), mock.patch.object(
+                easycon118,
+                "EASYCON118_LOCAL_LABEL_DIR",
+                fallback_labels,
+            ):
+                easycon118.copy_easycon118_extension_labels(output_labels)
+
+            self.assertEqual(
+                sorted(path.name for path in output_labels.iterdir()),
+                sorted(easycon118.EASYCON118_EXTENSION_LABEL_NAMES),
+            )
 
 
 if __name__ == "__main__":

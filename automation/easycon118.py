@@ -240,6 +240,14 @@ EASYCON118_EXTENSION_LABEL_DIR = (
     / "assets"
     / "easycon118_extensions"
 )
+# PyInstaller can preserve the bytes of non-ASCII asset names while exposing
+# a mojibake filename on some Windows extraction/build paths.  The bundled
+# 1.1.8 label corpus is also shipped under ``local_assets`` with the exact
+# EasyCon names, so use it as a deterministic fallback for the two labels
+# injected into generated projects.
+EASYCON118_LOCAL_LABEL_DIR = (
+    RESOURCE_ROOT / "local_assets" / "easycon118" / "ImgLabel"
+)
 EASYCON118_EXTENSION_LABEL_NAMES = ("闪公图标.IL", "冲浪.IL")
 EGG_SETTINGS_OVERRIDE_PATH = (
     EASYCON118_EXTENSION_LABEL_DIR
@@ -1095,7 +1103,11 @@ def copy_easycon118_extension_labels(label_dir: str | Path) -> None:
     for name in EASYCON118_EXTENSION_LABEL_NAMES:
         source = EASYCON118_EXTENSION_LABEL_DIR / name
         if not source.is_file():
-            raise FileNotFoundError(f"仓库缺少 EasyCon 扩展标签: {name}")
+            fallback = EASYCON118_LOCAL_LABEL_DIR / name
+            if fallback.is_file():
+                source = fallback
+            else:
+                raise FileNotFoundError(f"仓库缺少 EasyCon 扩展标签: {name}")
         (label_dir / name).write_bytes(source.read_bytes().rstrip(b"\r\n"))
 
 
