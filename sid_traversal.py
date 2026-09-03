@@ -20,9 +20,10 @@ import uuid
 from rng.sid_reverse import sid_at_advance
 
 
-SCHEMA = 1
+SCHEMA = 2
 DEFAULT_START_ADVANCE = 1901
 NAMED_RIVAL_START_ADVANCE = 1900
+SID_ADVANCE_STEP = 2
 DEFAULT_MAX_ADVANCES = 10_000
 DEFAULT_TARGET_MAX_ADVANCES = 3_000
 TERMINAL_STATUSES = frozenset({"completed", "exhausted", "paused"})
@@ -38,11 +39,17 @@ def sid_traversal_start_advance(
     the immutable traversal context, so a changed manual start gets a fresh
     checkpoint instead of silently taking over an existing run.
     """
+    expected_parity = 0 if bool(named_rival) else 1
     if override is None:
         return NAMED_RIVAL_START_ADVANCE if bool(named_rival) else DEFAULT_START_ADVANCE
     override = int(override)
     if override < 0:
         raise ValueError("SID 遍历自定义起点不能为负数")
+    if override % SID_ADVANCE_STEP != expected_parity:
+        parity_name = "偶数" if expected_parity == 0 else "奇数"
+        raise ValueError(
+            f"SID 遍历自定义起点必须是{parity_name}（当前劲敌取名设置对应的可执行 ADV 奇偶）"
+        )
     return override
 
 
@@ -101,6 +108,11 @@ def traversal_context(
         "kind": "sid-traversal",
         "tid": tid,
         "named_rival": bool(named_rival),
+        # 1.3.7 SID计算_奇/偶 selects the route by ADV parity.  The
+        # no-name route is odd, the named-rival route is even, and traversal
+        # must advance by two so it never submits the other route's parity.
+        "sid_advance_parity": 0 if bool(named_rival) else 1,
+        "sid_advance_step": SID_ADVANCE_STEP,
         "start_sid_advance": resolved_start,
         "max_advances": max_advances,
         "target_max_advances": target_max_advances,
@@ -137,11 +149,19 @@ def _validate_state(state: dict, context: dict) -> None:
         raise ValueError("SID 遍历进度状态不是对象")
     max_advances = int(context["max_advances"])
     start = int(context["start_sid_advance"])
+    parity = int(context.get("sid_advance_parity", start % SID_ADVANCE_STEP))
+    step = int(context.get("sid_advance_step", SID_ADVANCE_STEP))
+    if step != SID_ADVANCE_STEP or parity not in (0, 1):
+        raise ValueError("SID 遍历奇偶步进上下文无效")
+    if start % step != parity:
+        raise ValueError("SID 遍历起点与奇偶约束不一致")
     next_advance = int(state.get("next_sid_advance", start))
-    # max_advances is inclusive.  ``max + 1`` is the explicit exhausted
-    # cursor written after the final non-shiny candidate completes.
-    if not start <= next_advance <= max_advances + 1:
+    # max_advances is inclusive.  The exhausted cursor is the next candidate
+    # after the final matching-parity ADV, which can be max+1 or max+2.
+    if not start <= next_advance <= max_advances + step:
         raise ValueError("SID 遍历 next ADV 超出当前任务范围")
+    if next_advance % step != parity:
+        raise ValueError("SID 遍历 next ADV 与奇偶约束不一致")
     current = state.get("current_sid_advance")
     if current is not None:
         current = int(current)
@@ -150,6 +170,8 @@ def _validate_state(state: dict, context: dict) -> None:
         # A current candidate is never allowed to be behind the resume point.
         if next_advance != current:
             raise ValueError("SID 遍历当前候选与 next ADV 不一致")
+        if current % step != parity:
+            raise ValueError("SID 遍历当前 ADV 与奇偶约束不一致")
         sid = state.get("current_sid")
         if sid is None or not 0 <= int(sid) <= 0xFFFF:
             raise ValueError("SID 遍历当前 SID 无效")
@@ -165,6 +187,8 @@ def _validate_state(state: dict, context: dict) -> None:
     hit_advance = state.get("hit_sid_advance")
     if hit_advance is not None and not start <= int(hit_advance) <= max_advances:
         raise ValueError("SID 遍历命中 ADV 无效")
+    if hit_advance is not None and int(hit_advance) % step != parity:
+        raise ValueError("SID 遍历命中 ADV 与奇偶约束不一致")
 
 
 def read_progress(directory: str | Path, context: dict) -> dict | None:
@@ -292,9 +316,12 @@ class SIDTraversalSession:
         advance = int(advance)
         if advance != self.next_sid_advance:
             raise ValueError("SID 遍历候选必须从当前 next ADV 开始")
-        # ``max_advances`` is inclusive.  The final candidate must still be
-        # allowed to run; only the explicit ``max + 1`` exhausted cursor is
-        # prevented from starting.
+        step = int(self.context.get("sid_advance_step", SID_ADVANCE_STEP))
+        parity = int(self.context.get("sid_advance_parity", advance % step))
+        if advance % step != parity:
+            raise ValueError("SID 遍历候选与奇偶约束不一致")
+        # ``max_advances`` is inclusive.  The final matching-parity candidate
+        # must still be allowed to run; only the exhausted cursor is blocked.
         if advance > int(self.context["max_advances"]):
             raise ValueError("SID 遍历已达到最大 ADV")
         self.state.update(
@@ -314,7 +341,8 @@ class SIDTraversalSession:
         current = self.current_sid_advance
         if current is None:
             raise ValueError("没有正在进行的 SID 候选")
-        next_advance = current + 1
+        step = int(self.context.get("sid_advance_step", SID_ADVANCE_STEP))
+        next_advance = current + step
         exhausted = next_advance > int(self.context["max_advances"])
         self.state.update(
             status="exhausted" if exhausted else "running",

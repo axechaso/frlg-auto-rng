@@ -1841,7 +1841,8 @@ class AutoRngApp:
             traversal_options,
             "SID遍历模式",
             "仅野生目标可用。生成前会确认当前 TID 是否正确，并询问是否给劲敌取名；"
-            "未取名从 ADV 1901 开始，取名从 ADV 1900 开始。每个 SID 候选都会先搜索低帧闪光目标；"
+            "未取名从 ADV 1901 开始且只走奇数 ADV，取名从 ADV 1900 开始且只走偶数 ADV，"
+            "每次推进 2 帧。每个 SID 候选都会先搜索低帧闪光目标；"
             "明确未出闪才推进并保存下一起点，中途停止会保留当前候选，下一次从断点继续。",
         ).pack(side="left", padx=(8, 0))
         self.sid_traversal_start_label = ttk.Label(
@@ -1858,7 +1859,8 @@ class AutoRngApp:
             traversal_options,
             "自定义 SID 起点",
             "仅高级模式可用。留空使用 1901（未给劲敌取名）或 1900（给劲敌取名）；"
-            "填写后会作为新的任务起点并使用独立断点，不会覆盖其它起点的进度。",
+            "填写后必须与劲敌取名对应的奇偶一致，并作为新的任务起点使用独立断点，"
+            "不会覆盖其它起点的进度。",
         ).pack(side="left", padx=(6, 0))
         self.sid_traversal_progress_var = tk.StringVar(
             value="尚无 SID 遍历断点；生成后会显示保存的起点。"
@@ -2654,7 +2656,7 @@ class AutoRngApp:
             "整包程序更新",
             "绿色版每天最多自动检查一次稳定版。发现新版后会先询问，完整下载 ZIP 并校验"
             "大小和 SHA-256，再退出程序完成目录交换；失败会恢复旧版。用户配置和日志不在"
-            "程序目录中，不会被替换。首次安装 0.2.1 仍需手动解压，之后可使用应用内更新。",
+            "程序目录中，不会被替换。旧版可直接升级到 0.2.2。",
         ).pack(side="left", padx=(6, 0))
         if not is_frozen_build():
             self.app_update_button.configure(state="disabled")
@@ -3520,15 +3522,15 @@ class AutoRngApp:
             return None
         override = self._sid_traversal_start_override()
         start_hint = (
-            f"当前高级起点为 ADV {override}，会覆盖默认起点。"
+            f"当前高级起点为 ADV {override}，会覆盖默认起点；仍必须匹配本次路线的奇偶。"
             if override is not None
-            else "选择“是”从 ADV 1900 开始；选择“否”从 ADV 1901 开始。"
+            else "选择“是”从 ADV 1900 开始并只遍历偶数；选择“否”从 ADV 1901 开始并只遍历奇数。"
         )
         return messagebox.askyesno(
             "劲敌名称",
             "开始 SID 遍历前，请确认是否给劲敌取名。\n\n"
             + start_hint
-            + "\n劲敌名称只影响默认起点；已填写的高级起点优先。是否给劲敌取名？",
+            + "\n劲敌名称决定 SID 计算分支和 ADV 奇偶；已填写的高级起点优先。是否给劲敌取名？",
         )
 
     def _sid_traversal_progress_text(self, context: dict | None) -> str:
@@ -5397,6 +5399,13 @@ class AutoRngApp:
                 f"遍历上限必须不小于起点 ADV {start_advance}。",
             )
             return
+        if request.min_advances > SID_TRAVERSAL_TARGET_MAX_ADVANCES:
+            messagebox.showerror(
+                "SID遍历输入错误",
+                "目标闪光搜索的最小 ADV 不能大于低帧搜索上限 "
+                f"{SID_TRAVERSAL_TARGET_MAX_ADVANCES}（当前为 {request.min_advances}）。",
+            )
+            return
         try:
             label_profile = self._active_label_profile()
         except ValueError as exc:
@@ -5431,7 +5440,9 @@ class AutoRngApp:
         self.set_busy(True, "正在准备 SID 遍历计划并预检 1.1.8 入口……")
         self.set_result(
             f"TID {request.tid:05d} 已确认；"
-            f"将从 ADV {start_advance} 遍历到 {max_advances}，正在检查脚本和运行后端。"
+            f"将从 ADV {start_advance} 遍历到 {max_advances}；"
+            f"每个 SID 的目标搜索范围为 ADV {request.min_advances}-"
+            f"{SID_TRAVERSAL_TARGET_MAX_ADVANCES}，正在检查脚本和运行后端。"
         )
 
         def worker() -> None:
@@ -5526,8 +5537,10 @@ class AutoRngApp:
             "野生 SID 遍历模式：可续跑",
             f"目标宝可梦：{request.pokemon}；遭遇：{request.category} / {request.location}",
             f"TID：{request.tid:05d}（SID 输入不参与遍历）",
-            f"劲敌取名：{'是' if named_rival else '否'}；起点 ADV：{context['start_sid_advance']}",
-            f"遍历上限：{context['max_advances']}；低帧目标搜索上限：{SID_TRAVERSAL_TARGET_MAX_ADVANCES}",
+            f"劲敌取名：{'是' if named_rival else '否'}；起点 ADV：{context['start_sid_advance']}；"
+            f"只遍历{'偶数' if context['sid_advance_parity'] == 0 else '奇数'} ADV（步长 2）",
+            f"遍历上限：{context['max_advances']}；低帧目标搜索范围："
+            f"ADV {request.min_advances}-{SID_TRAVERSAL_TARGET_MAX_ADVANCES}",
             f"计划文件：{plan_path}",
             f"断点文件：{sid_traversal_progress_path(SID_TRAVERSAL_PROGRESS_DIR, context)}",
             self._sid_traversal_progress_text(context),
@@ -6444,7 +6457,10 @@ class AutoRngApp:
                 "将按已保存断点逐个尝试野生闪光目标，直到确认闪光并反推出正确 SID。\n"
                 f"TID {self.sid_traversal_request.tid:05d} / "
                 f"劲敌取名 {'是' if self.sid_traversal_named_rival else '否'} / "
-                f"ADV {context.get('start_sid_advance', '?')}-{context.get('max_advances', '?')}\n"
+                f"SID ADV {context.get('start_sid_advance', '?')}-{context.get('max_advances', '?')} / "
+                f"仅{'偶数' if context.get('sid_advance_parity') == 0 else '奇数'} ADV，步长 2\n"
+                f"目标搜索 ADV {((context.get('wild_request') or {}).get('min_advances', 0))}-"
+                f"{context.get('target_max_advances', '?')}\n"
                 f"{progress}\n"
                 "每个候选会从当前存档重新执行；明确未出闪才推进起点，停止或异常会保留当前候选。"
                 "请确认存档、路线、宝可梦和 TID 均正确，是否继续？"

@@ -1,0 +1,32 @@
+{
+  "kind": "egg_full",
+  "version": 1,
+  "game": "火红",
+  "nx_model": 1,
+  "seed_mode": 0,
+  "target_seed": "EDDE",
+  "held_advances": 1115,
+  "pickup_advances": 3405,
+  "egg_species_id": 46,
+  "compatibility": 50,
+  "parent_a_gender": "雌",
+  "parent_a_ivs": [
+    8,
+    19,
+    25,
+    15,
+    12,
+    31
+  ],
+  "parent_b_gender": "雄",
+  "parent_b_ivs": [
+    0,
+    5,
+    11,
+    29,
+    0,
+    5
+  ],
+  "start_from_prepared_254": true,
+  "home_buffer_adaptive_threshold": false
+}

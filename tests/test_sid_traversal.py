@@ -4,9 +4,11 @@ import unittest
 from pathlib import Path
 
 from rng.sid_reverse import sid_at_advance
+from run_sid_traversal import traversal_candidate_request
 from sid_traversal import (
     DEFAULT_START_ADVANCE,
     NAMED_RIVAL_START_ADVANCE,
+    SID_ADVANCE_STEP,
     SIDTraversalSession,
     progress_path,
     read_progress,
@@ -33,10 +35,35 @@ def make_context(*, named=False, max_advances=2000, target_max_advances=3000):
 
 
 class SIDTraversalProgressTests(unittest.TestCase):
+    def test_candidate_search_preserves_the_requested_minimum_advance(self):
+        from automation.planner import AutoSearchRequest
+
+        request = AutoSearchRequest(
+            game="fr_nx",
+            tid=12345,
+            sid=0,
+            method="Wild",
+            category="Grass",
+            location="Viridian Forest",
+            pokemon="Pikachu",
+            min_advances=500,
+            max_advances=6500,
+        )
+        candidate = traversal_candidate_request(request, 4567, target_max_advances=3000)
+        self.assertEqual(candidate.min_advances, 500)
+        self.assertEqual(candidate.max_advances, 3000)
+        with self.assertRaisesRegex(ValueError, "下限不能大于上限"):
+            traversal_candidate_request(request, 4567, target_max_advances=499)
+
     def test_start_depends_on_rival_name(self):
         self.assertEqual(sid_traversal_start_advance(False), DEFAULT_START_ADVANCE)
         self.assertEqual(sid_traversal_start_advance(True), NAMED_RIVAL_START_ADVANCE)
-        self.assertEqual(sid_traversal_start_advance(False, 2450), 2450)
+        self.assertEqual(sid_traversal_start_advance(False, 2451), 2451)
+        self.assertEqual(sid_traversal_start_advance(True, 2450), 2450)
+        with self.assertRaisesRegex(ValueError, "奇数"):
+            sid_traversal_start_advance(False, 2450)
+        with self.assertRaisesRegex(ValueError, "偶数"):
+            sid_traversal_start_advance(True, 2451)
 
     def test_custom_start_is_part_of_context_identity(self):
         self.assertNotEqual(
@@ -48,7 +75,7 @@ class SIDTraversalProgressTests(unittest.TestCase):
                 easycon_options=make_context()["easycon_options"],
                 source_sha256="0" * 64,
                 max_advances=2000,
-                start_advance=1950,
+                start_advance=1951,
             ),
         )
 
@@ -75,9 +102,9 @@ class SIDTraversalProgressTests(unittest.TestCase):
             context = make_context()
             with SIDTraversalSession(tmp, context) as session:
                 session.begin_candidate(DEFAULT_START_ADVANCE)
-                self.assertEqual(session.complete_non_shiny(), DEFAULT_START_ADVANCE + 1)
+                self.assertEqual(session.complete_non_shiny(), DEFAULT_START_ADVANCE + SID_ADVANCE_STEP)
             payload = read_progress(tmp, context)
-            self.assertEqual(payload["state"]["next_sid_advance"], DEFAULT_START_ADVANCE + 1)
+            self.assertEqual(payload["state"]["next_sid_advance"], DEFAULT_START_ADVANCE + SID_ADVANCE_STEP)
             self.assertIsNone(payload["state"]["current_sid_advance"])
 
     def test_context_round_trip_normalizes_tuple_values(self):
@@ -91,7 +118,7 @@ class SIDTraversalProgressTests(unittest.TestCase):
             context = make_context(max_advances=DEFAULT_START_ADVANCE)
             with SIDTraversalSession(tmp, context) as session:
                 session.begin_candidate(DEFAULT_START_ADVANCE)
-                self.assertEqual(session.complete_non_shiny(), DEFAULT_START_ADVANCE + 1)
+                self.assertEqual(session.complete_non_shiny(), DEFAULT_START_ADVANCE + SID_ADVANCE_STEP)
                 self.assertEqual(session.state["status"], "exhausted")
 
     def test_paused_candidate_resumes_after_previous_candidates(self):
@@ -100,12 +127,32 @@ class SIDTraversalProgressTests(unittest.TestCase):
             with SIDTraversalSession(tmp, context) as session:
                 session.begin_candidate(DEFAULT_START_ADVANCE)
                 session.complete_non_shiny()
-                session.begin_candidate(DEFAULT_START_ADVANCE + 1)
+                session.begin_candidate(DEFAULT_START_ADVANCE + SID_ADVANCE_STEP)
                 session.pause("stop-file")
             with SIDTraversalSession(tmp, context) as resumed:
-                self.assertEqual(resumed.next_sid_advance, DEFAULT_START_ADVANCE + 1)
-                self.assertEqual(resumed.current_sid_advance, DEFAULT_START_ADVANCE + 1)
+                self.assertEqual(resumed.next_sid_advance, DEFAULT_START_ADVANCE + SID_ADVANCE_STEP)
+                self.assertEqual(resumed.current_sid_advance, DEFAULT_START_ADVANCE + SID_ADVANCE_STEP)
                 self.assertEqual(resumed.state["attempt_count"], 2)
+
+    def test_context_records_the_route_parity_and_two_advance_step(self):
+        unnamed = make_context(named=False)
+        named = make_context(named=True)
+        self.assertEqual(unnamed["sid_advance_parity"], 1)
+        self.assertEqual(named["sid_advance_parity"], 0)
+        self.assertEqual(unnamed["sid_advance_step"], SID_ADVANCE_STEP)
+        self.assertNotEqual(unnamed, named)
+
+    def test_progress_rejects_the_other_sid_parity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            context = make_context()
+            with SIDTraversalSession(tmp, context) as session:
+                session.begin_candidate(DEFAULT_START_ADVANCE)
+            path = progress_path(tmp, context)
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+            payload["state"]["next_sid_advance"] = DEFAULT_START_ADVANCE + 1
+            Path(path).write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "奇偶"):
+                read_progress(tmp, context)
 
     def test_context_isolation_and_atomic_payload(self):
         with tempfile.TemporaryDirectory() as tmp:

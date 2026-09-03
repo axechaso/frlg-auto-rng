@@ -16,7 +16,7 @@ class UpdateManifestToolTests(unittest.TestCase):
             (unpacked / "FRLG-Auto-RNG.exe").write_bytes(b"main")
             (unpacked / "_internal").mkdir()
             (unpacked / "_internal" / "x").write_bytes(b"internal")
-            package = root / "FRLG-Auto-RNG-0.2.1-windows-x64.zip"
+            package = root / "FRLG-Auto-RNG-0.2.2-windows-x64.zip"
             package.write_bytes(b"zip bytes")
             result = create_manifest(package, unpacked, notes="notes")
             expected_hash = hashlib.sha256(b"zip bytes").hexdigest()
@@ -41,7 +41,7 @@ class UpdateManifestToolTests(unittest.TestCase):
             package.write_bytes(b"x")
             with self.assertRaises(ValueError):
                 create_manifest(package, unpacked)
-            package = root / "FRLG-Auto-RNG-0.2.1-windows-x64.zip"
+            package = root / "FRLG-Auto-RNG-0.2.2-windows-x64.zip"
             package.write_bytes(b"x")
             with self.assertRaises(ValueError):
                 create_manifest(package, root / "empty")

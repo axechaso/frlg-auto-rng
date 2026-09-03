@@ -94,14 +94,27 @@ def traversal_candidate_request(
     *,
     target_max_advances: int = DEFAULT_TARGET_MAX_ADVANCES,
 ) -> AutoSearchRequest:
-    """Build the low-frame shiny search request for one candidate SID."""
+    """Build the low-frame shiny search request for one candidate SID.
+
+    Keep the user's wild-page minimum Advance as the lower bound.  SID
+    traversal only relaxes encounter filters; it must not silently search a
+    frame prefix that the user excluded.
+    """
     target_max_advances = int(target_max_advances)
     if target_max_advances <= 0:
         raise ValueError("SID遍历的低帧搜索上限必须大于0")
+    target_min_advances = int(request.min_advances)
+    if target_min_advances < 0:
+        raise ValueError("SID遍历的低帧搜索下限不能为负数")
+    if target_min_advances > target_max_advances:
+        raise ValueError(
+            "SID遍历的低帧搜索下限不能大于上限 "
+            f"（{target_min_advances}>{target_max_advances}）"
+        )
     return replace(
         request,
         sid=int(sid),
-        min_advances=0,
+        min_advances=target_min_advances,
         max_advances=target_max_advances,
         iv_min=(0, 0, 0, 0, 0, 0),
         iv_max=(31, 31, 31, 31, 31, 31),
@@ -203,6 +216,18 @@ def run_traversal(
     _append_log(log_path, "SID遍历启动|TID=%d|起点=%d|上限=%d" % (
         request.tid, context["start_sid_advance"], max_advances
     ))
+    _append_log(
+        log_path,
+        "SID遍历奇偶约束|仅尝试%s ADV|步长=%d"
+        % (
+            "偶数" if context["sid_advance_parity"] == 0 else "奇数",
+            context["sid_advance_step"],
+        ),
+    )
+    _append_log(
+        log_path,
+        f"SID遍历目标搜索范围|ADV={request.min_advances}-{target_max_advances}",
+    )
     runner_warnings: list[str] = []
     runner = prepare_compat_runner(
         ezcon_path,
@@ -257,7 +282,11 @@ def run_traversal(
                 # confirmed non-shiny candidate and is safe to advance.
                 session.complete_non_shiny("no-low-frame-shiny-target")
                 candidate_info.update({"status": "non-shiny", "result": str(exc)})
-                _append_log(log_path, f"ADV={advance} 无低帧闪光目标，起点更新为 {session.next_sid_advance}")
+                _append_log(
+                    log_path,
+                    f"ADV={advance} 无低帧闪光目标，起点按奇偶步长 {context['sid_advance_step']} "
+                    f"更新为 {session.next_sid_advance}",
+                )
                 _write_report(report_path, {**state_report, "state": session.state})
                 continue
             except Exception as exc:
@@ -320,7 +349,11 @@ def run_traversal(
                 return 0
             if kind == "non-shiny" and code == 0:
                 session.complete_non_shiny("non-shiny-confirmed")
-                _append_log(log_path, f"ADV={advance} 明确完成但未出闪，下一起点={session.next_sid_advance}")
+                _append_log(
+                    log_path,
+                    f"ADV={advance} 明确完成但未出闪，下一起点按奇偶步长 "
+                    f"{context['sid_advance_step']} 更新为 {session.next_sid_advance}",
+                )
                 _write_report(report_path, {**state_report, "state": session.state})
                 continue
             session.pause("stopped-before-explicit-completion" if code == 130 else "missing-completion-marker")

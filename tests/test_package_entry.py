@@ -18,8 +18,8 @@ class PackageEntryTests(unittest.TestCase):
         self.assertEqual(
             json.loads(output.getvalue()),
             {
-                "version": "0.2.1",
-                "version_code": 2026090301,
+                "version": "0.2.2",
+                "version_code": 2026090302,
                 "update_schema": 1,
                 "repository": "axechaso/frlg-auto-rng",
             },
@@ -31,7 +31,7 @@ class PackageEntryTests(unittest.TestCase):
             self.assertEqual(
                 package_entry.main(["--version-json-file", str(path)]), 0
             )
-            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.2.1")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.2.2")
 
     def test_health_marker_is_written_before_gui(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -49,7 +49,7 @@ class PackageEntryTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(
                 json.loads(path.read_text(encoding="utf-8")),
-                {"token": "a" * 32, "version_code": 2026090301},
+                {"token": "a" * 32, "version_code": 2026090302},
             )
 
     def test_invalid_internal_arguments_are_rejected(self):
