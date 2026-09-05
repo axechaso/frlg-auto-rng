@@ -40,6 +40,7 @@ jobs:
           tid_records.py
           tid_session.py
           process_control.py
+          pyside_preview.py
           run_auto_rng_gui.py
           run_auto_planner.py
           run_easycon_logged.py
@@ -81,6 +82,7 @@ jobs:
           tests.test_home_buffer_recovery
           tests.test_label_matcher
           tests.test_manual_tools
+          tests.test_pyside_preview
           tests.test_sid_reverse
           tests.test_sid_reverse118
           tests.test_sid_reverse_capture
