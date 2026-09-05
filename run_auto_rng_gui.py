@@ -160,7 +160,9 @@ DEFAULT_EZCON = DEFAULT_EZCON_PATH
 IV_STAT_LABELS = ("HP", "攻击", "防御", "特攻", "特防", "速度")
 IV_PRESETS = ("不限", "6V", "0A", "0S", "0A0S")
 SID_SOURCE_LABELS = ("定点", "野生")
-MODE_TAB_ORDER = ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）")
+SCRIPT_PACKAGE_UI_NAME = "2.0 自动乱数脚本包"
+SCRIPT_FLOW_UI_NAME = "2.0 自动乱数脚本"
+MODE_TAB_ORDER = ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋")
 ADVANCED_TAB_LABEL = "脚本测试（高级）"
 RUN_LOG_TAB_LABEL = "运行日志"
 TID_RECORD_TAB_LABEL = "TID 实测表"
@@ -172,11 +174,11 @@ SID_TRAVERSAL_TARGET_MAX_ADVANCES = SID_TRAVERSAL_DEFAULT_TARGET_MAX_ADVANCES
 MANUAL_PROFILE_LABEL = "未选择（手动输入）"
 SAVE_PROFILE_PATH = USER_DATA_ROOT / "save_profiles.json"
 DEVICE_LABEL_ROOT = USER_DATA_ROOT / "device_label_overrides"
-EGG_START_MODE_FULL = "完整准备（自动走254步并存档）"
-EGG_START_MODE_PREPARED = "从已完成254步准备开始"
+EGG_START_MODE_FULL = "完整准备（自动走 254 步并存档）"
+EGG_START_MODE_PREPARED = "从已完成 254 步准备开始"
 EGG_START_MODES = (EGG_START_MODE_FULL, EGG_START_MODE_PREPARED)
-SEED_STARTUP_HOME_BUFFER = "方案0：当前 HOME_BUFFER（原样）"
-SEED_STARTUP_FIXED_USER_HOME = "方案1：固定用户界面 HOME"
+SEED_STARTUP_HOME_BUFFER = "方案 0：当前 HOME_BUFFER（原样）"
+SEED_STARTUP_FIXED_USER_HOME = "方案 1：固定用户界面 HOME"
 SEED_STARTUP_SCHEMES = (
     SEED_STARTUP_HOME_BUFFER,
     SEED_STARTUP_FIXED_USER_HOME,
@@ -185,18 +187,18 @@ SEED_STARTUP_SCHEME_CODES = {
     SEED_STARTUP_HOME_BUFFER: 0,
     SEED_STARTUP_FIXED_USER_HOME: 1,
 }
-SEED_CALIBRATION_ORIGINAL = "方案0：原始12轮绝对落点众数"
-SEED_CALIBRATION_LOCKED_FINE = "方案1：实验锁定与毫秒细调"
-SEED_CALIBRATION_SHADOW = "方案2：成功参数保持与影子监测（仅孵蛋实验流程）"
+SEED_CALIBRATION_ORIGINAL = "方案 0：原始 12 轮绝对落点众数"
+SEED_CALIBRATION_LOCKED_FINE = "方案 1：实验锁定与毫秒细调"
+SEED_CALIBRATION_CONTINUATION = "方案 2：命中保持后的方向票接续（仅孵蛋）"
 SEED_CALIBRATION_SCHEMES = (
     SEED_CALIBRATION_ORIGINAL,
     SEED_CALIBRATION_LOCKED_FINE,
-    SEED_CALIBRATION_SHADOW,
+    SEED_CALIBRATION_CONTINUATION,
 )
 SEED_CALIBRATION_SCHEME_CODES = {
     SEED_CALIBRATION_ORIGINAL: 0,
     SEED_CALIBRATION_LOCKED_FINE: 1,
-    SEED_CALIBRATION_SHADOW: 2,
+    SEED_CALIBRATION_CONTINUATION: 2,
 }
 TID_SID_MODE_TARGET = "目标 SID（自动计算 ADV）"
 TID_SID_MODE_NO_RANDOM = "不乱数 SID（固定 F3，采用实际 SID）"
@@ -546,9 +548,9 @@ def parse_iv_ranges(
             minimum = int(str(minimum_text).strip())
             maximum = int(str(maximum_text).strip())
         except ValueError as exc:
-            raise ValueError(f"{label}个体值必须是 0-31 的整数") from exc
+            raise ValueError(f"{label}个体值必须是 0–31 的整数") from exc
         if not 0 <= minimum <= 31 or not 0 <= maximum <= 31:
-            raise ValueError(f"{label}个体值必须在 0-31 之间")
+            raise ValueError(f"{label}个体值必须在 0–31 之间")
         if minimum > maximum:
             raise ValueError(
                 f"{label}个体值最低值 {minimum} 不能高于最高值 {maximum}"
@@ -566,9 +568,9 @@ def parse_exact_ivs(values, label: str) -> tuple[int, int, int, int, int, int]:
         try:
             value = int(str(text).strip())
         except ValueError as exc:
-            raise ValueError(f"{label}{stat}必须是 0-31 的整数") from exc
+            raise ValueError(f"{label}{stat}必须是 0–31 的整数") from exc
         if not 0 <= value <= 31:
-            raise ValueError(f"{label}{stat}必须在 0-31 之间")
+            raise ValueError(f"{label}{stat}必须在 0–31 之间")
         result.append(value)
     return tuple(result)  # type: ignore[return-value]
 
@@ -619,7 +621,7 @@ def build_egg_config_payload(
     parent_a_ivs = parse_exact_ivs(parent_a_ivs, "亲本A")
     parent_b_ivs = parse_exact_ivs(parent_b_ivs, "亲本B")
     if not isinstance(start_from_prepared_254, bool):
-        raise ValueError("254步启动模式必须是布尔值")
+        raise ValueError("254 步启动模式必须是布尔值")
     return {
         "version": EGG_CONFIG_VERSION,
         "game": game,
@@ -782,21 +784,21 @@ def build_egg_full_config_payload(
     except (TypeError, ValueError) as exc:
         raise ValueError("Held/生成帧和 Pickup/领取帧必须是整数") from exc
     if not isinstance(start_from_prepared_254, bool):
-        raise ValueError("254步启动模式必须是布尔值")
+        raise ValueError("254 步启动模式必须是布尔值")
     if not isinstance(home_buffer_adaptive_threshold, bool):
-        raise ValueError("HOME_BUFFER稳定低分自适应开关必须是布尔值")
+        raise ValueError("HOME_BUFFER 稳定低分自适应开关必须是布尔值")
     try:
         seed_startup_scheme = int(seed_startup_scheme)
     except (TypeError, ValueError) as exc:
-        raise ValueError("Seed启动方案只能是0或1") from exc
+        raise ValueError("Seed 启动方案只能是 0 或 1") from exc
     if seed_startup_scheme not in {0, 1}:
-        raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
+        raise ValueError("Seed 启动方案只能是 0（当前 HOME_BUFFER）或 1（固定用户界面 HOME）")
     try:
         seed_calibration_scheme = int(seed_calibration_scheme)
     except (TypeError, ValueError) as exc:
-        raise ValueError("Seed校准方案只能是0、1或2") from exc
+        raise ValueError("Seed 校准方案只能是 0、1 或 2") from exc
     if seed_calibration_scheme not in {0, 1, 2}:
-        raise ValueError("Seed校准方案只能是0（原始12轮众数）、1（实验锁定细调）或2（成功参数保持）")
+        raise ValueError("Seed 校准方案只能是 0（原始 12 轮众数）、1（实验锁定细调）或 2（命中保持后的方向票接续）")
     game_code = ("fr" if game == "火红" else "lg") + ("_nx2" if nx_model == 2 else "_nx")
     request = EggRunRequest(
         game=game_code,
@@ -1195,7 +1197,7 @@ class AutoRngApp:
         frame = ttk.Frame(self.tid_records_tab)
         frame.pack(fill="both", expand=True, pady=6)
         columns = ("tid", "game", "nx_model", "language", "OP", "F1", "F2", "occurrences", "player_name", "op_correction", "last_seen")
-        labels = ("TID", "游戏", "机型", "语言", "OP", "F1", "F2", "出现次数", "主角名称", "OP修正ms", "最近记录")
+        labels = ("TID", "游戏", "机型", "语言", "OP", "F1", "F2", "出现次数", "主角名称", "OP 修正（ms）", "最近记录时间")
         self.tid_record_tree = ttk.Treeview(frame, columns=columns, show="headings", height=18, selectmode="browse")
         for column, label in zip(columns, labels):
             self.tid_record_tree.heading(column, text=label)
@@ -1229,7 +1231,7 @@ class AutoRngApp:
         try:
             rows = self.tid_record_store.rows(**self._tid_record_filters())
         except Exception as exc:
-            self.tid_record_status_var.set(f"TID表读取失败：{exc}")
+            self.tid_record_status_var.set(f"TID 实测表读取失败：{exc}")
             return
         selected = self.tid_record_tree.selection()
         self.tid_record_tree.delete(*self.tid_record_tree.get_children())
@@ -1245,7 +1247,7 @@ class AutoRngApp:
             self._show_tid_record_details()
         else:
             self.tid_record_details_var.set("选择一条记录查看固定延迟、按键及主角设置。次数表示观测次数，不保证再次命中。")
-        self.tid_record_status_var.set(f"显示 {len(rows)} 项参数记录（最多1000项）；导出包含全部筛选结果。保存位置：{TID_RECORD_PATH}")
+        self.tid_record_status_var.set(f"显示 {len(rows)} 项参数记录（最多 1000 项）；导出包含全部筛选结果。保存位置：{TID_RECORD_PATH}")
 
     def _show_tid_record_details(self, _event=None):
         selected = self.tid_record_tree.selection()
@@ -1255,22 +1257,22 @@ class AutoRngApp:
         self.tid_record_details_var.set(
             f"{row['game']} / Switch {row['nx_model']} / {row['language']} / TID {row['tid']:05d}\n"
             f"主角：{row['player_name']}（{'男性' if row['gender'] == 0 else '女性'}）；"
-            f"OP/F1/F2固定延迟：{row['op_fixed_delay']}/{row['f1_fixed_delay']}/{row['f2_fixed_delay']} ms；OP修正：{row['op_correction']} ms\n"
+            f"OP/F1/F2 固定延迟：{row['op_fixed_delay']}/{row['f1_fixed_delay']}/{row['f2_fixed_delay']} ms；OP 修正：{row['op_correction']} ms\n"
             f"OP机型补偿：{row['op_model_offset']} ms；"
-            f"SELECT执行/额外补偿：{row['select_count']}/{row['select_correction']}；HOME_BUFFER：{row['home_buffer_delay']} ms；"
+            f"SELECT 执行/额外补偿：{row['select_count']}/{row['select_correction']}；HOME_BUFFER：{row['home_buffer_delay']} ms；"
             f"Sound：{('MONO','STEREO')[row['sound']]}；Button：{('HELP','LR','L=A')[row['button_mode']]}；"
-            f"Seed键：{('A','START','L')[row['seed_button']]}；取名进入键：{('A','B')[row['name_entry_button']]}"
+            f"Seed 键：{('A','START','L')[row['seed_button']]}；取名进入键：{('A','B')[row['name_entry_button']]}"
         )
 
     def export_tid_records(self):
         try:
             filters = self._tid_record_filters()
-            path = filedialog.asksaveasfilename(parent=self.root, title="导出TID实测表", initialfile="TID实测表.csv", defaultextension=".csv", filetypes=[("CSV表格", "*.csv")])
+            path = filedialog.asksaveasfilename(parent=self.root, title="导出 TID 实测表", initialfile="TID 实测表.csv", defaultextension=".csv", filetypes=[("CSV 表格", "*.csv")])
             if path:
                 count = self.tid_record_store.export_csv(Path(path), **filters)
                 self.tid_record_status_var.set(f"已导出 {count} 项记录：{path}")
         except Exception as exc:
-            messagebox.showerror("TID表导出失败", str(exc), parent=self.root)
+            messagebox.showerror("TID 实测表导出失败", str(exc), parent=self.root)
 
     def _tid_record_arguments(self, log_path):
         context = TidRecordContext.from_request(self.tid_game_var.get(), self.tid_request)
@@ -1630,13 +1632,13 @@ class AutoRngApp:
         self.sid_count_var.trace_add("write", self._refresh_sid_party_rows)
         self._refresh_sid_party_rows()
 
-        sid_source = ttk.LabelFrame(sid_tab, text="3. SID 采集脚本包", padding=8)
+        sid_source = ttk.LabelFrame(sid_tab, text="3. SID 查找脚本", padding=8)
         sid_source.pack(fill="x", pady=(8, 0))
         # 优先使用安装器生成的已审计本地快照。下载目录可能仍是旧版
         # SID 模板或缺少闪光雄性标签，不能因为文件“存在”就绕过导入结果。
         self.sid_source_var = tk.StringVar(value=str(DEFAULT_SOURCE_118))
         self._labeled_entry(
-            sid_source, "1.1.8 包", self.sid_source_var, 0, 0, width=70, span=5
+            sid_source, SCRIPT_PACKAGE_UI_NAME, self.sid_source_var, 0, 0, width=70, span=5
         )
         ttk.Button(sid_source, text="选择", command=self.choose_sid_source).grid(
             row=0, column=6, padx=4
@@ -1725,7 +1727,7 @@ class AutoRngApp:
             maximum.grid(row=2, column=index, padx=5, pady=2)
             ttk.Button(
                 iv_frame,
-                text="0-31",
+                text="0–31",
                 width=5,
                 command=lambda stat_index=index - 1: self.reset_iv_stat(stat_index),
             ).grid(row=3, column=index, padx=5, pady=2)
@@ -1814,7 +1816,7 @@ class AutoRngApp:
             capture_options,
             "道具乱数模式",
             "仅野生目标可用。开启后，物种正确且“无道具”标签不匹配时计为一次命中；"
-            "脚本按队伍空位数保存对应次数的携带道具目标，支持 1-5 个空位。",
+            "脚本按队伍空位数保存对应次数的携带道具目标，支持 1–5 个空位。",
         ).pack(side="left", padx=(6, 0))
         traversal_options = ttk.Frame(filters)
         traversal_options.grid(
@@ -1822,7 +1824,7 @@ class AutoRngApp:
         )
         self.sid_traversal_check = ttk.Checkbutton(
             traversal_options,
-            text="SID遍历模式",
+            text="SID 遍历模式",
             variable=self.sid_traversal_var,
             command=self._update_item_rng_controls,
         )
@@ -1839,7 +1841,7 @@ class AutoRngApp:
         self.sid_traversal_max_adv_spin.pack(side="left")
         self._help_marker(
             traversal_options,
-            "SID遍历模式",
+            "SID 遍历模式",
             "仅野生目标可用。生成前会确认当前 TID 是否正确，并询问是否给劲敌取名；"
             "未取名从 ADV 1901 开始且只走奇数 ADV，取名从 ADV 1900 开始且只走偶数 ADV，"
             "每次推进 2 帧。每个 SID 候选都会先搜索低帧闪光目标；"
@@ -1931,7 +1933,7 @@ class AutoRngApp:
 
         egg = ttk.LabelFrame(
             egg_tab,
-            text="2. 孵蛋测试目标",
+            text="2. 孵蛋目标",
             padding=8,
         )
         egg.pack(fill="x", pady=(10, 0))
@@ -1964,9 +1966,15 @@ class AutoRngApp:
         )
         ttk.Checkbutton(
             egg,
-            text="允许生成并运行实验性的同 Seed 孵蛋正式 WAIT 流程（尚未完成本机实机验收）",
+            text="我已确认孵蛋前置条件，允许启动流程",
             variable=self.egg_ack_var,
-        ).grid(row=4, column=0, columnspan=8, sticky="w", padx=6, pady=(5, 0))
+        ).grid(row=4, column=0, columnspan=7, sticky="w", padx=6, pady=(5, 0))
+        self._help_marker(
+            egg,
+            "孵蛋运行确认",
+            "该流程尚未完成本机整轮实机验收。启动前请确认 254 步基础档、队伍空位、"
+            "甜甜香气宝可梦和 Ten Lines 目标参数均正确。",
+        ).grid(row=4, column=7, sticky="e", padx=6, pady=(5, 0))
         egg_config_actions = ttk.Frame(egg)
         egg_config_actions.grid(row=5, column=0, columnspan=8, sticky="w", padx=6, pady=(7, 0))
         ttk.Button(
@@ -2066,7 +2074,7 @@ class AutoRngApp:
         )
         self.tid_shiny_sid_button = ttk.Button(
             tid_identity,
-            text="6V闪SID",
+            text="6V 闪 SID",
             command=self.calculate_tid_shiny_sid,
         )
         self.tid_shiny_sid_button.grid(
@@ -2086,7 +2094,7 @@ class AutoRngApp:
         )
         self._add_tooltip(
             self.tid_shiny_sid_button,
-            "6V闪SID",
+            "6V 闪 SID",
             "只计算并回填目标 SID，不启动游戏。搜索起点不能早于 F3 固定延迟对应帧，"
             "并会计入当前语言的 SID 前置补偿和 SID ADV 修正；结果按最低可执行 ADV，"
             "而不是 SID 数值大小。",
@@ -2129,7 +2137,7 @@ class AutoRngApp:
         self._help_marker(
             tid_frames,
             "帧数单位",
-            "这里的脚本帧按游戏画面帧填写，不是 1.1.8 / Ten Lines 的 RNG advance。",
+            "这里按游戏画面帧填写，不是 Ten Lines / 2.0 脚本使用的 RNG advance。",
         ).grid(row=0, column=4, padx=5, pady=2)
         frame_rows = (
             ("乱数中心帧", (self.tid_op_target_var, self.tid_f1_target_var, self.tid_f2_target_var)),
@@ -2295,7 +2303,7 @@ class AutoRngApp:
         ).grid(row=3, column=7, sticky="w", padx=4, pady=4)
         self.tid_any_tid_denoise_check = ttk.Checkbutton(
             tid_starter,
-            text="任意 TID 等待去噪确认",
+            text="任意 TID 仍需去噪确认",
             variable=self.tid_any_tid_denoise_var,
         )
         self.tid_any_tid_denoise_check.grid(row=4, column=2, columnspan=5, sticky="w", padx=4, pady=4)
@@ -2455,17 +2463,17 @@ class AutoRngApp:
             justify="left",
         ).grid(row=4, column=0, columnspan=7, sticky="w", padx=4, pady=(5, 0))
 
-        runtime = ttk.LabelFrame(container, text="EasyCon 共通设置与工具", padding=10)
+        runtime = ttk.LabelFrame(container, text="EasyCon 1.6.4-a 与设备", padding=10)
         runtime.pack(fill="x", pady=(0, 10), before=self.mode_notebook)
         self.source_var = tk.StringVar(value=str(DEFAULT_SOURCE_118))
         self.ezcon_var = tk.StringVar(value=str(DEFAULT_EZCON))
         self.port_var = tk.StringVar(value="COM22")
         self.video_var = tk.StringVar(value="0")
-        self.source_entry = self._labeled_entry(runtime, "1.1.8 包（普通/孵蛋）", self.source_var, 0, 0, width=68, span=5)
+        self.source_entry = self._labeled_entry(runtime, SCRIPT_PACKAGE_UI_NAME, self.source_var, 0, 0, width=68, span=5)
         self._add_tooltip(
             self.source_entry,
-            "1.1.8 包路径",
-            "普通、孵蛋和高级页的正式/时间轴入口都从此目录读取。",
+            "2.0 自动乱数脚本包路径",
+            "野生/静态、孵蛋和高级页的正式版/时间轴版入口都从此目录读取。",
         )
         ttk.Button(runtime, text="选择", command=self.choose_source).grid(row=0, column=6, padx=4)
         self.ezcon_entry = self._labeled_entry(runtime, "ezcon.exe", self.ezcon_var, 1, 0, width=68, span=5)
@@ -2533,7 +2541,7 @@ class AutoRngApp:
         self._add_tooltip(
             self.home_buffer_adaptive_check,
             "HOME_BUFFER 稳定低分自适应",
-            "作用于 1.1.8、TID 和 SID，默认关闭。只有同一状态连续稳定命中时才会采用低于 95 的分数。",
+            "作用于 2.0 自动乱数脚本、TID 和 SID，默认关闭。只有同一状态连续稳定命中时才会采用低于 95 的分数。",
         )
         self.seed_update_button = ttk.Button(
             manual_tools,
@@ -2545,7 +2553,7 @@ class AutoRngApp:
         seed_options = ttk.Frame(runtime)
         seed_options.grid(row=4, column=0, columnspan=7, sticky="w", padx=4, pady=(2, 0))
         self.seed_calibration_scheme_var = tk.StringVar(value=SEED_CALIBRATION_ORIGINAL)
-        ttk.Label(seed_options, text="Seed校准").pack(side="left", padx=(0, 4))
+        ttk.Label(seed_options, text="Seed 校准").pack(side="left", padx=(0, 4))
         self.seed_calibration_scheme_combo = ttk.Combobox(
             seed_options,
             textvariable=self.seed_calibration_scheme_var,
@@ -2554,7 +2562,7 @@ class AutoRngApp:
             state="disabled",
         )
         self.seed_calibration_scheme_combo.pack(side="left")
-        ttk.Label(seed_options, text="Seed启动").pack(side="left", padx=(10, 4))
+        ttk.Label(seed_options, text="Seed 启动").pack(side="left", padx=(10, 4))
         self.seed_startup_scheme_var = tk.StringVar(value=SEED_STARTUP_HOME_BUFFER)
         self.seed_startup_scheme_combo = ttk.Combobox(
             seed_options,
@@ -2565,7 +2573,7 @@ class AutoRngApp:
         )
         self.seed_startup_scheme_combo.pack(side="left")
         self.script_entry_options = ttk.Frame(seed_options)
-        ttk.Label(self.script_entry_options, text="脚本模板").pack(
+        ttk.Label(self.script_entry_options, text="2.0 脚本入口").pack(
             side="left", padx=(0, 4)
         )
         self.script_test_entry_combo = ttk.Combobox(
@@ -2582,7 +2590,7 @@ class AutoRngApp:
         )
         self._help_marker(
             self.script_entry_options,
-            "脚本模板",
+            "2.0 脚本入口",
             "正式版脚本使用 NS火叶全自动一键乱数2.0.ecs；时间轴版脚本使用"
             " NS火叶全自动一键乱数2.0-时间轴.ecs。"
             "自选 ECS 保留高级页的任意脚本测试能力。切换模板会自动更新 ECS 文件路径。",
@@ -2618,9 +2626,9 @@ class AutoRngApp:
             precalibration_options,
             "自动更新预校准",
             "默认关闭。完整命中目标后保存本次 Seed 与可用的帧修正；记录按游戏、"
-            "Switch机型、Seed模式、Seed启动方案、正式/时间轴入口和流程类型隔离。"
-            "正式版普通定点只复用Seed；时间轴定点及野生、孵蛋、御三家可复用帧修正。"
-            "TID与SID阶段不使用这些记录。",
+            "Switch 机型、Seed 模式、Seed 启动方案、正式版/时间轴版入口和流程类型隔离。"
+            "正式版普通定点只复用 Seed；时间轴版定点及野生、孵蛋、御三家可复用帧修正。"
+            "TID 与 SID 阶段不使用这些记录。",
         ).pack(side="left", padx=(6, 0))
 
         app_update_options = ttk.Frame(runtime)
@@ -2656,7 +2664,7 @@ class AutoRngApp:
             "整包程序更新",
             "绿色版每天最多自动检查一次稳定版。发现新版后会先询问，完整下载 ZIP 并校验"
             "大小和 SHA-256，再退出程序完成目录交换；失败会恢复旧版。用户配置和日志不在"
-            "程序目录中，不会被替换。旧版可直接升级到 0.2.2。",
+            f"程序目录中，不会被替换。旧版可直接升级到 {APP_VERSION}。",
         ).pack(side="left", padx=(6, 0))
         if not is_frozen_build():
             self.app_update_button.configure(state="disabled")
@@ -3256,7 +3264,7 @@ class AutoRngApp:
             # Check all known types first: no half-applied drafts.
             for name, value in saved.get("values", {}).items():
                 if name in variables and type(value) is not type(variables[name].get()):
-                    raise ValueError(f"TID参数{name}类型无效，原文件保留")
+                    raise ValueError(f"TID 参数“{name}”类型无效，原文件保留")
             self._updating = True
             try:
                 for name, value in saved.get("values", {}).items():
@@ -3305,7 +3313,7 @@ class AutoRngApp:
             })
             self._refresh_tid_progress()
         except OSError as exc:
-            self.tid_progress_status_var.set(f"TID参数保存失败：{exc}")
+            self.tid_progress_status_var.set(f"TID 参数保存失败：{exc}")
 
     def _restore_pending_tid_calibration(self):
         pending = self._tid_pending_calibration
@@ -3325,7 +3333,7 @@ class AutoRngApp:
     def _refresh_tid_progress(self):
         try:
             if self.tid_mode_var.get() != "穷举模式":
-                self.tid_progress_status_var.set("TID参数自动保存；穷举模式运行时自动记录搜索进度。")
+                self.tid_progress_status_var.set("TID 参数会自动保存；穷举模式运行时会自动记录搜索进度。")
                 return
             request = replace(self.collect_tid_request(), calibration_check=False)
             flow = self.collect_tid_starter_flow_request(request)
@@ -3508,9 +3516,9 @@ class AutoRngApp:
         try:
             value = int(text)
         except ValueError as exc:
-            raise ValueError("SID遍历自定义起点必须是整数") from exc
+            raise ValueError("SID 遍历的自定义起点必须是整数") from exc
         if not 0 <= value <= 65535:
-            raise ValueError("SID遍历自定义起点必须在0-65535之间")
+            raise ValueError("SID 遍历的自定义起点必须在 0–65535 之间")
         return value
 
     def _ask_sid_traversal_confirmation(self, request: AutoSearchRequest) -> bool | None:
@@ -3559,7 +3567,7 @@ class AutoRngApp:
             )
         else:
             detail = f"下次从 ADV {state.get('next_sid_advance')} 继续"
-        return f"SID遍历断点：{detail}；尝试 {state.get('attempt_count', 0)} 次；文件：{path}"
+        return f"SID 遍历断点：{detail}；尝试 {state.get('attempt_count', 0)} 次；文件：{path}"
 
     @staticmethod
     def _sid_traversal_report_text(path: Path | None) -> tuple[str, str | None]:
@@ -3569,13 +3577,13 @@ class AutoRngApp:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            return f"SID遍历报告读取失败：{exc}\n报告文件：{path}", None
+            return f"SID 遍历报告读取失败：{exc}\n报告文件：{path}", None
         if not isinstance(payload, dict):
-            return f"SID遍历报告格式无效\n报告文件：{path}", None
+            return f"SID 遍历报告格式无效\n报告文件：{path}", None
         context = payload.get("context")
         state = payload.get("state")
         status = payload.get("status")
-        lines = ["SID遍历运行报告", f"状态：{status or '未知'}"]
+        lines = ["SID 遍历运行报告", f"状态：{status or '未知'}"]
         if isinstance(context, dict):
             lines.append(
                 f"起点/上限：ADV {context.get('start_sid_advance', '?')}"
@@ -3633,11 +3641,11 @@ class AutoRngApp:
         """Return the selected calibration path with page-specific defaults."""
         code = SEED_CALIBRATION_SCHEME_CODES[self.seed_calibration_scheme_var.get()]
         if not egg and code == 2:
-            raise ValueError("正式版 Seed校准方案只能选择方案0或方案1")
+            raise ValueError("正式版 Seed 校准只能选择方案 0 或方案 1")
         return code
 
     def _update_seed_scheme_controls(self) -> None:
-        """Keep advanced Seed choices valid for the active 1.1.8 entry."""
+        """Keep advanced Seed choices valid for the active 2.0 entry."""
         combo = getattr(self, "seed_calibration_scheme_combo", None)
         startup_combo = getattr(self, "seed_startup_scheme_combo", None)
         calibration_var = getattr(self, "seed_calibration_scheme_var", None)
@@ -3654,7 +3662,7 @@ class AutoRngApp:
         combo.configure(values=values)
         advanced = self._seed_options_are_advanced()
         if not advanced:
-            desired = SEED_CALIBRATION_SHADOW if is_egg else SEED_CALIBRATION_ORIGINAL
+            desired = SEED_CALIBRATION_CONTINUATION if is_egg else SEED_CALIBRATION_ORIGINAL
             if (
                 calibration_var.get() != desired
                 or startup_var.get() != SEED_STARTUP_HOME_BUFFER
@@ -3764,7 +3772,7 @@ class AutoRngApp:
             text=(
                 "预检所选脚本" if is_script_test
                 else "准备 SID 查找" if is_sid
-                else "生成孵蛋测试脚本" if is_egg
+                else "生成孵蛋脚本" if is_egg
                 else (
                     "生成 TID/SID + 御三家计划"
                     if self.tid_starter_flow_var.get()
@@ -3779,7 +3787,7 @@ class AutoRngApp:
                 if is_script_test
                 else "填写 SID 查找条件后点击“准备 SID 查找”。"
                 if is_sid
-                else "填写孵蛋参数后点击“生成孵蛋测试脚本”。"
+                else "填写孵蛋参数后点击“生成孵蛋脚本”。"
                 if is_egg
                 else (
                     "填写 TID/SID 与御三家参数后生成连续流程计划。"
@@ -4188,7 +4196,7 @@ class AutoRngApp:
                 calibration_labels = {
                     0: SEED_CALIBRATION_ORIGINAL,
                     1: SEED_CALIBRATION_LOCKED_FINE,
-                    2: SEED_CALIBRATION_SHADOW,
+                    2: SEED_CALIBRATION_CONTINUATION,
                 }
                 self.seed_calibration_scheme_var.set(
                     calibration_labels[calibration_code]
@@ -4211,9 +4219,9 @@ class AutoRngApp:
     def collect_egg_request(self) -> EggRunRequest:
         species_id = parse_egg_species(self.egg_pokemon_var.get())
         if self.egg_seed_mode_var.get() == "请选择":
-            raise ValueError("孵蛋测试必须选择与 Ten Lines 结果一致的 Seed 模式")
+            raise ValueError("请选择与 Ten Lines 结果一致的孵蛋 Seed 模式")
         if not self.egg_ack_var.get():
-            raise ValueError("请先确认允许运行尚未完成实机验收的孵蛋正式 WAIT 流程")
+            raise ValueError("请先勾选孵蛋运行确认")
         return EggRunRequest(
             game=self._game_code(),
             seed_mode=int(self.egg_seed_mode_var.get().split(":", 1)[0]),
@@ -4242,19 +4250,19 @@ class AutoRngApp:
     def calculate_tid_shiny_sid(self) -> None:
         """Find and apply the earliest SID that makes the configured PID shiny."""
         if self.busy or self._process_running():
-            messagebox.showerror("正在运行", "请先等待当前流程结束，再计算6V闪SID。")
+            messagebox.showerror("正在运行", "请先等待当前流程结束，再计算 6V 闪 SID。")
             return
         try:
             tid_text = str(self.tid_target_var.get()).strip()
             if not re.fullmatch(r"[0-9]+", tid_text):
-                raise ValueError("TID必须是十进制整数")
+                raise ValueError("TID 必须是十进制整数")
             tid = int(tid_text, 10)
             if not 0 <= tid <= 0xFFFF:
-                raise ValueError("TID必须在0-65535之间")
+                raise ValueError("TID 必须在 0–65535 之间")
             f3_delay_var = getattr(self, "tid_f3_delay_var", None)
             f3_delay_text = f3_delay_var.get() if f3_delay_var is not None else "0"
             if not re.fullmatch(r"[0-9]+", str(f3_delay_text).strip()):
-                raise ValueError("F3固定延迟必须是非负整数")
+                raise ValueError("F3 固定延迟必须是非负整数")
             f3_delay_ms = int(str(f3_delay_text).strip(), 10)
             f3_frame_floor = fixed_delay_to_frames(f3_delay_ms)
             language_var = getattr(self, "tid_language_var", None)
@@ -4270,7 +4278,7 @@ class AutoRngApp:
                 else "0"
             )
             if not re.fullmatch(r"[+-]?[0-9]+", sid_correction_text):
-                raise ValueError("SID ADV修正必须是整数")
+                raise ValueError("SID ADV 修正必须是整数")
             sid_correction = int(sid_correction_text, 10)
             f3_min_advances = sid_min_advances_for_f3(
                 f3_delay_ms,
@@ -4295,12 +4303,12 @@ class AutoRngApp:
             )
             if hit is None:
                 raise LookupError(
-                    f"TID生成链 ADV {f3_min_advances:,}-"
+                    f"TID 生成链 ADV {f3_min_advances:,}-"
                     f"{DEFAULT_TID_SID_SEARCH_ADVANCES - 1:,} 中没有找到"
-                    "该PID对应的闪光SID"
+                    "该 PID 对应的闪光 SID"
                 )
         except (ValueError, LookupError) as exc:
-            messagebox.showerror("6V闪SID计算失败", str(exc), parent=self.root)
+            messagebox.showerror("6V 闪 SID 计算失败", str(exc), parent=self.root)
             return
 
         self._updating = True
@@ -4311,16 +4319,16 @@ class AutoRngApp:
             self._updating = False
         self.invalidate_plan()
         self.append_result_note(
-            "6V闪SID计算完成："
+            "6V 闪 SID 计算完成："
             f"TID {tid:05d} / PID {pid:08X} / PSV {psv:04d}\n"
-            f"合法SID候选：{', '.join(f'{sid:05d}' for sid in sid_candidates)}\n"
-            f"F3固定延迟：{f3_delay_ms} ms = {f3_frame_floor} ADV；"
-            f"{language}版SID前置补偿：{sid_prefix} ADV；SID修正：{sid_correction:+d}；"
+            f"合法 SID 候选：{', '.join(f'{sid:05d}' for sid in sid_candidates)}\n"
+            f"F3 固定延迟：{f3_delay_ms} ms = {f3_frame_floor} ADV；"
+            f"{language}版 SID 前置补偿：{sid_prefix} ADV；SID 修正：{sid_correction:+d}；"
             f"实际最低搜索 ADV：{f3_min_advances}；"
             f"最低 SID ADV：{hit.advance}；目标 SID 已设置为 {hit.sid:05d}。"
         )
         self.status_var.set(
-            f"6V闪SID已回填：SID {hit.sid:05d}（ADV {hit.advance}，"
+            f"6V 闪 SID 已回填：SID {hit.sid:05d}（ADV {hit.advance}，"
             f"最低可执行 ADV {f3_min_advances}）；请重新生成计划。"
         )
 
@@ -4544,10 +4552,10 @@ class AutoRngApp:
         entry_text = "正式版" if context.get("entry") == "FORMAL" else "时间轴版"
         lines = [
             "自动更新预校准：开启（"
-            f"{kind_text} / {entry_text} / Seed启动方案{context.get('seed_startup_scheme', '?')}）"
+            f"{kind_text} / {entry_text} / Seed 启动方案 {context.get('seed_startup_scheme', '?')}）"
         ]
         if config.get("frame_enabled") is False:
-            lines.append("本流程只复用Seed预校准；正式版普通定点不复用帧预校准。")
+            lines.append("本流程只复用 Seed 预校准；正式版普通定点不复用帧预校准。")
         loaded = config.get("loaded")
         if isinstance(loaded, dict):
             nx = int(context.get("nx_model", 1))
@@ -4560,7 +4568,7 @@ class AutoRngApp:
                 frame_text = "帧=不加载"
             else:
                 frame_text = f"帧={loaded.get('frame_ns1' if nx == 1 else 'frame_ns2')}"
-            lines.append(f"已载入同上下文记录：Seed索引={seed_value} / {frame_text}")
+            lines.append(f"已载入同上下文记录：Seed 索引={seed_value} / {frame_text}")
         else:
             lines.append("未找到同上下文历史记录，本次使用模板初值。")
         return lines
@@ -4612,7 +4620,7 @@ class AutoRngApp:
         return (
             "预校准已更新："
             f"{context['kind']} / {context['entry']} / 启动方案{context['seed_startup_scheme']} / "
-            f"Seed索引={seed_value} / {frame_text}"
+            f"Seed 索引={seed_value} / {frame_text}"
         )
 
     def set_run_log(self, text: str) -> None:
@@ -5256,7 +5264,7 @@ class AutoRngApp:
             request = self.collect_request()
             if self.method_var.get() == "野生" and self.sid_traversal_var.get():
                 if self.item_rng_mode_var.get():
-                    raise ValueError("SID遍历模式不能与道具乱数模式同时开启")
+                    raise ValueError("SID 遍历模式不能与道具乱数模式同时开启")
                 named_rival = self._ask_sid_traversal_confirmation(request)
                 if named_rival is None:
                     return
@@ -5271,7 +5279,7 @@ class AutoRngApp:
             if item_rng_enabled:
                 party_empty_slots = int(self.party_empty_slots_var.get())
                 if not 1 <= party_empty_slots <= 5:
-                    raise ValueError("队伍空位数量必须在 1-5 之间")
+                    raise ValueError("队伍空位数量必须在 1–5 之间")
             else:
                 party_empty_slots = 1
             template_name = self._selected_generation_template_name()
@@ -5391,17 +5399,17 @@ class AutoRngApp:
             start_override = self._sid_traversal_start_override()
             start_advance = sid_traversal_start_advance(named_rival, start_override)
         except (TypeError, ValueError) as exc:
-            messagebox.showerror("SID遍历输入错误", str(exc))
+            messagebox.showerror("SID 遍历输入错误", str(exc))
             return
         if max_advances < start_advance:
             messagebox.showerror(
-                "SID遍历输入错误",
+                "SID 遍历输入错误",
                 f"遍历上限必须不小于起点 ADV {start_advance}。",
             )
             return
         if request.min_advances > SID_TRAVERSAL_TARGET_MAX_ADVANCES:
             messagebox.showerror(
-                "SID遍历输入错误",
+                "SID 遍历输入错误",
                 "目标闪光搜索的最小 ADV 不能大于低帧搜索上限 "
                 f"{SID_TRAVERSAL_TARGET_MAX_ADVANCES}（当前为 {request.min_advances}）。",
             )
@@ -5437,7 +5445,7 @@ class AutoRngApp:
         self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
-        self.set_busy(True, "正在准备 SID 遍历计划并预检 1.1.8 入口……")
+        self.set_busy(True, "正在准备 SID 遍历计划并预检 2.0 脚本入口……")
         self.set_result(
             f"TID {request.tid:05d} 已确认；"
             f"将从 ADV {start_advance} 遍历到 {max_advances}；"
@@ -5548,10 +5556,10 @@ class AutoRngApp:
         if preparation.check.ok:
             lines.extend(f"预检提示：{warning}" for warning in preparation.check.warnings)
             lines.append("开始运行后，每个明确未出闪候选都会落盘更新下一起点；停止会保留当前候选。")
-            status = "SID遍历计划已准备，可以开始；已有断点会自动续跑。"
+            status = "SID 遍历计划已准备，可以开始；已有断点会自动续跑。"
         else:
             lines.extend(f"预检失败：{error}" for error in preparation.check.errors)
-            status = "SID遍历计划已生成，但预检不允许启动。"
+            status = "SID 遍历计划已生成，但预检不允许启动。"
         self.set_result("\n".join(lines))
         self.set_busy(False, status)
 
@@ -5631,7 +5639,7 @@ class AutoRngApp:
         self.runtime_check = preparation.check
         lines = [
             "高级模式：直接 ECS 测试",
-            f"1.1.8 入口：{identify_script_test_entry(self.source_var.get(), preparation.script_path)}",
+            f"2.0 脚本入口：{identify_script_test_entry(self.source_var.get(), preparation.script_path)}",
             f"脚本：{preparation.script_path}",
             f"工作目录：{preparation.project_dir}",
             f"运行后端：{preparation.backend}",
@@ -5726,9 +5734,9 @@ class AutoRngApp:
             f"TID：{request.tid:05d}；队内闪光数量：{request.party_count}",
             f"每只最多糖果：{request.max_candies}；识图阈值：{request.recognition_threshold}",
             (
-                "SID HOME_BUFFER稳定低分自适应：开启（稳定3次、最低90分）"
+                "SID HOME_BUFFER 稳定低分自适应：开启（稳定 3 次、最低 90 分）"
                 if request.home_buffer_adaptive_threshold
-                else "SID HOME_BUFFER稳定低分自适应：关闭（严格95分）"
+                else "SID HOME_BUFFER 稳定低分自适应：关闭（严格 95 分）"
             ),
             "图鉴覆盖：" + ", ".join(str(request.dex_overrides[index]) for index in active_slots),
             "来源：" + ", ".join(
@@ -5772,7 +5780,7 @@ class AutoRngApp:
         self.runtime_check = None
         status = (
             (
-                "正在生成延后身份解析的 TID 阶段；御三家目标将在取得实际TID/SID后搜索……"
+                "正在生成延后身份解析的 TID 阶段；御三家目标将在取得实际 TID/SID 后搜索……"
                 if flow_request is not None and flow_request.deferred_identity
                 else "正在搜索御三家目标并生成 TID/SID 连续流程计划……"
             )
@@ -5785,18 +5793,18 @@ class AutoRngApp:
                 (
                     (
                         (
-                            "穷举阶段将输出实际TID和SID ADV；运行时计算实际SID后，"
+                            "穷举阶段将输出实际 TID 和 SID ADV；运行时计算实际 SID 后，"
                             if flow_request.tid_request.mode == 0
-                            else "不乱数SID阶段将输出实际TID和SID ADV；运行时计算实际SID后，"
+                            else "不乱数 SID 阶段将输出实际 TID 和 SID ADV；运行时计算实际 SID 后，"
                         )
-                        + "再搜索最早可达闪光御三家并生成1.1.8第三阶段。"
+                        + "再搜索最早可达闪光御三家并生成 2.0 第三阶段。"
                     )
                     if flow_request.deferred_identity
                     else (
                         "正在搜索 ADV "
                         f"{flow_request.starter_min_advances}-"
                         f"{flow_request.starter_max_advances} 内最早可达闪光御三家，"
-                        "并生成英文TID、研究所桥接和1.1.8御三家三个阶段。"
+                        "并生成英文 TID、研究所桥接和 2.0 御三家三个阶段。"
                     )
                 )
             )
@@ -5914,9 +5922,9 @@ class AutoRngApp:
             f"固定延迟 OP/F1/F2/F3：{request.op_fixed_delay}/{request.f1_fixed_delay}/{request.f2_fixed_delay}/{request.f3_fixed_delay}",
             f"固定延迟检查：{'开启' if request.calibration_check else '关闭'}",
             (
-                "TID HOME_BUFFER稳定低分自适应：开启（稳定3次、最低90分）"
+                "TID HOME_BUFFER 稳定低分自适应：开启（稳定 3 次、最低 90 分）"
                 if request.home_buffer_adaptive_threshold
-                else "TID HOME_BUFFER稳定低分自适应：关闭（严格95分）"
+                else "TID HOME_BUFFER 稳定低分自适应：关闭（严格 95 分）"
             ),
             f"计划文件：{plan_path}",
             f"生成脚本：{project_main}",
@@ -5924,25 +5932,25 @@ class AutoRngApp:
         if starter_save_template:
             lines.append("已接入同步按键与同语言帧换算更新；首次使用新版建议勾选固定延迟检查。")
         if request.calibration_check:
-            lines.append("启动后先测量OP/F1/F2/F3，自动回填实际OP修正并关闭检测，再生成、预检和执行正式计划；无需再次点击开始。")
+            lines.append("启动后先测量 OP/F1/F2/F3，自动回填实际 OP 修正并关闭检测，再生成、预检和执行正式计划；无需再次点击开始。")
         elif not starter_save_template and request.language == "日文":
             lines.append("兼容修正：已把日版 FOR $InputLen 改为 1.6.4-a 可编译的显式索引循环。")
         if flow_plan is not None:
             if flow_plan.request.tid_request.language == "日文":
                 lines.append(
-                    "日版御三家临时分支：Seed模式10（mono_h_a / HELP / 封面A），"
+                    "日版御三家临时分支：Seed 模式 10（mono_h_a / HELP / 封面 A），"
                     "使用日版识图标签；识图失败不会默认判为天真。"
                 )
             if flow_plan.request.accept_any_tid:
                 condition = "通过原版去噪确认" if flow_plan.request.any_tid_require_denoise else "首次完整识别，不等待去噪"
-                lines.append(f"TID接续条件：任意合法TID，{condition}；目标TID和特殊号码均不参与成功判定。")
+                lines.append(f"TID 接续条件：任意合法 TID，{condition}；目标 TID 和特殊号码均不参与成功判定。")
             lines.extend(
                 (
-                    f"御三家 Seed校准方案：固定方案{STARTER_SEED_CALIBRATION_SCHEME}（当前正式方案）",
+                    f"御三家 Seed 校准方案：固定方案 {STARTER_SEED_CALIBRATION_SCHEME}（当前正式方案）",
                     (
-                        "御三家 Seed启动方案：固定用户界面 HOME（方案1）"
+                        "御三家 Seed 启动方案：固定用户界面 HOME（方案 1）"
                         if flow_plan.request.starter_seed_startup_scheme == 1
-                        else "御三家 Seed启动方案：当前 HOME_BUFFER（方案0）"
+                        else "御三家 Seed 启动方案：当前 HOME_BUFFER（方案 0）"
                     ),
                     (
                         "御三家脚本入口：正式版"
@@ -5950,7 +5958,7 @@ class AutoRngApp:
                         else "御三家脚本入口：时间轴版"
                     ),
                     (
-                        "御三家自动更新预校准：开启（独立于普通定点和TID/SID）"
+                        "御三家自动更新预校准：开启（独立于普通定点和 TID/SID）"
                         if flow_plan.request.update_precalibration
                         else "御三家自动更新预校准：关闭"
                     ),
@@ -5961,21 +5969,21 @@ class AutoRngApp:
                 deferred_label = (
                     "穷举动态衔接"
                     if flow_plan.request.tid_request.mode == 0
-                    else "不乱数SID动态衔接"
+                    else "不乱数 SID 动态衔接"
                 )
                 lines.extend(
                     (
                         f"连续流程：{flow_plan.request.version} / {flow_plan.request.starter} / {deferred_label}",
                         f"御三家游戏设置：{flow_plan.request.starter_settings}",
                         (
-                            "御三家搜索：取得实际TID和SID ADV后计算实际SID，再在 ADV "
+                            "御三家搜索：取得实际 TID 和 SID ADV 后计算实际 SID，再在 ADV "
                             f"{flow_plan.request.starter_min_advances}-"
                             f"{flow_plan.request.starter_max_advances} 内搜索最早闪光目标"
                         ),
                         "F3：固定延迟；随机F3模式已移除",
                         f"ID 阶段：{project_main}",
                         f"研究所桥接：{project_main.parents[1] / '02_lab_bridge' / 'main.ecs'}",
-                        "1.1.8 御三家：运行时按实际TID/SID生成并立即预检",
+                        "2.0 御三家：运行时按实际 TID/SID 生成并立即预检",
                     )
                 )
             else:
@@ -5999,7 +6007,7 @@ class AutoRngApp:
                         f"SID ADV 重试顺序：{retry_preview} ...",
                         f"ID 阶段：{project_main}",
                         f"研究所桥接：{project_main.parents[1] / '02_lab_bridge' / 'main.ecs'}",
-                        f"1.1.8 御三家：{project_main.parents[1] / '03_starter_118' / 'main.ecs'}",
+                        f"2.0 御三家：{project_main.parents[1] / '03_starter_118' / 'main.ecs'}",
                     )
                 )
                 lines.extend(
@@ -6014,9 +6022,9 @@ class AutoRngApp:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
             status = (
                 (
-                    "穷举连续流程前两阶段已通过预检；第三阶段将在取得实际TID/SID后生成并预检。"
+                    "穷举连续流程前两阶段已通过预检；第三阶段将在取得实际 TID/SID 后生成并预检。"
                     if flow_plan.request.tid_request.mode == 0
-                    else "不乱数SID连续流程前两阶段已通过预检；第三阶段将在取得实际TID/SID后生成并预检。"
+                    else "不乱数 SID 连续流程前两阶段已通过预检；第三阶段将在取得实际 TID/SID 后生成并预检。"
                 )
                 if flow_plan.starter_target is None
                 else "连续流程三阶段均已生成并通过预检，可以开始运行。"
@@ -6046,7 +6054,7 @@ class AutoRngApp:
         self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
-        self.set_busy(True, "正在生成孵蛋测试脚本并执行 1.6.4a 预检……")
+        self.set_busy(True, "正在生成孵蛋脚本并执行 EasyCon 1.6.4-a 预检……")
         self.set_result("孵蛋模式使用 Ten Lines 已选出的同 Seed / Held / Pickup，不重复搜索目标。")
 
         def worker():
@@ -6116,25 +6124,25 @@ class AutoRngApp:
         pokemon = get_species_name(request.species_id)
         selected_template = self._selected_generation_template_name()
         entry_description = (
-            "正式 WAIT 版"
+            "正式版（普通 WAIT）"
             if selected_template == STANDARD_TEMPLATE_NAME
             else "时间轴版"
         )
         lines = [
-            f"孵蛋模式：同 Seed {entry_description}（实验性）",
+            f"孵蛋模式：同 Seed {entry_description}",
             (
-                "启动准备：从已完成254步的基础存档开始"
+                "启动准备：从已完成 254 步的基础存档开始"
                 if request.start_from_prepared_254
-                else "启动准备：完整准备（自动走254步、检查设置并存档）"
+                else "启动准备：完整准备（自动走 254 步、检查设置并存档）"
             ),
             f"蛋种：{SPECIES_EN_TO_ZH.get(pokemon, pokemon)} ({pokemon})",
             f"目标 Seed：{request.normalized_seed}，Seed 模式：{request.seed_mode}",
             (
-                "Seed启动：固定用户界面 HOME（关闭游戏识图保持原样）"
+                "Seed 启动：固定用户界面 HOME（关闭游戏识图保持原样）"
                 if request.seed_startup_scheme == 1
-                else "Seed启动：当前 HOME_BUFFER（原样）"
+                else "Seed 启动：当前 HOME_BUFFER（原样）"
             ),
-            f"Seed校准方案：{request.seed_calibration_scheme}",
+            f"Seed 校准方案：{request.seed_calibration_scheme}",
             f"Held/生成帧：{request.held_advances}",
             f"Pickup/领取帧：{request.pickup_advances}",
             f"双亲相性：{request.compatibility}",
@@ -6152,7 +6160,7 @@ class AutoRngApp:
             lines.extend(self._precalibration_plan_lines(usable_project))
         if check and check.ok and usable_project is not None:
             lines.extend(f"预检提示：{warning}" for warning in check.warnings)
-            status = "孵蛋测试脚本已生成，可以在确认存档准备后开始。"
+            status = "孵蛋脚本已生成，可以在确认存档准备后开始。"
         elif check:
             lines.extend(f"预检失败：{error}" for error in check.errors)
             status = "孵蛋脚本已生成，但预检不允许启动。"
@@ -6204,8 +6212,8 @@ class AutoRngApp:
             f"初始 Seed：{plan.initial_seed.seed}",
             f"Advance：{plan.initial_seed.advances}",
             f"Seed 模式：{plan.seed_mode}",
-            f"Seed启动：{self.seed_startup_scheme_var.get()}",
-            f"Seed校准方案：{self.seed_calibration_scheme_var.get()}",
+            f"Seed 启动：{self.seed_startup_scheme_var.get()}",
+            f"Seed 校准方案：{self.seed_calibration_scheme_var.get()}",
             f"脚本入口：{self.script_test_entry_var.get()}",
             (
                 "指定模式：已跳过筛选搜索"
@@ -6234,7 +6242,7 @@ class AutoRngApp:
             if check:
                 lines.extend(f"预检提示：{warning}" for warning in check.warnings)
             if plan.request.category.endswith("Rod") and "Safari Zone" in plan.request.location:
-                lines.append("启动前确认：所选钓竿已登录到 Y；1.1.8 实际复用中央钓点路线。")
+                lines.append("启动前确认：所选钓竿已登录到 Y；2.0 脚本实际复用中央钓点路线。")
         self.set_result("\n".join(lines))
         can_start = bool(
             usable_project and check and check.ok
@@ -6476,21 +6484,21 @@ class AutoRngApp:
             target = self.tid_flow_plan.starter_target
             if target is None:
                 deferred_stage = (
-                    "穷举TID"
+                    "穷举 TID"
                     if self.tid_flow_plan.request.tid_request.mode == 0
-                    else "不乱数SID的TID乱数"
+                    else "不乱数 SID 的 TID 乱数"
                 )
                 condition = (
-                    ("第一阶段取得任意合法TID后（忽略目标TID及特殊号码；"
+                    ("第一阶段取得任意合法 TID 后（忽略目标 TID 及特殊号码；"
                      + ("等待去噪确认" if self.tid_flow_plan.request.any_tid_require_denoise else "首次完整识别即继续，不等待去噪")
                      + "），")
                     if self.tid_flow_plan.request.accept_any_tid
-                    else "第一阶段命中启用的TID条件后，"
+                    else "第一阶段命中启用的 TID 条件后，"
                 )
                 confirmation = (
-                    f"将运行{deferred_stage} → 动态计算实际SID → 研究所桥接 → 1.1.8御三家流程。\n"
-                    + condition + "工具读取实际TID和SID ADV，"
-                    "计算实际SID并搜索最早闪光御三家；第三阶段届时生成并预检。\n"
+                    f"将运行{deferred_stage} → 动态计算实际 SID → 研究所桥接 → 2.0 御三家流程。\n"
+                    + condition + "工具读取实际 TID 和 SID ADV，"
+                    "计算实际 SID 并搜索最早闪光御三家；第三阶段届时生成并预检。\n"
                     f"{self.tid_flow_plan.request.version} / {self.tid_flow_plan.request.starter} / "
                     f"ADV {self.tid_flow_plan.request.starter_min_advances}-"
                     f"{self.tid_flow_plan.request.starter_max_advances}\n"
@@ -6498,13 +6506,13 @@ class AutoRngApp:
                 )
             else:
                 confirmation = (
-                    "将依次运行三个阶段：TID/SID 1.3.7 → 研究所桥接存档 → 现有1.1.8御三家流程。\n"
+                    "将依次运行三个阶段：TID/SID 1.3.7 → 研究所桥接存档 → 2.0 御三家流程。\n"
                     f"目标 TID/SID {self.tid_request.target_tid:05d} / {self.tid_request.target_sid:05d}\n"
                     f"{self.tid_flow_plan.request.version} / {target.species_zh} / "
                     f"Seed {target.seed_hex} / ADV {target.advances}\n"
                     "第一阶段会新建存档；第二阶段会自动走到御三家前并存档；"
-                    "第三阶段由1.1.8负责领取、识别和校准。若精确命中但不闪，"
-                    "程序会按SID ADV重试范围重新执行三段。是否继续？"
+                    "第三阶段由 2.0 脚本负责领取、识别和校准。若精确命中但不闪，"
+                    "程序会按 SID ADV 重试范围重新执行三段。是否继续？"
                 )
         elif self.tid_request is not None:
             confirmation = (
@@ -6516,12 +6524,18 @@ class AutoRngApp:
             )
         elif self.egg_request is not None:
             preparation = (
-                "本次会跳过254步走位、设置检查和存档；请确认当前存档确实是已完成254步准备的基础档。"
+                "本次会跳过 254 步走位、设置检查和存档；请确认当前存档确实是已完成 254 步准备的基础档。"
                 if self.egg_request.start_from_prepared_254
-                else "本次会自动完成254步走位、设置检查并建立基础存档。"
+                else "本次会自动完成 254 步走位、设置检查并建立基础存档。"
+            )
+            selected_entry = self._selected_generation_template_name()
+            egg_entry = (
+                "正式版（普通 WAIT）"
+                if selected_entry == STANDARD_TEMPLATE_NAME
+                else "时间轴版"
             )
             confirmation = (
-                "将启动 1.1.8 的实验性同 Seed 孵蛋正式 WAIT 流程。\n"
+                f"将启动 {SCRIPT_FLOW_UI_NAME}的同 Seed 孵蛋{egg_entry}流程。\n"
                 f"Seed {self.egg_request.normalized_seed} / Held {self.egg_request.held_advances} / "
                 f"Pickup {self.egg_request.pickup_advances}\n"
                 f"{preparation}\n"
@@ -6532,11 +6546,11 @@ class AutoRngApp:
                 f"将启动 EasyCon CLI 并控制 {self.port_var.get()} / 采集卡 {self.video_var.get()}。\n"
                 f"本方案使用 Seed 模式 {self.plan_result.plan.seed_mode}："
                 f"{self.plan_result.plan.initial_seed.settings}\n"
-                "请确认游戏设置、存档位置和 NS 主页状态均符合 1.1.8 要求，是否继续？"
+                f"请确认游戏设置、存档位置和 NS 主页状态均符合 {SCRIPT_FLOW_UI_NAME}要求，是否继续？"
             )
         if self.tid_request is not None and self.tid_request.calibration_check:
             confirmation = (
-                "已开启固定延迟检测：先执行检测，再自动回填四项延迟与实际OP修正，"
+                "已开启固定延迟检测：先执行检测，再自动回填四项延迟与实际 OP 修正，"
                 "重新生成并预检下述计划，通过后自动继续；不会再次询问。\n\n" + confirmation
             )
         fingerprint_warnings = [
@@ -6637,7 +6651,7 @@ class AutoRngApp:
             plan_path = self.sid_traversal_plan_path
             context = self.sid_traversal_context or {}
             if plan_path is None:
-                messagebox.showerror("SID遍历启动失败", "缺少 SID 遍历计划文件，请重新生成。")
+                messagebox.showerror("SID 遍历启动失败", "缺少 SID 遍历计划文件，请重新生成。")
                 return
             command = build_worker_command("sid-traversal", [
                 "--request-json",
@@ -6691,7 +6705,7 @@ class AutoRngApp:
                     self.sid_request,
                 )
             except (OSError, ValueError) as exc:
-                messagebox.showerror("SID计划写入失败", str(exc))
+                messagebox.showerror("SID 计划写入失败", str(exc))
                 return
             self.sid_log_path = output_dir / f"sid-reverse-{timestamp}.log"
             self.sid_report_path = output_dir / f"sid-reverse-{timestamp}.txt"
@@ -6852,7 +6866,7 @@ class AutoRngApp:
                     command.extend(arguments)
             except (OSError, ValueError) as exc:
                 self.running_mode = None
-                messagebox.showerror("TID记录准备失败", str(exc))
+                messagebox.showerror("TID 记录准备失败", str(exc))
                 return
         log_path = self._current_running_log_path()
         self.stop_request_path = log_path.with_name(log_path.name + "." + uuid.uuid4().hex + ".stop")
@@ -6894,7 +6908,7 @@ class AutoRngApp:
                 f"SID 遍历正在运行；日志将保存到 {self.sid_traversal_log_path}。"
                 if self.running_mode == "sid_traversal"
                 else (
-                    "TID/SID → 研究所 → 1.1.8 御三家流程正在运行；详细日志见新打开的终端。"
+                    "TID/SID → 研究所 → 2.0 御三家流程正在运行；详细日志见新打开的终端。"
                     if self.running_mode == "tid_flow"
                     else (
                         f"TID/SID 正在运行；日志将保存到 {self.tid_log_path}。"
@@ -6949,7 +6963,7 @@ class AutoRngApp:
         self._tid_pending_calibration = None
         if hasattr(self, "_tid_save_job"):
             self._save_tid_settings()
-        self.status_var.set("固定延迟与实际OP修正已自动回填；后台正在生成、预检并继续正式计划。")
+        self.status_var.set("固定延迟与实际 OP 修正已自动回填；后台正在生成、预检并继续正式计划。")
 
     def poll_process(self):
         if self.process is None:
@@ -7052,8 +7066,8 @@ class AutoRngApp:
             detail = f"；日志：{tid_log_path}" if tid_log_path is not None else ""
             log_text = read_display_log_tail(tid_log_path, maximum_chars=30000)
             if log_text:
-                self.set_result("TID/SID运行日志：\n\n" + log_text)
-            self.status_var.set(f"TID/SID脚本已退出，退出码 {code}{detail}")
+                self.set_result("TID/SID 运行日志：\n\n" + log_text)
+            self.status_var.set(f"TID/SID 脚本已退出，退出码 {code}{detail}")
         elif completed_mode == "tid_flow":
             detail = f"；日志：{tid_flow_log_path}" if tid_flow_log_path is not None else ""
             if code == 0:
@@ -7115,7 +7129,7 @@ class AutoRngApp:
         process = expected_process if expected_process is not None else self.process
         if process is None or self.process is not process or process.poll() is not None:
             return
-        self.status_var.set("停止请求超时，正在终止本次运行器及其EasyCon子进程……")
+        self.status_var.set("停止请求超时，正在终止本次运行器及其 EasyCon 子进程……")
         self._force_stop_process(process)
 
     def _force_stop_process(self, process):
@@ -7222,7 +7236,7 @@ class AutoRngApp:
             if self.running_tid_exhaustive:
                 stop = messagebox.askyesnocancel("保存穷举进度并关闭",
                     "是否停止当前流程并保存进度后关闭？\n\n"
-                    "是：停止后关闭，下次继续当前TID搜索点。\n"
+                    "是：停止后关闭，下次继续当前 TID 搜索点。\n"
                     "否：仅关闭界面，后台继续运行并记录进度。\n取消：返回工具。")
                 if stop is None:
                     return

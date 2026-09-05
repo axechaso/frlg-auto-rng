@@ -17,6 +17,8 @@ from run_auto_rng_gui import (
     HoverTooltip,
     MODE_TAB_ORDER,
     RUN_LOG_TAB_LABEL,
+    SEED_CALIBRATION_LOCKED_FINE,
+    SEED_CALIBRATION_ORIGINAL,
     SEED_STARTUP_FIXED_USER_HOME,
     SEED_STARTUP_HOME_BUFFER,
     SEED_STARTUP_SCHEME_CODES,
@@ -246,7 +248,7 @@ class GuiIvInputTests(unittest.TestCase):
         self.assertEqual(search.call_args.kwargs["min_advances"], 2279)
         self.assertEqual(search.call_args.kwargs["max_advances"], 1_000_000)
         self.assertEqual(app.tid_sid_var.get(), "08839")
-        self.assertIn("F3固定延迟：14900 ms = 1789 ADV", app.notes[-1])
+        self.assertIn("F3 固定延迟：14900 ms = 1789 ADV", app.notes[-1])
         self.assertIn("实际最低搜索 ADV：2279", app.notes[-1])
 
     def test_tid_sid_mode_choices_include_unrandomized_sid(self):
@@ -424,7 +426,7 @@ class GuiIvInputTests(unittest.TestCase):
         app = SimpleNamespace(
             mode_var=FakeVariable("normal"),
             advanced_mode_var=FakeVariable(False),
-            seed_calibration_scheme_var=FakeVariable("方案1：实验锁定与毫秒细调"),
+            seed_calibration_scheme_var=FakeVariable(SEED_CALIBRATION_LOCKED_FINE),
             seed_startup_scheme_var=FakeVariable(SEED_STARTUP_FIXED_USER_HOME),
             seed_calibration_scheme_combo=FakeCombo(),
             seed_startup_scheme_combo=FakeCombo(),
@@ -439,7 +441,7 @@ class GuiIvInputTests(unittest.TestCase):
         AutoRngApp._update_seed_scheme_controls(app)
         self.assertEqual(
             app.seed_calibration_scheme_var.get(),
-            "方案0：原始12轮绝对落点众数",
+            SEED_CALIBRATION_ORIGINAL,
         )
         self.assertEqual(app.seed_startup_scheme_var.get(), SEED_STARTUP_HOME_BUFFER)
         self.assertEqual(app.script_test_entry_var.set_calls, 0)
@@ -448,7 +450,7 @@ class GuiIvInputTests(unittest.TestCase):
 
         app.mode_var.set("egg")
         app.advanced_mode_var.set(True)
-        app.seed_calibration_scheme_var.set("方案1：实验锁定与毫秒细调")
+        app.seed_calibration_scheme_var.set(SEED_CALIBRATION_LOCKED_FINE)
         app.seed_startup_scheme_var.set(SEED_STARTUP_FIXED_USER_HOME)
         AutoRngApp._update_seed_scheme_controls(app)
         self.assertEqual(app.seed_calibration_scheme_combo.configured["state"], "readonly")
@@ -652,7 +654,7 @@ class GuiIvInputTests(unittest.TestCase):
                 "雄",
                 [31] * 6,
             )
-        with self.assertRaisesRegex(ValueError, "Seed启动方案"):
+        with self.assertRaisesRegex(ValueError, "Seed 启动方案"):
             build_egg_full_config_payload(
                 "火红", 1, 0, "EDDE", 1115, 3405, 46, 50,
                 "雌", [31] * 6, "雄", [31] * 6, False, False, 2,
@@ -778,7 +780,7 @@ class GuiIvInputTests(unittest.TestCase):
     def test_requested_tab_order(self):
         self.assertEqual(
             MODE_TAB_ORDER,
-            ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋（测试）"),
+            ("SID 查找", "TID 乱数", "野生 / 静态", "孵蛋"),
         )
         self.assertEqual(ADVANCED_TAB_LABEL, "脚本测试（高级）")
         self.assertEqual(RUN_LOG_TAB_LABEL, "运行日志")
@@ -870,7 +872,7 @@ class GuiIvInputTests(unittest.TestCase):
         app.advanced_mode_var.set(True)
         self.assertEqual(AutoRngApp._sid_traversal_start_override(app), 2450)
         app.sid_traversal_start_adv_var.set("-1")
-        with self.assertRaisesRegex(ValueError, "0-65535"):
+        with self.assertRaisesRegex(ValueError, "0–65535"):
             AutoRngApp._sid_traversal_start_override(app)
 
     def test_script_test_entry_path_tracks_selection_and_custom_files(self):

@@ -14,6 +14,7 @@ from automation.easycon118 import (
     EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
     EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE,
     EGG_FORMAL_WAIT_MARKER,
+    EGG_GENERATION_PARITY_MENU_MARKER,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
     EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH,
     EGG_PICKUP_PARITY_MENU_MARKER,
@@ -1192,12 +1193,16 @@ ENDFUNC
         self.assertIn("$Seed命中保持计数", configured)
         self.assertIn("$Seed预校准索引_NS1", configured)
         self.assertIn("$Seed预校准索引_NS2", configured)
-        self.assertIn("正式版±1五次多数、固定半步与命中后连续5次未命中保持", configured)
+        self.assertIn("方案2方向票接续控制器", configured)
+        self.assertIn("$方案2Seed接续启用 = 0", configured)
+        self.assertIn("$方案2Seed接续正方向票数 = 0", configured)
+        self.assertIn("$方案2Seed接续负方向票数 = 0", configured)
         self.assertNotIn("$孵蛋Seed等待MS = $孵蛋Seed等待MS -", configured)
 
     def test_seed_hold_uses_five_consecutive_misses_and_direct_fixed_half(self):
         original = (
             "$Seed命中保持样本数 = 10\n"
+            "$Seed命中保持本轮刷新 = 0\n"
             "FUNC 计算Seed锁定众数修正(): INT\n"
             + SEED_HOLD_OBSERVATION_OLD_BRANCH
             + SEED_HOLD_OBSERVATION_OLD_DECISION
@@ -1215,7 +1220,13 @@ ENDFUNC
         self.assertIn("$Seed命中保持样本数 = 5", configured)
         self.assertIn(SEED_HOLD_OBSERVATION_MARKER, configured)
         self.assertIn(SEED_HOLD_OBSERVATION_MIN_GLOBAL, configured)
-        self.assertIn(SEED_HOLD_OBSERVATION_CURRENT_BRANCH, configured)
+        self.assertIn("$方案2Seed接续启用 = 0", configured)
+        self.assertIn("$方案2Seed接续正方向票数 = 0", configured)
+        self.assertIn("$方案2Seed接续负方向票数 = 0", configured)
+        self.assertIn(
+            "$Seed校准方案 == 2 and $方案2Seed接续启用 == 1",
+            configured,
+        )
         self.assertIn(SEED_HOLD_OBSERVATION_DIRECT_HALF_MARKER, configured)
         self.assertIn("$Seed命中保持触发固定半步 = 1", configured)
         self.assertIn("$Seed命中保持启用 = 0", configured)
@@ -1228,8 +1239,10 @@ ENDFUNC
         )
         self.assertIn("本轮大波动不投方向票", configured)
         self.assertIn("±1方向样本不足3", configured)
+        self.assertIn("方案2连续5次未命中，保留方向票", configured)
+        self.assertIn("方案2连续5次未命中方向平票，保留方向票", configured)
 
-    def test_egg_timeline_uses_formal_held_parity_and_pickup_menu_phase(self):
+    def test_egg_timeline_uses_generation_menu_parity_and_pickup_menu_phase(self):
         original = """\
 $孵蛋流程请求Held帧 = 0
 FUNC 孵蛋流程_计算两次命中时间(): INT
@@ -1257,15 +1270,19 @@ $孵蛋测试结果 = 孵蛋测试_执行同Seed两次命中($Seed模式, $孵�
         self.assertEqual(configured_again, configured)
         self.assertIn(EGG_FORMAL_PARITY_OVERRIDE_MARKER, configured)
         self.assertIn(
-            "$孵蛋流程奇偶F1修正帧 = 奇偶修正后F1帧(0, $孵蛋流程请求Held帧)",
+            "$孵蛋流程奇偶F1修正帧 = 0",
             configured,
         )
         self.assertIn(
-            "$孵蛋流程执行Held帧 = 奇偶修正后F2帧($孵蛋流程请求Held帧)",
+            "IF $孵蛋生成目标帧 % 2 != 0",
             configured,
         )
         self.assertIn(
-            "$孵蛋流程Pickup奇偶基准帧 = $孵蛋流程请求Pickup帧 - $孵蛋流程奇偶F2扣除帧",
+            "$孵蛋流程执行Held帧 = $孵蛋流程请求Held帧",
+            configured,
+        )
+        self.assertIn(
+            "$孵蛋流程Pickup奇偶基准帧 = $孵蛋流程请求Pickup帧",
             configured,
         )
         self.assertIn(
@@ -1276,18 +1293,28 @@ $孵蛋测试结果 = 孵蛋测试_执行同Seed两次命中($Seed模式, $孵�
             "$孵蛋流程执行Pickup帧 = $孵蛋流程Pickup奇偶基准帧 - $孵蛋流程Pickup菜单推进帧",
             configured,
         )
+        parity_function = configured.split(
+            "FUNC 孵蛋流程_计算两次命中时间(): INT",
+            1,
+        )[1].split("ENDFUNC", 1)[0]
         self.assertEqual(
-            configured.count("$孵蛋流程奇偶F2扣除帧 = $孵蛋流程请求Held帧 - $孵蛋流程执行Held帧"),
+            parity_function.count("$孵蛋流程生成菜单推进帧 = 0"),
             1,
         )
+        self.assertIn(
+            "$孵蛋流程Pickup菜单推进帧 = 0 - $孵蛋流程Pickup菜单奇偶开关",
+            configured,
+        )
+        self.assertNotIn("奇偶修正后F1帧", configured)
+        self.assertNotIn("奇偶修正后F2帧", configured)
         self.assertIn("$孵蛋流程本轮奇偶等待MS, $孵蛋封面长按MS", configured)
         self.assertIn(
-            "$孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",
+            "$孵蛋流程生成菜单奇偶开关, $孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",
             configured,
         )
         self.assertNotIn("$孵蛋奇偶等待MS, $孵蛋封面长按MS", configured)
 
-    def test_pickup_parity_menu_is_after_confirmed_egg_and_idempotent(self):
+    def test_generation_and_pickup_parity_menus_are_independent_and_idempotent(self):
         original = """\
 FUNC 孵蛋测试_执行同Seed两次命中($Seed模式: INT, $Seed等待MS: INT, $精确尾段MS: INT, $奇偶等待MS: INT, $封面长按MS: INT, $TV开关: INT, $TV等待MS: INT, $出蛋目标MS: INT, $领蛋目标MS: INT, $出蛋识图阈值: INT, $抓捕识图阈值: INT, $出闪后继续抓捕: INT, $无蛋后复核Seed: INT): INT
     IF $无蛋后复核Seed != 0 and $无蛋后复核Seed != 1
@@ -1295,6 +1322,13 @@ FUNC 孵蛋测试_执行同Seed两次命中($Seed模式: INT, $Seed等待MS: INT
         RETURN 0
     ENDIF
     $孵蛋库_启动结果 = 孵蛋测试_启动并进入存档($Seed模式, $Seed等待MS, $精确尾段MS, $奇偶等待MS, $封面长按MS)
+    # 保留原脚本动作顺序；两个命中只共享绝对时间轴，不累计中间菜单误差。
+    $孵蛋库_出蛋误差MS = 孵蛋测试_按模式等待到($孵蛋库_游戏时间轴原点, $孵蛋库_出蛋目标MS, $精确尾段MS, $使用绝对时间轴)
+    IF $孵蛋库_出蛋误差MS > 100
+        PRINT 孵蛋生成帧截止已错过 & $孵蛋库_出蛋误差MS & " ms，本轮重启"
+        RETURN -2
+    ENDIF
+    LS DOWN
     IF $孵蛋库_出蛋检测结果 != 1
         RETURN 2
     ENDIF
@@ -1310,15 +1344,36 @@ ENDFUNC
         configured_again = _apply_egg_pickup_parity_menu_text(configured)
 
         self.assertEqual(configured_again, configured)
+        self.assertIn(EGG_GENERATION_PARITY_MENU_MARKER, configured)
         self.assertIn(EGG_PICKUP_PARITY_MENU_MARKER, configured)
+        self.assertIn("$生成菜单奇偶开关: INT", configured)
         self.assertIn("$Pickup菜单奇偶开关: INT", configured)
+        self.assertIn("孵蛋生成菜单奇偶开关无效", configured)
         self.assertIn("孵蛋Pickup菜单奇偶开关无效", configured)
+        generation_action = configured.split(
+            EGG_GENERATION_PARITY_MENU_MARKER,
+            1,
+        )[1].split("LS DOWN", 1)[0]
+        self.assertIn("IF $生成菜单奇偶开关 == 1", generation_action)
+        self.assertIn("X\n        WAIT 500\n        B\n        WAIT 500", generation_action)
         action = configured.split(EGG_PICKUP_PARITY_MENU_MARKER, 1)[1].split(
             "LS RIGHT",
             1,
         )[0]
         self.assertIn("IF $Pickup菜单奇偶开关 == 1", action)
         self.assertIn("X\n        WAIT 500\n        B\n        WAIT 500", action)
+        self.assertLess(
+            configured.index(EGG_GENERATION_PARITY_MENU_MARKER),
+            configured.index("$孵蛋库_出蛋误差MS ="),
+        )
+        self.assertLess(
+            configured.index("$孵蛋库_出蛋误差MS ="),
+            configured.index("LS DOWN"),
+        )
+        self.assertLess(
+            configured.index("LS DOWN"),
+            configured.index("IF $孵蛋库_出蛋检测结果 != 1"),
+        )
         self.assertLess(
             configured.index("RETURN 2"),
             configured.index(EGG_PICKUP_PARITY_MENU_MARKER),
@@ -1444,7 +1499,7 @@ ENDFUNC
         self.assertIn("RETURN 2", template)
         self.assertIn("$候选细分累计范围有效 = 0", template)
         self.assertIn("$孵蛋流程IV范围合并结果 = 合并候选细分IV范围()", template)
-        self.assertIn("$孵蛋Held固定预校准帧 = 230", template)
+        self.assertIn("$孵蛋Held固定预校准帧 = 222", template)
         self.assertIn("$孵蛋Pickup固定预校准帧 = 230", template)
         self.assertIn("$孵蛋Held反查帧容差 = 100", template)
         self.assertIn("$孵蛋Pickup反查帧容差 = 2000", template)
@@ -1533,6 +1588,10 @@ ENDFUNC
             template,
         )
         self.assertIn(
+            "$孵蛋流程执行Held帧 = $孵蛋流程请求Held帧",
+            template,
+        )
+        self.assertIn(
             "IF $孵蛋流程Held已稳定 == 1 and $孵蛋流程Pickup奇偶基准帧 % 2 != 0",
             template,
         )
@@ -1544,16 +1603,18 @@ ENDFUNC
             "IF $Seed启动方案 == 1\n        A\n        $孵蛋库_Seed时间轴原点 = TIME()",
             library,
         )
-        self.assertIn("孵蛋正式版奇偶校准: F1增加", template)
+        self.assertIn("孵蛋生成奇偶校准: 生成菜单", template)
         self.assertIn("$孵蛋流程本轮奇偶等待MS, $孵蛋封面长按MS", template)
         self.assertIn(
-            "$孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",
+            "$孵蛋流程生成菜单奇偶开关, $孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",
             template,
         )
         library = _apply_egg_pickup_parity_menu_text(
             library_path.read_text(encoding="utf-8")
         )
+        self.assertIn(EGG_GENERATION_PARITY_MENU_MARKER, library)
         self.assertIn(EGG_PICKUP_PARITY_MENU_MARKER, library)
+        self.assertIn("生成前开关一次菜单，物理增加7 advance", library)
         self.assertIn("出培育屋后开关一次菜单，物理增加7 advance", library)
         self.assertIn("识别冲浪结束后再打开菜单", library)
         self.assertIn(EGG_POND_SETTLE_FIXED, library)
