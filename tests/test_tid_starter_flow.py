@@ -240,6 +240,11 @@ class TidStarterFlowTests(unittest.TestCase):
             starter_seed_startup_scheme=1,
             starter_template_name=EGG_TEMPLATE_NAME,
             update_precalibration=True,
+            starter_debug_log_output=0,
+            starter_frame_parity_scheme=0,
+            starter_reverse_expansion_layers=2,
+            starter_reverse_expansion_seed_tolerances=(11, 22, 33),
+            starter_reverse_expansion_frame_half_widths=(1000, 2000, 3000),
             starter_max_advances=1600,
         )
 
@@ -249,9 +254,15 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertEqual(payload["starter_seed_startup_scheme"], 1)
         self.assertEqual(payload["starter_template_name"], EGG_TEMPLATE_NAME)
         self.assertTrue(payload["update_precalibration"])
+        self.assertEqual(payload["starter_debug_log_output"], 0)
+        self.assertEqual(payload["starter_frame_parity_scheme"], 0)
+        self.assertEqual(payload["starter_reverse_expansion_layers"], 2)
         self.assertEqual(restored.starter_seed_startup_scheme, 1)
         self.assertEqual(restored.starter_template_name, EGG_TEMPLATE_NAME)
         self.assertTrue(restored.update_precalibration)
+        self.assertEqual(restored.starter_debug_log_output, 0)
+        self.assertEqual(restored.starter_frame_parity_scheme, 0)
+        self.assertEqual(restored.starter_reverse_expansion_seed_tolerances, (11, 22, 33))
         restored.validate()
 
     @unittest.skipUnless(HAS_TID_ASSETS and SOURCE_118.is_dir(), "requires starter assets")

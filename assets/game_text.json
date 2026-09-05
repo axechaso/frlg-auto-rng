@@ -11,7 +11,7 @@
         "初始宝可梦": "Starter", "赠送": "Gift", "游戏城": "GameCorner", "定点": "Stationary",
         "传说": "Legend", "化石": "Fossil", "活动": "Event", "游走": "Roaming",
         "草丛": "Grass", "冲浪": "Surfing", "碎岩": "RockSmash",
-        "超级钓竿": "SuperRod", "好钓竿": "GoodRod", "破旧钓竿": "OldRod"
+        "厉害钓竿": "SuperRod", "好钓竿": "GoodRod", "破旧钓竿": "OldRod"
     },
     "method_zh_to_en": {"固定": "Static", "野生": "Wild"},
     "static_categories": ["Gift", "GameCorner", "Stationary", "Legend", "Fossil", "Event"],

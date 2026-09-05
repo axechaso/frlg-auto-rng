@@ -1,4 +1,4 @@
-"""Exact static-target whitelist implemented by EasyCon FRLG 1.1.8."""
+"""Exact static-target whitelist implemented by EasyCon FRLG 2.0."""
 
 STATIC_CATEGORIES_118 = (
     "Starter",

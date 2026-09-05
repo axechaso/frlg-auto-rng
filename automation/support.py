@@ -68,12 +68,12 @@ def get_route_support(
         if not game or not pokemon or not is_supported_static_target(game, category, pokemon):
             return RouteSupport(
                 RouteSupportLevel.UNSUPPORTED,
-                "该游戏版本、静态类别与宝可梦组合不在 1.1.8 支持白名单中。",
+                "该游戏版本、静态类别与宝可梦组合不在 2.0 支持白名单中。",
                 False,
             )
         return RouteSupport(
             RouteSupportLevel.BASELINE_118,
-            "1.1.8 定点流程基线；仍需按具体目标完成实机验收。",
+            "2.0 定点流程基线；仍需按具体目标完成实机验收。",
             True,
         )
 
@@ -81,7 +81,7 @@ def get_route_support(
     if category_key == "rocksmash":
         return RouteSupport(
             RouteSupportLevel.UNSUPPORTED,
-            "1.1.8 主脚本明确暂不支持碎岩；只允许搜索，不开放自动运行。",
+            "2.0 主脚本明确暂不支持碎岩；只允许搜索，不开放自动运行。",
             False,
         )
 
@@ -89,7 +89,7 @@ def get_route_support(
     if area is None:
         return RouteSupport(
             RouteSupportLevel.BASELINE_118,
-            "1.1.8 普通野生流程基线；仍需按地点完成实机验收。",
+            "2.0 普通野生流程基线；仍需按地点完成实机验收。",
             True,
         )
 
@@ -98,21 +98,21 @@ def get_route_support(
     if category_key == "grass":
         return RouteSupport(
             RouteSupportLevel.BASELINE_118,
-            "1.1.8 已实现中央/东/北/西区草丛路线，可生成并启动。",
+            "2.0 已实现中央/东/北/西区草丛路线，可生成并启动。",
             True,
         )
 
     if is_rod:
         return RouteSupport(
             RouteSupportLevel.BASELINE_118,
-            "1.1.8 已实现狩猎区三种钓竿路线，可生成并启动。",
+            "2.0 已实现狩猎区三种钓竿路线，可生成并启动。",
             True,
         )
 
     if category_key == "surfing":
         return RouteSupport(
             RouteSupportLevel.EXPERIMENTAL,
-            "新版 1.1.8 未把狩猎区冲浪列入已声明范围；只允许生成计划，不开放运行。",
+            "2.0 未把狩猎区冲浪列入已声明范围；只允许生成计划，不开放运行。",
             False,
         )
 

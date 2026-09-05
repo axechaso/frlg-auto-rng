@@ -14,8 +14,12 @@ from run_auto_rng_gui import (
     ADVANCED_TAB_LABEL,
     AutoRngApp,
     DEFAULT_TID_SHINY_PID,
+    FRAME_PARITY_F1_F2,
+    FRAME_PARITY_MENU,
     HoverTooltip,
     MODE_TAB_ORDER,
+    OUTPUT_LOG_COMPACT,
+    OUTPUT_LOG_DEBUG,
     RUN_LOG_TAB_LABEL,
     SEED_CALIBRATION_LOCKED_FINE,
     SEED_CALIBRATION_ORIGINAL,
@@ -476,6 +480,49 @@ class GuiIvInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "F3"):
             parse_tid_fixed_delays(log.replace("F3脚本固定延迟：14900\n", ""))
 
+    def test_advanced_reverse_and_output_choices_map_to_ecs_values(self):
+        class FakeVariable:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+        app = SimpleNamespace(
+            output_log_mode_var=FakeVariable(OUTPUT_LOG_COMPACT),
+            frame_parity_scheme_var=FakeVariable(FRAME_PARITY_F1_F2),
+            reverse_expansion_layers_var=FakeVariable("2"),
+            reverse_expansion_seed_vars=[
+                FakeVariable("11"), FakeVariable("22"), FakeVariable("33")
+            ],
+            reverse_expansion_frame_vars=[
+                FakeVariable("1000"), FakeVariable("2000"), FakeVariable("3000")
+            ],
+            _seed_options_are_advanced=lambda: True,
+        )
+        self.assertEqual(AutoRngApp._selected_output_log_mode(app), 0)
+        self.assertEqual(
+            AutoRngApp._selected_frame_parity_scheme(app, egg=False), 0
+        )
+        self.assertEqual(
+            AutoRngApp._selected_frame_parity_scheme(app, egg=True), 1
+        )
+        self.assertEqual(
+            AutoRngApp._selected_reverse_expansion(app),
+            (2, (11, 22, 33), (1000, 2000, 3000)),
+        )
+
+        app.output_log_mode_var.value = OUTPUT_LOG_DEBUG
+        app.frame_parity_scheme_var.value = FRAME_PARITY_MENU
+        app._seed_options_are_advanced = lambda: False
+        self.assertEqual(AutoRngApp._selected_output_log_mode(app), 1)
+        self.assertEqual(
+            AutoRngApp._selected_frame_parity_scheme(app, egg=False), 1
+        )
+        self.assertEqual(
+            AutoRngApp._selected_reverse_expansion(app), (None, None, None)
+        )
+
     def test_sid_terminal_log_is_cleaned_and_failure_is_explained(self):
         raw = (
             "\x1b[90m[18:25:45] \x1b[0m性格识别失败，最高匹配度:60\n"
@@ -614,6 +661,11 @@ class GuiIvInputTests(unittest.TestCase):
             True,
             True,
             1,
+            1,
+            0,
+            2,
+            (12, 24, 36),
+            (2000, 4000, 6000),
         )
         self.assertEqual(payload["kind"], "egg_full")
         self.assertEqual(payload["target_seed"], "EDDE")
@@ -623,13 +675,23 @@ class GuiIvInputTests(unittest.TestCase):
         self.assertTrue(payload["start_from_prepared_254"])
         self.assertTrue(payload["home_buffer_adaptive_threshold"])
         self.assertEqual(payload["seed_startup_scheme"], 1)
+        self.assertEqual(payload["seed_calibration_scheme"], 1)
+        self.assertEqual(payload["debug_log_output"], 0)
+        self.assertEqual(payload["reverse_expansion_layers"], 2)
+        self.assertEqual(payload["reverse_expansion_seed_tolerances"], [12, 24, 36])
+        self.assertEqual(payload["reverse_expansion_frame_half_widths"], [2000, 4000, 6000])
         self.assertEqual(parse_egg_full_config_payload(payload), payload)
 
         legacy = dict(payload)
         legacy.pop("seed_startup_scheme")
+        legacy.pop("debug_log_output")
+        legacy.pop("reverse_expansion_layers")
+        legacy.pop("reverse_expansion_seed_tolerances")
+        legacy.pop("reverse_expansion_frame_half_widths")
         self.assertEqual(
             parse_egg_full_config_payload(legacy)["seed_startup_scheme"], 0
         )
+        self.assertEqual(parse_egg_full_config_payload(legacy)["debug_log_output"], 1)
         self.assertEqual(SEED_STARTUP_SCHEME_CODES[SEED_STARTUP_HOME_BUFFER], 0)
         self.assertEqual(SEED_STARTUP_SCHEME_CODES[SEED_STARTUP_FIXED_USER_HOME], 1)
 

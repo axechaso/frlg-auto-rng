@@ -115,7 +115,6 @@ from automation import (
     write_sid_reverse_plan,
     write_sid_reverse_project,
     write_tid_starter_flow_bundle,
-    write_builtin_egg_surf_menu_probe,
     resolve_script_test_entry,
 )
 from rng.tenlines_utils import (
@@ -199,6 +198,18 @@ SEED_CALIBRATION_SCHEME_CODES = {
     SEED_CALIBRATION_ORIGINAL: 0,
     SEED_CALIBRATION_LOCKED_FINE: 1,
     SEED_CALIBRATION_CONTINUATION: 2,
+}
+OUTPUT_LOG_COMPACT = "精简日志"
+OUTPUT_LOG_DEBUG = "完整调试日志"
+OUTPUT_LOG_MODES = (OUTPUT_LOG_COMPACT, OUTPUT_LOG_DEBUG)
+OUTPUT_LOG_MODE_CODES = {OUTPUT_LOG_COMPACT: 0, OUTPUT_LOG_DEBUG: 1}
+FRAME_PARITY_F1_F2 = "方案 0：F1 +1 / F2 -1"
+FRAME_PARITY_MENU = "方案 1：菜单调整"
+FRAME_PARITY_MODES = (FRAME_PARITY_MENU, FRAME_PARITY_F1_F2)
+FRAME_PARITY_MODE_CODES = {FRAME_PARITY_F1_F2: 0, FRAME_PARITY_MENU: 1}
+REVERSE_EXPANSION_FALLBACKS = {
+    SCRIPT_TEST_ENTRY_FORMAL: (3, (25, 30, 30), (5000, 10000, 30000)),
+    SCRIPT_TEST_ENTRY_TIMELINE: (3, (10, 20, 25), (2000, 5000, 10000)),
 }
 TID_SID_MODE_TARGET = "目标 SID（自动计算 ADV）"
 TID_SID_MODE_NO_RANDOM = "不乱数 SID（固定 F3，采用实际 SID）"
@@ -755,6 +766,10 @@ def build_egg_full_config_payload(
     home_buffer_adaptive_threshold=False,
     seed_startup_scheme=0,
     seed_calibration_scheme=2,
+    debug_log_output=1,
+    reverse_expansion_layers=None,
+    reverse_expansion_seed_tolerances=None,
+    reverse_expansion_frame_half_widths=None,
 ) -> dict:
     """Validate and build a complete egg-page configuration."""
     parent = build_egg_parent_config_payload(
@@ -799,6 +814,23 @@ def build_egg_full_config_payload(
         raise ValueError("Seed 校准方案只能是 0、1 或 2") from exc
     if seed_calibration_scheme not in {0, 1, 2}:
         raise ValueError("Seed 校准方案只能是 0（原始 12 轮众数）、1（实验锁定细调）或 2（命中保持后的方向票接续）")
+    try:
+        debug_log_output = int(debug_log_output)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("脚本输出日志模式只能是 0（精简）或 1（完整调试）") from exc
+    if debug_log_output not in {0, 1}:
+        raise ValueError("脚本输出日志模式只能是 0（精简）或 1（完整调试）")
+    if reverse_expansion_layers is not None:
+        try:
+            reverse_expansion_layers = int(reverse_expansion_layers)
+            reverse_expansion_seed_tolerances = tuple(
+                int(value) for value in reverse_expansion_seed_tolerances
+            )
+            reverse_expansion_frame_half_widths = tuple(
+                int(value) for value in reverse_expansion_frame_half_widths
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("反查扩窗配置必须包含整数层数、三层 Seed 容差和三层帧半宽") from exc
     game_code = ("fr" if game == "火红" else "lg") + ("_nx2" if nx_model == 2 else "_nx")
     request = EggRunRequest(
         game=game_code,
@@ -816,6 +848,18 @@ def build_egg_full_config_payload(
         home_buffer_adaptive_threshold=home_buffer_adaptive_threshold,
         seed_startup_scheme=seed_startup_scheme,
         seed_calibration_scheme=seed_calibration_scheme,
+        debug_log_output=debug_log_output,
+        reverse_expansion_layers=reverse_expansion_layers,
+        reverse_expansion_seed_tolerances=(
+            None
+            if reverse_expansion_seed_tolerances is None
+            else tuple(reverse_expansion_seed_tolerances)
+        ),
+        reverse_expansion_frame_half_widths=(
+            None
+            if reverse_expansion_frame_half_widths is None
+            else tuple(reverse_expansion_frame_half_widths)
+        ),
     )
     request.validate()
     return {
@@ -837,6 +881,18 @@ def build_egg_full_config_payload(
         "home_buffer_adaptive_threshold": home_buffer_adaptive_threshold,
         "seed_startup_scheme": seed_startup_scheme,
         "seed_calibration_scheme": seed_calibration_scheme,
+        "debug_log_output": request.debug_log_output,
+        "reverse_expansion_layers": request.reverse_expansion_layers,
+        "reverse_expansion_seed_tolerances": (
+            None
+            if request.reverse_expansion_seed_tolerances is None
+            else list(request.reverse_expansion_seed_tolerances)
+        ),
+        "reverse_expansion_frame_half_widths": (
+            None
+            if request.reverse_expansion_frame_half_widths is None
+            else list(request.reverse_expansion_frame_half_widths)
+        ),
     }
 
 
@@ -869,6 +925,10 @@ def parse_egg_full_config_payload(payload) -> dict:
         payload.get("home_buffer_adaptive_threshold", False),
         payload.get("seed_startup_scheme", 0),
         payload.get("seed_calibration_scheme", 2),
+        payload.get("debug_log_output", 1),
+        payload.get("reverse_expansion_layers"),
+        payload.get("reverse_expansion_seed_tolerances"),
+        payload.get("reverse_expansion_frame_half_widths"),
     )
 
 
@@ -2432,18 +2492,13 @@ class AutoRngApp:
             text="输出 EasyCon 详细日志",
             variable=self.script_test_verbose_var,
         ).grid(row=1, column=5, columnspan=2, sticky="w", padx=4, pady=4)
-        ttk.Button(
-            script_test,
-            text="准备内置冲浪结束测试",
-            command=self.prepare_builtin_surf_menu_probe,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 4))
         self._help_marker(
             script_test,
             "高级脚本测试",
             "所选 ECS 会原地直接执行，不经过方案搜索、参数替换或正式 main.ecs 生成。"
             "兼容后端等同正式工具；原始 CLI 用于 A/B 对照。",
             label="?",
-        ).grid(row=2, column=2, sticky="w", padx=4, pady=(8, 4))
+        ).grid(row=2, column=0, sticky="w", padx=4, pady=(8, 4))
         self._help_marker(
             script_test,
             "危险操作",
@@ -2528,8 +2583,9 @@ class AutoRngApp:
         self._add_tooltip(
             self.advanced_mode_check,
             "高级模式",
-            "显示直接脚本测试页和 Seed 高级方案；开启后，已登记脚本、标签、EasyCon、"
-            "OCR 与兼容运行器的指纹不一致只警告。文件缺失、语法错误等硬错误仍会阻止运行。",
+            "显示直接脚本测试页，并允许修改 Seed 方案、反查扩窗和奇偶调整。开启后，"
+            "已登记脚本、标签、EasyCon、OCR 与兼容运行器的指纹不一致只警告；"
+            "文件缺失、语法错误和参数非法等硬错误仍会阻止运行。",
         )
         self.home_buffer_adaptive_var = tk.BooleanVar(value=False)
         self.home_buffer_adaptive_check = ttk.Checkbutton(
@@ -2598,7 +2654,8 @@ class AutoRngApp:
         self.seed_scheme_help_marker = self._help_marker(
             seed_options,
             "Seed 高级方案",
-            "仅高级模式可修改。关闭高级模式时，普通入口固定方案 0；孵蛋入口保留当前方案 2。",
+            "仅高级模式可修改。关闭高级模式时，野生、静态和御三家固定方案 0；"
+            "孵蛋固定方案 2；Seed 启动均恢复方案 0。",
             label="?",
         )
         self.seed_scheme_help_marker.pack(side="left", padx=(6, 0))
@@ -2606,9 +2663,132 @@ class AutoRngApp:
         # initial layout does not briefly expand and then reflow on startup.
         self.script_entry_options.pack_forget()
 
+        runtime_output_options = ttk.Frame(runtime)
+        runtime_output_options.grid(
+            row=5,
+            column=0,
+            columnspan=7,
+            sticky="w",
+            padx=4,
+            pady=(3, 0),
+        )
+        self.output_log_mode_var = tk.StringVar(value=OUTPUT_LOG_DEBUG)
+        ttk.Label(runtime_output_options, text="脚本输出日志").pack(
+            side="left", padx=(0, 4)
+        )
+        self.output_log_mode_combo = ttk.Combobox(
+            runtime_output_options,
+            textvariable=self.output_log_mode_var,
+            values=OUTPUT_LOG_MODES,
+            width=16,
+            state="readonly",
+        )
+        self.output_log_mode_combo.pack(side="left")
+        self._help_marker(
+            runtime_output_options,
+            "脚本输出日志",
+            "精简日志保留运行状态、误差、修正和命中结果；完整调试日志还会输出识图分数、"
+            "候选与校准细节。这里只控制生成的 2.0 自动乱数脚本（含孵蛋和御三家阶段），"
+            "不会改变执行时序，也不等同于脚本测试页的 EasyCon 详细日志。",
+        ).pack(side="left", padx=(6, 0))
+
+        self.advanced_reverse_options = ttk.LabelFrame(
+            runtime,
+            text="高级反查设置",
+            padding=(8, 5),
+        )
+        self.advanced_reverse_options.grid(
+            row=6,
+            column=0,
+            columnspan=7,
+            sticky="w",
+            padx=4,
+            pady=(4, 0),
+        )
+        self.frame_parity_scheme_var = tk.StringVar(value=FRAME_PARITY_MENU)
+        ttk.Label(self.advanced_reverse_options, text="奇偶调整").grid(
+            row=0, column=0, sticky="e", padx=(2, 4), pady=3
+        )
+        self.frame_parity_scheme_combo = ttk.Combobox(
+            self.advanced_reverse_options,
+            textvariable=self.frame_parity_scheme_var,
+            values=FRAME_PARITY_MODES,
+            width=24,
+            state="readonly",
+        )
+        self.frame_parity_scheme_combo.grid(
+            row=0, column=1, columnspan=2, sticky="w", padx=(0, 12), pady=3
+        )
+        ttk.Label(self.advanced_reverse_options, text="扩窗层数").grid(
+            row=0, column=3, sticky="e", padx=(2, 4), pady=3
+        )
+        self.reverse_expansion_layers_var = tk.StringVar(value="3")
+        self.reverse_expansion_layers_spin = ttk.Spinbox(
+            self.advanced_reverse_options,
+            from_=0,
+            to=3,
+            width=5,
+            justify="center",
+            textvariable=self.reverse_expansion_layers_var,
+        )
+        self.reverse_expansion_layers_spin.grid(
+            row=0, column=4, sticky="w", padx=(0, 8), pady=3
+        )
+        self._help_marker(
+            self.advanced_reverse_options,
+            "反查扩窗与奇偶调整",
+            "扩窗只在反查无结果时按层启用；每层填写相对目标中心的 Seed 容差和消耗帧半宽，"
+            "0 层表示关闭。窗口越大，反查耗时越长。孵蛋的预校准反查同样使用扩窗设置，"
+            "但孵蛋奇偶调整固定使用菜单方案，下面的奇偶选择会被忽略。",
+        ).grid(row=0, column=5, sticky="w", padx=(2, 0), pady=3)
+        ttk.Label(self.advanced_reverse_options, text="层").grid(
+            row=1, column=0, padx=3, pady=(3, 1)
+        )
+        ttk.Label(self.advanced_reverse_options, text="Seed 容差（±）").grid(
+            row=1, column=1, padx=3, pady=(3, 1)
+        )
+        ttk.Label(self.advanced_reverse_options, text="消耗帧半宽（±）").grid(
+            row=1, column=2, padx=3, pady=(3, 1)
+        )
+        self.reverse_expansion_seed_vars = []
+        self.reverse_expansion_frame_vars = []
+        self.reverse_expansion_entries = []
+        initial_expansion = REVERSE_EXPANSION_FALLBACKS[SCRIPT_TEST_ENTRY_FORMAL]
+        for index, (seed_value, frame_value) in enumerate(
+            zip(initial_expansion[1], initial_expansion[2]), 1
+        ):
+            ttk.Label(self.advanced_reverse_options, text=f"第 {index} 层").grid(
+                row=index + 1, column=0, padx=3, pady=2
+            )
+            seed_var = tk.StringVar(value=str(seed_value))
+            frame_var = tk.StringVar(value=str(frame_value))
+            seed_entry = ttk.Spinbox(
+                self.advanced_reverse_options,
+                from_=0,
+                to=99999,
+                width=10,
+                justify="center",
+                textvariable=seed_var,
+            )
+            frame_entry = ttk.Spinbox(
+                self.advanced_reverse_options,
+                from_=0,
+                to=999999999,
+                width=14,
+                justify="center",
+                textvariable=frame_var,
+            )
+            seed_entry.grid(row=index + 1, column=1, padx=3, pady=2)
+            frame_entry.grid(row=index + 1, column=2, padx=3, pady=2)
+            self.reverse_expansion_seed_vars.append(seed_var)
+            self.reverse_expansion_frame_vars.append(frame_var)
+            self.reverse_expansion_entries.extend((seed_entry, frame_entry))
+        self._reverse_defaults_template = SCRIPT_TEST_ENTRY_FORMAL
+        self.advanced_reverse_options.grid_remove()
+
         precalibration_options = ttk.Frame(runtime)
         precalibration_options.grid(
-            row=5,
+            row=7,
             column=0,
             columnspan=7,
             sticky="w",
@@ -2633,7 +2813,7 @@ class AutoRngApp:
 
         app_update_options = ttk.Frame(runtime)
         app_update_options.grid(
-            row=6,
+            row=8,
             column=0,
             columnspan=7,
             sticky="w",
@@ -2697,6 +2877,7 @@ class AutoRngApp:
         self.source_var.trace_add("write", self._on_script_test_source_change)
         self.script_test_path_var.trace_add("write", self._on_script_test_path_change)
         self._sync_script_test_entry_path()
+        self._sync_reverse_expansion_defaults(force=True)
 
     def _schedule_page_scrollregion_update(self, _event=None):
         if self._page_scrollregion_job is not None:
@@ -3155,6 +3336,10 @@ class AutoRngApp:
             self.sid_traversal_start_adv_var,
             self.home_buffer_adaptive_var, self.seed_calibration_scheme_var,
             self.seed_startup_scheme_var, self.update_precalibration_var,
+            self.output_log_mode_var, self.frame_parity_scheme_var,
+            self.reverse_expansion_layers_var,
+            *self.reverse_expansion_seed_vars,
+            *self.reverse_expansion_frame_vars,
             self.source_var, self.ezcon_var, self.video_var,
             self.egg_seed_var, self.egg_held_var, self.egg_pickup_var,
             self.egg_seed_mode_var, self.egg_pokemon_var, self.egg_compatibility_var,
@@ -3644,6 +3829,134 @@ class AutoRngApp:
             raise ValueError("正式版 Seed 校准只能选择方案 0 或方案 1")
         return code
 
+    def _selected_output_log_mode(self) -> int:
+        try:
+            return OUTPUT_LOG_MODE_CODES[self.output_log_mode_var.get()]
+        except KeyError as exc:
+            raise ValueError("请选择有效的脚本输出日志模式") from exc
+
+    def _selected_frame_parity_scheme(self, *, egg: bool) -> int:
+        if egg or not self._seed_options_are_advanced():
+            return 1
+        try:
+            return FRAME_PARITY_MODE_CODES[self.frame_parity_scheme_var.get()]
+        except KeyError as exc:
+            raise ValueError("请选择有效的奇偶调整方案") from exc
+
+    def _selected_reverse_expansion(self):
+        """Return explicit advanced overrides, or template-owned defaults."""
+        if not self._seed_options_are_advanced():
+            return None, None, None
+        try:
+            layers = int(self.reverse_expansion_layers_var.get())
+            seeds = tuple(int(variable.get()) for variable in self.reverse_expansion_seed_vars)
+            frames = tuple(int(variable.get()) for variable in self.reverse_expansion_frame_vars)
+        except ValueError as exc:
+            raise ValueError("反查扩窗层数、Seed 容差和帧半宽必须是整数") from exc
+        if not 0 <= layers <= 3:
+            raise ValueError("反查扩窗层数必须在 0–3 之间")
+        if any(value < 0 for value in seeds):
+            raise ValueError("反查扩窗 Seed 容差不能为负数")
+        if any(value < 0 for value in frames):
+            raise ValueError("反查扩窗帧半宽不能为负数")
+        return layers, seeds, frames
+
+    def _read_reverse_expansion_defaults(self, entry: str):
+        fallback = REVERSE_EXPANSION_FALLBACKS.get(
+            entry,
+            REVERSE_EXPANSION_FALLBACKS[SCRIPT_TEST_ENTRY_FORMAL],
+        )
+        if entry not in {SCRIPT_TEST_ENTRY_FORMAL, SCRIPT_TEST_ENTRY_TIMELINE}:
+            return fallback
+        template_name = (
+            STANDARD_TEMPLATE_NAME
+            if entry == SCRIPT_TEST_ENTRY_FORMAL
+            else EGG_TEMPLATE_NAME
+        )
+        path = Path(self.source_var.get()) / template_name
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+            names = ["扩窗层数上限"]
+            names.extend(
+                item
+                for index in range(1, 4)
+                for item in (f"扩窗第{index}层Seed容差", f"扩窗第{index}层帧半宽")
+            )
+            values = []
+            for name in names:
+                matches = re.findall(
+                    rf"(?m)^\s*\${re.escape(name)}\s*=\s*([0-9]+)\s*$",
+                    text,
+                )
+                if len(matches) != 1:
+                    return fallback
+                values.append(int(matches[0]))
+            return values[0], tuple(values[1::2]), tuple(values[2::2])
+        except (OSError, UnicodeError):
+            return fallback
+
+    def _sync_reverse_expansion_defaults(self, *, force: bool = False) -> None:
+        entry = self.script_test_entry_var.get()
+        if entry not in {SCRIPT_TEST_ENTRY_FORMAL, SCRIPT_TEST_ENTRY_TIMELINE}:
+            return
+        defaults = self._read_reverse_expansion_defaults(entry)
+        previous = getattr(self, "_reverse_defaults_values", None)
+        try:
+            current = (
+                int(self.reverse_expansion_layers_var.get()),
+                tuple(int(variable.get()) for variable in self.reverse_expansion_seed_vars),
+                tuple(int(variable.get()) for variable in self.reverse_expansion_frame_vars),
+            )
+        except ValueError:
+            current = None
+        if force or previous is None or current == previous:
+            updating = self._updating
+            self._updating = True
+            try:
+                self.reverse_expansion_layers_var.set(str(defaults[0]))
+                for variable, value in zip(self.reverse_expansion_seed_vars, defaults[1]):
+                    variable.set(str(value))
+                for variable, value in zip(self.reverse_expansion_frame_vars, defaults[2]):
+                    variable.set(str(value))
+            finally:
+                self._updating = updating
+        self._reverse_defaults_values = defaults
+        self._reverse_defaults_template = entry
+
+    def _update_advanced_runtime_controls(self) -> None:
+        frame = getattr(self, "advanced_reverse_options", None)
+        if frame is None:
+            return
+        mode = self.mode_var.get()
+        applies = mode in {"normal", "egg"} or (
+            mode == "tid" and self.tid_starter_flow_var.get()
+        )
+        if self._seed_options_are_advanced() and applies:
+            frame.grid()
+        else:
+            frame.grid_remove()
+        process = getattr(self, "process", None)
+        editable = not getattr(self, "busy", False) and not (
+            process is not None and process.poll() is None
+        )
+        parity = getattr(self, "frame_parity_scheme_combo", None)
+        if parity is not None:
+            if mode == "egg":
+                updating = self._updating
+                self._updating = True
+                try:
+                    self.frame_parity_scheme_var.set(FRAME_PARITY_MENU)
+                finally:
+                    self._updating = updating
+                parity.configure(state="disabled")
+            else:
+                parity.configure(state="readonly" if editable else "disabled")
+        layer_spin = getattr(self, "reverse_expansion_layers_spin", None)
+        if layer_spin is not None:
+            layer_spin.configure(state="normal" if editable else "disabled")
+        for entry in getattr(self, "reverse_expansion_entries", ()):
+            entry.configure(state="normal" if editable else "disabled")
+
     def _update_seed_scheme_controls(self) -> None:
         """Keep advanced Seed choices valid for the active 2.0 entry."""
         combo = getattr(self, "seed_calibration_scheme_combo", None)
@@ -3717,6 +4030,9 @@ class AutoRngApp:
                 )
             else:
                 entry_options.pack_forget()
+        update_advanced = getattr(self, "_update_advanced_runtime_controls", None)
+        if callable(update_advanced):
+            update_advanced()
 
     def _toggle_advanced_mode(self):
         if self.busy or self._process_running():
@@ -3743,6 +4059,7 @@ class AutoRngApp:
         self._update_seed_scheme_controls()
         self._update_tid_shiny_pid_controls()
         self._update_item_rng_controls()
+        self._update_advanced_runtime_controls()
         self._schedule_page_scrollregion_update()
         # Advanced mode changes which Seed/entry settings are effective.  The
         # normalization above is protected from Tk traces, so invalidate once
@@ -3764,6 +4081,7 @@ class AutoRngApp:
         if self.mode_var.get() != mode:
             self.mode_var.set(mode)
         self._update_seed_scheme_controls()
+        self._update_advanced_runtime_controls()
         is_egg = mode == "egg"
         is_tid = mode == "tid"
         is_sid = mode == "sid"
@@ -3801,6 +4119,7 @@ class AutoRngApp:
 
     def _on_tid_flow_toggle(self, *_):
         self._update_tid_flow_controls()
+        self._update_advanced_runtime_controls()
         if self._is_tid_mode():
             self._on_mode_tab_change()
 
@@ -4032,6 +4351,9 @@ class AutoRngApp:
         if self.egg_seed_mode_var.get() == "请选择":
             raise ValueError("保存全部配置前必须选择孵蛋 Seed 模式")
         species_id = parse_egg_species(self.egg_pokemon_var.get())
+        expansion_layers, expansion_seeds, expansion_frames = (
+            self._selected_reverse_expansion()
+        )
         return build_egg_full_config_payload(
             self.game_var.get(),
             {"Switch 1": 1, "Switch 2": 2}.get(self.nx_var.get()),
@@ -4049,6 +4371,10 @@ class AutoRngApp:
             self.home_buffer_adaptive_var.get(),
             self._selected_seed_startup_scheme(),
             self._selected_seed_calibration_scheme(egg=True),
+            self._selected_output_log_mode(),
+            expansion_layers,
+            expansion_seeds,
+            expansion_frames,
         )
 
     def _save_egg_json(self, payload: dict, title: str, initialfile: str) -> str | None:
@@ -4201,6 +4527,25 @@ class AutoRngApp:
                 self.seed_calibration_scheme_var.set(
                     calibration_labels[calibration_code]
                 )
+                self.output_log_mode_var.set(
+                    OUTPUT_LOG_DEBUG
+                    if int(config.get("debug_log_output", 1)) == 1
+                    else OUTPUT_LOG_COMPACT
+                )
+                if config.get("reverse_expansion_layers") is not None:
+                    self.reverse_expansion_layers_var.set(
+                        str(config["reverse_expansion_layers"])
+                    )
+                    for variable, value in zip(
+                        self.reverse_expansion_seed_vars,
+                        config["reverse_expansion_seed_tolerances"],
+                    ):
+                        variable.set(str(value))
+                    for variable, value in zip(
+                        self.reverse_expansion_frame_vars,
+                        config["reverse_expansion_frame_half_widths"],
+                    ):
+                        variable.set(str(value))
             finally:
                 self._updating = False
             self.invalidate_plan()
@@ -4222,6 +4567,9 @@ class AutoRngApp:
             raise ValueError("请选择与 Ten Lines 结果一致的孵蛋 Seed 模式")
         if not self.egg_ack_var.get():
             raise ValueError("请先勾选孵蛋运行确认")
+        expansion_layers, expansion_seeds, expansion_frames = (
+            self._selected_reverse_expansion()
+        )
         return EggRunRequest(
             game=self._game_code(),
             seed_mode=int(self.egg_seed_mode_var.get().split(":", 1)[0]),
@@ -4245,6 +4593,10 @@ class AutoRngApp:
             seed_startup_scheme=self._selected_seed_startup_scheme(),
             seed_calibration_scheme=self._selected_seed_calibration_scheme(egg=True),
             update_precalibration=self.update_precalibration_var.get(),
+            debug_log_output=self._selected_output_log_mode(),
+            reverse_expansion_layers=expansion_layers,
+            reverse_expansion_seed_tolerances=expansion_seeds,
+            reverse_expansion_frame_half_widths=expansion_frames,
         )
 
     def calculate_tid_shiny_sid(self) -> None:
@@ -4411,6 +4763,14 @@ class AutoRngApp:
             template_selector() if callable(template_selector) else STANDARD_TEMPLATE_NAME
         )
         update_precalibration_var = getattr(self, "update_precalibration_var", None)
+        expansion_selector = getattr(self, "_selected_reverse_expansion", None)
+        expansion_layers, expansion_seeds, expansion_frames = (
+            expansion_selector()
+            if callable(expansion_selector)
+            else (None, None, None)
+        )
+        output_selector = getattr(self, "_selected_output_log_mode", None)
+        parity_selector = getattr(self, "_selected_frame_parity_scheme", None)
         request = TidStarterFlowRequest(
             tid_request=replace(tid_request, calibration_check=False),
             version=self.tid_game_var.get(),
@@ -4451,6 +4811,15 @@ class AutoRngApp:
                 if update_precalibration_var is not None
                 else False
             ),
+            starter_debug_log_output=(
+                output_selector() if callable(output_selector) else 1
+            ),
+            starter_frame_parity_scheme=(
+                parity_selector(egg=False) if callable(parity_selector) else 1
+            ),
+            starter_reverse_expansion_layers=expansion_layers,
+            starter_reverse_expansion_seed_tolerances=expansion_seeds,
+            starter_reverse_expansion_frame_half_widths=expansion_frames,
         )
         request.validate()
         return request
@@ -4846,6 +5215,9 @@ class AutoRngApp:
         self.advanced_mode_check.configure(state=state)
         self.home_buffer_adaptive_check.configure(state=state)
         self.update_precalibration_check.configure(state=state)
+        self.output_log_mode_combo.configure(
+            state="readonly" if enabled else "disabled"
+        )
         self._update_seed_scheme_controls()
         self.seed_update_button.configure(state=state)
         update_button = getattr(self, "app_update_button", None)
@@ -5153,12 +5525,18 @@ class AutoRngApp:
         if self._updating:
             return
         self._sync_script_test_entry_path()
+        sync_expansion = getattr(self, "_sync_reverse_expansion_defaults", None)
+        if callable(sync_expansion):
+            sync_expansion()
         self.invalidate_plan()
 
     def _on_script_test_source_change(self, *_event) -> None:
         if self._updating or self.script_test_entry_var.get() == SCRIPT_TEST_ENTRY_CUSTOM:
             return
         self._sync_script_test_entry_path()
+        sync_expansion = getattr(self, "_sync_reverse_expansion_defaults", None)
+        if callable(sync_expansion):
+            sync_expansion()
 
     def _on_script_test_path_change(self, *_event) -> None:
         if self._updating:
@@ -5283,6 +5661,9 @@ class AutoRngApp:
             else:
                 party_empty_slots = 1
             template_name = self._selected_generation_template_name()
+            expansion_layers, expansion_seeds, expansion_frames = (
+                self._selected_reverse_expansion()
+            )
         except Exception as exc:
             messagebox.showerror("输入错误", str(exc))
             return
@@ -5299,6 +5680,11 @@ class AutoRngApp:
             item_rng_mode=item_rng_enabled,
             party_empty_slots=party_empty_slots,
             update_precalibration=self.update_precalibration_var.get(),
+            debug_log_output=self._selected_output_log_mode(),
+            frame_parity_scheme=self._selected_frame_parity_scheme(egg=False),
+            reverse_expansion_layers=expansion_layers,
+            reverse_expansion_seed_tolerances=expansion_seeds,
+            reverse_expansion_frame_half_widths=expansion_frames,
         )
         fingerprint_warning_only = self.advanced_mode_var.get()
         try:
@@ -5398,6 +5784,9 @@ class AutoRngApp:
             max_advances = int(self.sid_traversal_max_adv_var.get())
             start_override = self._sid_traversal_start_override()
             start_advance = sid_traversal_start_advance(named_rival, start_override)
+            expansion_layers, expansion_seeds, expansion_frames = (
+                self._selected_reverse_expansion()
+            )
         except (TypeError, ValueError) as exc:
             messagebox.showerror("SID 遍历输入错误", str(exc))
             return
@@ -5430,6 +5819,11 @@ class AutoRngApp:
             seed_calibration_scheme=self._selected_seed_calibration_scheme(egg=False),
             item_rng_mode=False,
             party_empty_slots=1,
+            debug_log_output=self._selected_output_log_mode(),
+            frame_parity_scheme=self._selected_frame_parity_scheme(egg=False),
+            reverse_expansion_layers=expansion_layers,
+            reverse_expansion_seed_tolerances=expansion_seeds,
+            reverse_expansion_frame_half_widths=expansion_frames,
         )
         input_fingerprint = self.input_fingerprint()
         fingerprint_warning_only = self.advanced_mode_var.get()
@@ -7176,34 +7570,6 @@ class AutoRngApp:
             self.script_test_entry_status_var.set(
                 f"已选择：{Path(path).name}（{self.script_test_entry_var.get()}）"
             )
-
-    def prepare_builtin_surf_menu_probe(self):
-        if self.busy or self._process_running():
-            messagebox.showerror("正在运行", "请先等待当前操作结束或停止 EasyCon。")
-            return
-        try:
-            output_dir = (
-                WRITABLE_ROOT
-                / "runtime"
-                / "script_tests"
-                / "egg_surf_menu_probe"
-            )
-            main_path = write_builtin_egg_surf_menu_probe(
-                Path(self.source_var.get()),
-                output_dir,
-            )
-            self._updating = True
-            try:
-                self.script_test_entry_var.set(SCRIPT_TEST_ENTRY_CUSTOM)
-                self.script_test_path_var.set(str(main_path))
-            finally:
-                self._updating = False
-            self.script_test_entry_status_var.set(
-                f"自选 ECS：{main_path.name}（内置冲浪结束测试）"
-            )
-            self.generate_script_test_preflight()
-        except Exception as exc:
-            messagebox.showerror("内置测试准备失败", str(exc))
 
     def choose_tid_source(self):
         path = filedialog.askdirectory(

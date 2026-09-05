@@ -3,19 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from app_paths import RESOURCE_ROOT
 from fingerprint_policy import record_fingerprint_mismatch
 
 from .easycon118 import (
-    EASYCON118_EXTENSION_LABEL_DIR,
-    EASYCON118_LOCAL_LABEL_DIR,
     EGG_TEMPLATE_NAME,
     EXPECTED_EZCON_SHA256,
     EXPECTED_EZCON_VERSION,
@@ -48,14 +43,6 @@ _SCRIPT_TEST_ENTRY_FILENAMES = {
     SCRIPT_TEST_ENTRY_TIMELINE: EGG_TEMPLATE_NAME,
 }
 
-BUILTIN_EGG_SURF_MENU_PROBE = (
-    RESOURCE_ROOT
-    / "assets"
-    / "easycon118_extensions"
-    / "egg_surf_menu_probe.ecs"
-)
-BUILTIN_EGG_SURF_MENU_LABELS = ("冲浪",)
-
 _LABEL_REFERENCE_RE = re.compile(r"@([\w]+)", re.UNICODE)
 
 
@@ -65,13 +52,13 @@ def resolve_script_test_entry(
     *,
     require_exists: bool = True,
 ) -> Path:
-    """Resolve one of the two audited 1.1.8 entry scripts."""
+    """Resolve one of the two audited 2.0 entry scripts."""
     try:
         filename = _SCRIPT_TEST_ENTRY_FILENAMES[selection]
     except KeyError as exc:
         if selection == SCRIPT_TEST_ENTRY_CUSTOM:
             raise ValueError("自选 ECS 需要在下方指定脚本文件") from exc
-        raise ValueError(f"未知 1.1.8 脚本入口: {selection}") from exc
+        raise ValueError(f"未知 2.0 脚本入口: {selection}") from exc
     path = (Path(source_dir).expanduser().resolve() / filename).resolve()
     if require_exists and not path.is_file():
         raise FileNotFoundError(f"找不到{selection}入口: {path}")
@@ -129,7 +116,7 @@ def prepare_script_test_runtime(
     *,
     fingerprint_warning_only: bool = False,
 ) -> ScriptTestPreparation:
-    """Validate an arbitrary ECS project without applying 1.1.8 rewrites.
+    """Validate an arbitrary ECS project without applying 2.0 rewrites.
 
     The selected script stays in place.  The original pinned CLI is always
     used for version and ``format`` checks.  At run time the caller uses either
@@ -275,7 +262,7 @@ def prepare_script_test_runtime(
         warnings.append("脚本及 lib 未发现直接 @标签 引用")
     warnings.extend(
         (
-            "高级测试直接运行所选文件：不改参数、不复制脚本、不套用 1.1.8 完整语料指纹。",
+            "高级测试直接运行所选文件：不改参数、不复制脚本、不套用自动乱数脚本包完整语料指纹。",
             "所选 ECS 拥有完整手柄控制权限，运行前必须人工确认游戏与存档状态。",
         )
     )
@@ -288,51 +275,3 @@ def prepare_script_test_runtime(
         label_references=label_references,
         check=check,
     )
-
-
-def write_builtin_egg_surf_menu_probe(
-    source_dir: str | Path,
-    output_dir: str | Path,
-) -> Path:
-    """Create the standalone surf-complete probe with its audited label."""
-    source_dir = Path(source_dir).resolve()
-    output_dir = Path(output_dir).resolve()
-    if not BUILTIN_EGG_SURF_MENU_PROBE.is_file():
-        raise FileNotFoundError(f"缺少内置冲浪结束测试脚本: {BUILTIN_EGG_SURF_MENU_PROBE}")
-
-    label_sources = []
-    for name in BUILTIN_EGG_SURF_MENU_LABELS:
-        label_path = EASYCON118_EXTENSION_LABEL_DIR / f"{name}.IL"
-        if not label_path.is_file():
-            fallback = EASYCON118_LOCAL_LABEL_DIR / f"{name}.IL"
-            if fallback.is_file():
-                label_path = fallback
-            else:
-                raise FileNotFoundError(f"仓库缺少内置测试标签: {label_path.name}")
-        label_sources.append(label_path)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_label_dir = output_dir / "ImgLabel"
-    output_label_dir.mkdir(parents=True, exist_ok=True)
-    main_path = output_dir / "main.ecs"
-    shutil.copy2(BUILTIN_EGG_SURF_MENU_PROBE, main_path)
-    for label_path in label_sources:
-        (output_label_dir / label_path.name).write_bytes(
-            label_path.read_bytes().rstrip(b"\r\n")
-        )
-
-    manifest = {
-        "kind": "builtin_egg_surf_menu_probe",
-        "source_script": str(BUILTIN_EGG_SURF_MENU_PROBE),
-        "source_118": str(source_dir),
-        "main_sha256": hashlib.sha256(main_path.read_bytes()).hexdigest(),
-        "labels": {
-            label_path.name: hashlib.sha256(label_path.read_bytes()).hexdigest()
-            for label_path in label_sources
-        },
-    }
-    (output_dir / "script-test.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return main_path

@@ -27,6 +27,7 @@ from automation.static_targets import (
     is_supported_static_target,
 )
 from rng.tenlines_utils import IVs, InitialSeedResult, SearcherResult, calibration
+from assets.game_text import CATEGORY_EN_TO_ZH, CATEGORY_ZH_TO_EN
 
 
 def target(seed: str, ivs: tuple[int, ...], pid: str = "00000001") -> SearcherResult:
@@ -286,17 +287,32 @@ class CompatibilityTests(unittest.TestCase):
             seed_search=lambda **_: [route("9C76", 100020, mode=6)],
         )
         names = (
-            "游戏版本文本", "Seed模式", "NX机型", "Seed启动方案", "目标Seed", "目标消耗帧",
+            "游戏版本文本", "Seed模式", "NX机型", "Seed启动方案", "调试日志输出",
+            "帧奇偶修正方案", "目标Seed", "目标消耗帧",
             "目标宝可梦名称", "目标全国图鉴编号", "静态或野生", "宝可梦遭遇方法",
             "宝可梦遭遇地点", "麻痹", "点到为止", "出闪后继续抓捕",
             "道具乱数模式", "队伍空位数量",
         )
         template = "\n".join(f'${name} = "old"' for name in names)
         template += "\n# ============================进阶设置\n$内部参数 = 1"
+        for name in (
+            "扩窗层数上限", "扩窗第1层Seed容差", "扩窗第1层帧半宽",
+            "扩窗第2层Seed容差", "扩窗第2层帧半宽",
+            "扩窗第3层Seed容差", "扩窗第3层帧半宽",
+        ):
+            template += f"\n${name} = 0"
         configured = configure_template_text(
             template,
             result.plan,
-            EasyCon118Options(nx_model=1, seed_startup_scheme=1),
+            EasyCon118Options(
+                nx_model=1,
+                seed_startup_scheme=1,
+                debug_log_output=0,
+                frame_parity_scheme=0,
+                reverse_expansion_layers=2,
+                reverse_expansion_seed_tolerances=(11, 22, 33),
+                reverse_expansion_frame_half_widths=(1000, 2000, 3000),
+            ),
         )
         self.assertIn('$Seed模式 = 6', configured)
         self.assertIn('$Seed启动方案 = 1', configured)
@@ -305,10 +321,20 @@ class CompatibilityTests(unittest.TestCase):
         self.assertIn('$目标宝可梦名称 = ""', configured)
         self.assertIn('$目标全国图鉴编号 = 25', configured)
         self.assertIn('$静态或野生 = "野生"', configured)
+        self.assertIn('$调试日志输出 = 0', configured)
+        self.assertIn('$帧奇偶修正方案 = 0', configured)
+        self.assertIn('$扩窗层数上限 = 2', configured)
+        self.assertIn('$扩窗第2层Seed容差 = 22', configured)
+        self.assertIn('$扩窗第3层帧半宽 = 3000', configured)
 
         values = plan_to_user_values(result.plan)
         self.assertEqual(values["目标宝可梦名称"], "")
         self.assertEqual(values["目标全国图鉴编号"], 25)
+
+    def test_super_rod_uses_gen3_chinese_name_with_legacy_input_alias(self):
+        self.assertEqual(CATEGORY_EN_TO_ZH["SuperRod"], "厉害钓竿")
+        self.assertEqual(CATEGORY_ZH_TO_EN["厉害钓竿"], "SuperRod")
+        self.assertEqual(CATEGORY_ZH_TO_EN["超级钓竿"], "SuperRod")
 
     def test_wild_item_rng_options_are_written_with_party_slot_count(self):
         item = target("12345678", (31, 31, 31, 31, 31, 31))

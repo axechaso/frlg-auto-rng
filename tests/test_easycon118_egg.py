@@ -306,6 +306,8 @@ ENDFUNC
         self.assertEqual(values["目标Seed"], "75D1")
         self.assertEqual(values["Seed启动方案"], 0)
         self.assertEqual(values["Seed校准方案"], 2)
+        self.assertEqual(values["调试日志输出"], 1)
+        self.assertEqual(values["帧奇偶修正方案"], 1)
         self.assertEqual(values["目标消耗帧"], 8021)
         self.assertEqual(values["孵蛋领取目标帧"], 10021)
         self.assertEqual(values["孵蛋双亲A_HP"], 31)
@@ -384,7 +386,7 @@ ENDFUNC
         old_template = "\n".join(
             f"${name} = 0" for name in egg_request_to_user_values(egg_request())
         ) + "\n# ============================进阶设置\n"
-        with self.assertRaisesRegex(ValueError, "local_assets仍为旧缓存"):
+        with self.assertRaisesRegex(ValueError, "local_assets 仍为旧缓存"):
             configure_egg_template_text(
                 old_template,
                 egg_request(),
@@ -421,6 +423,7 @@ ENDFUNC
     def test_template_replaces_all_required_egg_inputs(self):
         names = (
             "游戏版本文本", "Seed模式", "NX机型", "Seed校准方案", "Seed启动方案",
+            "调试日志输出", "帧奇偶修正方案",
             "目标Seed", "目标消耗帧",
             "目标宝可梦名称", "目标全国图鉴编号", "静态或野生",
             "道具乱数模式", "队伍空位数量",
@@ -442,6 +445,12 @@ ENDFUNC
         )
         template += "\n# ============================进阶设置\n$内部参数 = 1"
         for name in (
+            "扩窗层数上限", "扩窗第1层Seed容差", "扩窗第1层帧半宽",
+            "扩窗第2层Seed容差", "扩窗第2层帧半宽",
+            "扩窗第3层Seed容差", "扩窗第3层帧半宽",
+        ):
+            template += f"\n${name} = 0"
+        for name in (
             "孵蛋Held无蛋表Seed", "孵蛋Held无蛋表目标帧", "孵蛋Held无蛋表相性",
             "孵蛋Held无蛋表Offset", "孵蛋Held无蛋表最小帧", "孵蛋Held无蛋表最大帧",
             "孵蛋Held无蛋区间起点表", "孵蛋Held无蛋区间终点表",
@@ -449,7 +458,15 @@ ENDFUNC
         ):
             template += f"\n${name} = 0"
         configured = configure_egg_template_text(
-            template, egg_request(seed_startup_scheme=1, seed_calibration_scheme=1)
+            template,
+            egg_request(
+                seed_startup_scheme=1,
+                seed_calibration_scheme=1,
+                debug_log_output=0,
+                reverse_expansion_layers=1,
+                reverse_expansion_seed_tolerances=(12, 24, 36),
+                reverse_expansion_frame_half_widths=(2000, 4000, 6000),
+            ),
         )
         self.assertIn('$静态或野生 = "孵蛋"', configured)
         self.assertIn("$道具乱数模式 = 0", configured)
@@ -457,6 +474,11 @@ ENDFUNC
         self.assertIn('$目标Seed = "75D1"', configured)
         self.assertIn('$Seed启动方案 = 1', configured)
         self.assertIn('$Seed校准方案 = 1', configured)
+        self.assertIn('$调试日志输出 = 0', configured)
+        self.assertIn('$帧奇偶修正方案 = 1', configured)
+        self.assertIn('$扩窗层数上限 = 1', configured)
+        self.assertIn('$扩窗第1层Seed容差 = 12', configured)
+        self.assertIn('$扩窗第3层帧半宽 = 6000', configured)
         self.assertIn('$孵蛋双亲A_DEF = 29', configured)
         self.assertIn('$孵蛋双亲B_SPA = 3', configured)
         self.assertIn('$孵蛋Held无蛋表Seed = "75D1"', configured)
@@ -1480,12 +1502,16 @@ ENDFUNC
         template_path = _select_egg_template_path(source_dir)
         library_path = root / "local_assets" / "easycon118" / "lib" / "27_孵蛋测试流程.ecs"
         if not template_path.is_file() or not library_path.is_file():
-            self.skipTest("requires the imported 1.1.8 egg runtime")
+            self.skipTest("requires the imported 2.0 egg runtime")
         template = template_path.read_text(encoding="utf-8")
         self.assertEqual(template_path.name, "NS火叶全自动一键乱数2.0.ecs")
         self.assertIn(EGG_FORMAL_WAIT_MARKER, template)
         self.assertIn("$孵蛋使用绝对时间轴 = 0", template)
         self.assertIn("$调试日志输出 = 1", template)
+        self.assertIn("$帧奇偶修正方案 = 1", template)
+        self.assertIn("$扩窗层数上限 = 3", template)
+        self.assertIn("$扩窗第1层Seed容差 = 25", template)
+        self.assertIn("$扩窗第3层帧半宽 = 30000", template)
         self.assertIn(EGG_TRANSIENT_RETRY_OVERRIDE_MARKER, template)
         self.assertIn(EGG_TERMINAL_STOP_OVERRIDE_MARKER, template)
         self.assertIn("FUNC 孵蛋流程_计算两次命中时间(): INT", template)

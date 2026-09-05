@@ -137,7 +137,7 @@ class AutoSearchRequest:
             self.game, self.category, get_species_name(species_id)
         ):
             raise ValueError(
-                f"1.1.8 不支持该版本的静态组合: {self.category} / {self.pokemon}"
+                f"2.0 不支持该版本的静态组合: {self.category} / {self.pokemon}"
             )
 
     def to_ivs_range(self) -> IVsRange:
@@ -168,7 +168,7 @@ class RunPlan:
     def seed_mode(self) -> int:
         seed_mode = settings_to_seed_mode(self.initial_seed.settings)
         if seed_mode is None:
-            raise ValueError("选中的初始 Seed 设置无法映射到 1.1.8 Seed 模式")
+            raise ValueError("选中的初始 Seed 设置无法映射到 2.0 Seed 模式")
         return seed_mode
 
     def to_rng_config(

@@ -44,7 +44,7 @@ FUNC HOME_BUFFER识别稳定状态($只使用当前NX: INT): INT
             PRINT "HOME_BUFFER_LABEL|NX_MODE=" & $只使用当前NX & "|NX=" & $NX机型 & "|BUFFER=" & $HOME_BUFFER选中正确 & "|NORMAL=" & $HOME_BUFFER选中普通 & "|ERROR=" & $HOME_BUFFER选中错误 & "|NS1_BUFFER=" & $HOME_BUFFER当前正确退出 & "|NS2_BUFFER=" & $HOME_BUFFER当前正确退出_NS2 & "|THRESHOLD=" & $HOME_BUFFER有效识图阈值 & "|ADAPTIVE=" & $HOME_BUFFER稳定低分自适应 & "|SAMPLE=" & $HOME_BUFFER自适应采样
         ENDIF
 
-        # 95 分及以上保持原 1.1.8 的判断优先级：BUFFER、ERROR、NORMAL。
+        # 95 分及以上保持 2.0 的判断优先级：BUFFER、ERROR、NORMAL。
         IF $HOME_BUFFER选中正确 >= $HOME_BUFFER有效识图阈值
             RETURN 1
         ELIF $HOME_BUFFER选中错误 >= $HOME_BUFFER有效识图阈值

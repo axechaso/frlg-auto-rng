@@ -1,4 +1,4 @@
-"""Verify the 1.1.8 label corpus and optionally self-match every label."""
+"""Verify the 2.0 label corpus and optionally self-match every label."""
 
 import argparse
 import json
@@ -67,12 +67,12 @@ def main() -> int:
         and manifest["sha256"] == EXPECTED_LABEL_SHA256
     )
     if not expected:
-        print("标签清单与已审计的 1.1.8 资产不一致。", file=sys.stderr)
+        print("标签清单与已审计的 2.0 资产不一致。", file=sys.stderr)
         return 2
     scripts = inspect_script_corpus(args.label_dir.parent)
     print(json.dumps({"scripts": scripts}, ensure_ascii=False, indent=2))
     if scripts["count"] != EXPECTED_SCRIPT_FILE_COUNT:
-        print("主 ECS/lib 文件数与已审计的 1.1.8 资产不一致。", file=sys.stderr)
+        print("主 ECS/lib 文件数与已审计的 2.0 资产不一致。", file=sys.stderr)
         return 3
     if not is_supported_script_input_sha256(scripts["sha256"]):
         print(

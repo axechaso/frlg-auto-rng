@@ -95,7 +95,6 @@ from .script_test import (
     inspect_script_label_references,
     prepare_script_test_runtime,
     resolve_script_test_entry,
-    write_builtin_egg_surf_menu_probe,
 )
 
 __all__ = [
@@ -181,5 +180,4 @@ __all__ = [
     "write_configured_project",
     "write_configured_tid_project",
     "write_sid_reverse_project",
-    "write_builtin_egg_surf_menu_probe",
 ]

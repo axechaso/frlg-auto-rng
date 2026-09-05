@@ -1,4 +1,4 @@
-"""Generate and launch a configured 1.1.8 project on pinned EasyCon 1.6.4a."""
+"""Generate and launch a configured 2.0 project on pinned EasyCon 1.6.4a."""
 
 import json
 import hashlib
@@ -82,9 +82,9 @@ PREVIOUS_SCRIPT_SHA256S = (
     # Download package with the egg candy navigation fix; importing it
     # materializes the remaining 1.6.4-a runtime fixes below.
     "cc11e48441fa58c06ea06d307bc868821477483f4a696e02e81779247891ff4f",
-    # Current 1.1.8 download package after the latest egg-flow timing edits.
+    # Earlier download package after the latest egg-flow timing edits.
     "cd263d5e94021df1fdfe68ae3da385f20c478d2f901fddd159f0922b263489f8",
-    # Raw 1.1.8 package with the audited egg wild reverse window raised to
+    # Earlier package with the audited egg wild reverse window raised to
     # 6500 advances.
     "407e3fde784c631e871c48f201759e29487cc3e3a10b301aac051cbede9f3385",
     # Download package after adding cross-level IV-range intersection and
@@ -150,7 +150,13 @@ PREVIOUS_SCRIPT_SHA256S = (
     # physical +7 advance was still subtracted from both timing deadlines.
     "e8b807402408c76cbbe204c0921422ee8ccbf43fd0d1f7e23428c065bc743d6d",
 )
-EXPECTED_SCRIPT_SHA256 = "750eb3349405395edb1879c0bc12f8e53888e6e73d0efde223ae40f17f31530c"
+PREVIOUS_SCRIPT_SHA256S += (
+    # Version 2.0 package before the selectable log/parity/expansion fields.
+    "750eb3349405395edb1879c0bc12f8e53888e6e73d0efde223ae40f17f31530c",
+    # First Version 2.0 package with selectable log/parity/expansion fields.
+    "183393d7190add9aeb8ea806efcdd14590ee89c887f908abca66580ca928c191",
+)
+EXPECTED_SCRIPT_SHA256 = "43a5a9c220db51177f4cc6a9171148a0094b63f3ba49a3d8eb339243203aeca2"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
@@ -184,7 +190,7 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # the completed no-egg pre-calibration.
     "1700ba02cc60fdfd9857f14a2a8384c5736c06908a92e468d1dfd721a9be4865",
     # Materialized corpus before the opt-in HOME_BUFFER stable-low-score
-    # classifier was added to both 1.1.8 entry scripts.
+    # classifier was added to both entry scripts.
     "da32012466a7349113ff166cf158c39dd721fc6e33c8d84355b9747cd7888f86",
     "1ea3bd0ba820e3cb3b1b8616f24e7e8d23b87767b23c49c77cc0a187c2037f73",
     "30fea007607c06d69efdefe256c4b4a639d865854ca94da8afe309eaf0272451",
@@ -228,6 +234,17 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # Current Version 2.0 corpus: generation-menu timing no longer subtracts
     # the physical +7 twice, and Pickup uses its measured -1 net effect.
     "93f09eaf6229fc810da98957f9979bfc0d3d2abd9925d54e80006132169bfccb",
+    # Version 2.0 corpus with selectable script logging, parity adjustment,
+    # and three user-configurable reverse-lookup expansion windows.
+    "f16d0824459e71a56d4efb0b644784fc7f47e50efb9b628c46aa9c019e8eca27",
+    # Version 2.0 materialization before the restart-overlay marker was renamed.
+    "595819c0323db072d5845ef1ba4b9bb73ab7c83fff0fad25bd7f88c3c47509a2",
+    # Current Version 2.0 materialization with all user-facing script version
+    # text normalized while retaining legacy-overlay migration support.
+    "5c292a2139ac6ed86fe3e75a3c9885a1ad1d1334cc53c0f76ff5db00ff1cb6cd",
+    # Current materialization after the remaining repository overlays were
+    # normalized to the 2.0 user-facing version name.
+    "4f78b8f30219092e4608eb342d63fd8fde76cbaf9e112b2df17a271ea949008c",
 )
 
 
@@ -254,7 +271,7 @@ EASYCON118_EXTENSION_LABEL_DIR = (
 )
 # PyInstaller can preserve the bytes of non-ASCII asset names while exposing
 # a mojibake filename on some Windows extraction/build paths.  The bundled
-# 1.1.8 label corpus is also shipped under ``local_assets`` with the exact
+# The 2.0 label corpus is also shipped under ``local_assets`` with the exact
 # EasyCon names, so use it as a deterministic fallback for the two labels
 # injected into generated projects.
 EASYCON118_LOCAL_LABEL_DIR = (
@@ -374,7 +391,8 @@ ENDFUNC
 EGG_SETTINGS_LIBRARY_NAME = "27_孵蛋测试流程.ecs"
 EGG_SETTINGS_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：游戏设置 OCR 使用有限重试"
 EGG_SETTINGS_NEXT_FUNCTION = "FUNC 孵蛋测试_执行前置准备"
-EGG_RESTART_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按 1.1.8 原版顺序关闭游戏，优先处理退出状态"
+EGG_RESTART_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按 2.0 顺序关闭游戏，优先处理退出状态"
+EGG_RESTART_LEGACY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按 1.1.8 原版顺序关闭游戏，优先处理退出状态"
 EGG_RESTART_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_关闭游戏"
 EGG_RESTART_NEXT_FUNCTION = "FUNC 孵蛋测试_软重启并跳过回忆"
 EGG_RESTART_GLOBALS = """\
@@ -971,7 +989,7 @@ class EasyCon118Options:
     # HOME sequence measured by the legacy standalone RNG script.
     seed_startup_scheme: int = 0
     # Temporary Japanese starter branch.  It changes only the generated
-    # starter project; ordinary English 1.1.8 projects keep their corpus.
+    # starter project; ordinary English 2.0 projects keep their corpus.
     japanese_starter: bool = False
     # The formal entry supports the two audited Seed calibration paths.  This
     # is appended after the historical fields to keep positional callers
@@ -992,6 +1010,13 @@ class EasyCon118Options:
     # ``STARTER`` keeps the TID -> rival starter route separate from ordinary
     # static encounters, whose preceding menu/bridge flow is different.
     precalibration_context_kind: str | None = None
+    # Runtime output and reverse-search controls exposed by the desktop tool.
+    # ``None`` keeps the selected ECS template's own expansion defaults.
+    debug_log_output: int = 1
+    frame_parity_scheme: int = 1
+    reverse_expansion_layers: int | None = None
+    reverse_expansion_seed_tolerances: tuple[int, int, int] | None = None
+    reverse_expansion_frame_half_widths: tuple[int, int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -1021,6 +1046,13 @@ class EggRunRequest:
     precalibration_seed_ns2: int | None = None
     precalibration_held: int | None = None
     precalibration_pickup: int | None = None
+    debug_log_output: int = 1
+    # Egg runs always use the menu-based parity adjustment.  Expansion
+    # overrides remain optional because the pre-calibration wild reverse
+    # search shares the ordinary reverse-search controller.
+    reverse_expansion_layers: int | None = None
+    reverse_expansion_seed_tolerances: tuple[int, int, int] | None = None
+    reverse_expansion_frame_half_widths: tuple[int, int, int] | None = None
 
     @property
     def nx_model(self) -> int:
@@ -1068,6 +1100,12 @@ class EggRunRequest:
             raise ValueError(
                 "Seed校准方案只能是0（原始12轮众数）、1（实验锁定细调）或2（命中保持后的方向票接续）"
             )
+        _validate_runtime_output_mode(self.debug_log_output)
+        _reverse_expansion_values(
+            self.reverse_expansion_layers,
+            self.reverse_expansion_seed_tolerances,
+            self.reverse_expansion_frame_half_widths,
+        )
         if not isinstance(self.update_precalibration, bool):
             raise ValueError("更新预校准开关必须是布尔值")
         for name, value in (
@@ -1140,7 +1178,7 @@ def probe_easycon_devices(
 
 
 def inspect_label_corpus(label_dir: str | Path) -> dict[str, Any]:
-    """Return a deterministic fingerprint of a 1.1.8 ``ImgLabel`` folder."""
+    """Return a deterministic fingerprint of a 2.0 ``ImgLabel`` folder."""
     label_dir = Path(label_dir)
     files = sorted(
         (path for path in label_dir.iterdir() if path.is_file() and path.suffix == ".IL"),
@@ -1177,7 +1215,7 @@ def copy_easycon118_extension_labels(label_dir: str | Path) -> None:
     """
     label_dir = Path(label_dir)
     if not label_dir.is_dir():
-        raise FileNotFoundError(f"1.1.8 包缺少 ImgLabel 目录: {label_dir}")
+        raise FileNotFoundError(f"2.0 脚本包缺少 ImgLabel 目录: {label_dir}")
     for name in EASYCON118_EXTENSION_LABEL_NAMES:
         source = EASYCON118_EXTENSION_LABEL_DIR / name
         if not source.is_file():
@@ -1190,17 +1228,17 @@ def copy_easycon118_extension_labels(label_dir: str | Path) -> None:
 
 
 def inspect_script_corpus(source_dir: str | Path) -> dict[str, Any]:
-    """Fingerprint both official 1.1.8 entry scripts and every file under ``lib``."""
+    """Fingerprint both official 2.0 entry scripts and every file under ``lib``."""
     source_dir = Path(source_dir)
     templates = [source_dir / name for name in EXPECTED_TEMPLATE_NAMES]
     missing_templates = [path.name for path in templates if not path.is_file()]
     if missing_templates:
         raise FileNotFoundError(
-            f"1.1.8 包缺少正式/孵蛋入口: {', '.join(missing_templates)}"
+            f"2.0 脚本包缺少正式/孵蛋入口: {', '.join(missing_templates)}"
         )
     lib_dir = source_dir / "lib"
     if not lib_dir.is_dir():
-        raise FileNotFoundError(f"1.1.8 包缺少 lib 目录: {lib_dir}")
+        raise FileNotFoundError(f"2.0 脚本包缺少 lib 目录: {lib_dir}")
     files = [(path.name, path) for path in templates]
     files.extend(
         (path.relative_to(source_dir).as_posix(), path)
@@ -1386,7 +1424,7 @@ def _load_egg_precalibration(
 
 def _function_block(text: str, signature: str) -> tuple[int, int, str]:
     if text.count(signature) != 1:
-        raise ValueError(f"1.1.8 模板缺少唯一函数: {signature}")
+        raise ValueError(f"2.0 模板缺少唯一函数: {signature}")
     start = text.index(signature)
     end_marker = "\nENDFUNC"
     end = text.index(end_marker, start) + len(end_marker)
@@ -1405,7 +1443,7 @@ def _insert_precalibration_globals(text: str, lines: list[str]) -> str:
     addition = "\n" + PRECALIBRATION_RUNTIME_MARKER + "\n" + "\n".join(lines)
     configured, count = pattern.subn(r"\1" + addition, text, count=1)
     if count != 1:
-        raise ValueError("1.1.8 模板缺少唯一的NS2 Seed预校准字段")
+        raise ValueError("2.0 模板缺少唯一的 NS2 Seed 预校准字段")
     return configured
 
 
@@ -1427,7 +1465,7 @@ def _apply_seed_precalibration_globals(
         pattern = re.compile(rf"(?m)^\${re.escape(name)}\s*=\s*[^\r\n]*$")
         configured, count = pattern.subn(f"${name} = {normalized}", configured)
         if count != 1:
-            raise ValueError(f"1.1.8 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
+            raise ValueError(f"2.0 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
     return configured
 
 
@@ -1474,7 +1512,7 @@ def _apply_regular_precalibration_runtime_text(
     ns1_anchor = "    $Seed预校准索引 = $Seed预校准索引_NS1"
     ns2_anchor = "    $Seed预校准索引 = $Seed预校准索引_NS2"
     if text.count(ns1_anchor) != 1 or text.count(ns2_anchor) != 1:
-        raise ValueError("1.1.8 模板的NX Seed预校准选择分支数量异常")
+        raise ValueError("2.0 模板的 NX Seed 预校准选择分支数量异常")
     text = text.replace(
         ns1_anchor,
         ns1_anchor + "\n    $消耗帧预校准修正 = $消耗帧预校准修正_NS1",
@@ -1489,7 +1527,7 @@ def _apply_regular_precalibration_runtime_text(
     _, _, block = _function_block(text, signature)
     recalc_anchor = "    $校准成功 = 重新计算等待参数()"
     if block.count(recalc_anchor) != 1:
-        raise ValueError("1.1.8 固定延迟函数缺少唯一的等待参数重算入口")
+        raise ValueError("2.0 固定延迟函数缺少唯一的等待参数重算入口")
     block = block.replace(
         recalc_anchor,
         "    $消耗帧实际执行修正量 += $消耗帧预校准修正\n"
@@ -1510,7 +1548,7 @@ def _apply_regular_precalibration_runtime_text(
     _, _, block = _function_block(text, signature)
     terminal_anchor = "        PRINT 已命中目标，脚本停止"
     if block.count(terminal_anchor) != 1:
-        raise ValueError("1.1.8 自动校准函数缺少唯一的完整目标命中分支")
+        raise ValueError("2.0 自动校准函数缺少唯一的完整目标命中分支")
     block = block.replace(terminal_anchor, marker_line + "\n" + terminal_anchor, 1)
     return _replace_function_block(text, signature, block)
 
@@ -1550,7 +1588,7 @@ def _apply_egg_precalibration_runtime_text(
         "    $孵蛋Pickup执行修正帧 = $孵蛋Pickup动态预校准帧"
     )
     if block.count(init_anchor) != 1:
-        raise ValueError("1.1.8 孵蛋总控缺少唯一的Held/Pickup动态修正初始化")
+        raise ValueError("2.0 孵蛋总控缺少唯一的 Held/Pickup 动态修正初始化")
     block = block.replace(init_anchor, init_replacement, 1)
     text = _replace_function_block(text, signature, block)
 
@@ -1566,7 +1604,7 @@ def _apply_egg_precalibration_runtime_text(
     _, _, block = _function_block(text, signature)
     success_anchor = "    PRINT 孵蛋目标Seed、Held帧和Pickup帧全部命中，流程完成"
     if block.count(success_anchor) != 1:
-        raise ValueError("1.1.8 孵蛋完成函数缺少唯一的完整目标命中分支")
+        raise ValueError("2.0 孵蛋完成函数缺少唯一的完整目标命中分支")
     block = block.replace(success_anchor, marker_line + "\n" + success_anchor, 1)
     return _replace_function_block(text, signature, block)
 
@@ -1576,14 +1614,75 @@ def _game_text(game: str) -> str:
         return "火红"
     if game.startswith("lg"):
         return "叶绿"
-    raise ValueError(f"1.1.8 只支持火红/叶绿，当前游戏为 {game!r}")
+    raise ValueError(f"2.0 只支持火红/叶绿，当前游戏为 {game!r}")
+
+
+def _validate_runtime_output_mode(value: int) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("输出日志模式只能是0（精简）或1（完整调试）") from exc
+    if value not in {0, 1}:
+        raise ValueError("输出日志模式只能是0（精简）或1（完整调试）")
+    return value
+
+
+def _validate_frame_parity_scheme(value: int) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("奇偶调整方案只能是0（F1/F2）或1（菜单）") from exc
+    if value not in {0, 1}:
+        raise ValueError("奇偶调整方案只能是0（F1/F2）或1（菜单）")
+    return value
+
+
+def _reverse_expansion_values(
+    layers: int | None,
+    seed_tolerances: tuple[int, int, int] | None,
+    frame_half_widths: tuple[int, int, int] | None,
+) -> dict[str, int]:
+    """Validate optional three-layer reverse-search overrides for ECS."""
+    if layers is None and seed_tolerances is None and frame_half_widths is None:
+        return {}
+    if layers is None or seed_tolerances is None or frame_half_widths is None:
+        raise ValueError("反查扩窗覆盖必须同时填写层数、三层 Seed 容差和三层帧半宽")
+    try:
+        layers = int(layers)
+        seeds = tuple(int(value) for value in seed_tolerances)
+        frames = tuple(int(value) for value in frame_half_widths)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("反查扩窗参数必须是整数") from exc
+    if not 0 <= layers <= 3:
+        raise ValueError("反查扩窗层数必须在0-3之间")
+    if len(seeds) != 3 or len(frames) != 3:
+        raise ValueError("反查扩窗必须提供三层 Seed 容差和三层帧半宽")
+    if any(value < 0 for value in seeds):
+        raise ValueError("反查扩窗 Seed 容差不能为负数")
+    if any(value < 0 for value in frames):
+        raise ValueError("反查扩窗帧半宽不能为负数")
+    values = {"扩窗层数上限": layers}
+    for index, (seed, frame) in enumerate(zip(seeds, frames), 1):
+        values[f"扩窗第{index}层Seed容差"] = seed
+        values[f"扩窗第{index}层帧半宽"] = frame
+    return values
+
+
+def reverse_expansion_to_ecs_values(
+    options: EasyCon118Options | EggRunRequest,
+) -> dict[str, int]:
+    return _reverse_expansion_values(
+        options.reverse_expansion_layers,
+        options.reverse_expansion_seed_tolerances,
+        options.reverse_expansion_frame_half_widths,
+    )
 
 
 def plan_to_user_values(
     plan: RunPlan,
     options: EasyCon118Options | None = None,
 ) -> dict[str, Any]:
-    """Map a generated plan to the editable variables at the top of 1.1.8."""
+    """Map a generated plan to the editable variables at the top of 2.0."""
     options = options or EasyCon118Options()
     nx_model = options.nx_model
     if nx_model is None:
@@ -1601,6 +1700,9 @@ def plan_to_user_values(
         raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
     if options.seed_calibration_scheme not in {0, 1}:
         raise ValueError("正式版 Seed校准方案只能是0（原始12轮众数）或1（实验锁定细调）")
+    debug_log_output = _validate_runtime_output_mode(options.debug_log_output)
+    frame_parity_scheme = _validate_frame_parity_scheme(options.frame_parity_scheme)
+    reverse_expansion_to_ecs_values(options)
     is_wild = _is_wild(plan)
     if not isinstance(options.item_rng_mode, bool):
         raise ValueError("道具乱数模式必须是布尔值")
@@ -1632,6 +1734,8 @@ def plan_to_user_values(
         "NX机型": nx_model,
         "Seed校准方案": options.seed_calibration_scheme,
         "Seed启动方案": options.seed_startup_scheme,
+        "调试日志输出": debug_log_output,
+        "帧奇偶修正方案": frame_parity_scheme,
         "目标Seed": plan.initial_seed.seed.upper(),
         "目标消耗帧": plan.initial_seed.advances,
         # The ECS resolves the name before the numeric Dex field.  Generated
@@ -1662,6 +1766,9 @@ def egg_request_to_user_values(request: EggRunRequest) -> dict[str, Any]:
         "NX机型": request.nx_model,
         "Seed校准方案": request.seed_calibration_scheme,
         "Seed启动方案": request.seed_startup_scheme,
+        "调试日志输出": _validate_runtime_output_mode(request.debug_log_output),
+        # Egg generation deliberately ignores any caller/UI parity choice.
+        "帧奇偶修正方案": 1,
         "目标Seed": request.normalized_seed,
         "目标消耗帧": request.held_advances,
         "目标宝可梦名称": "",
@@ -1815,7 +1922,7 @@ def _configure_all_values(template_text: str, values: dict[str, Any]) -> str:
         pattern = re.compile(rf"(?m)^\s*\${re.escape(name)}\s*=\s*[^\r\n]*$")
         configured, count = pattern.subn(f"${name} = {_ecs_literal(value)}", configured)
         if count != 1:
-            raise ValueError(f"1.1.8 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
+            raise ValueError(f"2.0 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
     return configured
 
 
@@ -1826,17 +1933,21 @@ def configure_template_text(
     *,
     allow_experimental: bool = False,
 ) -> str:
-    """Replace only the declared 1.1.8 user-input assignments."""
+    """Replace only the declared 2.0 user-input assignments."""
     if not plan.route_support.can_start and not allow_experimental:
         raise ValueError(
-            "该路线只允许搜索/生成计划，不能生成可启动的 1.1.8 正式脚本: "
+            "该路线只允许搜索/生成计划，不能生成可启动的 2.0 正式脚本: "
             + plan.route_support.summary
         )
 
-    return _configure_user_values(
+    configured = _configure_user_values(
         template_text,
         plan_to_user_values(plan, options),
-        optional_names={"Seed校准方案"},
+        optional_names={"Seed校准方案", "调试日志输出", "帧奇偶修正方案"},
+    )
+    return _configure_all_values(
+        configured,
+        reverse_expansion_to_ecs_values(options or EasyCon118Options()),
     )
 
 
@@ -1850,7 +1961,7 @@ def _configure_user_values(
     marker = "# ============================进阶设置"
     user_section, separator, remainder = template_text.partition(marker)
     if not separator:
-        raise ValueError("1.1.8 模板缺少进阶设置分界标记，拒绝在未知版本中替换参数")
+        raise ValueError("2.0 模板缺少进阶设置分界标记，拒绝在未知版本中替换参数")
     configured = user_section
     for name, value in values.items():
         pattern = re.compile(rf"(?m)^\s*\${re.escape(name)}\s*=\s*[^\r\n]*$")
@@ -1858,7 +1969,7 @@ def _configure_user_values(
         if count == 0 and name in optional_names:
             continue
         if count != 1:
-            raise ValueError(f"1.1.8 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
+            raise ValueError(f"2.0 模板字段 ${name} 应出现 1 次，实际为 {count} 次")
     return configured + (separator + remainder if separator else "")
 
 
@@ -1889,6 +2000,25 @@ def _assert_configured_user_values(
         if actual != expected:
             raise ValueError(
                 f"生成脚本参数不一致: ${name} 应为 {expected}，实际为 {actual!r}"
+            )
+
+
+def _assert_configured_all_values(
+    project_main: str | Path,
+    values: dict[str, Any],
+) -> None:
+    if not values:
+        return
+    text = Path(project_main).read_text(encoding="utf-8-sig")
+    for name, value in values.items():
+        expected = _ecs_literal(value)
+        matches = re.findall(
+            rf"(?m)^\s*\${re.escape(name)}\s*=\s*([^\r\n]*?)\s*$",
+            text,
+        )
+        if matches != [expected]:
+            raise ValueError(
+                f"生成脚本参数不一致: ${name} 应为 {expected}，实际为 {matches!r}"
             )
 
 
@@ -1954,6 +2084,10 @@ def validate_generated_project_consistency(
             f"应为 {expected_controller}"
         )
     _assert_configured_user_values(project_main, plan_to_user_values(plan, options))
+    _assert_configured_all_values(
+        project_main,
+        reverse_expansion_to_ecs_values(options),
+    )
 
 
 def validate_generated_egg_project_consistency(
@@ -1981,14 +2115,20 @@ def validate_generated_egg_project_consistency(
         "game", "seed_mode", "target_seed", "held_advances", "pickup_advances",
         "species_id", "compatibility", "parent_a_gender", "parent_b_gender",
         "parent_a_ivs", "parent_b_ivs", "seed_startup_scheme",
-        "seed_calibration_scheme",
+        "seed_calibration_scheme", "debug_log_output",
+        "reverse_expansion_layers", "reverse_expansion_seed_tolerances",
+        "reverse_expansion_frame_half_widths",
     ):
         actual = manifest_request.get(key)
         expected = expected_request.get(key)
         if key == "target_seed":
             actual = str(actual or "").upper()
             expected = str(expected or "").upper()
-        elif key in {"parent_a_ivs", "parent_b_ivs"}:
+        elif key in {
+            "parent_a_ivs", "parent_b_ivs",
+            "reverse_expansion_seed_tolerances",
+            "reverse_expansion_frame_half_widths",
+        }:
             actual = tuple(actual) if isinstance(actual, (list, tuple)) else actual
             expected = tuple(expected) if isinstance(expected, (list, tuple)) else expected
         if actual != expected:
@@ -2004,6 +2144,10 @@ def validate_generated_egg_project_consistency(
             f"应为 {expected_wait_mode}，实际为 {manifest.get('egg_wait_mode')!r}"
         )
     _assert_configured_user_values(project_main, egg_request_to_user_values(request))
+    _assert_configured_all_values(
+        project_main,
+        reverse_expansion_to_ecs_values(request),
+    )
 
 
 def _apply_seed_mode3_help_start_text(text: str) -> str:
@@ -2057,7 +2201,7 @@ def _render_japanese_starter_ocr_helper() -> str:
     """Render the main-script-only Japanese starter OCR helper."""
     lines = [
         _JAPANESE_STARTER_MARKER,
-        "# 日版御三家临时分支；日版标签随1.1.8包提供，默认英文流程不调用。",
+        "# 日版御三家临时分支；日版标签随 2.0 脚本包提供，默认英文流程不调用。",
         "FUNC 读取并输出日版御三家识图结果(): INT",
         "    $性别识图失败 = 0",
         "    $性格识图失败 = 0",
@@ -2175,7 +2319,7 @@ def _apply_japanese_starter_guard_text(text: str) -> str:
         return text
     anchor = "FUNC 检查运行参数(): INT\n"
     if text.count(anchor) != 1:
-        raise ValueError("1.1.8 主脚本缺少唯一的运行参数检查入口")
+        raise ValueError("2.0 主脚本缺少唯一的运行参数检查入口")
     guard = (
         "    IF $Seed模式 == 10\n"
         "        IF $遭遇类型 != 1 or ($目标全国图鉴编号 != 1 and $目标全国图鉴编号 != 4 and $目标全国图鉴编号 != 7)\n"
@@ -2194,7 +2338,7 @@ def _apply_japanese_starter_runtime_text(text: str) -> str:
         return text
     anchor = "FUNC 读取并输出识图结果(): INT\n"
     if text.count(anchor) != 1:
-        raise ValueError("1.1.8 主脚本缺少唯一的识图结果入口")
+        raise ValueError("2.0 主脚本缺少唯一的识图结果入口")
     branch = (
         "    IF $Seed模式 == 10\n"
         "        RETURN 读取并输出日版御三家识图结果()\n"
@@ -2245,7 +2389,7 @@ def _apply_japanese_seed_mode10(library_path: Path, game_cn: str, game: str) -> 
     values = _japanese_seed_values(game)
     max_index = re.search(rf"(?m)^FUNC 取Seed最大索引_{re.escape(game_cn)}\(\): INT\n    RETURN (\d+)$", original)
     if max_index is None or int(max_index.group(1)) != len(values) - 1:
-        raise ValueError(f"{game_cn}日版 Seed 表长度与 1.1.8 时间表不一致")
+        raise ValueError(f"{game_cn}日版 Seed 表长度与 2.0 时间表不一致")
     rendered = ",".join('""' if value == "" else f'"{value}"' for value in values)
     function_anchor = f"\nFUNC 取SeedHEX_{game_cn}($idx: INT, $mode: INT): STRING\n"
     if original.count(function_anchor) != 1:
@@ -2271,7 +2415,11 @@ def configure_egg_template_text(template_text: str, request: EggRunRequest) -> s
     configured = _configure_user_values(
         template_text,
         egg_request_to_user_values(request),
-        optional_names={"Seed校准方案"},
+        optional_names={"Seed校准方案", "调试日志输出", "帧奇偶修正方案"},
+    )
+    configured = _configure_all_values(
+        configured,
+        reverse_expansion_to_ecs_values(request),
     )
     availability = build_egg_held_availability(request)
     availability_values = egg_held_availability_to_ecs_values(availability)
@@ -2288,8 +2436,8 @@ def configure_egg_template_text(template_text: str, request: EggRunRequest) -> s
     )
     if missing_fields:
         raise ValueError(
-            "当前1.1.8孵蛋模板未包含Held无蛋区间字段，通常是local_assets仍为旧缓存。"
-            "请重新运行安装脚本刷新1.1.8缓存，或在GUI选择更新后的1.1.8包。"
+            "当前 2.0 孵蛋模板未包含 Held 无蛋区间字段，通常是 local_assets 仍为旧缓存。"
+            "请重新运行安装脚本刷新 2.0 缓存，或在 GUI 选择更新后的 2.0 脚本包。"
             "缺少字段：" + "、".join(f"${name}" for name in missing_fields)
         )
     configured = _configure_all_values(
@@ -2320,9 +2468,14 @@ def _apply_egg_summary_fix_text(template_text: str) -> str:
         " & $孵蛋亲本B性别 & \"，相性 \" & $孵蛋双亲相性"
     )
     if fixed_species not in template_text:
-        if template_text.count(inline_species) != 1:
+        safe_species_assignment = (
+            "    $孵蛋蛋种名称文本 = "
+            "目标中文名称($游戏版本, $孵蛋蛋种族全国图鉴编号)"
+        )
+        if template_text.count(inline_species) == 1:
+            template_text = template_text.replace(inline_species, fixed_species, 1)
+        elif template_text.count(safe_species_assignment) != 1:
             raise ValueError("孵蛋模板缺少唯一的蛋种摘要，拒绝应用日志修正")
-        template_text = template_text.replace(inline_species, fixed_species, 1)
     if fixed_parents not in template_text:
         if template_text.count(bad_parents) != 1:
             raise ValueError("孵蛋模板缺少唯一的亲本摘要，拒绝应用日志修正")
@@ -2417,7 +2570,7 @@ def _apply_wild_pid_retry_limit_text(template_text: str) -> str:
         return template_text
     imported_count = template_text.count(WILD_PID_RETRY_LIMIT_IMPORTED)
     if imported_count != 1:
-        raise ValueError("1.1.8 模板的野生 PID 尝试上限不唯一，拒绝生成运行副本")
+        raise ValueError("2.0 模板的野生 PID 尝试上限不唯一，拒绝生成运行副本")
     return template_text.replace(
         WILD_PID_RETRY_LIMIT_IMPORTED,
         WILD_PID_RETRY_LIMIT_MARKER + "\n" + WILD_PID_RETRY_LIMIT_RUNTIME,
@@ -2488,7 +2641,7 @@ def _apply_egg_party_slot_main_runtime_override_text(
         egg_end = template_text.index(EGG_PARTY_SLOT_MAIN_EGG_NEXT_SECTION, egg_start)
     else:
         # Minimal unit fixtures may stop after the egg function; the real
-        # 1.1.8 template is still checked against the explicit next section.
+        # The 2.0 template is still checked against the explicit next section.
         egg_end = template_text.index("ENDFUNC", egg_start)
     egg_section = template_text[egg_start:egg_end]
     if "$孵蛋流程开页结果 = 孵蛋流程_喂糖后打开蛋能力页()" not in egg_section:
@@ -3050,10 +3203,20 @@ def _apply_egg_wild_seed_fallback_text(template_text: str) -> str:
     section = template_text[start:end]
     old_count = section.count(EGG_WILD_SEED_SCAN_OLD)
     current_count = section.count(EGG_WILD_SEED_SCAN_CURRENT)
+    semantic_current = (
+        section.count(EGG_WILD_SEED_WINDOW_INIT) == 1
+        and section.count("$孵蛋流程扫描结果 = 执行反查扫描()") == 2
+        and section.count("$有效Seed容差 = $孵蛋野生Seed容差 + 5") == 1
+        and section.count("$有效最大消耗帧 = $孵蛋野生最大消耗帧 + 1000") == 1
+    )
     if old_count == 1 and current_count == 0 and section.count("    FOR\n") == 1:
         section = section.replace(EGG_WILD_SEED_SCAN_OLD, EGG_WILD_SEED_SCAN_CURRENT, 1)
         section = section.replace("    FOR\n", EGG_WILD_SEED_WINDOW_INIT + "    FOR\n", 1)
-    elif old_count != 0 or current_count != 1:
+    elif old_count == 0 and (current_count == 1 or semantic_current):
+        # 新版正式脚本会用“完整调试日志”开关包住两条扩窗明细；
+        # 判断关键赋值和两次扫描，避免因纯日志结构变化重复打补丁。
+        pass
+    else:
         raise ValueError("孵蛋野生Seed反查缺少唯一的扫描分支，拒绝应用兜底扩窗")
     if (section.count(EGG_WILD_SEED_WINDOW_INIT) != 1
             or section.index(EGG_WILD_SEED_WINDOW_INIT) > section.index("    FOR\n")):
@@ -3165,7 +3328,7 @@ def _apply_standard_home_buffer_runtime_override_text(
     template_text: str,
     override_text: str,
 ) -> str:
-    """Replace the standard 1.1.8 HOME_BUFFER controller idempotently."""
+    """Replace the standard 2.0 HOME_BUFFER controller idempotently."""
     if STANDARD_HOME_BUFFER_OVERRIDE_MARKER in template_text:
         start = template_text.index(STANDARD_HOME_BUFFER_OVERRIDE_MARKER)
     else:
@@ -3341,7 +3504,7 @@ def _apply_egg_settings_runtime_override_text(
     library_text: str,
     override_text: str,
 ) -> str:
-    """Replace only the egg settings checker in a copied 1.1.8 runtime library."""
+    """Replace only the egg settings checker in a copied 2.0 runtime library."""
     global_anchor = "$孵蛋库_设置结果 = 0\n"
     if EGG_SETTINGS_GLOBALS not in library_text:
         if library_text.count(global_anchor) != 1:
@@ -3383,6 +3546,8 @@ def _apply_egg_restart_runtime_override_text(
 
     if EGG_RESTART_OVERRIDE_MARKER in library_text:
         start = library_text.index(EGG_RESTART_OVERRIDE_MARKER)
+    elif EGG_RESTART_LEGACY_OVERRIDE_MARKER in library_text:
+        start = library_text.index(EGG_RESTART_LEGACY_OVERRIDE_MARKER)
     else:
         if library_text.count(EGG_RESTART_ORIGINAL_FUNCTION) != 1:
             raise ValueError("孵蛋流程库缺少唯一的关闭游戏函数，拒绝应用重启覆盖")
@@ -3465,12 +3630,12 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
 
 
 def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
-    """Bake reviewed 1.6.4-a fixes into both direct-run 1.1.8 entries."""
+    """Bake reviewed 1.6.4-a fixes into both direct-run 2.0 entries."""
     source_dir = Path(source_dir).resolve()
     standard_path = source_dir / STANDARD_TEMPLATE_NAME
     egg_path = source_dir / EGG_TEMPLATE_NAME
     if not standard_path.is_file() or not egg_path.is_file():
-        raise FileNotFoundError("1.1.8 包缺少正式版或时间轴版主脚本")
+        raise FileNotFoundError("2.0 脚本包缺少正式版或时间轴版主脚本")
 
     classifier_text = HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH.read_text(encoding="utf-8")
     standard_configured = _apply_standard_home_buffer_runtime_override_text(
@@ -3568,12 +3733,12 @@ def write_configured_project(
     script_corpus = inspect_script_corpus(source_dir)
     if script_corpus["count"] != EXPECTED_SCRIPT_FILE_COUNT:
         raise ValueError(
-            f"1.1.8 主脚本/lib 文件数应为 {EXPECTED_SCRIPT_FILE_COUNT}，"
+            f"2.0 主脚本/lib 文件数应为 {EXPECTED_SCRIPT_FILE_COUNT}，"
             f"当前为 {script_corpus['count']}"
         )
     if not is_supported_runtime_script_sha256(script_corpus["sha256"]):
         print(
-            "警告：1.1.8 主脚本/lib 指纹未登记，仍继续生成："
+            "警告：2.0 主脚本/lib 指纹未登记，仍继续生成："
             + script_corpus["sha256"],
             file=sys.stderr,
         )
@@ -3583,7 +3748,7 @@ def write_configured_project(
     )
     template_path = source_dir / selected_template
     if not template_path.is_file():
-        raise FileNotFoundError(f"1.1.8 包缺少所选入口: {template_path}")
+        raise FileNotFoundError(f"2.0 脚本包缺少所选入口: {template_path}")
     store_path = _precalibration_store_path(precalibration_store_path)
     options, precalibration = _load_plan_precalibration(
         plan,
@@ -3640,7 +3805,7 @@ def write_configured_project(
         for directory in ("lib", "ImgLabel"):
             source = source_dir / directory
             if not source.is_dir():
-                raise FileNotFoundError(f"1.1.8 包缺少 {directory} 目录")
+                raise FileNotFoundError(f"2.0 脚本包缺少 {directory} 目录")
             target = output_dir / directory
             if target.exists():
                 shutil.rmtree(target)
@@ -3745,12 +3910,12 @@ def write_configured_egg_project(
     script_corpus = inspect_script_corpus(source_dir)
     if script_corpus["count"] != EXPECTED_SCRIPT_FILE_COUNT:
         raise ValueError(
-            f"1.1.8 正式/孵蛋主脚本及 lib 文件数应为 {EXPECTED_SCRIPT_FILE_COUNT}，"
+            f"2.0 正式/孵蛋主脚本及 lib 文件数应为 {EXPECTED_SCRIPT_FILE_COUNT}，"
             f"当前为 {script_corpus['count']}"
         )
     if not is_supported_runtime_script_sha256(script_corpus["sha256"]):
         print(
-            "警告：1.1.8 孵蛋主脚本/lib 指纹未登记，仍继续生成："
+            "警告：2.0 孵蛋主脚本/lib 指纹未登记，仍继续生成："
             + script_corpus["sha256"],
             file=sys.stderr,
         )
@@ -3761,7 +3926,7 @@ def write_configured_egg_project(
     )
     template_path = source_dir / selected_template
     if not template_path.is_file():
-        raise FileNotFoundError(f"1.1.8 包缺少所选入口: {template_path}")
+        raise FileNotFoundError(f"2.0 脚本包缺少所选入口: {template_path}")
     store_path = _precalibration_store_path(precalibration_store_path)
     request, precalibration = _load_egg_precalibration(
         request,
@@ -3838,7 +4003,7 @@ def write_configured_egg_project(
         for directory in ("lib", "ImgLabel"):
             source = source_dir / directory
             if not source.is_dir():
-                raise FileNotFoundError(f"1.1.8 包缺少 {directory} 目录")
+                raise FileNotFoundError(f"2.0 脚本包缺少 {directory} 目录")
             target = output_dir / directory
             if target.exists():
                 shutil.rmtree(target)
@@ -4001,15 +4166,15 @@ def validate_runtime(
         try:
             corpus = inspect_label_corpus(label_dir)
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
-            errors.append(f"1.1.8 标签清单读取失败: {exc}")
+            errors.append(f"2.0 标签清单读取失败: {exc}")
         else:
             if corpus["count"] != EXPECTED_LABEL_COUNT:
                 errors.append(
-                    f"1.1.8 标签数量应为 {EXPECTED_LABEL_COUNT}，当前为 {corpus['count']}"
+                    f"2.0 标签数量应为 {EXPECTED_LABEL_COUNT}，当前为 {corpus['count']}"
                 )
             if corpus["methods"] != EXPECTED_LABEL_METHODS:
                 errors.append(
-                    f"1.1.8 标签方法分布不一致: {corpus['methods']}"
+                    f"2.0 标签方法分布不一致: {corpus['methods']}"
                 )
             override_check = validate_project_overrides(
                 label_dir,
@@ -4021,7 +4186,7 @@ def validate_runtime(
                 warnings.extend(override_check.warnings)
             elif corpus["sha256"] != EXPECTED_LABEL_SHA256:
                 record_fingerprint_mismatch(
-                    "1.1.8 标签指纹不一致，可能不是已审计的完整标签包: "
+                    "2.0 标签指纹不一致，可能不是已审计的完整标签包: "
                     + corpus["sha256"],
                     warning_only=fingerprint_warning_only,
                     errors=errors,

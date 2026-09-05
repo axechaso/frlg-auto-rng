@@ -1,4 +1,4 @@
-"""Import the user-supplied 1.1.8 package into a local, ignored asset cache."""
+"""Import the user-supplied 2.0 script package into a local, ignored asset cache."""
 
 import argparse
 import hashlib
@@ -39,7 +39,7 @@ def import_package(source: Path, destination: Path) -> Path:
     if ROOT.resolve() not in destination.parents:
         raise ValueError("导入目标必须位于当前项目目录内")
     label_dir = source / "ImgLabel"
-    # The upstream 1.1.8 package may predate either repository extension:
+    # The upstream script package may predate either repository extension:
     # the SID shiny-male icon and the egg pond surf-complete marker. Always
     # audit a copy with both canonical labels installed so old and new source
     # folders produce the same deterministic 1150-label corpus.
@@ -75,7 +75,7 @@ def import_package(source: Path, destination: Path) -> Path:
         sid_template = source / SID_REVERSE_TEMPLATE_NAME
     templates.append(sid_template)
     if any(not path.is_file() for path in templates) or not (source / "lib").is_dir():
-        raise FileNotFoundError("1.1.8 包必须包含正式/孵蛋/SID采集主 ECS、lib 和 ImgLabel")
+        raise FileNotFoundError("2.0 脚本包必须包含正式/孵蛋/SID采集主 ECS、lib 和 ImgLabel")
     destination.mkdir(parents=True, exist_ok=True)
     for name in ("lib", "ImgLabel", "Tessdata"):
         source_path = source / name
@@ -86,7 +86,7 @@ def import_package(source: Path, destination: Path) -> Path:
             ]
             if missing_models:
                 raise FileNotFoundError(
-                    "1.1.8 包缺少火叶 OCR 模型: " + ", ".join(missing_models)
+                    "2.0 脚本包缺少火叶 OCR 模型: " + ", ".join(missing_models)
                 )
             mismatched_models = []
             for model, expected_sha256 in EXPECTED_TESSDATA_SHA256.items():
@@ -95,7 +95,7 @@ def import_package(source: Path, destination: Path) -> Path:
                     mismatched_models.append(f"{model}: {actual_sha256}")
             if mismatched_models:
                 raise ValueError(
-                    "1.1.8 火叶 OCR 模型指纹不一致: " + "; ".join(mismatched_models)
+                    "2.0 火叶 OCR 模型指纹不一致: " + "; ".join(mismatched_models)
                 )
         target = destination / name
         if target.exists():
@@ -110,7 +110,7 @@ def import_package(source: Path, destination: Path) -> Path:
     installed_script_manifest = materialize_easycon118_164a_fixes(destination)
     if not is_supported_runtime_script_sha256(installed_script_manifest["sha256"]):
         print(
-            "警告：1.1.8 修正合并后的脚本指纹未登记，仍继续导入："
+            "警告：2.0 修正合并后的脚本指纹未登记，仍继续导入："
             + installed_script_manifest["sha256"],
             file=sys.stderr,
         )

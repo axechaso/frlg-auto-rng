@@ -24,8 +24,15 @@ STATIC_POKEMON_EN_TO_ZH = SPECIES_EN_TO_ZH
 STATIC_POKEMON_ZH_TO_EN = SPECIES_ZH_TO_EN
 
 # ── 遇敌分类 ──
-CATEGORY_ZH_TO_EN: dict = game_text["category_zh_to_en"]
-CATEGORY_EN_TO_ZH: dict = {v: k for k, v in CATEGORY_ZH_TO_EN.items()}
+CATEGORY_ZH_TO_EN: dict = {
+    **game_text["category_zh_to_en"],
+    # Accept the old UI wording in saved/external input, but keep the Gen 3
+    # canonical display name below as 厉害钓竿.
+    "超级钓竿": "SuperRod",
+}
+CATEGORY_EN_TO_ZH: dict = {
+    v: k for k, v in game_text["category_zh_to_en"].items()
+}
 
 # ── 遇敌方式 ──
 METHOD_ZH_TO_EN: dict = game_text["method_zh_to_en"]

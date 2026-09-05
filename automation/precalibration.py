@@ -1,8 +1,8 @@
-"""Persistent, context-scoped pre-calibration values for 1.1.8 runs.
+"""Persistent, context-scoped pre-calibration values for 2.0 runs.
 
 The ECS scripts only emit a small, ASCII marker after a complete target hit.
 This module owns the durable side of that handshake.  TID/SID code does not
-import it, so identity calibration remains independent from 1.1.8 values.
+import it, so identity calibration remains independent from 2.0 values.
 """
 
 from __future__ import annotations

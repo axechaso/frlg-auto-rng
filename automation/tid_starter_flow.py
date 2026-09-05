@@ -46,6 +46,7 @@ from .easycon118 import (
     STANDARD_TEMPLATE_NAME,
     EasyCon118Options,
     EasyConRuntimeCheck,
+    reverse_expansion_to_ecs_values,
     validate_runtime,
     write_configured_project,
 )
@@ -90,6 +91,11 @@ class TidStarterFlowRequest:
     starter_seed_startup_scheme: int = 0
     starter_template_name: str = STANDARD_TEMPLATE_NAME
     update_precalibration: bool = False
+    starter_debug_log_output: int = 1
+    starter_frame_parity_scheme: int = 1
+    starter_reverse_expansion_layers: int | None = None
+    starter_reverse_expansion_seed_tolerances: tuple[int, int, int] | None = None
+    starter_reverse_expansion_frame_half_widths: tuple[int, int, int] | None = None
 
     def validate(self) -> None:
         self.tid_request.validate()
@@ -103,6 +109,16 @@ class TidStarterFlowRequest:
             raise ValueError("御三家脚本模板只能选择正式版或时间轴版入口")
         if not isinstance(self.update_precalibration, bool):
             raise ValueError("御三家更新预校准开关必须是布尔值")
+        if self.starter_debug_log_output not in {0, 1}:
+            raise ValueError("御三家输出日志模式只能是0（精简）或1（完整调试）")
+        if self.starter_frame_parity_scheme not in {0, 1}:
+            raise ValueError("御三家奇偶调整方案只能是0（F1/F2）或1（菜单）")
+        expansion = EasyCon118Options(
+            reverse_expansion_layers=self.starter_reverse_expansion_layers,
+            reverse_expansion_seed_tolerances=self.starter_reverse_expansion_seed_tolerances,
+            reverse_expansion_frame_half_widths=self.starter_reverse_expansion_frame_half_widths,
+        )
+        reverse_expansion_to_ecs_values(expansion)
         if self.starter_sound not in {0, 1}:
             raise ValueError("御三家 Sound 只能是 MONO 或 STEREO")
         if self.starter_button_mode not in {0, 1, 2}:
@@ -141,7 +157,7 @@ class TidStarterFlowRequest:
 
     @property
     def starter_settings(self) -> GameSettings:
-        """Return the independent 1.1.8 settings used by the starter stage."""
+        """Return the independent 2.0 settings used by the starter stage."""
         return GameSettings(
             sound={0: "mono", 1: "stereo"}[self.starter_sound],
             button_mode={0: "h", 1: "r", 2: "a"}[self.starter_button_mode],
@@ -226,6 +242,23 @@ def tid_starter_flow_request_from_dict(payload: dict[str, object]) -> TidStarter
             payload.get("starter_template_name", STANDARD_TEMPLATE_NAME)
         ),
         update_precalibration=payload.get("update_precalibration", False),
+        starter_debug_log_output=int(payload.get("starter_debug_log_output", 1)),
+        starter_frame_parity_scheme=int(payload.get("starter_frame_parity_scheme", 1)),
+        starter_reverse_expansion_layers=(
+            None
+            if payload.get("starter_reverse_expansion_layers") is None
+            else int(payload["starter_reverse_expansion_layers"])
+        ),
+        starter_reverse_expansion_seed_tolerances=(
+            None
+            if payload.get("starter_reverse_expansion_seed_tolerances") is None
+            else tuple(int(value) for value in payload["starter_reverse_expansion_seed_tolerances"])
+        ),
+        starter_reverse_expansion_frame_half_widths=(
+            None
+            if payload.get("starter_reverse_expansion_frame_half_widths") is None
+            else tuple(int(value) for value in payload["starter_reverse_expansion_frame_half_widths"])
+        ),
     )
 
 
@@ -262,7 +295,7 @@ class TidStarterFlowPlan:
             "mode": "tid_sid_starter_verification",
             "architecture": (
                 "language-specific audited ID template -> shared lab route -> "
-                "configured EasyCon 1.1.8 Starter flow"
+                "configured EasyCon 2.0 Starter flow"
             ),
             "request": {
                 **asdict(self.request),
@@ -291,14 +324,14 @@ def build_starter_run_plan(
     request: TidStarterFlowRequest,
     target: StarterTarget,
 ) -> RunPlan:
-    """Adapt the searched starter result to the existing 1.1.8 plan format."""
+    """Adapt the searched starter result to the existing 2.0 plan format."""
     tid_request = request.tid_request
     settings = request.starter_settings
     seed_mode = settings_to_seed_mode(settings)
     if seed_mode is None:
         raise ValueError(
-            "当前TID游戏设置无法映射到1.1.8的Seed模式；"
-            "请改用1.1.8支持的Sound/Button Mode/Seed Button组合"
+            "当前 TID 游戏设置无法映射到 2.0 的 Seed 模式；"
+            "请改用 2.0 支持的 Sound / Button Mode / Seed Button 组合"
         )
 
     game_family = "fr" if request.version == "火红" else "lg"
@@ -361,7 +394,7 @@ def build_starter_run_plan(
         iv_total=sum(target.ivs),
         route_support=support,
         warnings=(
-            "御三家执行阶段复用1.1.8现有Starter流程；进入第三阶段后由1.1.8负责领取、识别和校准。",
+            "御三家执行阶段复用 2.0 现有 Starter 流程；进入第三阶段后由 2.0 负责领取、识别和校准。",
         ),
     )
 
@@ -611,7 +644,7 @@ def write_tid_starter_flow_bundle(
     fingerprint_warnings: list[str] | None = None,
     precalibration_store_path: str | Path | None = None,
 ) -> Path:
-    """Write the ID, lab bridge, and configured existing 1.1.8 starter stage."""
+    """Write the ID, lab bridge, and configured existing 2.0 starter stage."""
     source_dir = Path(source_dir).resolve()
     starter_source_dir = Path(starter_source_dir).resolve()
     output_dir = Path(output_dir).resolve()
@@ -674,6 +707,11 @@ def write_tid_starter_flow_bundle(
                 seed_calibration_scheme=STARTER_SEED_CALIBRATION_SCHEME,
                 update_precalibration=plan.request.update_precalibration,
                 precalibration_context_kind="STARTER",
+                debug_log_output=plan.request.starter_debug_log_output,
+                frame_parity_scheme=plan.request.starter_frame_parity_scheme,
+                reverse_expansion_layers=plan.request.starter_reverse_expansion_layers,
+                reverse_expansion_seed_tolerances=plan.request.starter_reverse_expansion_seed_tolerances,
+                reverse_expansion_frame_half_widths=plan.request.starter_reverse_expansion_frame_half_widths,
             ),
             template_name=plan.request.starter_template_name,
             precalibration_store_path=precalibration_store_path,
@@ -702,7 +740,7 @@ def write_resolved_exhaustive_starter_project(
     *,
     precalibration_store_path: str | Path | None = None,
 ) -> Path:
-    """Materialize the 1.1.8 starter stage after stage 1 reveals the IDs."""
+    """Materialize the 2.0 starter stage after stage 1 reveals the IDs."""
     starter_dir = Path(starter_dir).resolve()
     main_path = write_configured_project(
         Path(starter_source_dir).resolve(),
@@ -716,6 +754,11 @@ def write_resolved_exhaustive_starter_project(
             seed_calibration_scheme=STARTER_SEED_CALIBRATION_SCHEME,
             update_precalibration=resolved.request.update_precalibration,
             precalibration_context_kind="STARTER",
+            debug_log_output=resolved.request.starter_debug_log_output,
+            frame_parity_scheme=resolved.request.starter_frame_parity_scheme,
+            reverse_expansion_layers=resolved.request.starter_reverse_expansion_layers,
+            reverse_expansion_seed_tolerances=resolved.request.starter_reverse_expansion_seed_tolerances,
+            reverse_expansion_frame_half_widths=resolved.request.starter_reverse_expansion_frame_half_widths,
         ),
         template_name=resolved.request.starter_template_name,
         precalibration_store_path=precalibration_store_path,

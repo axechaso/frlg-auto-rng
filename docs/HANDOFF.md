@@ -6,11 +6,18 @@
 
 ## 2026-09-05 2.0 孵蛋更新与界面文案整理
 
-- 下载目录 2.0 脚本语料更新为 `750eb3349405395edb1879c0bc12f8e53888e6e73d0efde223ae40f17f31530c`。物化后的 1.6.4-a 兼容语料为 `93f09eaf6229fc810da98957f9979bfc0d3d2abd9925d54e80006132169bfccb`；旧输入继续作为历史兼容项，新输入已登记为当前基线。
+- 高级模式新增三层反查扩窗覆盖：层数 0–3，各层分别填写 Seed 容差和消耗帧半宽；关闭高级模式时生成器不改模板原值。覆盖会传入普通、SID 遍历、孵蛋预校准及 TID 连续流程的御三家阶段。
+- 奇偶调整新增菜单/F1-F2方案选择；普通与御三家按高级选择生成，孵蛋在请求映射和生成一致性校验两层固定写入菜单方案 1。
+- 公共“脚本输出日志”支持精简/完整调试，作用于生成的 2.0 普通、孵蛋及御三家阶段，不等同于直接脚本页的 runner 详细日志。孵蛋“全部配置”会保存该设置及高级扩窗值。
+- 野生 `SuperRod` 的规范中文显示由“超级钓竿”修正为第三世代“厉害钓竿”，旧称仍作为输入兼容别名。
+- 脚本测试页移除无实际维护价值的“准备内置冲浪结束测试”，同时删除专用 ECS、生成函数和测试；直接选择任意已审阅 ECS 的能力保留。
+- 逐项复核现有悬浮说明，并更新高级模式、Seed 方案、脚本日志和扩窗/奇偶边界说明；硬错误、常驻警告和实机验收边界不隐藏。
+
+- 下载目录 2.0 脚本语料更新为 `43a5a9c220db51177f4cc6a9171148a0094b63f3ba49a3d8eb339243203aeca2`。物化后的 1.6.4-a 兼容语料为 `4f78b8f30219092e4608eb342d63fd8fde76cbaf9e112b2df17a271ea949008c`；旧输入继续作为历史兼容项，新输入已登记为当前基线。
 - 孵蛋 Held 固定预校准改为 222，Pickup 保持 230。奇数 Held 的生成前 X/B 菜单动作保留，但不再把物理 `+7 advance` 从 Held/Pickup 截止点重复预扣；Pickup 菜单按当前绝对时间轴实测净效果 `-1 advance` 计算，开启时执行点后移 1。
 - Seed 校准方案 2 改为“命中保持后的方向票接续”：精确命中后的五轮保持若方向票不足或平票，不丢弃现有 `±1` 证据，继续收集到至少三票且出现多数方向；方案 0/1 和帧轴不随本次修改改变。
 - GUI 页签将“孵蛋（测试）”简化为“孵蛋”，当前普通/孵蛋入口统一称为“2.0 自动乱数脚本”，并统一 Seed、TID/SID、ADV、版本号、范围和单位写法。孵蛋未完成整轮实机验收的提醒仍保留在运行确认帮助和结果区，没有改成已实机稳定结论。完整文案约定见 `docs/UI_TEXT.md`。
-- 当前验证：项目 450 项单元测试、下载包 32 个 `Tools/check_*.py` 全部通过；下载包和物化缓存的正式版/时间轴版共四份主脚本均通过真实 EasyCon 1.6.4-a `format`。这些结果仍不等同于 Switch 实机长跑验收。
+- 当前验证：项目 450 项单元测试、下载包 34 个 `Tools/check_*.py` 全部通过；下载包和物化缓存的正式版/时间轴版共四份主脚本均通过真实 EasyCon 1.6.4-a `format`，隐藏 GUI 冒烟确认高级反查显示、孵蛋菜单奇偶锁定和公共日志选择控件正常。这些结果仍不等同于 Switch 实机长跑验收。
 
 ## 2026-09-02 TID SID 搜索与 6V 闪 SID
 
@@ -344,12 +351,11 @@ Notebook 上方常驻“存档信息”栏。实现参考 PokeFinder Gen 3 Profi
 
 ### 脚本测试（高级，默认隐藏）
 
-- 直接选择并原地运行 `.ecs`；不搜索、不替换参数、不复制为正式 `main.ecs`，也不要求 1.1.8 完整语料指纹；
+- 直接选择并原地运行 `.ecs`；不搜索、不替换参数、不复制为正式 `main.ecs`，也不要求自动乱数脚本包完整语料指纹；
 - 仍要求原始 `ezcon.exe` 返回 `1.6.4-a+9c86137` 并用它执行 `format`；ezcon、OCR、标签、模板及兼容 runner 的哈希不一致只警告，缺失和结构错误仍拒绝；
 - 扫描主脚本与同目录 `lib/*.ecs` 中的直接 `@标签`，启动前确认相邻 `ImgLabel` 里存在对应 `.IL`；
 - 可选“工具兼容运行器（正式工具）”或“原始 EasyCon 1.6.4-a CLI（A/B 对照）”，两者使用相同串口、采集卡、DSHOW 和命令构造；
 - 输出统一保存到 `runtime/script_tests/logs/` 并在结束后回显；日志名区分 `compat/original`，同名 JSON 记录脚本 SHA-256、后端、执行文件和设备参数；
-- “准备内置冲浪结束测试”只复制仓库扩展 `冲浪.IL`，等待 `冲浪 > 95` 后按一次 `X` 并停住；不会发送方向键、抓捕或存档；
 - 这不是安全沙箱，所选 ECS 有完整手柄控制权限。A/B 只能证明该脚本和当次环境，不能当作正式流程实机验收。
 
 ### SID 查找
@@ -395,11 +401,11 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 
 孵蛋页不负责搜索蛋目标。用户必须先从 Ten Lines Egg 页取得同一初始 Seed 下的 Held 和 Pickup。Pickup 至少比 Held 晚 1800 帧。
 
-2.0 时间轴模板包含 `$孵蛋Held无蛋表Seed`、区间起止表等字段，生成器会按目标 Seed/Held/相性计算并写入。若报“模板字段实际为 0 次”，优先判断 `local_assets/easycon118` 是旧的忽略缓存并重新导入最新脚本包；不要把字段校验改为跳过。当前 2.0 下载包输入指纹为 `750eb3349405395edb1879c0bc12f8e53888e6e73d0efde223ae40f17f31530c`，导入后物化的 33 文件 SHA-256 为 `93f09eaf6229fc810da98957f9979bfc0d3d2abd9925d54e80006132169bfccb`，旧物化指纹仍作为兼容输入保留。
+2.0 时间轴模板包含 `$孵蛋Held无蛋表Seed`、区间起止表等字段，生成器会按目标 Seed/Held/相性计算并写入。若报“模板字段实际为 0 次”，优先判断 `local_assets/easycon118` 是旧的忽略缓存并重新导入最新脚本包；不要把字段校验改为跳过。当前 2.0 下载包输入指纹为 `43a5a9c220db51177f4cc6a9171148a0094b63f3ba49a3d8eb339243203aeca2`，导入后物化的 33 文件 SHA-256 为 `4f78b8f30219092e4608eb342d63fd8fde76cbaf9e112b2df17a271ea949008c`，旧物化指纹仍作为兼容输入保留。
 
 时间轴模板可能保留作者上一次道具乱数测试的 `$道具乱数模式 = 1`。孵蛋生成器必须显式写成 0，并把 `$队伍空位数量` 复位为 1；否则 `检查运行参数()` 会因孵蛋不是野生遭遇而在启动前拒绝运行。不要通过放宽 ECS 的道具模式检查来绕过。
 
-正式版、时间轴版和 SID 生成副本共享 `home_buffer_adaptive_classifier.ecs`。TID 日英生成副本使用 `assets/tid_rng137_extensions/home_buffer_adaptive.ecs`。TID 与 SID 都只按用户选择的 `$NS机型` 读取对应标签。默认有效阈值为 95；只有用户开启开关、当前 HOME_BUFFER 状态是三类标签中的唯一最高、分数至少 90，并且连续 3 次状态与整数分数完全相同，才把本次运行的有效阈值降到该分数。1.1.8/SID 日志输出 `HOME_BUFFER_ADAPTIVE|OLD=95|NEW=...`，TID 输出 `TID_HOME_BUFFER_ADAPTIVE|OLD=95|NEW=...`。不得把它扩展到普通 OCR、能力、冲浪或 TID/SID 的其他识图阶段。
+正式版、时间轴版和 SID 生成副本共享 `home_buffer_adaptive_classifier.ecs`。TID 日英生成副本使用 `assets/tid_rng137_extensions/home_buffer_adaptive.ecs`。TID 与 SID 都只按用户选择的 `$NS机型` 读取对应标签。默认有效阈值为 95；只有用户开启开关、当前 HOME_BUFFER 状态是三类标签中的唯一最高、分数至少 90，并且连续 3 次状态与整数分数完全相同，才把本次运行的有效阈值降到该分数。2.0/SID 日志输出 `HOME_BUFFER_ADAPTIVE|OLD=95|NEW=...`，TID 输出 `TID_HOME_BUFFER_ADAPTIVE|OLD=95|NEW=...`。不得把它扩展到普通 OCR、能力、冲浪或 TID/SID 的其他识图阶段。
 
 孵蛋两次野生 Seed 反查都选择刚捕获的队伍末位，从队首向上按 2 次；正式轮的蛋先进入第 5 位，复核野生后进入第 6 位，所以之后蛋个体反查固定选择第 5 位并按 3 次。首次打开能力页与神奇糖果选择必须共用这一目标身份规则，不能再只根据槽号推断按键次数。
 
@@ -447,10 +453,10 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 1. 根据 ROM 语言生成一份原版 1.3.7 ID 脚本，只在五种成功退出处增加 `TIDFLOW|ID|MATCH/TID/SID_ADV` 标记；
 2. 使用用户提供集合样本中已经实测的研究所路线，保存到所选御三家球前；
 3. 目标 TID/SID 乱数在运行前搜索御三家；穷举模式则在第一阶段结束后读取实际 TID/SID ADV，按“第一次 LCG 结果为 ADV 0”计算实际 SID，再从 ADV 1500 起找最早可达闪光 Method 1 御三家；
-4. 第三阶段直接复用 1.1.8 的御三家领取、能力读取、反查和校准；输出“已识别到出闪，脚本停止”即完成；
+4. 第三阶段直接复用 2.0 的御三家领取、能力读取、反查和校准；输出“已识别到出闪，脚本停止”即完成；
 5. 目标 TID/SID 乱数若精确命中但不闪，按当前 `$SID_ADV修正`、`+1`、`-1`、`+2`、`-2` 重跑三段；穷举模式使用本轮实际身份，不执行这组目标 SID 重试，精确 PID 不闪时保留日志停止。
 
-实现位于 `automation/tid_starter_flow.py`、`rng/sid_reverse.py`、`rng/starter_sid_verification.py` 和 `run_tid_starter_flow.py`。目标 TID/SID 计划仍预生成并预检三份主脚本；穷举计划先预检 `01_id` 与 `02_lab_bridge`，实际身份确定后才生成 `03_starter_118` 并立即执行同一 1.6.4-a 预检。每个目标 SID ADV 修正有独立 ID 脚本；穷举固定 F3 只生成一次。现有 1.1.8 的 Seed 表/OCR 只审计英文版，因此日文 1.3.7 仍可单独运行，但日文连续流程会被明确拒绝。集合样本中的旧 1.2.3 御三家 OP/F12 控制器没有导入。当前尚缺 Switch 实机动态身份衔接、三阶段与 SID 重试验收。
+实现位于 `automation/tid_starter_flow.py`、`rng/sid_reverse.py`、`rng/starter_sid_verification.py` 和 `run_tid_starter_flow.py`。目标 TID/SID 计划仍预生成并预检三份主脚本；穷举计划先预检 `01_id` 与 `02_lab_bridge`，实际身份确定后才生成内部兼容目录 `03_starter_118` 并立即执行同一 1.6.4-a 预检。每个目标 SID ADV 修正有独立 ID 脚本；穷举固定 F3 只生成一次。现有 2.0 的 Seed 表/OCR 只审计英文版，因此日文 1.3.7 仍可单独运行，但日文连续流程会被明确拒绝。集合样本中的旧 1.2.3 御三家 OP/F12 控制器没有导入。当前尚缺 Switch 实机动态身份衔接、三阶段与 SID 重试验收。
 
 ## 代码导航
 
@@ -462,23 +468,23 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 | `tenlines_seed_updater.py` | 内置下载官方 NX 二进制表、派生两份 ECS、1.6.4-a 双入口校验、清单校验和 current/previous 原子切换 |
 | `run_sid_reverse_capture.py` | SID 逐槽采集编排、提前收敛和报告落盘 |
 | `run_sid_reverse.py` | SID 采集日志分析与文本报告 |
-| `run_tid_starter_flow.py` | 按成功标记串行运行 TID、研究所桥接、1.1.8 御三家；穷举时动态解析实际身份，目标 SID 模式处理 ADV 重试 |
+| `run_tid_starter_flow.py` | 按成功标记串行运行 TID、研究所桥接、2.0 御三家；穷举时动态解析实际身份，目标 SID 模式处理 ADV 重试 |
 | `run_auto_planner.py` | 普通野生/静态命令行计划器；默认只生成，`--run` 才启动 |
 | `automation/planner.py` | `AutoSearchRequest`、分层搜索、最高 IV 总和、同分最小 Advance |
-| `automation/seed_modes.py` | 1.1.8 Seed 模式 0–9 与 Ten Lines 游戏设置映射 |
+| `automation/seed_modes.py` | 2.0 Seed 模式 0–10 与 Ten Lines 游戏设置映射 |
 | `automation/static_targets.py` | 静态类别和版本限定白名单 |
 | `automation/support.py` | 路线启动边界；狩猎区/碎岩等保守阻止 |
-| `automation/easycon118.py` | 1.1.8 参数替换、指纹、EasyCon 预检、设备枚举和运行命令 |
-| `automation/script_test.py` | 1.1.8 正式/时间轴/自选入口解析、任意 ECS 原地预检、直接标签检查、原始/兼容运行器 A/B 与内置冲浪结束测试工程 |
+| `automation/easycon118.py` | 2.0 参数替换、指纹、EasyCon 预检、设备枚举和运行命令 |
+| `automation/script_test.py` | 2.0 正式/时间轴/自选入口解析、任意 ECS 原地预检、直接标签检查与原始/兼容运行器 A/B |
 | `automation/sid_reverse118.py` | SID 采集请求校验、模板参数替换、HOME_BUFFER 启动覆盖与工程生成 |
 | `automation/tid_rng137.py` | TID/SID 1.3.7 模板/标签锁定、参数替换、日版 1.6.4-a 兼容和预检 |
-| `automation/tid_starter_flow.py` | TID/SID 到御三家的分阶段计划、ID 重试脚本、研究所桥接和 1.1.8 Starter 工程 |
+| `automation/tid_starter_flow.py` | TID/SID 到御三家的分阶段计划、ID 重试脚本、研究所桥接和 2.0 Starter 工程 |
 | `rng/tenlines_utils.py` | Ten Lines 搜索、IV 分层、资源读取和 C++ 接口 |
 | `rng/sid_reverse.py` | Method 1/2/4 PID、PSV 与 SID 候选恢复 |
 | `rng/sid_reverse_workflow.py` | SIDREV 日志解析、IV 区间和多只宝可梦交集 |
 | `rng/starter_sid_verification.py` | ADV 1500 起的最早闪光御三家搜索及目标命中后的 SID 判定 |
 | `easycon/label_matcher.py` | 方法 1/5/14 的统一标签匹配兼容层 |
-| `tools/import_easycon118.py` | 从外部 1.1.8 包导入已审计快照 |
+| `tools/import_easycon118.py` | 从外部 2.0 脚本包导入已审计快照（文件名保留兼容） |
 | `tools/import_tid_rng137.py` | 从外部多功能包导入已审计的 TID/SID 1.3.7 日英模板与标签 |
 | `tools/prepare_easycon164a.py` | 锁定 ezcon 版本/哈希并安装两份火叶 Tessdata |
 | `tools/build_easycon164a_compat_runner.ps1` | 从固定 1.6.4-a commit 重建 GUI 识图取整兼容 runner |
@@ -493,14 +499,14 @@ local_assets/easycon118/   经审计的外部脚本快照
 local_assets/tid_rng137/   经审计的 TID/SID 1.3.7 快照
 runtime/easycon118/        最近一次生成的 main.ecs、lib、ImgLabel、plan.json
 runtime/sid_reverse/       SID 采集工程、日志和结果报告
-runtime/tid_starter_flow/  TID、研究所、1.1.8 御三家三阶段工程和连续流程日志
-runtime/script_tests/      高级模式内置/自选测试工程和独立运行日志
+runtime/tid_starter_flow/  TID、研究所、2.0 御三家三阶段工程和连续流程日志
+runtime/script_tests/      高级模式自选测试工程和独立运行日志
 rng_logs/plans/            每次普通或孵蛋生成的 JSON 记录
 runtime/launcher.log        BAT 启动日志
 %LOCALAPPDATA%/FRLG-Auto-RNG/seed_tables/  打包版验证后的 current 与 previous Seed 表
 ```
 
-这些目录都不能被当作源文件修改入口。模板应从外部 1.1.8 包重新审计导入，生成工程由 Python 重新产生。
+这些目录都不能被当作源文件修改入口。模板应从外部 2.0 脚本包重新审计导入，生成工程由 Python 重新产生。
 
 ## 固定版本与资产指纹
 
@@ -522,8 +528,8 @@ default path: %USERPROFILE%\Downloads\伊机控-EasyCon-v1.6.4alpha测试版-260
 历史合并语料（可自动升级）SHA-256: aea14e79615bfda89e1f7428014adc2dcc848005bd7ebad0bd170eac67703aef
 上一版合并语料（可自动升级）SHA-256: fe0ae41be3fe035cbefec9afd525b968a070c8781a73595e1ae16b4cd1e2e839
 上一下载包输入（领取后失败保留首次预校准）SHA-256: 77bea49b62c909d105dd7b81529bbb3a8046d996781d68b2ebc479cd6096c841
-当前 2.0 下载包输入 SHA-256: 750eb3349405395edb1879c0bc12f8e53888e6e73d0efde223ae40f17f31530c
-合并 1.6.4-a 修正后的当前基线 SHA-256: 93f09eaf6229fc810da98957f9979bfc0d3d2abd9925d54e80006132169bfccb。上一基线 `e1408a137dce1ed15f520cfcc62d90992100f6c9c6a92ec60ae537c574df89a3` 及更早的已登记变体仍保留为历史兼容输入。
+当前 2.0 下载包输入 SHA-256: 43a5a9c220db51177f4cc6a9171148a0094b63f3ba49a3d8eb339243203aeca2
+合并 1.6.4-a 修正后的当前基线 SHA-256: 4f78b8f30219092e4608eb342d63fd8fde76cbaf9e112b2df17a271ea949008c。上一基线 `93f09eaf6229fc810da98957f9979bfc0d3d2abd9925d54e80006132169bfccb` 及更早的已登记变体仍保留为历史兼容输入。
 ```
 
 安装器会识别上述已登记指纹，并把复制到 `local_assets/easycon118/` 的两份入口和共享 `lib` 自动升级为当前修正。用户会直接更新下载包脚本，所以未知指纹按用户要求只警告后继续导入、生成和审计，不得擅自改回严格拒绝；必需文件缺失、标签不完整和 1.6.4-a `format` 失败仍必须阻止运行。未知指纹不代表已经审计通过，日志和生成清单仍要记录实际 SHA-256 以便追踪。
@@ -540,7 +546,7 @@ default path: %USERPROFILE%\Downloads\伊机控-EasyCon-v1.6.4alpha测试版-260
 标签语料 SHA-256: 00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e
 ```
 
-SID 入口、`闪公图标.IL` 和孵蛋池塘用的 `冲浪.IL` 作为仓库内置扩展保存在 `assets/easycon118_extensions/`。导入器会把两份标签以规范的一行格式覆盖到快照，再校验 1150 标签的新指纹，因此旧包不要求预先带有这些扩展。SID 六项能力合法范围分别代入各项努力值，不能回退成 EV=0。Python 根据图鉴编号和火红/叶绿版本把完整第三世代六项种族值与性别阈值写入 ECS；不能调用 1.1.8 原有的不完整目标表。用户手填每只初始等级，后续等级按成功喂糖次数 `+1`。
+SID 入口、`闪公图标.IL` 和孵蛋池塘用的 `冲浪.IL` 作为仓库内置扩展保存在 `assets/easycon118_extensions/`。导入器会把两份标签以规范的一行格式覆盖到快照，再校验 1150 标签的新指纹，因此旧包不要求预先带有这些扩展。SID 六项能力合法范围分别代入各项努力值，不能回退成 EV=0。Python 根据图鉴编号和火红/叶绿版本把完整第三世代六项种族值与性别阈值写入 ECS；不能调用 2.0 原有的不完整目标表。用户手填每只初始等级，后续等级按成功喂糖次数 `+1`。
 
 方法 14 必须保留原 Alpha 通道作为 `TM_SQDIFF_NORMED` 的 mask。
 
@@ -560,7 +566,7 @@ EasyCon 1.6.4a 的 OCR 是本地 Tesseract，不依赖外部 AI 服务。原始 
 
 1. 安装 Windows x64 Python 3.12。
 2. 确认 `rng/src/pybind/calibration_bind.cp312-win_amd64.pyd` 存在。
-3. 把 1.1.8 包放到 `%USERPROFILE%\Downloads\NS火叶全自动一键乱数1.1.8`。
+3. 把 2.0 脚本包放到历史兼容目录 `%USERPROFILE%\Downloads\NS火叶全自动一键乱数1.1.8`。
 4. 把 EasyCon 1.6.4a 放到默认目录，或后续显式调整准备脚本和 GUI 路径。
 5. 运行 `安装-自动乱数首版.bat`。
 6. 运行 `启动-自动乱数首版.bat`。
@@ -577,7 +583,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 ```
 
-2026-09-05 当前基线：项目 `.venv` 运行 450 项单元测试全部通过；下载包的 32 个 `Tools/check_*.py` 全部通过；下载包和物化缓存的正式版/时间轴版共四份主脚本均通过真实 EasyCon 1.6.4-a `format`。当前 2.0 输入/物化指纹分别为 `750eb3349405395edb1879c0bc12f8e53888e6e73d0efde223ae40f17f31530c` 和 `93f09eaf6229fc810da98957f9979bfc0d3d2abd9925d54e80006132169bfccb`。
+2026-09-05 当前 2.0 输入/物化指纹分别为 `43a5a9c220db51177f4cc6a9171148a0094b63f3ba49a3d8eb339243203aeca2` 和 `4f78b8f30219092e4608eb342d63fd8fde76cbaf9e112b2df17a271ea949008c`。最终测试数和格式检查结果以本节顶部的本次交付记录为准。
 
 2026-08-26 的代码基线：项目 `.venv` 运行 209 项单元测试全部通过；内置 Seed 更新器已经用 Ten Lines 官方当前火红 2311 条、叶绿 2438 条数据完成真实联网验证。更新后的本地资产正式版、时间轴版和实际生成的孵蛋运行副本均通过真实 EasyCon 1.6.4-a `format`，下载包的 22 个 `Tools/check_*.py` 全部通过。当前下载包输入指纹为 `92f5870f09c28b55a583a9ea5ddf4d23a55af4e847220c0aade35d7e66bb52f5`，导入后物化的 33 文件固定 SHA-256 是 `b7d3cf56cc3018522548514a279a950176b136c938dcceda90f60b9b133d2d57`；标签审计仍为 1150 个标签、SHA-256 `00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e`。本轮新增 PokeFinder 风格存档信息管理；孵蛋 Pickup 稳定前的目标 Seed 无蛋证据与临时 Held 跳区逻辑、内置 Seed 表更新、常驻运行日志页、Held 无蛋区间表写入、旧缓存明确诊断、亲本/全部两种孵蛋配置保存及运行中共享采集预览继续保留。确认：
 
@@ -586,7 +592,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 - 运行日志页常驻末尾；进程启动成功后自动跳转，所有运行模式从各自日志文件实时刷新；
 - 内置 Seed 更新器的二进制表与 ECS 表来自同一官方数据，四文件和两入口 `format` 全部通过后才切换；
 - 设备枚举会自动回填可用串口和带名称采集卡，并保留仍在线的当前索引；
-- HOME_BUFFER 自适应写入 1.1.8 普通/孵蛋、TID 及 SID 生成副本，默认关闭；
+- HOME_BUFFER 自适应写入 2.0 普通/孵蛋、TID 及 SID 生成副本，默认关闭；
 - 领取后 Seed 未命中或野生反查失败保持 `$孵蛋流程Seed已预校准 = 1`，下一轮不得重复首次预校准；
 - 普通类型下拉框不再包含孵蛋；
 - 孵蛋参数可收集成 `EggRunRequest`；
@@ -594,7 +600,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 - 900×620 窗口可滚动到页面底部；
 - “隐藏属性”文案已经改为“觉醒力量”。
 - TID/SID 日英参数可收集，日文生成副本可通过真实 1.6.4-a `format`。
-- TID 连续流程已接入 GUI 生成和启动链；目标 TID/SID 模式预生成三阶段并保留 SID ADV 重试，穷举模式读取实际 TID/SID ADV 后才计算 SID、搜索并生成 1.1.8 Starter。F3 随机模式已移除，固定延迟检查四项完整时自动回填。两种三阶段流程仍未完成 Switch 实机验收，日文连续流程也尚未开放。
+- TID 连续流程已接入 GUI 生成和启动链；目标 TID/SID 模式预生成三阶段并保留 SID ADV 重试，穷举模式读取实际 TID/SID ADV 后才计算 SID、搜索并生成 2.0 Starter。F3 随机模式已移除，固定延迟检查四项完整时自动回填。两种三阶段流程仍未完成 Switch 实机验收，日文连续流程也尚未开放。
 
 本机曾验证 1.6.4a 可以枚举串口和视频设备，并可用 `format` 解析当前 ECS。换设备后设备编号必然可能变化，必须重新检测。
 
@@ -604,7 +610,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 |---|---|
 | 普通野生路线 | 搜索/生成/启动链已接通；仍需按地点实机验收 |
 | 静态目标 | 7 类、每版 27 个 GUI 目标；已接通但仍需实机验收 |
-| 普通碎岩 | 1.1.8 明确未完成，只搜索，不启动 |
+| 普通碎岩 | 2.0 明确未完成，只搜索，不启动 |
 | 狩猎区 | 中央/东/北/西区草丛及三种钓竿路线已实现并开放生成、启动；冲浪/碎岩仍按脚本支持范围限制 |
 | 漫游三圣兽 | 截断 IV bug 与存档御三家约束未实现，不开放 |
 | 孵蛋 | 已实机走到领取后野生复核和能力读取；新共享孵化/反查导航尚未完成整轮实机验收 |
@@ -631,7 +637,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 ## 可直接粘贴到新对话的提示
 
 ```text
-最新补充（优先于下方历史快照数字）：GUI 顶部已有 PokeFinder 风格存档信息管理，保存名称/火叶版本/TID/SID/Switch 机型到 `%LOCALAPPDATA%\FRLG-Auto-RNG\save_profiles.json`，选择后同步四页相关字段，手动模式不覆盖输入。当前 2.0 输入/物化指纹分别为 `750eb334...`/`93f09eaf...`。孵蛋 Held/Pickup 固定预校准分别为 222/230；奇数 Held 的生成菜单动作不再从绝对时间轴重复预扣，Pickup 菜单按净效果 -1 ADV 计算。Seed 校准方案 2 会在命中保持后保留并接续方向票。孵蛋页已有亲本配置与全部配置两套保存入口，运行脚本时共享采集预览仍可打开；SID 查找已增加 Switch 1/2，并用 HOME_BUFFER 替换固定 A → 1200 ms → A，公共稳定低分自适应开关也作用于 SID 生成副本；命中后仍继续原 WAIT 8000、跳 OP 和进档操作。
+最新补充（优先于下方历史快照数字）：GUI 顶部已有 PokeFinder 风格存档信息管理，保存名称/火叶版本/TID/SID/Switch 机型到 `%LOCALAPPDATA%\FRLG-Auto-RNG\save_profiles.json`，选择后同步四页相关字段，手动模式不覆盖输入。当前 2.0 输入/物化指纹分别为 `43a5a9c...`/`4f78b8f3...`。孵蛋 Held/Pickup 固定预校准分别为 222/230；奇数 Held 的生成菜单动作不再从绝对时间轴重复预扣，Pickup 菜单按净效果 -1 ADV 计算。Seed 校准方案 2 会在命中保持后保留并接续方向票。孵蛋页已有亲本配置与全部配置两套保存入口，运行脚本时共享采集预览仍可打开；SID 查找已增加 Switch 1/2，并用 HOME_BUFFER 替换固定 A → 1200 ms → A，公共稳定低分自适应开关也作用于 SID 生成副本；命中后仍继续原 WAIT 8000、跳 OP 和进档操作。
 
 请接手这个火红/叶绿全自动乱数项目。先完整阅读 README.md、docs/HANDOFF.md 和 docs/INITIAL_AUTO_RNG.md，然后运行 git status --short，确认不要覆盖或清理现有未提交改动。
 
@@ -645,5 +651,5 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 
-当前验证数字以上方最新结果为准；下载包 `Tools/check_*.py`、两份主脚本和物化后的正式/时间轴入口都必须通过真实 EasyCon 1.6.4-a 检查。2.0 语料会在导入本地快照时自动合并 1.6.4-a 修正，当前下载包输入指纹为 `750eb3349405395edb1879c0bc12f8e53888e6e73d0efde223ae40f17f31530c`，物化后的 33 个 ECS 文件 SHA-256 为 `93f09eaf6229fc810da98957f9979bfc0d3d2abd9925d54e80006132169bfccb`。用户会直接修改下载包，未知指纹只警告后继续，不要擅自恢复严格拒绝；缺文件、标签或 `format` 失败仍应阻止。当前工具工作区是 `D:\Codex\火叶乱数\frlg-auto-rng`。GUI 启动后自动枚举串口和采集卡；采集卡下拉项显示序号与设备名。TID 页已移除随机 F3，固定延迟检查完整结束后自动回填四项；穷举连续流程按实际 TID/SID ADV 动态生成御三家阶段。高级模式旁的 HOME_BUFFER 稳定低分自适应作用于 2.0 普通/孵蛋和 TID/SID 生成副本，默认关闭。孵蛋 Held/Pickup 固定预校准分别为 222/230，方案 2 的命中保持结束后会保留并接续方向票；最终无解保留游戏画面停止，已确定个体但目标帧未命中时重启校准。完成环境核对后，请根据我接下来的要求继续，不要自行扩大到修改 TID/EasyCon 原包。
+当前验证数字以上方最新结果为准；下载包 `Tools/check_*.py`、两份主脚本和物化后的正式/时间轴入口都必须通过真实 EasyCon 1.6.4-a 检查。2.0 语料会在导入本地快照时自动合并 1.6.4-a 修正，当前下载包输入指纹为 `43a5a9c220db51177f4cc6a9171148a0094b63f3ba49a3d8eb339243203aeca2`，物化后的 33 个 ECS 文件 SHA-256 为 `4f78b8f30219092e4608eb342d63fd8fde76cbaf9e112b2df17a271ea949008c`。用户会直接修改下载包，未知指纹只警告后继续，不要擅自恢复严格拒绝；缺文件、标签或 `format` 失败仍应阻止。当前工具工作区是 `D:\Codex\火叶乱数\frlg-auto-rng`。GUI 启动后自动枚举串口和采集卡；采集卡下拉项显示序号与设备名。TID 页已移除随机 F3，固定延迟检查完整结束后自动回填四项；穷举连续流程按实际 TID/SID ADV 动态生成御三家阶段。高级模式旁的 HOME_BUFFER 稳定低分自适应作用于 2.0 普通/孵蛋和 TID/SID 生成副本，默认关闭。孵蛋 Held/Pickup 固定预校准分别为 222/230，方案 2 的命中保持结束后会保留并接续方向票；最终无解保留游戏画面停止，已确定个体但目标帧未命中时重启校准。完成环境核对后，请根据我接下来的要求继续，不要自行扩大到修改 TID/EasyCon 原包。
 ```

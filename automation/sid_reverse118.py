@@ -305,12 +305,12 @@ def write_sid_reverse_project(
     corpus = inspect_script_corpus(source_dir)
     if corpus["count"] != EXPECTED_SCRIPT_FILE_COUNT:
         raise ValueError(
-            f"1.1.8正式/时间轴主脚本及lib文件数应为{EXPECTED_SCRIPT_FILE_COUNT}，"
+            f"2.0 正式/时间轴主脚本及 lib 文件数应为 {EXPECTED_SCRIPT_FILE_COUNT}，"
             f"当前为{corpus['count']}"
         )
     if not is_supported_runtime_script_sha256(corpus["sha256"]):
         print(
-            "警告：1.1.8 主脚本/lib 指纹未登记，仍继续生成 SID 反查项目："
+            "警告：2.0 主脚本/lib 指纹未登记，仍继续生成 SID 反查项目："
             + corpus["sha256"],
             file=sys.stderr,
         )

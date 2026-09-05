@@ -1,5 +1,4 @@
 import hashlib
-import json
 import subprocess
 import tempfile
 import unittest
@@ -274,29 +273,6 @@ class DirectScriptTestTests(unittest.TestCase):
 
             self.assertFalse(preparation.check.ok)
             self.assertIn("Tessdata 缺少", "\n".join(preparation.check.errors))
-
-    def test_builtin_surf_probe_copies_only_required_labels(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source = root / "source"
-            source_labels = source / "ImgLabel"
-            source_labels.mkdir(parents=True)
-            for label in script_test.BUILTIN_EGG_SURF_MENU_LABELS:
-                (source_labels / f"{label}.IL").write_bytes(label.encode("utf-8"))
-            output = root / "output"
-
-            main = script_test.write_builtin_egg_surf_menu_probe(source, output)
-
-            self.assertTrue(main.is_file())
-            self.assertIn("SURF_MENU|SURF_SUMMARY", main.read_text(encoding="utf-8"))
-            self.assertEqual(
-                sorted(path.name for path in (output / "ImgLabel").iterdir()),
-                ["冲浪.IL"],
-            )
-            manifest = json.loads(
-                (output / "script-test.json").read_text(encoding="utf-8")
-            )
-            self.assertEqual(manifest["kind"], "builtin_egg_surf_menu_probe")
 
     def test_extension_labels_fall_back_to_bundled_local_assets(self):
         with tempfile.TemporaryDirectory() as temporary:

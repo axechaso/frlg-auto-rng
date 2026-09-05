@@ -1,4 +1,4 @@
-"""Mapping between Ten Lines game settings and the 1.1.8 Seed mode field."""
+"""Mapping between Ten Lines game settings and the 2.0 Seed mode field."""
 
 from rng.tenlines_utils import GameSettings
 
@@ -18,7 +18,7 @@ _MODE_VALUES = {
 
 
 def seed_mode_to_settings(seed_mode: int) -> GameSettings:
-    """Convert a 1.1.8 Seed mode number to structured game settings."""
+    """Convert a 2.0 Seed mode number to structured game settings."""
     try:
         sound, button_mode, seed_button, extra_button = _MODE_VALUES[seed_mode]
     except KeyError as exc:
@@ -32,7 +32,7 @@ def seed_mode_to_settings(seed_mode: int) -> GameSettings:
 
 
 def settings_to_seed_mode(settings: GameSettings) -> int | None:
-    """Return the exact 1.1.8 mode for settings, or ``None`` if unsupported."""
+    """Return the exact 2.0 mode for settings, or ``None`` if unsupported."""
     value = (
         settings.sound,
         settings.button_mode,
