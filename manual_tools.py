@@ -12,7 +12,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any, Callable
 
-from app_paths import DATA_ROOT
+from app_paths import DATA_ROOT, RESOURCE_ROOT
 
 
 class GamePadKey:
@@ -117,11 +117,14 @@ CONTROLLER_OVERLAY_WIDTH = 100
 CONTROLLER_OVERLAY_HEIGHT = 100
 CONTROLLER_OVERLAY_IDLE_FILL = "#323232"
 CONTROLLER_OVERLAY_ACTIVE_FILL = "#00ff00"
+CONTROLLER_OVERLAY_ASSET_DIR = RESOURCE_ROOT / "assets" / "easycon_vpad"
+CONTROLLER_OVERLAY_SHOULDER_ASSETS = {
+    GamePadKey.ZL: "JoyCon_ZL",
+    GamePadKey.ZR: "JoyCon_ZR",
+    GamePadKey.L: "JoyCon_L",
+    GamePadKey.R: "JoyCon_R",
+}
 CONTROLLER_OVERLAY_BUTTON_LAYOUT = {
-    GamePadKey.ZL: ("round", (3, 1, 24, 7)),
-    GamePadKey.L: ("round", (25, 3, 45, 8)),
-    GamePadKey.R: ("round", (55, 3, 75, 8)),
-    GamePadKey.ZR: ("round", (76, 1, 97, 7)),
     GamePadKey.LCLICK: ("oval", (16, 26, 31, 41)),
     GamePadKey.TOP: ("round", (21, 55, 27, 61)),
     GamePadKey.DOWN: ("round", (21, 67, 27, 73)),
@@ -512,6 +515,8 @@ class ControllerStateOverlay:
         self._right_press_window: tuple[int, int] | None = None
         self._right_dragged = False
         self._button_items: dict[str, int] = {}
+        self._asset_images: dict[str, tk.PhotoImage] = {}
+        self._shoulder_items: dict[str, int] = {}
 
         self.window = tk.Toplevel(root)
         self.window.title("手柄状态浮窗")
@@ -558,56 +563,23 @@ class ControllerStateOverlay:
 
     def _draw_background(self) -> None:
         canvas = self.canvas
-        canvas.create_polygon(
-            4,
-            22,
-            11,
-            8,
-            25,
-            2,
-            49,
-            2,
-            49,
-            98,
-            19,
-            98,
-            7,
-            87,
-            2,
-            69,
-            fill="#8e8ad3",
-            outline="#32313b",
-            width=2,
-            smooth=True,
-            splinesteps=24,
-        )
-        canvas.create_polygon(
-            51,
-            2,
-            75,
-            2,
-            89,
-            8,
-            96,
-            22,
-            98,
-            69,
-            93,
-            87,
-            81,
-            98,
-            51,
-            98,
-            fill="#e99a9d",
-            outline="#42343a",
-            width=2,
-            smooth=True,
-            splinesteps=24,
-        )
-        canvas.create_rectangle(46, 21, 49, 91, fill="#77758d", outline="#44434d")
-        canvas.create_rectangle(51, 21, 54, 91, fill="#8b737a", outline="#554247")
+        background = self._load_asset("JoyCon.png")
+        canvas.create_image(0, 0, image=background, anchor="nw")
         canvas.create_oval(11, 21, 36, 46, fill="#5b596d", outline="#34333e")
         canvas.create_oval(63, 52, 88, 77, fill="#725d63", outline="#42343a")
+
+    def _load_asset(self, filename: str) -> tk.PhotoImage:
+        path = CONTROLLER_OVERLAY_ASSET_DIR / filename
+        if not path.is_file():
+            raise RuntimeError(f"缺少 EasyCon 手柄浮窗资源：{path}")
+        image = tk.PhotoImage(master=self.window, file=str(path))
+        if image.width() != CONTROLLER_OVERLAY_WIDTH or image.height() != CONTROLLER_OVERLAY_HEIGHT:
+            raise RuntimeError(
+                f"EasyCon 手柄浮窗资源尺寸错误：{path.name} "
+                f"({image.width()}x{image.height()})"
+            )
+        self._asset_images[filename] = image
+        return image
 
     def _draw_state_items(self) -> None:
         canvas = self.canvas
@@ -637,6 +609,15 @@ class ControllerStateOverlay:
             )
             for index in range(4)
         )
+        for key, basename in CONTROLLER_OVERLAY_SHOULDER_ASSETS.items():
+            idle_image = self._load_asset(f"{basename}_0.png")
+            self._load_asset(f"{basename}_1.png")
+            self._shoulder_items[key] = canvas.create_image(
+                0,
+                0,
+                image=idle_image,
+                anchor="nw",
+            )
 
     def refresh_state(self) -> None:
         if self._closed:
@@ -658,6 +639,13 @@ class ControllerStateOverlay:
                     if connected and key in pressed
                     else CONTROLLER_OVERLAY_IDLE_FILL
                 ),
+            )
+        for key, item in self._shoulder_items.items():
+            basename = CONTROLLER_OVERLAY_SHOULDER_ASSETS[key]
+            state = 1 if connected and key in pressed else 0
+            self.canvas.itemconfigure(
+                item,
+                image=self._asset_images[f"{basename}_{state}.png"],
             )
         connection_fill = "#ffffff" if connected else "#202020"
         for item in self._connection_items:
