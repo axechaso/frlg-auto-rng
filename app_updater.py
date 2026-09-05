@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
@@ -20,6 +21,8 @@ import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
+
+import truststore
 
 from app_version import (
     APP_VERSION_CODE,
@@ -38,6 +41,11 @@ MAX_UNPACKED_BYTES = 12 * 1024 * 1024 * 1024
 MAX_ZIP_ENTRIES = 100_000
 TOKEN_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+CERTIFICATE_ERROR_MESSAGE = (
+    "Windows 系统证书库无法验证 GitHub 的 HTTPS 证书。"
+    "请检查系统时间、Windows 根证书更新或 HTTPS 代理证书后重试；"
+    "程序不会关闭证书验证。"
+)
 
 
 class UpdateError(RuntimeError):
@@ -325,11 +333,37 @@ def _read_response(response: object, maximum: int) -> bytes:
     return b"".join(chunks)
 
 
+def _system_urlopen(request: urllib.request.Request, *, timeout: float):
+    """Open HTTPS using the native OS trust store without weakening TLS."""
+
+    context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    return urllib.request.urlopen(request, timeout=timeout, context=context)
+
+
+def _is_certificate_error(error: BaseException) -> bool:
+    current: BaseException | object | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return True
+        reason = getattr(current, "reason", None)
+        cause = getattr(current, "__cause__", None)
+        context = getattr(current, "__context__", None)
+        current = reason or cause or context
+    return False
+
+
 def _open(opener: Callable, request: urllib.request.Request, timeout: float):
     try:
-        return opener(request, timeout=timeout)
-    except TypeError:
-        return opener(request)
+        try:
+            return opener(request, timeout=timeout)
+        except TypeError:
+            return opener(request)
+    except Exception as exc:
+        if _is_certificate_error(exc):
+            raise UpdateError(CERTIFICATE_ERROR_MESSAGE) from exc
+        raise
 
 
 def check_for_update(
@@ -337,7 +371,7 @@ def check_for_update(
     current_version_code: int = APP_VERSION_CODE,
     cache_dir: Path,
     force: bool = False,
-    opener: Callable = urllib.request.urlopen,
+    opener: Callable = _system_urlopen,
     now: float | None = None,
 ) -> UpdateCheckResult:
     now_value = time.time() if now is None else now
@@ -442,7 +476,7 @@ def download_package(
     candidate: UpdateCandidate,
     destination: Path,
     *,
-    opener: Callable = urllib.request.urlopen,
+    opener: Callable = _system_urlopen,
     progress: Callable[[int, int], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> Path:
@@ -599,7 +633,7 @@ def prepare_update(
     install_dir: Path,
     updates_root: Path,
     updater_source: Path | None = None,
-    opener: Callable = urllib.request.urlopen,
+    opener: Callable = _system_urlopen,
     progress: Callable[[int, int], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
     probe: Callable[[Path, UpdateManifest], None] = _probe_staged_version,

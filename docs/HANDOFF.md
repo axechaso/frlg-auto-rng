@@ -4,6 +4,13 @@
 
 快照日期：2026-09-05。
 
+## 2026-09-05 Windows 更新证书链修复
+
+- 冻结版“检查程序更新”曾直接使用 `urllib.request.urlopen`，部分 Windows/杀毒 HTTPS 代理环境会返回 `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate`。更新检查、清单读取和 ZIP 下载现统一经 `truststore.SSLContext(PROTOCOL_TLS_CLIENT)` 使用 Windows CryptoAPI 信任库，可取得系统中间证书和受管代理根证书。
+- 没有增加忽略证书或不安全重试：系统信任库仍无法验证时会明确提示检查系统时间、Windows 根证书更新或 HTTPS 代理证书，并说明程序不会关闭证书验证。原有 GitHub URL 白名单、清单字段、包大小及 SHA-256 校验均保留。
+- `truststore==0.10.4` 已进入正式 `requirements-auto.txt`；主程序与独立更新器的 PyInstaller 参数均显式收集其平台子模块。旧绿色版的更新器代码无法自我修复，用户必须手工安装首个包含本修复的新包，之后才恢复应用内更新。
+- 新增系统 SSLContext、证书错误不降级及打包收集测试；源码及带 `truststore` 的临时 PyInstaller 单文件 EXE 均真实访问 GitHub Release 并返回 `current`，项目 `.venv` 完整 467 项测试通过。Actions 结果以本次提交记录为准，本轮未修改 ECS 或自动乱数流程。
+
 ## 2026-09-05 PySide6 恢复初版视觉层次
 
 - 用户确认工具首先要让人容易操作：以 `7438e0e` 初版截图的紧凑摘要、双栏、右侧方案/设备准备和单行操作栏为视觉基准。上一轮虽然补齐功能，却把 Tk 的密集控件组织搬进预览；本轮恢复初版视觉层次。功能页面映射仍保留，作为完整性清单，不作为排版要求。

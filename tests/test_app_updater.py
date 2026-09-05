@@ -1,12 +1,17 @@
 import hashlib
 import io
+import inspect
 import json
+import ssl
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
+import app_updater
 from app_updater import (
     PreparedUpdate,
     UpdateCandidate,
@@ -80,6 +85,45 @@ class BytesResponse(io.BytesIO):
 
 
 class AppUpdaterTests(unittest.TestCase):
+    def test_default_opener_uses_windows_truststore_without_disabling_tls(self):
+        for operation in (
+            app_updater.check_for_update,
+            app_updater.download_package,
+            app_updater.prepare_update,
+        ):
+            with self.subTest(operation=operation.__name__):
+                self.assertIs(
+                    inspect.signature(operation).parameters["opener"].default,
+                    app_updater._system_urlopen,
+                )
+        request = app_updater.urllib.request.Request("https://api.github.com/")
+        context = mock.Mock()
+        response = BytesResponse(b"ok")
+        with (
+            mock.patch.object(app_updater.truststore, "SSLContext", return_value=context) as factory,
+            mock.patch.object(app_updater.urllib.request, "urlopen", return_value=response) as urlopen,
+        ):
+            self.assertIs(app_updater._system_urlopen(request, timeout=9.0), response)
+        factory.assert_called_once_with(ssl.PROTOCOL_TLS_CLIENT)
+        urlopen.assert_called_once_with(request, timeout=9.0, context=context)
+
+    def test_certificate_failure_is_actionable_and_never_retried_insecurely(self):
+        calls = []
+
+        def rejected(_request, **_kwargs):
+            calls.append(1)
+            verification = ssl.SSLCertVerificationError(1, "unable to get local issuer certificate")
+            raise urllib.error.URLError(verification)
+
+        with self.assertRaisesRegex(UpdateError, "Windows 系统证书库") as raised:
+            app_updater._open(
+                rejected,
+                app_updater.urllib.request.Request("https://api.github.com/"),
+                15.0,
+            )
+        self.assertEqual(calls, [1])
+        self.assertIn("不会关闭证书验证", str(raised.exception))
+
     def test_manifest_contract_and_rejections(self):
         manifest = make_manifest()
         self.assertEqual(manifest.version, "0.2")

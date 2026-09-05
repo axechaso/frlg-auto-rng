@@ -12,6 +12,8 @@ class WindowsReleaseScriptTests(unittest.TestCase):
         self.assertIn("tools.create_update_manifest", source)
         self.assertIn("--onefile", source)
         self.assertIn("--version-json-file", source)
+        self.assertIn('"truststore==0.10.4"', source)
+        self.assertGreaterEqual(source.count('"--collect-submodules", "truststore"'), 2)
 
     def test_publisher_requires_preflight_and_draft_verification(self):
         source = (ROOT / "tools" / "publish_windows_release.ps1").read_text(encoding="utf-8")
