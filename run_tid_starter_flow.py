@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from datetime import datetime
 import json
@@ -26,8 +26,9 @@ from device_label_overrides import (
 )
 from tid_records import recording_session
 from process_control import StopFileWatcher, terminate_process_tree
-from tid_session import TidProgressSession, progress_context, progress_lease
+from tid_session import TidProgressSession, progress_context, progress_lease, latest_progress
 from automation.tid_checkpoint import instrument_tid_checkpoint
+from automation.tid_search import progress_supported
 from automation.tid_calibration import (
     calibrated_tid_request,
     parse_tid_calibration_result,
@@ -263,18 +264,24 @@ def update_starter_precalibration(flow: FlowRunner, starter_main: Path) -> None:
     )
 
 
-def run_flow_attempts(flow: FlowRunner, flow_dir: Path, corrections: list[int]) -> int:
+def run_flow_attempts(flow: FlowRunner, flow_dir: Path, corrections: list[int], *, prepare_attempt=None, start_attempt=0) -> int:
     """Run complete save attempts until 1.1.8 confirms a shiny starter."""
     bridge_main = flow_dir / "02_lab_bridge" / "main.ecs"
     starter_main = flow_dir / "03_starter_118" / "main.ecs"
     for attempt_index, correction in enumerate(corrections):
+        if attempt_index < start_attempt:
+            continue
         flow.output("")
         flow.output(
             f"########## 建档尝试 {attempt_index + 1}/{len(corrections)}："
             f"SID ADV修正 {correction:+d} ##########"
         )
         id_main = flow_dir / "01_id" / f"main_attempt_{attempt_index:03d}.ecs"
-        code = flow.run_stage(1, "TID/SID 1.3.7", id_main, required_marker=ID_MARKER)
+        if prepare_attempt is None:
+            code = flow.run_stage(1, "TID/SID 1.3.7", id_main, required_marker=ID_MARKER)
+        else:
+            with prepare_attempt(attempt_index, correction, id_main):
+                code = flow.run_stage(1, "TID/SID 1.3.7", id_main, required_marker=ID_MARKER)
         if code != 0:
             return code
         code = flow.run_stage(2, "研究所桥接与存档", bridge_main, required_marker=BRIDGE_MARKER)
@@ -417,6 +424,57 @@ def run_exhaustive_flow(
     return 4
 
 
+@contextmanager
+def tid_progress_scope(flow, source_main, actual_request, context, progress_dir, ezcon_path, *,
+                       resume=True, fingerprint_warning_only=False):
+    """Own a single ID attempt's checkpoint; other stages never resume here."""
+    id_dir = source_main.parent
+    with TidProgressSession(progress_dir, context, resume=resume) as progress:
+        configured = instrument_tid_checkpoint(
+            source_main.read_text(encoding="utf-8-sig"), actual_request, progress.state
+        )
+        runtime_dir = Path(tempfile.mkdtemp(prefix="tid-resume-", dir=id_dir.parent))
+        main = runtime_dir / "main.ecs"
+        main.write_text(configured, encoding="utf-8")
+        shutil.copytree(id_dir / "ImgLabel", runtime_dir / "ImgLabel")
+        override_sidecar = id_dir / PROJECT_OVERRIDE_FILENAME
+        if override_sidecar.is_file():
+            shutil.copy2(
+                override_sidecar,
+                runtime_dir / PROJECT_OVERRIDE_FILENAME,
+            )
+        (runtime_dir / "progress_context.json").write_text(
+            json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        check = (
+            validate_tid_runtime(
+                ezcon_path,
+                main,
+                fingerprint_warning_only=True,
+            )
+            if fingerprint_warning_only
+            else validate_tid_runtime(ezcon_path, main)
+        )
+        if not check.ok:
+            raise ValueError("TID续跑脚本预检失败：" + "; ".join(check.errors))
+        if flow.stop_requested:
+            raise InterruptedError("TID进度准备已取消")
+        flow.id_main_override = main
+        flow.progress = progress
+        if progress.state:
+            state = progress.state
+            flow.output(f"[TID续跑] 恢复模式{state.get('MODE', 0)}，搜索层级{state['STAGE']}，OP/F1/F2偏移="
+                        f"{state['OP']}/{state['F1']}/{state['F2']}；当前点重新进行去噪观察。")
+        else:
+            flow.output("[TID进度] 从所填起点开始，逐轮自动保存搜索进度。")
+        flow.output(f"[TID进度] {progress.path}")
+        try:
+            yield main
+        finally:
+            flow.progress = None
+            flow.id_main_override = None
+
+
 def run_tid_plan(
     flow: FlowRunner,
     plan_dir: Path,
@@ -551,71 +609,39 @@ def run_tid_plan(
 
         if flow.stop_requested:
             return 130
-        if progress_dir is not None and request.mode == 0:
+        if progress_dir is not None and progress_supported(request):
             id_dir = plan_dir / "01_id" if is_flow else plan_dir
             manifest = json.loads((id_dir / "plan.json").read_text(encoding="utf-8"))
             actual_request = tid_request_from_dict(manifest["tid_request"])
             template_hash = manifest["source_manifest"]["scripts"][actual_request.language]["sha256"]
-            context = progress_context(
-                actual_request, game, template_hash,
-                payload["request"] if is_flow else None,
-            )
-            # Acquire the lease before any new ID game operation. The worker,
-            # not the GUI, owns writes even when its parent window is closed.
-            with TidProgressSession(progress_dir, context, resume=resume) as progress:
-                source_main = id_dir / ("main_attempt_000.ecs" if is_flow else "main.ecs")
-                configured = instrument_tid_checkpoint(
-                    source_main.read_text(encoding="utf-8-sig"), actual_request, progress.state
-                )
-                runtime_dir = Path(tempfile.mkdtemp(prefix="tid-resume-", dir=plan_dir.parent))
-                main = runtime_dir / "main.ecs"
-                main.write_text(configured, encoding="utf-8")
-                shutil.copytree(id_dir / "ImgLabel", runtime_dir / "ImgLabel")
-                override_sidecar = id_dir / PROJECT_OVERRIDE_FILENAME
-                if override_sidecar.is_file():
-                    shutil.copy2(
-                        override_sidecar,
-                        runtime_dir / PROJECT_OVERRIDE_FILENAME,
+            if is_flow and not bool(payload.get("deferred_identity")):
+                corrections = [int(value) for value in payload["sid_retry_corrections"]]
+                contexts = [progress_context(
+                    replace(actual_request, sid_advance_correction=correction), game, template_hash, payload["request"],
+                ) for correction in corrections]
+                latest = latest_progress(progress_dir, contexts, unfinished_only=True) if resume else None
+                def prepare_attempt(index, correction, source_main):
+                    attempt_request = replace(actual_request, sid_advance_correction=correction)
+                    return tid_progress_scope(
+                        flow, source_main, attempt_request, contexts[index], progress_dir, ezcon_path,
+                        resume=resume, fingerprint_warning_only=fingerprint_warning_only,
                     )
-                (runtime_dir / "progress_context.json").write_text(
-                    json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8"
+                return run_flow_attempts(
+                    flow, plan_dir, corrections, prepare_attempt=prepare_attempt,
+                    start_attempt=latest[0] if latest else 0,
                 )
-                check = (
-                    validate_tid_runtime(
-                        ezcon_path,
-                        main,
-                        fingerprint_warning_only=True,
+            context = progress_context(actual_request, game, template_hash, payload["request"] if is_flow else None)
+            source_main = id_dir / ("main_attempt_000.ecs" if is_flow else "main.ecs")
+            with tid_progress_scope(
+                flow, source_main, actual_request, context, progress_dir, ezcon_path,
+                resume=resume, fingerprint_warning_only=fingerprint_warning_only,
+            ) as main:
+                if is_flow:
+                    return run_exhaustive_flow(
+                        flow, plan_dir, payload, ezcon_path,
+                        fingerprint_warning_only=fingerprint_warning_only, label_profile=label_profile,
                     )
-                    if fingerprint_warning_only
-                    else validate_tid_runtime(ezcon_path, main)
-                )
-                if not check.ok:
-                    raise ValueError("穷举续跑脚本预检失败：" + "; ".join(check.errors))
-                if flow.stop_requested:
-                    return 130
-                flow.id_main_override = main
-                flow.progress = progress
-                if progress.state:
-                    state = progress.state
-                    flow.output(f"[TID续跑] 恢复搜索层级{state['STAGE']}，OP/F1/F2偏移="
-                                f"{state['OP']}/{state['F1']}/{state['F2']}；当前点重新进行去噪观察。")
-                else:
-                    flow.output("[TID进度] 从所填起点开始，逐轮自动保存穷举进度。")
-                flow.output(f"[TID进度] {progress.path}")
-                try:
-                    if is_flow:
-                        return run_exhaustive_flow(
-                            flow,
-                            plan_dir,
-                            payload,
-                            ezcon_path,
-                            fingerprint_warning_only=fingerprint_warning_only,
-                            label_profile=label_profile,
-                        )
-                    return flow.run_stage(1, "TID/SID正式计划", main)
-                finally:
-                    flow.progress = None
-                    flow.id_main_override = None
+                return flow.run_stage(1, "TID/SID正式计划", main)
         if not is_flow:
             return flow.run_stage(1, "TID/SID正式计划", plan_dir / "main.ecs")
         corrections = [int(value) for value in payload["sid_retry_corrections"]]

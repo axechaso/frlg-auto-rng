@@ -115,7 +115,7 @@ class TidLogParser:
         if correction is None:
             # A resumed worker restores actual OP recovery separately from the
             # unchanged calibration baseline. Record that actual correction.
-            correction = re.search(r"TIDPROGRESS\|V=1\|.*\|OP_CORRECTION=(-?\d+)\|.*\|END=1$", line)
+            correction = re.search(r"TIDPROGRESS\|V=[12]\|.*\|OP_CORRECTION=(-?\d+)\|.*\|END=1$", line)
         if correction:
             self.context = replace(self.context, op_correction=int(correction[1]))
             self.pending = {}

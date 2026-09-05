@@ -198,6 +198,21 @@ class TidRngRequest:
     single_digit_id: bool = False
     image_threshold: int = 95
     home_buffer_adaptive_threshold: bool = False
+    additional_target_tids: tuple[int, ...] = ()
+    auto_rng: bool = False
+    near_tid_distance: int = 100
+    near_tid_hits: int = 3
+    auto_op_rng_range: int = 20
+    auto_f1_rng_range: int = 20
+    auto_f2_rng_range: int = 10
+
+    def __post_init__(self):
+        if isinstance(self.additional_target_tids, list):
+            object.__setattr__(self, "additional_target_tids", tuple(self.additional_target_tids))
+
+    @property
+    def exhaustive_targets(self) -> tuple[int, ...]:
+        return tuple(dict.fromkeys((self.target_tid, *self.additional_target_tids)))
 
     def validate(self, template_text: str | None = None) -> None:
         if self.language not in TID_SCRIPT_NAMES:
@@ -210,6 +225,17 @@ class TidRngRequest:
             raise ValueError("NS 机型必须是 Switch 1 或 Switch 2")
         if not 0 <= self.target_tid <= 65535:
             raise ValueError("目标 TID 必须在 0-65535 之间")
+        if not isinstance(self.additional_target_tids, (tuple, list)) or len(self.additional_target_tids) > 31:
+            raise ValueError("额外目标 TID 最多填写31个")
+        if any(type(tid) is not int or not 0 <= tid <= 65535 for tid in self.additional_target_tids):
+            raise ValueError("额外目标 TID 必须是0-65535的整数")
+        if not isinstance(self.auto_rng, bool):
+            raise ValueError("自动转乱数开关必须是布尔值")
+        if type(self.near_tid_distance) is not int or not 0 <= self.near_tid_distance <= 32768:
+            raise ValueError("接近目标的环形距离必须在0-32768之间")
+        near_limit = self.denoise_try_window if self.auto_rng and self.mode == 0 else 10
+        if type(self.near_tid_hits) is not int or not 1 <= self.near_tid_hits <= near_limit:
+            raise ValueError("接近目标的次数必须在1到去噪窗口之间")
         if not 0 <= self.target_sid <= 65535:
             raise ValueError("目标 SID 必须在 0-65535 之间")
         if self.sound not in {0, 1}:
@@ -235,18 +261,17 @@ class TidRngRequest:
             "F1 起点": self.f1_start,
             "F2 起点": self.f2_start,
             "F3 随机范围": self.f3_random_range,
-            "OP 乱数半径": self.op_rng_range,
-            "F1 乱数半径": self.f1_rng_range,
-            "F2 乱数半径": self.f2_rng_range,
-            "OP 穷举范围": self.op_max_range,
-            "F1 穷举范围": self.f1_max_range,
-            "F2 穷举范围": self.f2_max_range,
             "F2 候选阈值": self.f2_candidate_range,
             "F1 候选阈值": self.f1_candidate_range,
         }
         for label, value in nonnegative.items():
             if value < 0:
                 raise ValueError(f"{label}不能为负数")
+        for value in (self.op_rng_range, self.f1_rng_range, self.f2_rng_range,
+                      self.auto_op_rng_range, self.auto_f1_rng_range, self.auto_f2_rng_range,
+                      self.op_max_range, self.f1_max_range, self.f2_max_range):
+            if type(value) is not int or not -(2**30) < value < 2**30:
+                raise ValueError("TID搜索半径必须是可执行范围内的整数")
         if self.f3_random_range != 0:
             raise ValueError(
                 "F3随机模式已移除；请使用目标SID自动计算ADV，或使用固定F3延迟"
@@ -323,6 +348,7 @@ class TidRngRequest:
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
+        result["additional_target_tids"] = list(self.additional_target_tids)
         result["mode_name"] = "乱数" if self.mode == 1 else "穷举"
         return result
 
@@ -395,9 +421,13 @@ def configure_tid_template_text(
     include_flow_marker: bool = False,
 ) -> str:
     if is_starter_save_template(template_text):
-        return configure_starter_save_id(
+        from .tid_search import extend_tid_search
+        configured = configure_starter_save_id(
             template_text, request, include_flow_marker=include_flow_marker
         )
+        return extend_tid_search(configured, request)
+    if request.auto_rng or request.additional_target_tids:
+        raise ValueError("多目标和自动转乱数需要新版TID球前存档模板，请更新TID缓存")
     request.validate(template_text)
     user_section, separator, remainder = template_text.partition(_USER_SECTION_END)
     if not separator:

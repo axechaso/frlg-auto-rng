@@ -225,8 +225,9 @@ class TidRng137Tests(unittest.TestCase):
         self.assertIn(marker, configured)
         original_body = self.english
         if is_starter_save_template(self.english):
+            from automation.tid_search import extend_tid_search
             configured = split_tid_modules(configured)[1]
-            original_body = split_tid_modules(self.english)[1]
+            original_body = split_tid_modules(extend_tid_search(self.english, request))[1]
         self.assertEqual(
             configured.partition(marker)[2],
             original_body.partition(marker)[2],

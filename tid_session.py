@@ -47,8 +47,23 @@ def progress_context(request, game: str, template_sha256: str, flow_request: dic
     if not isinstance(template_sha256, str) or len(template_sha256) != 64:
         raise ValueError("TID进度缺少模板指纹")
     request.validate()
-    return {"schema": 1, "game": game, "request": request.to_dict(),
+    if flow_request is not None:
+        flow_request = dict(flow_request)
+        # A generated-plan annotation, not a user option. The GUI's dataclass
+        # does not contain it; both entry points must address the same file.
+        flow_request.pop("starter_seed_calibration_scheme", None)
+    return {"schema": 1, "search_revision": 2, "game": game, "request": request.to_dict(),
             "template_sha256": template_sha256, "flow_request": flow_request}
+
+
+def latest_progress(directory: Path, contexts: list[dict], *, unfinished_only=False):
+    candidates = []
+    for index, context in enumerate(contexts):
+        saved = read_progress(directory, context)
+        if saved and saved.get("state") is not None:
+            if not unfinished_only or saved["status"] != "completed":
+                candidates.append((index, saved))
+    return max(candidates, key=lambda item: item[1].get("updated_at", ""), default=None)
 
 
 def progress_path(directory: Path, context: dict) -> Path:

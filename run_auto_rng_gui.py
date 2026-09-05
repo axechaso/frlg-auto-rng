@@ -46,7 +46,8 @@ from device_label_overrides import (
 )
 from save_profiles import SaveProfile, SaveProfileStore
 from tid_records import TidRecordContext, TidRecordStore
-from tid_session import load_tid_settings, write_json_atomic, progress_context, read_progress
+from tid_session import load_tid_settings, write_json_atomic, progress_context, read_progress, latest_progress
+from automation.tid_search import parse_target_tids, progress_supported
 from process_control import terminate_process_tree
 from automation.tid_rng137 import resolve_tid_template
 from automation.precalibration import (
@@ -2197,7 +2198,7 @@ class AutoRngApp:
         self._help_marker(
             tid_frames,
             "帧数单位",
-            "这里按游戏画面帧填写，不是 Ten Lines / 2.0 脚本使用的 RNG advance。",
+            "帧数为 RNG advance，沿用 TID 脚本的 120.00144 advance/s 换算；WAIT 和固定延迟使用毫秒。",
         ).grid(row=0, column=4, padx=5, pady=2)
         frame_rows = (
             ("乱数中心帧", (self.tid_op_target_var, self.tid_f1_target_var, self.tid_f2_target_var)),
@@ -2211,6 +2212,29 @@ class AutoRngApp:
                 ttk.Entry(tid_frames, textvariable=variable, width=12).grid(
                     row=row, column=column, padx=8, pady=3
                 )
+
+        self.tid_additional_targets_var = tk.StringVar(value="")
+        self.tid_auto_rng_var = tk.BooleanVar(value=False)
+        self.tid_near_distance_var = tk.StringVar(value="100")
+        self.tid_near_hits_var = tk.StringVar(value="3")
+        self.tid_auto_op_range_var = tk.StringVar(value="20")
+        self.tid_auto_f1_range_var = tk.StringVar(value="20")
+        self.tid_auto_f2_range_var = tk.StringVar(value="10")
+        ttk.Label(tid_frames, text="穷举额外目标TID").grid(row=5, column=0, sticky="e", padx=5)
+        ttk.Entry(tid_frames, textvariable=self.tid_additional_targets_var).grid(
+            row=5, column=1, columnspan=3, sticky="ew", padx=8, pady=3)
+        self._help_marker(tid_frames, "多个目标", "主目标始终保留；额外目标用空格或逗号分隔，最多31个，例如 00000, 33333, 65535。仅穷举使用；切换乱数后锁定已确认的区域目标。").grid(row=5, column=4)
+        ttk.Checkbutton(tid_frames, text="接近目标区间后自动转乱数", variable=self.tid_auto_rng_var).grid(
+            row=6, column=0, columnspan=4, sticky="w", padx=5, pady=4)
+        ttk.Label(tid_frames, text="接近距离 / 次数").grid(row=7, column=0, sticky="e", padx=5)
+        ttk.Entry(tid_frames, textvariable=self.tid_near_distance_var, width=12).grid(row=7, column=1, padx=8, pady=3)
+        ttk.Entry(tid_frames, textvariable=self.tid_near_hits_var, width=12).grid(row=7, column=2, padx=8, pady=3)
+        self._help_marker(tid_frames, "目标区间确认", "同一参数的去噪窗口内，对每个目标分别统计环形距离内的结果。允许不同TID，默认±100内3次；跨参数不累加。达到次数立即切换，窗口满仍未达到则继续穷举。距离不是帧补偿。").grid(row=7, column=4)
+        ttk.Label(tid_frames, text="自动切换后半径").grid(row=8, column=0, sticky="e", padx=5)
+        for column, variable in enumerate((self.tid_auto_op_range_var, self.tid_auto_f1_range_var, self.tid_auto_f2_range_var), 1):
+            ttk.Entry(tid_frames, textvariable=variable, width=12).grid(row=8, column=column, padx=8, pady=3)
+        ttk.Label(tid_frames, text="半径超出可执行下限时自动缩小；负数归零，按原搜索步长2向下取偶数。", foreground="#475569").grid(
+            row=9, column=0, columnspan=5, sticky="w", padx=5, pady=3)
 
         tid_settings = ttk.LabelFrame(tid_tab, text="3. 游戏设置与固定延迟", padding=8)
         tid_settings.pack(fill="x", pady=(8, 0))
@@ -2431,23 +2455,23 @@ class AutoRngApp:
             row=0, column=6, padx=4
         )
 
-        tid_resume = ttk.LabelFrame(tid_tab, text="7. 参数保存与穷举续跑", padding=8)
+        tid_resume = ttk.LabelFrame(tid_tab, text="7. 参数保存与搜索续跑", padding=8)
         tid_resume.pack(fill="x", pady=(8, 0))
         self.tid_resume_var = tk.BooleanVar(value=True)
         tid_resume_toggle = ttk.Frame(tid_resume)
         tid_resume_toggle.pack(anchor="w", fill="x")
         ttk.Checkbutton(
-            tid_resume_toggle, text="继续同参数的上次穷举进度",
+            tid_resume_toggle, text="继续同参数的上次搜索进度（穷举 / 非零半径乱数）",
             variable=self.tid_resume_var,
         ).pack(side="left")
         self._help_marker(
             tid_resume_toggle,
-            "穷举续跑",
+            "搜索续跑",
             "默认开启，TID 参数会自动保存。取消勾选后，本次从所填起点开始；"
             "打开工具不会自动运行游戏。续跑会重试停止时的当前点并重新去噪，"
             "已命中完成的进度不会继续。",
         ).pack(side="left", padx=(6, 0))
-        self.tid_progress_status_var = tk.StringVar(value="尚无本次参数的穷举进度。")
+        self.tid_progress_status_var = tk.StringVar(value="尚无本次参数的搜索进度。")
         ttk.Label(tid_resume, textvariable=self.tid_progress_status_var, wraplength=950,
                   justify="left").pack(anchor="w")
         ttk.Button(tid_resume, text="刷新进度", command=self._refresh_tid_progress).pack(anchor="w", pady=4)
@@ -3361,6 +3385,9 @@ class AutoRngApp:
             self.tid_calibration_var,
             self.tid_op_target_var, self.tid_f1_target_var, self.tid_f2_target_var,
             self.tid_op_rng_range_var, self.tid_f1_rng_range_var, self.tid_f2_rng_range_var,
+            self.tid_additional_targets_var, self.tid_auto_rng_var,
+            self.tid_near_distance_var, self.tid_near_hits_var,
+            self.tid_auto_op_range_var, self.tid_auto_f1_range_var, self.tid_auto_f2_range_var,
             self.tid_op_start_var, self.tid_f1_start_var, self.tid_f2_start_var,
             self.tid_op_max_range_var, self.tid_f1_max_range_var, self.tid_f2_max_range_var,
             self.tid_sound_var, self.tid_button_mode_var, self.tid_seed_button_var,
@@ -3524,10 +3551,10 @@ class AutoRngApp:
 
     def _refresh_tid_progress(self):
         try:
-            if self.tid_mode_var.get() != "穷举模式":
-                self.tid_progress_status_var.set("TID 参数会自动保存；穷举模式运行时会自动记录搜索进度。")
-                return
             request = replace(self.collect_tid_request(), calibration_check=False)
+            if not progress_supported(request):
+                self.tid_progress_status_var.set("乱数半径全为0：重复同一个参数点，无需恢复搜索位置；参数仍会自动保存。")
+                return
             flow = self.collect_tid_starter_flow_request(request)
             if flow is not None:
                 request = flow.to_flow_tid_request()
@@ -3536,16 +3563,34 @@ class AutoRngApp:
             context = progress_context(request, self.tid_game_var.get(),
                 hashlib.sha256(template.read_bytes()).hexdigest(), flow_payload)
             saved = read_progress(TID_PROGRESS_DIR, context)
+            if flow is not None and not flow.deferred_identity:
+                from rng.starter_sid_verification import sid_advance_scan_offsets
+                contexts = [progress_context(
+                    replace(request, sid_advance_correction=request.sid_advance_correction + offset),
+                    self.tid_game_var.get(), context["template_sha256"], flow_payload,
+                ) for offset in sid_advance_scan_offsets(flow.sid_retry_radius)]
+                latest = latest_progress(TID_PROGRESS_DIR, contexts)
+                if latest is not None:
+                    saved = latest[1]
             if not saved or saved.get("state") is None:
                 text = "当前游戏、机型、参数及脚本版本没有可续跑的检查点，将从所填起点开始。"
             else:
                 state = saved["state"]
                 status = "已命中完成；下次重新开始" if saved["status"] == "completed" else "可续跑（若后台仍在运行，须先停止）"
-                text = (f"{status}：搜索层级 {state['STAGE']}，OP/F1/F2偏移 "
-                        f"{state['OP']}/{state['F1']}/{state['F2']}，累计 {state['COUNT']} 次。")
+                if state.get("MODE", 0) == 1:
+                    text = (f"{status}：{'穷举自动转乱数' if state['SWITCHED'] else '乱数'}，目标TID {state['TARGET']:05d}，"
+                            f"中心OP/F1/F2 {state['OP_CENTER']}/{state['F1_CENTER']}/{state['F2_CENTER']}，"
+                            f"半径 {state['OP_RANGE']}/{state['F1_RANGE']}/{state['F2_RANGE']}，"
+                            f"当前壳层 ±{state['RADIUS']}，累计 {state['COUNT']} 次。")
+                    if flow is not None and not flow.deferred_identity:
+                        correction = saved.get("context", context)["request"]["sid_advance_correction"]
+                        text += f" 当前SID ADV修正 {correction:+d}。"
+                else:
+                    text = (f"{status}：穷举层级 {state['STAGE']}，OP/F1/F2偏移 "
+                            f"{state['OP']}/{state['F1']}/{state['F2']}，累计 {state['COUNT']} 次。")
             self.tid_progress_status_var.set(text)
         except (OSError, ValueError, KeyError, TypeError) as exc:
-            self.tid_progress_status_var.set(f"暂不能匹配穷举进度：{exc}")
+            self.tid_progress_status_var.set(f"暂不能匹配搜索进度：{exc}")
 
     def invalidate_plan(self, *_):
         if self._updating:
@@ -4745,6 +4790,13 @@ class AutoRngApp:
             single_digit_id=self.tid_single_digit_var.get(),
             image_threshold=int(self.tid_threshold_var.get()),
             home_buffer_adaptive_threshold=self.home_buffer_adaptive_var.get(),
+            additional_target_tids=() if any_tid else parse_target_tids(self.tid_additional_targets_var.get()),
+            auto_rng=self.tid_auto_rng_var.get() and not any_tid,
+            near_tid_distance=int(self.tid_near_distance_var.get()),
+            near_tid_hits=int(self.tid_near_hits_var.get()),
+            auto_op_rng_range=int(self.tid_auto_op_range_var.get()),
+            auto_f1_rng_range=int(self.tid_auto_f1_range_var.get()),
+            auto_f2_rng_range=int(self.tid_auto_f2_range_var.get()),
         )
         template_path = resolve_tid_template(self.tid_source_var.get(), request.language)
         template_text = template_path.read_text(encoding="utf-8-sig")
@@ -6332,6 +6384,12 @@ class AutoRngApp:
         ]
         if starter_save_template:
             lines.append("已接入同步按键与同语言帧换算更新；首次使用新版建议勾选固定延迟检查。")
+        if request.mode == 0:
+            lines.append("穷举目标TID：" + ", ".join(f"{tid:05d}" for tid in request.exhaustive_targets))
+            if request.auto_rng:
+                lines.append(f"自动转乱数：同参数窗口内至少{request.near_tid_hits}次落在同目标±{request.near_tid_distance}内；"
+                             f"切换后半径OP/F1/F2={request.auto_op_rng_range}/{request.auto_f1_rng_range}/{request.auto_f2_rng_range}。")
+        lines.append("搜索半径越过可执行下限时自动缩小，负数归零，并按步长2向下取偶数；实际值见运行日志。")
         if request.calibration_check:
             lines.append("启动后先测量 OP/F1/F2/F3，自动回填实际 OP 修正并关闭检测，再生成、预检和执行正式计划；无需再次点击开始。")
         elif not starter_save_template and request.language == "日文":
@@ -7176,7 +7234,7 @@ class AutoRngApp:
                 command.extend(
                     ["--label-override-profile", str(label_profile.directory)]
                 )
-            if self.tid_request.mode == 0:
+            if progress_supported(replace(self.tid_request, calibration_check=False)):
                 command.extend(["--tid-progress-dir", str(TID_PROGRESS_DIR),
                                 "--tid-game", self.tid_game_var.get()])
                 if not self.tid_resume_var.get():
@@ -7285,7 +7343,7 @@ class AutoRngApp:
             messagebox.showerror("启动失败", str(exc))
             return
         self.preview_url = preview_url
-        self.running_tid_exhaustive = bool(self.tid_request and self.tid_request.mode == 0)
+        self.running_tid_exhaustive = bool(self.tid_request and progress_supported(replace(self.tid_request, calibration_check=False)))
         self.close_when_stopped = False
         self._save_tid_settings()
         self.start_button.configure(state="disabled")
@@ -7607,7 +7665,7 @@ class AutoRngApp:
             if self.close_when_stopped:
                 return
             if self.running_tid_exhaustive:
-                stop = messagebox.askyesnocancel("保存穷举进度并关闭",
+                stop = messagebox.askyesnocancel("保存搜索进度并关闭",
                     "是否停止当前流程并保存进度后关闭？\n\n"
                     "是：停止后关闭，下次继续当前 TID 搜索点。\n"
                     "否：仅关闭界面，后台继续运行并记录进度。\n取消：返回工具。")
