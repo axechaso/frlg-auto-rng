@@ -2,6 +2,8 @@
 
 核对日期：2026-09-05。基线为 `7438e0e`；本轮开始时 HEAD 和 `pyside_preview.py` 均与该提交一致。正式行为逐项对照同提交的 `run_auto_rng_gui.py`，不以原型中的示例值推断功能。
 
+本表是功能核对清单，不是 Tk 排版复制要求。用户确认以初版截图的简洁双栏和紧凑摘要为视觉基准；后续恢复的布局位置见各区域说明。工具以容易操作为目标，常用输入直接显示，少用参数按需展开。
+
 已完整阅读目标仓库的 `HANDOFF.md`、`UI_TEXT.md`、`PYSIDE6_PREVIEW.md`。目标仓库没有 `docs/开发交接.md`，该文件实际位于 `C:\Users\axenx\Downloads\NS火叶全自动一键乱数1.1.8\docs\开发交接.md`，已按用户要求阅读。历史文档存在过时验收记录，本轮页面合同以当前 Tk 源码为准。
 
 ## 页面顺序与公共区域
@@ -15,9 +17,9 @@
 | 5 孵蛋 | `_build_ui` 1938–2064 | `egg` | 同 Seed 表单、亲本输入与确认；配置文件、生成未接入 |
 | 条件页 脚本测试（高级） | `_build_ui` 2457–2520；`_toggle_advanced_mode` | `script_test`，初版缺页；高级模式开启后出现在日志之前 | 入口与后端选择；路径解析、预检、运行未接入 |
 | 固定末页 运行日志 | `_build_ui` 1425–1536 | `logs` | 空日志及标签诊断布局；日志尾读、诊断、覆盖未接入 |
-| 存档信息 | 1366–1397；`open_save_profile_manager`、`_apply_save_profile` | 顶部存档选择与管理入口 | 真实档案与管理器未接入，不展示虚构的当前档案 |
+| 存档信息 | 1366–1397；`open_save_profile_manager`、`_apply_save_profile` | 右上紧凑摘要，点击打开存档窗口；野生/静态/孵蛋的手动 TID/SID 在该窗口 | 真实档案与管理器未接入，不展示虚构的当前档案 |
 | EasyCon 与设备 | 2522–2851；`check_devices` 等 | 顶部“共通设置”窗口，所有页面共用 | 设置输入仅保存在当前窗口内；设备、文件、更新操作禁用 |
-| 操作与结果 | 2853–2879；`_on_mode_tab_change` | 固定底栏与独立可展开“方案与预检结果” | 后端操作全部禁用；结果不显示示例成功 |
+| 操作与结果 | 2853–2879；`_on_mode_tab_change` | 右侧方案与运行准备；底栏生成/开始、更多菜单取消/停止；详情独立窗口。窄屏和整页实测表通过底栏打开同一摘要 | 后端操作全部禁用；结果不显示示例成功 |
 
 `tid_records` 和 `logs` 不是输入模式。切换这两页时保留前一个输入模式及其主按钮文案、公共 Seed 设置和结果，不能把“搜索”改成“导出日志”。默认启动 SID 页，与 Tk 一致。
 
@@ -31,6 +33,8 @@
 | 输出 | 公共结果区显示 PSV 交集、8 个真实 SID 候选、建档链最早值与报告路径 | Method 1/2/4；不支持孵蛋来源；没有“取得 SID 后继续御三家”开关 |
 
 初版多出的性别列、御三家接续及单个示例 SID 成功结果应移除；补上主机、糖果、阈值、地点、六槽和前置确认。
+
+布局采用“第 1–6 只”页签按队伍顺序填写，每只的基本资料与六项 EV 完整可见；数量之外页签禁用，不删除输入。此处仍有六槽，没有减少正式需要的观测资料。
 
 ## TID 乱数
 
@@ -47,6 +51,8 @@
 接线：`collect_tid_request` → `TidRngRequest`；`collect_tid_starter_flow_request` → `TidStarterFlowRequest`；`generate_tid_project` → `write_configured_tid_project` / `build_tid_starter_flow_plan` / `write_tid_starter_flow_bundle`；`run_tid_starter_flow.py` 执行。6V 闪 SID 使用 `calculate_tid_shiny_sid` 和 `rng.sid_reverse`，不能在布局层复制计算。
 
 模式规则来自 `_update_tid_flow_controls`：连续穷举固定为“不乱数 SID（固定 F3，采用实际 SID）”；任意 TID 仅连续穷举可用，开启后禁用目标 TID/特殊号码并允许独立去噪；固定 F3 禁用目标 SID，延后身份路径禁用目标 SID 重试半径。关闭连续流程时禁用御三家设置。语言默认值由 `_apply_tid_language_defaults` 定义；后续抽取输入服务时复用。初版的阶段示意不能取代这七区，也不能声称御三家出闪后已自动保存。
+
+七区功能均保留；范围、固定延迟、特殊号码、脚本路径和续跑资料默认折叠，随时可展开，与“高级模式”开关独立。新建存档警告与连续御三家条件直接显示。
 
 ## TID 实测表
 
@@ -71,6 +77,8 @@
 保留“孵蛋运行条件”（游戏、主机、Seed 模式、可编辑蛋种、完整准备/从已完成 254 步开始）与“孵蛋目标”（同 Seed、Held、Pickup、相性 20/50/70、双亲性别/六 IV、前置确认）。A 性别仅雌/无性别，B 仅雄/无性别。游戏和主机在 Tk 与野生/静态共用，Qt 表单也保持同步。
 
 四按钮必须齐全：保存亲本配置、载入亲本配置、保存全部配置、载入全部配置。未来复用 `_egg_parent_config_payload`、`_egg_full_config_payload`、对应载入校验、`collect_egg_request` → `EggRunRequest` → `write_configured_egg_project`。亲本配置和全部配置作用域不同，确认不持久化。
+
+亲本 A/B 以两组性别与六项 IV 表单呈现，不再要求用户横向滚动宽表。
 
 本页不搜索蛋目标，也不提供任意不同 Seed 模式；从 Ten Lines Egg 页取得同 Seed Held/Pickup，Pickup 至少晚 1800 ADV。整轮实机未验收说明保留，取消初版虚构的孵化周期/骑车次数成功卡。公共奇偶在本模式固定菜单方案。
 

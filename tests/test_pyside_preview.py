@@ -76,6 +76,8 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         self.window = self.window_class()
 
     def tearDown(self):
+        self.window.profile_dialog.close()
+        self.window.result_dialog.close()
         self.window.settings_dialog.close()
         self.window.close()
         self.window.deleteLater()
@@ -197,12 +199,15 @@ class PySidePreviewInteractionTests(unittest.TestCase):
 
     def test_minimum_window_and_bottom_reachability(self):
         from PySide6.QtCore import QSize
-        from pyside_preview import NAV_ITEMS
+        from pyside_preview import NAV_ITEMS, Card
         window = self.window
         self.assertEqual([k for k, _, _ in NAV_ITEMS], ["sid", "tid", "tid_records", "wild", "egg", "script_test", "logs"])
         window.resize(900, 620)
         window.show()
         window.advanced_check.setChecked(True)
+        for card in window.findChildren(Card):
+            if hasattr(card, "toggle"):
+                card.toggle.setChecked(True)
         for page in window.page_indices:
             window.select_page(page)
             self.app.processEvents()
@@ -214,6 +219,44 @@ class PySidePreviewInteractionTests(unittest.TestCase):
             self.app.processEvents()
             self.assertEqual(bar.value(), bar.maximum(), page)
             self.assertTrue(window.search_button.isVisible())
+
+    def test_narrow_overview_returns_to_sidebar_without_losing_result(self):
+        from PySide6.QtCore import QTimer
+        window = self.window
+        window.resize(1360, 860)
+        window.show()
+        self.app.processEvents()
+        self.assertTrue(window.overview_scroll.isVisible())
+        self.assertFalse(window.overview_button.isVisible())
+        window.result_panel.setPlainText("Kept result")
+        window.resize(900, 620)
+        self.app.processEvents()
+        self.assertFalse(window.overview_scroll.isVisible())
+        self.assertTrue(window.overview_button.isVisible())
+        QTimer.singleShot(0, lambda: self.app.activeModalWidget().accept())
+        window._show_overview()
+        self.assertIs(window.overview_scroll.widget(), window.overview)
+        self.assertEqual(window.result_panel.toPlainText(), "Kept result")
+        window.resize(1360, 860)
+        self.app.processEvents()
+        self.assertTrue(window.overview.isVisible())
+
+    def test_collapsing_optional_settings_preserves_edits(self):
+        from pyside_preview import Card
+        window = self.window
+        window.fields["tid_op_delay"].setText("31234")
+        window.fields["wild_sid"].setText("00007")
+        for card in window.findChildren(Card):
+            if hasattr(card, "toggle"):
+                self.assertTrue(card.content.isHidden())
+                card.toggle.setChecked(True)
+                self.assertFalse(card.content.isHidden())
+                card.toggle.setChecked(False)
+                self.assertTrue(card.content.isHidden())
+        window.profile_chip.click()
+        self.assertTrue(window.profile_dialog.isVisible())
+        self.assertEqual(window.fields["wild_sid"].text(), "00007")
+        self.assertEqual(window.fields["tid_op_delay"].text(), "31234")
 
 
 if __name__ == "__main__":

@@ -12,19 +12,21 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
     QFrame,
+    QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -33,6 +35,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -336,6 +339,27 @@ QPushButton:disabled, QComboBox:disabled, QLineEdit:disabled, QSpinBox:disabled 
 }
 QLabel[role="warning"] { color: #9a541b; }
 QToolTip { color: #172033; background: #ffffff; border: 1px solid #c9d1df; }
+QPushButton#profileChip, QPushButton#deviceChip {
+    background: white; border: 1px solid #e1e7f0; border-radius: 11px;
+}
+QPushButton#profileChip:hover, QPushButton#deviceChip:hover { border-color: #aebaff; }
+QPushButton[kind="section"] {
+    border: none; background: transparent; text-align: left;
+    color: #172033; font-size: 15px; font-weight: 750; padding: 0;
+}
+QPushButton[kind="primary"]:disabled { background: #b0b6ed; color: white; }
+QPushButton[kind="success"]:disabled { background: #8dc9b9; color: white; }
+QLabel#emptySymbol { color: #8595d6; background: #eff2ff; border-radius: 24px; font-size: 42px; }
+QLabel#pendingBadge { color: #6675ad; background: #eef1ff; border-radius: 9px; padding: 5px 10px; }
+QLabel#readyText { color: #718096; }
+QSpinBox::up-button, QSpinBox::down-button { width: 15px; border: none; }
+QMenu { background: white; border: 1px solid #dce2ef; padding: 6px; }
+QMenu::item { padding: 8px 16px; }
+QMenu::item:disabled { color: #8792a5; }
+QTabWidget::pane { border: none; }
+QTabBar::tab { background: #f6f8fc; color: #718096; padding: 9px 14px; margin-right: 6px; border-radius: 8px; }
+QTabBar::tab:selected { background: #e9edff; color: #4f62d9; font-weight: 700; }
+QTabBar::tab:disabled { color: #aab3c3; }
 """
 
 STATS = ("HP", "攻击", "防御", "特攻", "特防", "速度")
@@ -378,7 +402,7 @@ def _combo(*items: str, current: int = 0) -> QComboBox:
     widget.setMinimumWidth(0)
     widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     widget.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-    widget.setMinimumContentsLength(8)
+    widget.setMinimumContentsLength(4)
     return widget
 
 
@@ -390,18 +414,34 @@ def _line(text: str = "", placeholder: str = "") -> QLineEdit:
 
 
 class Card(QFrame):
-    def __init__(self, title: str, subtitle: str = "", parent: QWidget | None = None):
+    def __init__(self, title: str, subtitle: str = "", parent: QWidget | None = None, *, collapsible: bool = False):
         super().__init__(parent)
         self.setObjectName("card")
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(18, 17, 18, 18)
-        self.layout.setSpacing(13)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(18, 17, 18, 18)
+        outer.setSpacing(13)
         heading = QVBoxLayout()
         heading.setSpacing(3)
-        heading.addWidget(_label(title, name="cardTitle"))
-        if subtitle:
+        if collapsible:
+            self.toggle = _button(f"›  {title}", "section", enabled=True)
+            self.toggle.setCheckable(True)
+            self.toggle.setToolTip(subtitle)
+            heading.addWidget(self.toggle)
+        else:
+            heading.addWidget(_label(title, name="cardTitle"))
+        if subtitle and not collapsible:
             heading.addWidget(_label(subtitle, name="cardSubtitle"))
-        self.layout.addLayout(heading)
+        outer.addLayout(heading)
+        self.content = QWidget()
+        self.layout = QVBoxLayout(self.content)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(13)
+        outer.addWidget(self.content)
+        if collapsible:
+            self.content.hide()
+            self.toggle.toggled.connect(self.content.setVisible)
+            self.toggle.toggled.connect(lambda expanded: self.toggle.setText(f"{'⌄' if expanded else '›'}  {title}"))
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
 
 class FrlgPreviewWindow(QMainWindow):
@@ -409,7 +449,7 @@ class FrlgPreviewWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(WINDOW_TITLE)
         self.setMinimumSize(900, 620)
-        self.resize(1280, 860)
+        self.resize(1360, 860)
         self.setStyleSheet(APP_STYLE)
         self.nav_buttons: dict[str, QPushButton] = {}
         self.page_indices: dict[str, int] = {}
@@ -430,7 +470,7 @@ class FrlgPreviewWindow(QMainWindow):
     def _build_sidebar(self) -> QWidget:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(204)
+        sidebar.setFixedWidth(208)
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(16, 22, 16, 18)
         layout.setSpacing(8)
@@ -503,20 +543,14 @@ class FrlgPreviewWindow(QMainWindow):
         titles.addWidget(self.page_title)
         titles.addWidget(self.page_description)
         top.addLayout(titles, 1)
-        settings = _button("共通设置", enabled=True)
-        settings.clicked.connect(lambda: self.settings_dialog.show())
-        top.addWidget(settings)
+        self.profile_chip = self._chip("存档信息", "未选择 · 手动输入", "profileChip")
+        self.profile_chip.clicked.connect(lambda: self.profile_dialog.show())
+        top.addWidget(self.profile_chip)
+        top.addSpacing(8)
+        self.device_chip = self._chip("当前设备", "尚未检测", "deviceChip")
+        self.device_chip.clicked.connect(lambda: self.settings_dialog.show())
+        top.addWidget(self.device_chip)
         header_layout.addLayout(top)
-
-        profiles = QHBoxLayout()
-        profiles.addWidget(_label("存档信息", name="fieldLabel"))
-        profile = _combo("未选择（手动输入）")
-        profile.setEnabled(False)
-        profile.setToolTip("存档资料与管理器尚未接入；当前只编辑内存中的表单。")
-        profiles.addWidget(profile, 1)
-        profiles.addWidget(_button("管理存档"))
-        profiles.addWidget(_label("当前设备：尚未检测", role="muted"))
-        header_layout.addLayout(profiles)
 
         banner = QFrame()
         banner.setObjectName("previewBanner")
@@ -524,13 +558,15 @@ class FrlgPreviewWindow(QMainWindow):
         banner_layout.setContentsMargins(12, 7, 12, 7)
         banner_layout.addWidget(_label("界面预览", name="previewBannerTitle"))
         banner_layout.addWidget(
-            _label("当前用于确认布局和视觉方向，不会修改配置或启动 EasyCon。", role="muted")
+            _label("仅预览布局，搜索、设备与运行服务尚未接入。", role="muted"), 1
         )
-        banner_layout.addStretch(1)
         self.advanced_check = QCheckBox("高级模式")
         self.advanced_check.setToolTip("显示脚本测试、Seed、扩窗与奇偶设置。正式版仅放宽指纹不一致，缺文件、语法和参数错误仍阻止运行；本预览不执行检查。")
         self.advanced_check.toggled.connect(self._toggle_advanced)
         banner_layout.addWidget(self.advanced_check)
+        settings = _button("共通设置", enabled=True)
+        settings.clicked.connect(lambda: self.settings_dialog.show())
+        banner_layout.addWidget(settings)
         header_layout.addWidget(banner)
         layout.addWidget(header)
 
@@ -542,27 +578,152 @@ class FrlgPreviewWindow(QMainWindow):
         self._add_page("logs", self._build_logs_page())
         self._add_page("tid_records", self._build_tid_records_page())
         self._add_page("script_test", self._build_script_test_page())
-        layout.addWidget(self.stack, 1)
+        body = QWidget()
+        self.body_layout = QHBoxLayout(body)
+        self.body_layout.setContentsMargins(0, 0, 0, 0)
+        self.body_layout.setSpacing(0)
+        self.body_layout.addWidget(self.stack, 7)
+        self.overview = self._build_overview()
+        self.overview_scroll = QScrollArea()
+        self.overview_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.overview_scroll.setWidgetResizable(True)
+        self.overview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.overview_scroll.setWidget(self.overview)
+        self.body_layout.addWidget(self.overview_scroll, 4)
+        layout.addWidget(body, 1)
+        self.result_dialog = QDialog(self)
+        self.result_dialog.setWindowTitle("方案与预检详情")
+        self.result_dialog.resize(700, 480)
+        result_layout = QVBoxLayout(self.result_dialog)
         self.result_panel = QPlainTextEdit()
         self.result_panel.setReadOnly(True)
-        self.result_panel.setMaximumHeight(125)
         self.result_panel.setPlainText("方案与预检结果\n尚未接入方案生成或预检服务。此处没有可运行的计划。")
-        self.result_panel.hide()
-        layout.addWidget(self.result_panel)
+        result_layout.addWidget(self.result_panel)
         layout.addWidget(self._build_footer())
         return workspace
 
     @staticmethod
-    def _chip(title: str, value: str, object_name: str) -> QFrame:
-        chip = QFrame()
+    def _chip(title: str, value: str, object_name: str) -> QPushButton:
+        chip = QPushButton()
         chip.setObjectName(object_name)
-        chip.setMinimumWidth(178)
+        chip.setFixedWidth(178)
+        chip.setFixedHeight(50)
+        chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        chip.setAccessibleName(f"{title}：{value}，点击查看设置")
         chip_layout = QVBoxLayout(chip)
         chip_layout.setContentsMargins(12, 7, 12, 7)
         chip_layout.setSpacing(0)
         chip_layout.addWidget(_label(title, name="chipTitle"))
         chip_layout.addWidget(_label(value, name="chipValue"))
+        for label in chip.findChildren(QLabel):
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         return chip
+
+    def _build_overview(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 8, 20, 24)
+        layout.setSpacing(16)
+        summary = Card("推荐方案", "生成后在这里查看目标与关键参数。")
+        self.summary_title = summary.findChild(QLabel, "cardTitle")
+        hero = QHBoxLayout()
+        hero.setSpacing(16)
+        symbol = _label("◎", name="emptySymbol")
+        symbol.setFixedSize(86, 86)
+        symbol.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hero.addWidget(symbol)
+        words = QVBoxLayout()
+        self.summary_name = _label("暂无方案", name="summaryName")
+        words.addWidget(self.summary_name)
+        words.addWidget(_label("完成左侧条件后生成", role="muted"))
+        badge = _label("生成服务待接入", name="pendingBadge")
+        badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        words.addWidget(badge)
+        hero.addLayout(words, 1)
+        summary.layout.addLayout(hero)
+        metrics = QHBoxLayout()
+        self.metric_labels = []
+        for title in ("Seed", "Advance", "个体合计"):
+            tile = QFrame()
+            tile.setObjectName("metricTile")
+            tile_layout = QVBoxLayout(tile)
+            tile_layout.setContentsMargins(11, 10, 11, 10)
+            tile_layout.addWidget(_label("—", name="metricValue"))
+            label = _label(title, name="metricLabel")
+            self.metric_labels.append(label)
+            tile_layout.addWidget(label)
+            metrics.addWidget(tile, 1)
+        summary.layout.addLayout(metrics)
+        self.summary_note = _label("尚无可运行的计划。", role="muted")
+        summary.layout.addWidget(self.summary_note)
+        details = _button("查看方案与预检详情", enabled=True)
+        details.clicked.connect(lambda: self.result_dialog.show())
+        summary.layout.addWidget(details)
+        shadow = QGraphicsDropShadowEffect(summary)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(33, 45, 76, 24))
+        summary.setGraphicsEffect(shadow)
+        layout.addWidget(summary)
+
+        ready = Card("运行准备", "运行前需要确认以下三项。")
+        for title, detail in (("单片机", "尚未检测"), ("采集卡", "尚未检测"), ("EasyCon", "尚未校验")):
+            row = QHBoxLayout()
+            dot = _label("●")
+            dot.setStyleSheet("color: #b6c0cf; font-size: 11px;")
+            row.addWidget(dot)
+            row.addWidget(_label(title, name="chipValue"))
+            row.addStretch(1)
+            row.addWidget(_label(detail, role="muted"))
+            ready.layout.addLayout(row)
+        buttons = QHBoxLayout()
+        for title in ("重新检测", "虚拟手柄", "监视窗口"):
+            button = _button(title)
+            button.setStyleSheet("padding-left: 7px; padding-right: 7px;")
+            buttons.addWidget(button)
+        ready.layout.addLayout(buttons)
+        layout.addWidget(ready)
+        layout.addStretch(1)
+        return panel
+
+    def _refresh_overview(self) -> None:
+        titles = {
+            "wild": ("推荐方案", "暂无方案", ("Seed", "Advance", "个体合计")),
+            "sid": ("候选结果", "等待查找", ("PSV 交集", "SID 候选", "最早建档 ADV")),
+            "tid": ("建档计划", "暂无计划", ("目标 TID", "采用 SID", "御三家 ADV")),
+            "egg": ("孵蛋计划", "暂无计划", ("Seed", "Held", "Pickup")),
+            "script_test": ("预检结果", "等待预检", ("脚本入口", "运行时", "预检状态")),
+        }
+        title, name, metrics = titles[self.input_mode]
+        self.summary_title.setText(title)
+        self.summary_name.setText(name)
+        for label, text in zip(self.metric_labels, metrics):
+            label.setText(text)
+        self._adapt_workspace()
+
+    def _adapt_workspace(self) -> None:
+        if not hasattr(self, "overview_scroll") or not hasattr(self, "overview_button"):
+            return
+        wide = self.width() >= 1180 and getattr(self, "current_page", "sid") != "tid_records"
+        self.overview_scroll.setVisible(wide)
+        self.overview_button.setVisible(not wide)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._adapt_workspace()
+
+    def _show_overview(self) -> None:
+        # On narrow screens the same overview is shown in a dialog. Its widgets
+        # are temporarily reparented, so there is only one summary/state view.
+        dialog = QDialog(self)
+        dialog.setWindowTitle("方案与运行准备")
+        dialog.resize(440, 650)
+        layout = QVBoxLayout(dialog)
+        overview = self.overview_scroll.takeWidget()
+        layout.addWidget(overview)
+        dialog.exec()
+        layout.removeWidget(overview)
+        self.overview_scroll.setWidget(overview)
 
     def _add_page(self, key: str, page: QWidget) -> None:
         scroll = QScrollArea()
@@ -627,7 +788,7 @@ class FrlgPreviewWindow(QMainWindow):
         card.layout.addLayout(grid)
 
     def _path_card(self, title: str, field_title: str, key: str) -> Card:
-        card = Card(title, "文件读取尚未接入；填写路径仅用于表单布局检查。")
+        card = Card(title, "路径选择与校验尚未接入。", collapsible=True)
         self._form(card, [(key, field_title, _line(placeholder="待接入路径选择与校验"))], 1)
         self._actions(card, "选择")
         return card
@@ -646,22 +807,38 @@ class FrlgPreviewWindow(QMainWindow):
 
     def _build_wild_page(self) -> QWidget:
         page, layout = self._page_canvas()
-        conditions = Card("乱数条件", "类型只有野生与静态；御三家属于静态类别。地点、宝可梦与特性目录尚未接入。")
+        conditions = Card("乱数条件", "先选择游戏、遭遇方式和目标，再细化筛选范围。")
         self._form(conditions, [
-            ("wild_game", "游戏", _combo("火红", "叶绿")),
+            ("wild_game", "游戏版本", _combo("火红", "叶绿")),
+            ("wild_method", "目标类型", _combo("野生", "静态")),
             ("wild_nx", "主机", _combo("Switch 1", "Switch 2")),
-            ("wild_method", "类型", _combo("野生", "静态")),
-            ("wild_tid", "TID", _line("58888")),
-            ("wild_sid", "SID", _line("12232")),
-            ("wild_category", "遭遇方式 / 静态类别", _combo()),
-            ("wild_location", "地点", _combo("遭遇地点目录待接入")),
-            ("wild_species", "宝可梦", _combo("目标目录待接入")),
+            ("wild_category", "遭遇方式", _combo()),
+            ("wild_location", "地点", _combo("待载入地点")),
+            ("wild_species", "宝可梦", _combo("待载入目标")),
         ])
+        self.profile_dialog = QDialog(self)
+        self.profile_dialog.setWindowTitle("存档信息")
+        self.profile_dialog.resize(460, 340)
+        profile_layout = QVBoxLayout(self.profile_dialog)
+        profile = Card("存档信息", "存档服务尚未接入，以下仅为本次窗口内的手动输入。")
+        selector = _combo("未选择（手动输入）")
+        selector.setEnabled(False)
+        profile.layout.addWidget(selector)
+        self._form(profile, [
+            ("wild_tid", "当前 TID", _line("58888")),
+            ("wild_sid", "当前 SID", _line("12232")),
+        ], 2)
+        profile.layout.addWidget(_label("TID / SID 用于野生、静态与孵蛋；SID 查找和新建 TID 条件在各自页面填写。", role="muted"))
+        self._actions(profile, "管理存档")
+        profile_layout.addWidget(profile)
+        close = _button("完成", enabled=True)
+        close.clicked.connect(self.profile_dialog.hide)
+        profile_layout.addWidget(close)
         self.fields["wild_location"].setEnabled(False)
         self.fields["wild_species"].setEnabled(False)
         layout.addWidget(conditions)
 
-        iv = Card("个体值范围", "最低与最高分别填写。0A / 0S 预设的其余项均精确为 31。")
+        iv = Card("个体值筛选", "上方为最低值，下方为最高值；点击能力名称可重置单项。")
         presets = QHBoxLayout()
         presets.addWidget(_label("Ten Lines 预设", name="fieldLabel"))
         for name in ("不限", "6V", "0A", "0S", "0A0S"):
@@ -672,43 +849,53 @@ class FrlgPreviewWindow(QMainWindow):
         iv.layout.addLayout(presets)
         grid = QGridLayout()
         self.iv_ranges = []
-        for r, title in enumerate(("能力", "最低", "最高", "重置")):
-            grid.addWidget(_label(title, name="fieldLabel"), r, 0)
-        for c, stat in enumerate(STATS, 1):
-            grid.addWidget(_label(stat, name="fieldLabel"), 0, c)
+        grid.setSpacing(8)
+        for c, stat in enumerate(STATS):
+            tile = QFrame()
+            tile.setObjectName("ivTile")
+            tile_layout = QVBoxLayout(tile)
+            tile_layout.setContentsMargins(7, 8, 7, 9)
+            tile_layout.setSpacing(6)
+            reset = _button(stat, "section", enabled=True)
+            reset.setAccessibleName(f"重置 {stat} IV 为 0–31")
+            reset.setToolTip("重置为 0–31")
+            reset.setStyleSheet("font-size: 11px; text-align: center; color: #59677f;")
+            reset.setMinimumWidth(0)
+            reset.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            reset.clicked.connect(lambda _checked=False, index=c: self._reset_iv(index))
+            tile_layout.addWidget(reset)
             minimum, maximum = self._spin(0, 0, 31), self._spin(31, 0, 31)
             minimum.setAccessibleName(f"{stat} 最低 IV")
             maximum.setAccessibleName(f"{stat} 最高 IV")
             self.iv_ranges.append((minimum, maximum))
-            grid.addWidget(minimum, 1, c)
-            grid.addWidget(maximum, 2, c)
-            reset = _button("0–31", "preset", enabled=True)
-            reset.clicked.connect(lambda _checked=False, index=c - 1: self._reset_iv(index))
-            grid.addWidget(reset, 3, c)
+            for spin in (minimum, maximum):
+                spin.setStyleSheet("padding-left: 6px; padding-right: 1px;")
+                tile_layout.addWidget(spin)
+            grid.addWidget(tile, 0, c)
             grid.setColumnStretch(c, 1)
         iv.layout.addLayout(grid)
+        self._form(iv, [
+            ("wild_shiny", "闪光", _combo("不限", *[s for s in FILTER_SHINY_ZH_TO_EN if s != "不限"], current=1)),
+            ("wild_nature", "性格", _combo("不限", *[s for s in FILTER_NATURE_ZH_TO_EN if s != "不限"])),
+            ("wild_ability", "特性", _combo("不限（待载入）")),
+            ("wild_gender", "性别", _combo(*FILTER_GENDER_ZH_TO_EN)),
+        ], 4)
+        self.fields["wild_ability"].setEnabled(False)
         layout.addWidget(iv)
 
-        filters = Card("筛选与最大 Advance", "指定 Seed / 帧数会跳过搜索，且要求手动选择 Seed 模式；本预览不生成请求。")
+        filters = Card("搜索范围", "选择搜索范围，或直接使用已有的 Seed 和帧数。")
         self._form(filters, [
             ("wild_search_mode", "运行模式", _combo("筛选搜索", "指定 Seed/帧数")),
             ("wild_min", "最小 Advance", _line("3000")),
             ("wild_max", "最大 Advance", _line("100000")),
-            ("wild_shiny", "闪光", _combo("不限", *[s for s in FILTER_SHINY_ZH_TO_EN if s != "不限"], current=1)),
-            ("wild_nature", "性格", _combo("不限", *[s for s in FILTER_NATURE_ZH_TO_EN if s != "不限"])),
-            ("wild_gender", "性别", _combo(*FILTER_GENDER_ZH_TO_EN)),
-            ("wild_ability", "特性", _combo("不限（目标特性目录待接入）")),
-            ("wild_hidden", "觉醒力量", _combo("不限", *[s for s in FILTER_TYPE_ZH_TO_EN if s != "不限"])),
-        ])
-        self.fields["wild_ability"].setEnabled(False)
-        self._form(filters, [
             ("wild_seed_mode", "Seed 模式", _combo("自动选择", *SEED_MODE_LABELS)),
             ("wild_direct_seed", "指定初始 Seed", _line("0000")),
             ("wild_direct_adv", "指定消耗帧", _line("3000")),
         ])
         layout.addWidget(filters)
 
-        capture = Card("出闪后处理", "道具乱数与 SID 遍历仅用于野生目标，二者互斥。")
+        capture = Card("更多筛选与出闪后处理", "觉醒力量、抓捕、道具与 SID 遍历。", collapsible=True)
+        self._form(capture, [("wild_hidden", "觉醒力量", _combo("不限", *[s for s in FILTER_TYPE_ZH_TO_EN if s != "不限"]))], 2)
         self.capture_checks = [self._check(title) for title in ("出闪后自动抓捕", "麻痹", "点到为止")]
         row = QHBoxLayout()
         for check in self.capture_checks:
@@ -781,42 +968,52 @@ class FrlgPreviewWindow(QMainWindow):
             ("sid_candies", "每只最多糖果", self._spin(5, 0, 99)),
             ("sid_threshold", "识图阈值", self._spin(85, 0, 100)),
         ])
-        self.sid_ack = QCheckBox("已确认队伍资料准确且神奇糖果位于背包第一页第一格")
-        self.sid_ack.setToolTip("确认队伍顺序、宝可梦、初始等级、来源和六项努力值均准确。")
+        self.sid_ack = QCheckBox("已核对队伍资料与糖果位置")
+        self.sid_ack.setToolTip("确认队伍顺序、宝可梦、初始等级、来源和六项努力值均准确，神奇糖果位于背包第一页第一格。")
         identity.layout.addWidget(self.sid_ack)
         layout.addWidget(identity)
 
-        party = Card("队伍闪光宝可梦信息", "仅处理队伍前 N 位；其余槽位禁用。六项为努力值 EV，野生来源必须填写相遇地点。")
-        self.sid_party = self._table(("槽位", "宝可梦（名称/编号）", "初始等级", "来源", "Ten Lines 相遇地点", *STATS), 6, 338)
-        self.sid_party.setFixedHeight(338)
-        widths = (40, 150, 75, 80, 185, 70, 70, 70, 70, 70, 70)
+        party = Card("队伍闪光宝可梦", "按队伍顺序逐只填写。下方六项为努力值 EV。")
+        self.sid_party = QTabWidget()
         self.sid_party_widgets = []
         for r in range(6):
-            slot = QTableWidgetItem(str(r + 1))
-            slot.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            self.sid_party.setItem(r, 0, slot)
-            widgets = [_line(placeholder="中文名 / 英文名 / 编号"), _line(placeholder="1–100"), _combo("定点", "野生"), _line(placeholder="野生必填；地点目录待接入")]
+            slot = QWidget()
+            slot_layout = QVBoxLayout(slot)
+            slot_layout.setContentsMargins(0, 14, 0, 0)
+            slot_layout.setSpacing(12)
+            grid = QGridLayout()
+            grid.setSpacing(12)
+            widgets = [_line(placeholder="名称 / 编号"), _line(placeholder="1–100"), _combo("定点", "野生"), _line(placeholder="野生来源必填")]
             widgets.extend(self._spin(0, 0, 255) for _ in STATS)
-            for c, widget in enumerate(widgets, 1):
-                widget.setAccessibleName(f"槽位 {r + 1} {self.sid_party.horizontalHeaderItem(c).text()}")
-                self.sid_party.setCellWidget(r, c, widget)
-            self.sid_party.setRowHeight(r, 46)
+            for c, (title, widget) in enumerate(zip(("宝可梦", "初始等级", "来源", "Ten Lines 相遇地点"), widgets[:4])):
+                self._field(grid, c // 2, c % 2, title, widget)
+                widget.setAccessibleName(f"槽位 {r + 1} {title}")
+            slot_layout.addLayout(grid)
+            evs = QGridLayout()
+            evs.setSpacing(8)
+            for c, (stat, widget) in enumerate(zip(STATS, widgets[4:])):
+                self._field(evs, 0, c, stat, widget)
+                widget.setAccessibleName(f"槽位 {r + 1} {stat} EV")
+            slot_layout.addLayout(evs)
+            self.sid_party.addTab(slot, f"第 {r + 1} 只")
             self.sid_party_widgets.append(widgets)
-        for c, width in enumerate(widths):
-            self.sid_party.setColumnWidth(c, width)
         self.fields["sid_count"].valueChanged.connect(self._refresh_sid_rows)
         self._refresh_sid_rows()
         party.layout.addWidget(self.sid_party)
-        party.layout.addWidget(_label("仅支持 Method 1/2/4，不支持孵蛋来源。横向滚动可填写全部六项 EV。", role="muted"))
+        party.layout.addWidget(_label("仅支持定点与野生来源；不支持孵蛋来源。", role="muted"))
         layout.addWidget(party)
         layout.addWidget(self._path_card("SID 查找脚本", "2.0 自动乱数脚本包（SID 独立路径）", "sid_source"))
         layout.addStretch(1)
         return page
 
     def _refresh_sid_rows(self) -> None:
+        count = self.fields["sid_count"].value()
         for i, widgets in enumerate(self.sid_party_widgets):
+            self.sid_party.setTabEnabled(i, i < count)
             for widget in widgets:
-                widget.setEnabled(i < self.fields["sid_count"].value())
+                widget.setEnabled(i < count)
+        if self.sid_party.currentIndex() >= count:
+            self.sid_party.setCurrentIndex(count - 1)
 
     def _build_tid_records_page(self) -> QWidget:
         page, layout = self._page_canvas()
@@ -829,8 +1026,8 @@ class FrlgPreviewWindow(QMainWindow):
         self._actions(filters, "查询 / 刷新", "导出 CSV")
         self.records_table = self._table(("TID", "游戏", "机型", "语言", "OP", "F1", "F2", "出现次数", "主角名称", "OP 修正（ms）", "最近记录时间"), height=280)
         self.records_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.records_table.setColumnWidth(9, 130)
-        self.records_table.setColumnWidth(10, 180)
+        for column, width in enumerate((90, 65, 85, 60, 65, 65, 65, 75, 90, 105, 160)):
+            self.records_table.setColumnWidth(column, width)
         filters.layout.addWidget(self.records_table)
         filters.layout.addWidget(_label("数据库尚未接入，未读取本机记录。正式界面最多显示 1000 项，CSV 导出包含全部筛选结果。", role="muted"))
         layout.addWidget(filters)
@@ -984,7 +1181,7 @@ class FrlgPreviewWindow(QMainWindow):
         settings.layout.addWidget(_label("脚本会新建存档并自动退出游戏两次；请先确认当前存档与主页状态。", role="warning"))
         layout.addWidget(settings)
 
-        frames = Card("乱数中心 / 穷举范围", "OP / F1 / F2 按游戏画面帧填写，不是 Ten Lines 的 RNG advance。")
+        frames = Card("乱数中心 / 穷举范围", "OP / F1 / F2 按游戏画面帧填写，不是 Ten Lines 的 RNG advance。", collapsible=True)
         frame_grid = QGridLayout()
         for c, title in enumerate(("参数", "OP", "F1", "F2")):
             frame_grid.addWidget(_label(title, name="fieldLabel"), 0, c)
@@ -1004,7 +1201,7 @@ class FrlgPreviewWindow(QMainWindow):
         frames.layout.addLayout(frame_grid)
         layout.addWidget(frames)
 
-        delays = Card("游戏设置与固定延迟", "延迟和 OP 修正使用 ms；测量与自动回填服务尚未接入。")
+        delays = Card("游戏设置与固定延迟", "延迟和 OP 修正使用 ms；测量与自动回填服务尚未接入。", collapsible=True)
         self._form(delays, [
             ("tid_sound", "Sound", _combo("MONO", "STEREO")),
             ("tid_button", "Button Mode", _combo("HELP", "LR", "L=A")),
@@ -1045,7 +1242,7 @@ class FrlgPreviewWindow(QMainWindow):
         starter.layout.addWidget(_label("御三家 Seed 校准固定方案 0；Seed 启动与脚本入口沿用共通设置。", role="muted"))
         layout.addWidget(starter)
 
-        filters = Card("穷举判定与高级范围", "本分区在普通模式下同样显示；号码开关按当前连续流程模式启用。")
+        filters = Card("穷举判定与高级范围", "号码开关按当前连续流程模式启用。", collapsible=True)
         self.tid_special_checks = [self._check(title, title == "65535") for title in ("豹子号", "升/降连号", "65535", "个位数 TID")]
         specials = QHBoxLayout()
         for check in self.tid_special_checks:
@@ -1060,7 +1257,7 @@ class FrlgPreviewWindow(QMainWindow):
         ])
         layout.addWidget(filters)
         layout.addWidget(self._path_card("TID 1.3.7 脚本包", "脚本包（TID 独立路径）", "tid_source"))
-        resume = Card("参数保存与穷举续跑", "参数保存、检查点读取与续跑服务尚未接入。")
+        resume = Card("参数保存与穷举续跑", "参数保存、检查点读取与续跑服务尚未接入。", collapsible=True)
         resume.layout.addWidget(self._check("继续同参数的上次穷举进度", True))
         resume.layout.addWidget(_label("未读取本机进度；当前表单在关闭窗口后丢弃。", role="muted"))
         self._actions(resume, "刷新进度")
@@ -1144,23 +1341,26 @@ class FrlgPreviewWindow(QMainWindow):
             ("egg_pickup", "Pickup / 领取帧（ADV）", _line("10021")),
             ("egg_compatibility", "双亲相性", _combo("20", "50", "70", current=2)),
         ])
-        self.egg_parents = self._table(("亲本", "性别", *STATS), 2, 148)
-        self.egg_parents.setFixedHeight(148)
-        self.egg_parents.setColumnWidth(0, 55)
-        self.egg_parents.setColumnWidth(1, 125)
+        self.egg_parents = QWidget()
+        parents_layout = QVBoxLayout(self.egg_parents)
+        parents_layout.setContentsMargins(0, 0, 0, 0)
+        parents_layout.setSpacing(16)
         for r, (name, choices) in enumerate((("A", ("雌", "无性别")), ("B", ("雄", "无性别")))):
-            item = QTableWidgetItem(name)
-            item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            self.egg_parents.setItem(r, 0, item)
+            row = QHBoxLayout()
+            row.addWidget(_label(f"亲本 {name}", name="chipValue"))
             gender = _combo(*choices)
             gender.setAccessibleName(f"亲本 {name} 性别")
-            self.egg_parents.setCellWidget(r, 1, gender)
-            for c, stat in enumerate(STATS, 2):
+            gender.setMaximumWidth(145)
+            row.addWidget(gender)
+            row.addStretch(1)
+            parents_layout.addLayout(row)
+            grid = QGridLayout()
+            grid.setSpacing(8)
+            for c, stat in enumerate(STATS):
                 spin = self._spin(31, 0, 31)
+                self._field(grid, 0, c, stat, spin)
                 spin.setAccessibleName(f"亲本 {name} {stat} IV")
-                self.egg_parents.setCellWidget(r, c, spin)
-                self.egg_parents.setColumnWidth(c, 100)
-            self.egg_parents.setRowHeight(r, 45)
+            parents_layout.addLayout(grid)
         target.layout.addWidget(_label("亲本个体值 IV", name="fieldLabel"))
         target.layout.addWidget(self.egg_parents)
         self.egg_ack = self._check("我已确认孵蛋前置条件，允许启动流程")
@@ -1187,7 +1387,7 @@ class FrlgPreviewWindow(QMainWindow):
         self.log_view.setPlainText("尚未接入运行日志。\n正式界面会在进程成功启动后切换到本页。")
         log_card.layout.addWidget(self.log_view)
         layout.addWidget(log_card)
-        labels = Card("设备标签诊断与覆盖", "设备覆盖按采集卡名称独立保存；日志诊断与标签文件服务尚未接入。")
+        labels = Card("设备标签诊断与覆盖", "设备覆盖按采集卡名称独立保存；日志诊断与标签文件服务尚未接入。", collapsible=True)
         labels.layout.addWidget(_label("尚未检测采集卡，未读取任何设备标签覆盖。", role="muted"))
         self.label_issues = self._table(("疑似标签", "最高分", "门槛", "连续次数", "出错阶段与原因"), height=190)
         self.label_issues.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -1210,29 +1410,34 @@ class FrlgPreviewWindow(QMainWindow):
     def _build_footer(self) -> QWidget:
         footer = QFrame()
         footer.setObjectName("footerBar")
-        layout = QVBoxLayout(footer)
-        layout.setContentsMargins(20, 8, 20, 10)
-        layout.setSpacing(6)
-        status = QHBoxLayout()
-        status.addWidget(_label("后端尚未接入 · 没有可运行的计划", role="muted"), 1)
-        result = _button("方案与预检结果", enabled=True)
-        result.setCheckable(True)
-        result.toggled.connect(self.result_panel.setVisible)
-        status.addWidget(result)
-        layout.addLayout(status)
-        actions = QHBoxLayout()
+        footer.setFixedHeight(70)
+        layout = QHBoxLayout(footer)
+        layout.setContentsMargins(20, 12, 20, 12)
+        layout.setSpacing(10)
+        layout.addWidget(_label("●  界面预览 · 尚未生成方案", name="readyText"), 1)
+        self.overview_button = _button("方案与设备", enabled=True)
+        self.overview_button.clicked.connect(self._show_overview)
+        layout.addWidget(self.overview_button)
         self.search_button = _button("搜索并生成方案", "primary")
-        actions.addWidget(self.search_button)
-        actions.addWidget(_button("取消搜索"))
-        actions.addWidget(_button("开始运行", "success"))
-        actions.addWidget(_button("停止 EasyCon"))
-        actions.addStretch(1)
-        layout.addLayout(actions)
+        self.search_button.setToolTip(NOT_CONNECTED)
+        layout.addWidget(self.search_button)
+        layout.addWidget(_button("开始运行", "success"))
+        more = _button("···", enabled=True)
+        more.setAccessibleName("更多运行操作")
+        more.setToolTip("取消搜索、停止 EasyCon")
+        menu = QMenu(more)
+        for title in ("取消搜索", "停止 EasyCon"):
+            action = menu.addAction(title)
+            action.setEnabled(False)
+            action.setToolTip(NOT_CONNECTED)
+        more.setMenu(menu)
+        layout.addWidget(more)
         return footer
 
     def select_page(self, key: str) -> None:
         if key not in self.page_indices:
             return
+        self.current_page = key
         if key == "script_test" and not self.advanced_check.isChecked():
             self.advanced_check.setChecked(True)
         if key not in {"tid_records", "logs"}:
@@ -1251,11 +1456,12 @@ class FrlgPreviewWindow(QMainWindow):
             {
                 "wild": "搜索并生成方案",
                 "sid": "准备 SID 查找",
-                "tid": "生成 TID/SID + 御三家计划" if self.tid_flow_check.isChecked() else "生成 TID/SID 脚本",
+                "tid": "生成建档与御三家计划" if self.tid_flow_check.isChecked() else "生成建档脚本",
                 "egg": "生成孵蛋脚本",
                 "script_test": "预检所选脚本",
             }[self.input_mode]
         )
+        self._refresh_overview()
         if hasattr(self, "settings_dialog"):
             self._refresh_common_settings()
 
@@ -1263,8 +1469,9 @@ class FrlgPreviewWindow(QMainWindow):
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=WINDOW_TITLE)
     parser.add_argument("--page", choices=[item[0] for item in NAV_ITEMS], default="sid")
-    parser.add_argument("--size", default="1280x860", help="Window size, e.g. 900x620")
+    parser.add_argument("--size", default="1360x860", help="Window size, e.g. 900x620")
     parser.add_argument("--advanced", action="store_true", help="Show advanced preview controls")
+    parser.add_argument("--expand", action="store_true", help="Expand optional sections for visual checks")
     parser.add_argument("--scroll", type=float, default=0, help="Screenshot scroll fraction, 0 to 1")
     parser.add_argument("--settings", action="store_true", help="Show the shared settings window")
     parser.add_argument("--screenshot", type=Path, help="Render the selected page to a PNG and exit")
@@ -1282,6 +1489,10 @@ def main(argv: list[str] | None = None) -> int:
     window.resize(width, height)
     window.advanced_check.setChecked(args.advanced)
     window.select_page(args.page)
+    if args.expand:
+        for card in window.findChildren(Card):
+            if hasattr(card, "toggle"):
+                card.toggle.setChecked(True)
     window.show()
     if args.settings:
         window.settings_dialog.show()
