@@ -28,6 +28,22 @@ class Machine:
         self.compiled = {}
         self.expressions = {}
         self.calls = []
+        self.output = None
+
+    def emit(self, expression):
+        if self.output is None:
+            return
+        parts = re.split(r'&(?=(?:[^"]*"[^"]*")*[^"]*$)', expression)
+        rendered = []
+        for part in parts:
+            part = part.strip()
+            if part.startswith('"'):
+                rendered.append(str(ast.literal_eval(part)))
+            elif part.startswith(('$', '(')):
+                rendered.append(str(self.value(part)))
+            else:
+                rendered.append(part)
+        self.output.append("".join(rendered))
 
     def value(self, expr):
         if expr not in self.expressions:
@@ -89,11 +105,13 @@ class Machine:
                     key, op, expr = m.groups()
                     if op != "=": expr = f"${key} {op[0]} ({expr})"
                     converted = f"state[{key!r}] = value({expr!r})"
-                elif not line.startswith("PRINT "):
+                elif line.startswith("PRINT "):
+                    converted = f"emit({line[6:]!r})"
+                else:
                     converted = f"raise AssertionError({'Hardware/wait executed in search test: ' + line!r})"
                 code.append("    " * indent + converted)
                 if converted.endswith(":"): indent += 1
-            namespace = {"value": self.value, "call": self.call, "state": self.state}
+            namespace = {"value": self.value, "call": self.call, "state": self.state, "emit": self.emit}
             exec("\n".join(code), namespace)
             self.compiled[name] = (params, namespace["run"])
         params, run = self.compiled[name]
@@ -184,7 +202,7 @@ class TidSearchTests(unittest.TestCase):
             request = TidRngRequest(language=language, player_name="Alxe" if p == "EN" else "レット゛",
                                     mode=0,auto_rng=True,additional_target_tids=(33333,))
             source=configure_tid_template_text(self.template,request)
-            allowed={p+"_"+name for name in ("匹配","计算穷举候选距离","穷举模式偏移运算","乱数模式操作延迟校验",
+            allowed={p+"_"+name for name in ("打印参数","匹配","计算穷举候选距离","穷举模式偏移运算","乱数模式操作延迟校验",
                 "穷举推进到下一个搜索点", "乱数模式偏移运算", "乱数定位到当前壳层下一个有效组合", "乱数推进到下一个壳层组合")}
             for name in re.findall(r"(?m)^FUNC ([^\s(]+)",self.template):
                 if name not in allowed:

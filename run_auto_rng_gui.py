@@ -302,9 +302,16 @@ def _generate_runtime_project_atomically(
 
 
 def clean_terminal_log(text: str) -> str:
-    """Remove terminal color/control sequences before showing a saved log in Tk."""
+    """Clean display only; durable logs retain checkpoints for resume/records."""
     cleaned = ANSI_ESCAPE_RE.sub("", text)
-    return cleaned.replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
+    # Hide only complete machine checkpoint lines, including EasyCon's optional
+    # timestamp. Keep errors, unknown versions and truncated lines visible.
+    return re.sub(
+        r"(?m)^(?:\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\]\s*)?"
+        r"TIDPROGRESS\|V=[123]\|(?:[A-Z0-9_]+=-?[0-9]+\|)+END=1[ \t]*(?:\n|$)",
+        "", cleaned,
+    )
 
 
 class HoverTooltip:

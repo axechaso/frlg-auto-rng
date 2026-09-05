@@ -200,4 +200,6 @@ def extend_tid_search(text: str, request) -> str:
                             "            IF $curr1 * 10000 + $curr2 * 1000 + $curr3 * 100 + $curr4 * 10 + $curr5 > 65535\n                $digits_ok = 0\n            ENDIF\n" + guard, 1)
     module += "\n" + "\n\n".join(extra) + "\n\n"
     from .tid_search_policy import optimize_tid_search
-    return optimize_tid_search(head + (module if prefix == "EN" else english) + (module if prefix == "JP" else japanese) + tail, request)
+    from .tid_logging import restore_tid_logging
+    configured = optimize_tid_search(head + (module if prefix == "EN" else english) + (module if prefix == "JP" else japanese) + tail, request)
+    return restore_tid_logging(configured, request)

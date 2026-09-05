@@ -535,6 +535,23 @@ class GuiIvInputTests(unittest.TestCase):
         self.assertIn("没有生成任何 SID 观测", explanation)
         self.assertIn("停止/取消请求", explanation)
 
+    def test_tid_display_filters_only_complete_known_checkpoint_lines(self):
+        raw = (
+            "\x1b[90m[18:25:45] \x1b[0mTIDPROGRESS|V=3|OP=20|OP_NEG=4|END=1\n"
+            "当前TID：00001\n"
+            "TIDPROGRESS|V=3|OP=20|OP_NEG=\n"
+            "TIDPROGRESS|V=4|OP=20|END=1\n"
+            "TIDPROGRESS|DONE=1\n"
+            "[进度错误] TIDPROGRESS|V=3|OP=20|END=1\n"
+        )
+        cleaned = clean_terminal_log(raw)
+        self.assertNotIn("OP_NEG=4|END=1", cleaned)
+        self.assertIn("当前TID：00001", cleaned)
+        self.assertIn("OP_NEG=\n", cleaned)
+        self.assertIn("TIDPROGRESS|V=4|OP=20|END=1", cleaned)
+        self.assertIn("TIDPROGRESS|DONE=1", cleaned)
+        self.assertIn("[进度错误] TIDPROGRESS|V=3|OP=20|END=1", cleaned)
+
     def test_tid_calibration_keeps_recovered_op_correction_with_measured_delays(self):
         log = (
             "OP修正增加50ms：当前修正=50ms，实际固定WAIT=30600ms\n"
