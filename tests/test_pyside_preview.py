@@ -76,6 +76,9 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         self.window = self.window_class()
 
     def tearDown(self):
+        from PySide6.QtWidgets import QToolTip
+        QToolTip.hideText()
+        self.window.advanced_dialog.close()
         self.window.profile_dialog.close()
         self.window.result_dialog.close()
         self.window.settings_dialog.close()
@@ -135,6 +138,13 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         window.fields["wild_game"].setCurrentIndex(1)
         window.fields["egg_nx"].setCurrentIndex(1)
         self.assertEqual(window.fields["egg_game"].currentIndex(), 1)
+        self.assertEqual(window.fields["profile_game"].currentIndex(), 1)
+        window.fields["profile_game"].setCurrentIndex(0)
+        self.assertEqual(window.fields["wild_game"].currentIndex(), 0)
+        self.assertEqual(window.fields["egg_game"].currentIndex(), 0)
+        window.fields["egg_game"].setCurrentIndex(1)
+        self.assertEqual(window.fields["profile_game"].currentIndex(), 1)
+        self.assertEqual(window.fields["wild_game"].currentIndex(), 1)
         self.assertEqual(window.fields["wild_nx"].currentIndex(), 1)
         self.assertFalse(window.fields["wild_direct_seed"].isEnabled())
         window.fields["wild_search_mode"].setCurrentIndex(1)
@@ -182,6 +192,78 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         self.assertEqual(window.fields["script_entry"].count(), 2)
         self.assertFalse(window.fields["tid_pid"].isEnabled())
 
+    def test_advanced_settings_are_reachable_and_keep_manual_values(self):
+        window = self.window
+        window.show()
+        window.select_page("wild")
+        self.assertTrue(window.advanced_button.isHidden())
+        window.advanced_check.setChecked(True)
+        window.advanced_button.click()
+        self.assertTrue(window.advanced_dialog.isVisible())
+        self.assertTrue(window.fields["expansion_3_adv"].isVisible())
+        window.fields["expansion_3_adv"].setText("12345")
+        window.fields["script_entry"].setCurrentIndex(1)
+        window.advanced_dialog.hide()
+        window.advanced_button.click()
+        self.assertEqual(window.fields["expansion_3_adv"].text(), "12345")
+        self.assertEqual(window.fields["script_entry"].currentIndex(), 1)
+        window._reveal_advanced_field("wild", "wild_traversal_start")
+        self.app.processEvents()
+        self.assertFalse(window.advanced_dialog.isVisible())
+        self.assertTrue(window.fields["wild_traversal_start"].isVisible())
+        window.traversal_check.setChecked(True)
+        self.assertTrue(window.fields["wild_traversal_start"].isEnabled())
+        window._reveal_advanced_field("tid", "tid_pid")
+        self.assertTrue(window.fields["tid_pid"].isEnabled())
+        window.advanced_check.setChecked(False)
+        self.assertEqual(window.fields["script_entry"].currentIndex(), 0)
+        self.assertFalse(window.fields["tid_pid"].isEnabled())
+        window.advanced_check.setChecked(True)
+        self.assertEqual(window.fields["expansion_3_adv"].text(), "12345")
+
+    def test_help_opens_on_click_and_keeps_backend_limits(self):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QHelpEvent
+        from PySide6.QtWidgets import QApplication, QPushButton, QToolTip
+        window = self.window
+        window.show()
+        marker = next(b for b in window.findChildren(QPushButton)
+                      if b.property("kind") == "help" and b.property("helpKey") == "sid_scope")
+        marker.click()
+        self.assertIn("Method 1/2/4", QToolTip.text())
+        self.assertIn("8 个真实 SID", QToolTip.text())
+        self.assertIn("高级模式", window.fields["tid_pid"].toolTip())
+        self.assertIn("0 层关闭", window.fields["layers"].toolTip())
+        self.assertIn("不是逐层累加", window.fields["expansion_1_seed"].toolTip())
+        window.select_page("tid")
+        window.advanced_check.setChecked(True)
+        field = window.fields["tid_pid"]
+        position = field.rect().center()
+        QApplication.sendEvent(field, QHelpEvent(QEvent.Type.ToolTip, position, field.mapToGlobal(position)))
+        self.assertIn("6V 闪 PID", QToolTip.text())
+        for label in ("6V 闪 SID", "虚拟手柄", "保存全部配置"):
+            button = next(b for b in window.findChildren(QPushButton) if b.text() == label)
+            self.assertIn("尚未接入", button.toolTip())
+            self.assertFalse(button.isEnabled())
+
+    def test_tid_extra_targets_preserve_input_across_mode_changes(self):
+        window = self.window
+        window.select_page("tid")
+        self.assertFalse(window.fields["tid_additional_targets"].isEnabled())
+        window.fields["tid_mode"].setCurrentIndex(1)
+        window.fields["tid_additional_targets"].setText("00007, 33333")
+        window.tid_auto_rng_check.setChecked(True)
+        self.assertTrue(window.fields["tid_near_hits"].isEnabled())
+        window.fields["tid_near_hits"].setText("4")
+        window.fields["tid_mode"].setCurrentIndex(0)
+        self.assertFalse(window.fields["tid_near_hits"].isEnabled())
+        window.fields["tid_mode"].setCurrentIndex(1)
+        self.assertEqual(window.fields["tid_additional_targets"].text(), "00007, 33333")
+        self.assertEqual(window.fields["tid_near_hits"].text(), "4")
+        window.tid_any_check.setChecked(True)
+        self.assertFalse(window.tid_auto_rng_check.isEnabled())
+        self.assertFalse(window.fields["tid_additional_targets"].isEnabled())
+
     def test_backend_actions_stay_disabled_in_every_mode(self):
         from PySide6.QtWidgets import QPushButton
         window = self.window
@@ -219,6 +301,9 @@ class PySidePreviewInteractionTests(unittest.TestCase):
             self.app.processEvents()
             self.assertEqual(bar.value(), bar.maximum(), page)
             self.assertTrue(window.search_button.isVisible())
+            for action in (window.search_button, window.cancel_button, window.start_button, window.stop_button):
+                self.assertTrue(action.isVisible(), page)
+                self.assertTrue(action.parentWidget().rect().contains(action.geometry()), page)
 
     def test_narrow_overview_returns_to_sidebar_without_losing_result(self):
         from PySide6.QtCore import QTimer
@@ -257,6 +342,15 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         self.assertTrue(window.profile_dialog.isVisible())
         self.assertEqual(window.fields["wild_sid"].text(), "00007")
         self.assertEqual(window.fields["tid_op_delay"].text(), "31234")
+        window.fields["tid_target"].setText("00009")
+        window.fields["profile_language"].setCurrentIndex(1)
+        self.assertEqual(window.fields["tid_language"].currentText(), "日文")
+        self.assertEqual(window.fields["tid_target"].text(), "00009")
+        self.assertEqual(window.fields["tid_op_delay"].text(), "31234")
+        self.assertEqual(window.fields["wild_sid"].text(), "00007")
+        window.fields["tid_language"].setCurrentIndex(0)
+        self.assertEqual(window.fields["profile_language"].currentText(), "英文（美版）")
+        self.assertEqual(window.fields["tid_op_delay"].text(), "30600")
 
 
 if __name__ == "__main__":
