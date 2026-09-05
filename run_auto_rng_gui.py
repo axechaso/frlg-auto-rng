@@ -2566,6 +2566,13 @@ class AutoRngApp:
             command=self.open_virtual_controller,
         )
         self.virtual_controller_button.pack(side="left")
+        self._add_tooltip(
+            self.virtual_controller_button,
+            "虚拟手柄与状态浮窗",
+            "连接当前串口并打开键盘虚拟手柄，同时显示 100×100 置顶状态浮窗。"
+            "绿色表示正在发送的按键；浮窗左键唤出控制窗口，右键拖动，中键隐藏。"
+            "自动脚本运行期间为避免串口冲突，虚拟手柄不可开启。",
+        )
         self.monitor_button = ttk.Button(
             manual_tools,
             text="监视窗口",

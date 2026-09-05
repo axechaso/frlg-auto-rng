@@ -9,11 +9,15 @@ from unittest.mock import patch
 
 from manual_tools import (
     CaptureMonitorWindow,
+    CONTROLLER_OVERLAY_BUTTON_LAYOUT,
+    CONTROLLER_OVERLAY_HEIGHT,
+    CONTROLLER_OVERLAY_WIDTH,
     DEFAULT_GAMEPAD_KEYBOARD_MAP,
     GamePadKey,
     KEYBOARD_GAMEPAD_MAP,
     ManualToolsManager,
     assign_keyboard_key,
+    clamp_overlay_position,
     encode_tk_png,
     fit_monitor_frame_size,
     load_key_mapping,
@@ -84,6 +88,21 @@ class ManualToolsTests(unittest.TestCase):
     def test_mapping_button_text_shows_controller_and_keyboard_key(self):
         self.assertEqual(mapping_button_text(GamePadKey.A, "y"), "A\n[Y]")
         self.assertEqual(mapping_button_text(GamePadKey.TOP, "w"), "↑\n[W]")
+
+    def test_controller_overlay_layout_covers_every_supported_control(self):
+        self.assertEqual(
+            set(CONTROLLER_OVERLAY_BUTTON_LAYOUT),
+            set(DEFAULT_GAMEPAD_KEYBOARD_MAP),
+        )
+        self.assertEqual(
+            (CONTROLLER_OVERLAY_WIDTH, CONTROLLER_OVERLAY_HEIGHT),
+            (100, 100),
+        )
+
+    def test_controller_overlay_position_is_clamped_to_the_visible_screen(self):
+        self.assertEqual(clamp_overlay_position(-20, -5, 1920, 1080), (0, 0))
+        self.assertEqual(clamp_overlay_position(1900, 1060, 1920, 1080), (1820, 980))
+        self.assertEqual(clamp_overlay_position(500, 400, 1920, 1080), (500, 400))
 
     def test_monitor_frames_are_encoded_as_png_for_tk(self):
         class FakePng:
@@ -245,6 +264,7 @@ class ManualToolsTests(unittest.TestCase):
         window.controller = FakeController()
         window._native_gamepad_key = GamePadKey
         window._pressed = set()
+        window.overlay = None
         window.pressed_var = FakeVariable()
 
         window.press(GamePadKey.TOP)

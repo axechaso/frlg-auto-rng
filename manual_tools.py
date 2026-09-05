@@ -113,6 +113,43 @@ def build_keyboard_gamepad_map(mapping) -> dict[str, str]:
 
 KEYBOARD_GAMEPAD_MAP = build_keyboard_gamepad_map(DEFAULT_GAMEPAD_KEYBOARD_MAP)
 
+CONTROLLER_OVERLAY_WIDTH = 100
+CONTROLLER_OVERLAY_HEIGHT = 100
+CONTROLLER_OVERLAY_IDLE_FILL = "#323232"
+CONTROLLER_OVERLAY_ACTIVE_FILL = "#00ff00"
+CONTROLLER_OVERLAY_BUTTON_LAYOUT = {
+    GamePadKey.ZL: ("round", (3, 1, 24, 7)),
+    GamePadKey.L: ("round", (25, 3, 45, 8)),
+    GamePadKey.R: ("round", (55, 3, 75, 8)),
+    GamePadKey.ZR: ("round", (76, 1, 97, 7)),
+    GamePadKey.LCLICK: ("oval", (16, 26, 31, 41)),
+    GamePadKey.TOP: ("round", (21, 55, 27, 61)),
+    GamePadKey.DOWN: ("round", (21, 67, 27, 73)),
+    GamePadKey.LEFT: ("round", (15, 61, 21, 67)),
+    GamePadKey.RIGHT: ("round", (27, 61, 33, 67)),
+    GamePadKey.X: ("oval", (71, 21, 80, 30)),
+    GamePadKey.Y: ("oval", (63, 29, 72, 38)),
+    GamePadKey.A: ("oval", (79, 29, 88, 38)),
+    GamePadKey.B: ("oval", (71, 37, 80, 46)),
+    GamePadKey.RCLICK: ("oval", (68, 57, 83, 72)),
+    GamePadKey.MINUS: ("round", (29, 12, 34, 17)),
+    GamePadKey.PLUS: ("round", (65, 12, 70, 17)),
+    GamePadKey.CAPTURE: ("round", (27, 82, 32, 87)),
+    GamePadKey.HOME: ("round", (67, 82, 72, 87)),
+}
+
+
+def clamp_overlay_position(
+    x: int,
+    y: int,
+    screen_width: int,
+    screen_height: int,
+) -> tuple[int, int]:
+    return (
+        max(0, min(int(x), max(0, int(screen_width) - CONTROLLER_OVERLAY_WIDTH))),
+        max(0, min(int(y), max(0, int(screen_height) - CONTROLLER_OVERLAY_HEIGHT))),
+    )
+
 
 def load_key_mapping(path: Path = KEY_MAPPING_PATH) -> dict[str, str]:
     mapping = dict(DEFAULT_GAMEPAD_KEYBOARD_MAP)
@@ -451,6 +488,275 @@ class KeyMappingWindow:
             self.on_closed()
 
 
+class ControllerStateOverlay:
+    """Compact EasyCon-style controller state overlay for the Tk GUI."""
+
+    TRANSPARENT_COLOR = "#010203"
+
+    def __init__(
+        self,
+        root: tk.Misc,
+        pressed_provider: Callable[[], set[str]],
+        connected_provider: Callable[[], bool],
+        activate_controller: Callable[[], None],
+        on_hidden: Callable[[], None],
+    ):
+        self.root = root
+        self.pressed_provider = pressed_provider
+        self.connected_provider = connected_provider
+        self.activate_controller = activate_controller
+        self.on_hidden = on_hidden
+        self._closed = False
+        self._position_initialized = False
+        self._right_press_root: tuple[int, int] | None = None
+        self._right_press_window: tuple[int, int] | None = None
+        self._right_dragged = False
+        self._button_items: dict[str, int] = {}
+
+        self.window = tk.Toplevel(root)
+        self.window.title("手柄状态浮窗")
+        self.window.overrideredirect(True)
+        self.window.resizable(False, False)
+        self.window.configure(background=self.TRANSPARENT_COLOR)
+        self.window.attributes("-topmost", True)
+        try:
+            self.window.wm_attributes("-transparentcolor", self.TRANSPARENT_COLOR)
+        except tk.TclError:
+            pass
+        self.window.protocol("WM_DELETE_WINDOW", self.hide)
+
+        self.canvas = tk.Canvas(
+            self.window,
+            width=CONTROLLER_OVERLAY_WIDTH,
+            height=CONTROLLER_OVERLAY_HEIGHT,
+            background=self.TRANSPARENT_COLOR,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        self.canvas.pack()
+        self._draw_background()
+        self._draw_state_items()
+
+        # The canvas fills the whole frameless window. Bind only once here:
+        # widget and toplevel bindings both participate in Tk's bind tags, so
+        # registering on both can dispatch one physical click twice.
+        self.canvas.bind("<ButtonRelease-1>", self._on_left_release, add="+")
+        self.canvas.bind("<ButtonRelease-2>", self._on_middle_release, add="+")
+        self.canvas.bind("<ButtonPress-3>", self._on_right_press, add="+")
+        self.canvas.bind("<B3-Motion>", self._on_right_drag, add="+")
+        self.canvas.bind("<ButtonRelease-3>", self._on_right_release, add="+")
+
+        self.window.withdraw()
+
+    @property
+    def is_open(self) -> bool:
+        return not self._closed and bool(self.window.winfo_exists())
+
+    @property
+    def is_visible(self) -> bool:
+        return self.is_open and self.window.state() != "withdrawn"
+
+    def _draw_background(self) -> None:
+        canvas = self.canvas
+        canvas.create_polygon(
+            4,
+            22,
+            11,
+            8,
+            25,
+            2,
+            49,
+            2,
+            49,
+            98,
+            19,
+            98,
+            7,
+            87,
+            2,
+            69,
+            fill="#8e8ad3",
+            outline="#32313b",
+            width=2,
+            smooth=True,
+            splinesteps=24,
+        )
+        canvas.create_polygon(
+            51,
+            2,
+            75,
+            2,
+            89,
+            8,
+            96,
+            22,
+            98,
+            69,
+            93,
+            87,
+            81,
+            98,
+            51,
+            98,
+            fill="#e99a9d",
+            outline="#42343a",
+            width=2,
+            smooth=True,
+            splinesteps=24,
+        )
+        canvas.create_rectangle(46, 21, 49, 91, fill="#77758d", outline="#44434d")
+        canvas.create_rectangle(51, 21, 54, 91, fill="#8b737a", outline="#554247")
+        canvas.create_oval(11, 21, 36, 46, fill="#5b596d", outline="#34333e")
+        canvas.create_oval(63, 52, 88, 77, fill="#725d63", outline="#42343a")
+
+    def _draw_state_items(self) -> None:
+        canvas = self.canvas
+        for key, (shape, bounds) in CONTROLLER_OVERLAY_BUTTON_LAYOUT.items():
+            if shape == "oval":
+                item = canvas.create_oval(
+                    *bounds,
+                    fill=CONTROLLER_OVERLAY_IDLE_FILL,
+                    outline="#111111",
+                )
+            else:
+                item = canvas.create_rectangle(
+                    *bounds,
+                    fill=CONTROLLER_OVERLAY_IDLE_FILL,
+                    outline="#111111",
+                )
+            self._button_items[key] = item
+
+        self._connection_items = tuple(
+            canvas.create_rectangle(
+                47,
+                32 + 10 * index,
+                52,
+                37 + 10 * index,
+                fill="#202020",
+                outline="#111111",
+            )
+            for index in range(4)
+        )
+
+    def refresh_state(self) -> None:
+        if self._closed:
+            return
+        try:
+            pressed = set(self.pressed_provider())
+        except Exception:
+            pressed = set()
+        try:
+            connected = bool(self.connected_provider())
+        except Exception:
+            connected = False
+
+        for key, item in self._button_items.items():
+            self.canvas.itemconfigure(
+                item,
+                fill=(
+                    CONTROLLER_OVERLAY_ACTIVE_FILL
+                    if connected and key in pressed
+                    else CONTROLLER_OVERLAY_IDLE_FILL
+                ),
+            )
+        connection_fill = "#ffffff" if connected else "#202020"
+        for item in self._connection_items:
+            self.canvas.itemconfigure(item, fill=connection_fill)
+        self.window.attributes("-alpha", 1.0 if connected else 0.55)
+
+    def show(self) -> None:
+        if self._closed:
+            return
+        if not self._position_initialized:
+            self.reset_position()
+        else:
+            self._clamp_to_screen()
+        self.refresh_state()
+        self.window.deiconify()
+        self.window.lift()
+
+    def hide(self) -> None:
+        if self._closed:
+            return
+        self.window.withdraw()
+        self.on_hidden()
+
+    def toggle(self) -> None:
+        if self.is_visible:
+            self.hide()
+        else:
+            self.show()
+
+    def reset_position(self) -> None:
+        self.root.update_idletasks()
+        root_x = self.root.winfo_rootx()
+        root_y = self.root.winfo_rooty()
+        root_width = max(1, self.root.winfo_width())
+        x = root_x + root_width - CONTROLLER_OVERLAY_WIDTH - 20
+        y = root_y + 50
+        x, y = clamp_overlay_position(
+            x,
+            y,
+            self.window.winfo_screenwidth(),
+            self.window.winfo_screenheight(),
+        )
+        self.window.geometry(f"+{x}+{y}")
+        self._position_initialized = True
+
+    def _clamp_to_screen(self) -> None:
+        x, y = clamp_overlay_position(
+            self.window.winfo_x(),
+            self.window.winfo_y(),
+            self.window.winfo_screenwidth(),
+            self.window.winfo_screenheight(),
+        )
+        self.window.geometry(f"+{x}+{y}")
+
+    def _on_left_release(self, _event=None):
+        self.activate_controller()
+        return "break"
+
+    def _on_middle_release(self, _event=None):
+        self.hide()
+        return "break"
+
+    def _on_right_press(self, event):
+        self._right_press_root = (event.x_root, event.y_root)
+        self._right_press_window = (self.window.winfo_x(), self.window.winfo_y())
+        self._right_dragged = False
+        return "break"
+
+    def _on_right_drag(self, event):
+        if self._right_press_root is None or self._right_press_window is None:
+            return "break"
+        dx = event.x_root - self._right_press_root[0]
+        dy = event.y_root - self._right_press_root[1]
+        if dx or dy:
+            self._right_dragged = True
+        x, y = clamp_overlay_position(
+            self._right_press_window[0] + dx,
+            self._right_press_window[1] + dy,
+            self.window.winfo_screenwidth(),
+            self.window.winfo_screenheight(),
+        )
+        self.window.geometry(f"+{x}+{y}")
+        return "break"
+
+    def _on_right_release(self, _event=None):
+        if not self._right_dragged:
+            self.reset_position()
+        self._right_press_root = None
+        self._right_press_window = None
+        self._right_dragged = False
+        return "break"
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self.window.destroy()
+
+
 class VirtualControllerWindow:
     def __init__(
         self,
@@ -471,6 +777,7 @@ class VirtualControllerWindow:
             self.gamepad_keyboard_map
         )
         self.mapping_window: KeyMappingWindow | None = None
+        self.overlay: ControllerStateOverlay | None = None
 
         self.window = tk.Toplevel(root)
         self.window.title("虚拟手柄")
@@ -516,12 +823,26 @@ class VirtualControllerWindow:
             variable=self.topmost_var,
             command=self._apply_topmost,
         ).pack(side="left")
+        self.overlay_button = ttk.Button(
+            footer,
+            text="隐藏浮窗",
+            command=self.toggle_overlay,
+        )
+        self.overlay_button.pack(side="left", padx=(8, 0))
         ttk.Button(
             footer,
             text="按键映射",
             command=self.open_key_mapping,
         ).pack(side="right")
 
+        self.overlay = ControllerStateOverlay(
+            root,
+            pressed_provider=lambda: set(self._pressed),
+            connected_provider=self._controller_connected,
+            activate_controller=self.show,
+            on_hidden=self._overlay_hidden,
+        )
+        self.overlay.show()
         self.window.after(80, self.connect)
 
     @property
@@ -529,6 +850,11 @@ class VirtualControllerWindow:
         return not self._closed and bool(self.window.winfo_exists())
 
     def show(self) -> None:
+        if self.overlay is not None:
+            self.overlay.show()
+            self.overlay_button.configure(text="隐藏浮窗")
+        # Keep keyboard events on the full controller window. The overlay is a
+        # status surface and must not steal focus merely because it is shown.
         self.window.deiconify()
         self.window.lift()
         self.window.focus_force()
@@ -547,6 +873,22 @@ class VirtualControllerWindow:
 
     def _apply_topmost(self) -> None:
         set_window_topmost(self.window, self.topmost_var.get())
+
+    def _controller_connected(self) -> bool:
+        return bool(self.controller is not None and self.controller.is_connected)
+
+    def toggle_overlay(self) -> None:
+        overlay = self.overlay
+        if overlay is None:
+            return
+        overlay.toggle()
+        self.overlay_button.configure(
+            text="隐藏浮窗" if overlay.is_visible else "显示浮窗"
+        )
+
+    def _overlay_hidden(self) -> None:
+        if not self._closed:
+            self.overlay_button.configure(text="显示浮窗")
 
     def open_key_mapping(self) -> None:
         self.release_all()
@@ -626,6 +968,8 @@ class VirtualControllerWindow:
                     detail = f"：{error}" if error else ""
                     self.status_var.set(f"无法连接 {port}{detail}")
                     self.connect_button.configure(text="重试")
+                if self.overlay is not None:
+                    self.overlay.refresh_state()
 
             self._post(finish)
 
@@ -645,6 +989,8 @@ class VirtualControllerWindow:
         if not self._closed:
             self.status_var.set("未连接")
             self.connect_button.configure(text="连接", state="normal")
+        if self.overlay is not None:
+            self.overlay.refresh_state()
 
     def _resolve_key(self, key: str):
         if self._native_gamepad_key is None:
@@ -662,6 +1008,8 @@ class VirtualControllerWindow:
             return
         self._pressed.add(key)
         self._update_pressed_display()
+        if self.overlay is not None:
+            self.overlay.refresh_state()
         if key in _DIRECTION_KEYS:
             self._sync_direction(controller)
         else:
@@ -672,6 +1020,8 @@ class VirtualControllerWindow:
             return
         self._pressed.discard(key)
         self._update_pressed_display()
+        if self.overlay is not None:
+            self.overlay.refresh_state()
         controller = self.controller
         if controller is not None and controller.is_connected:
             if key in _DIRECTION_KEYS:
@@ -701,6 +1051,8 @@ class VirtualControllerWindow:
     def release_all(self) -> None:
         self._pressed.clear()
         self._update_pressed_display()
+        if self.overlay is not None:
+            self.overlay.refresh_state()
         controller = self.controller
         if controller is not None and controller.is_connected:
             controller.release_all()
@@ -731,6 +1083,10 @@ class VirtualControllerWindow:
         if mapping_window is not None:
             mapping_window.close()
         self.disconnect()
+        overlay = self.overlay
+        self.overlay = None
+        if overlay is not None:
+            overlay.close()
         try:
             self.window.destroy()
         finally:
