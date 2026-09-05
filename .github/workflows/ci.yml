@@ -27,10 +27,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-auto.txt
+          cache-dependency-path: |
+            requirements-auto.txt
+            requirements-pyside-preview.txt
 
       - name: Install test dependencies
-        run: python -m pip install -r requirements-auto.txt
+        run: python -m pip install -r requirements-auto.txt -r requirements-pyside-preview.txt
 
       - name: Compile Python sources
         run: >-
