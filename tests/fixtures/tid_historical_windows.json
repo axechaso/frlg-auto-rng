@@ -1,0 +1,8 @@
+{
+  "source": "https://chatgpt.com/share/6a9c29f1-dd18-83ee-a11b-aab5d273477e",
+  "provenance": "Ordered tables visible in a historical shared assistant reply; original uploaded logs were not available. These batches are separate and are not combined with the cumulative 43/55-round summaries.",
+  "windows": [
+    {"name": "first_10", "frames": [3693, 2693, 2105], "target": "00000", "tids": ["65482", "20891", "65407", "45603", "20813", "20876", "45638", "20672", "64599", "64628"]},
+    {"name": "later_12", "frames": [3693, 2693, 2105], "target": "00000", "tids": ["65411", "20832", "65409", "00132", "65452", "65452", "20496", "45595", "45605", "65435", "65411", "00025"]}
+  ]
+}

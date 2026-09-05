@@ -52,7 +52,7 @@ def progress_context(request, game: str, template_sha256: str, flow_request: dic
         # A generated-plan annotation, not a user option. The GUI's dataclass
         # does not contain it; both entry points must address the same file.
         flow_request.pop("starter_seed_calibration_scheme", None)
-    return {"schema": 1, "search_revision": 2, "game": game, "request": request.to_dict(),
+    return {"schema": 1, "search_revision": 3, "game": game, "request": request.to_dict(),
             "template_sha256": template_sha256, "flow_request": flow_request}
 
 

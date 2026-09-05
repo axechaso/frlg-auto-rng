@@ -11,11 +11,12 @@ import unittest
 from unittest.mock import Mock, patch
 
 from automation.tid_checkpoint import (
-    SEARCH_STATE_VARIABLES, CHECKPOINT_V2_PREFIX, fixed_frame,
+    SEARCH_STATE_VARIABLES, CHECKPOINT_V3_PREFIX, fixed_frame,
     instrument_tid_checkpoint, parse_checkpoint, validate_checkpoint,
 )
 from automation.tid_rng137 import TidRngRequest, configure_tid_template_text
 from automation.tid_search import function, parse_target_tids, progress_supported
+from automation.tid_search_policy import POLICY_STATE_VARIABLES
 from automation.tid_starter_save import DEFAULT_TID_STARTER_SAVE_SOURCE, split_tid_modules
 
 
@@ -25,10 +26,13 @@ class Machine:
         self.source = source
         self.state = {name: 0 for name in re.findall(r"\$([\w\u0080-\uffff]+)", source)}
         self.compiled = {}
+        self.expressions = {}
         self.calls = []
 
     def value(self, expr):
-        tree = ast.parse(re.sub(r"\$([\w\u0080-\uffff]+)", r"v_\1", expr), mode="eval")
+        if expr not in self.expressions:
+            self.expressions[expr] = ast.parse(re.sub(r"\$([\w\u0080-\uffff]+)", r"v_\1", expr), mode="eval")
+        tree = self.expressions[expr]
         def visit(n):
             if isinstance(n, ast.Expression): return visit(n.body)
             if isinstance(n, ast.Constant): return n.value
@@ -108,6 +112,8 @@ class TidSearchTests(unittest.TestCase):
     def setup_machine(self, request, *, offset=24):
         source = configure_tid_template_text(self.template, request)
         m = Machine(source)
+        m.state.update({v[1:]: -1 if k.startswith("H") and k.endswith("_TARGET") else 0
+                        for k,v in POLICY_STATE_VARIABLES.items()})
         p = "EN" if request.language == "英文" else "JP"
         for key, value in request.to_user_values().items():
             if key.startswith("$"): m.state[key[1:]] = value
@@ -178,7 +184,8 @@ class TidSearchTests(unittest.TestCase):
             request = TidRngRequest(language=language, player_name="Alxe" if p == "EN" else "レット゛",
                                     mode=0,auto_rng=True,additional_target_tids=(33333,))
             source=configure_tid_template_text(self.template,request)
-            allowed={p+"_"+name for name in ("匹配","计算穷举候选距离","穷举模式偏移运算","乱数模式操作延迟校验")}
+            allowed={p+"_"+name for name in ("匹配","计算穷举候选距离","穷举模式偏移运算","乱数模式操作延迟校验",
+                "穷举推进到下一个搜索点", "乱数模式偏移运算", "乱数定位到当前壳层下一个有效组合", "乱数推进到下一个壳层组合")}
             for name in re.findall(r"(?m)^FUNC ([^\s(]+)",self.template):
                 if name not in allowed:
                     self.assertEqual(function(source,name),function(self.template,name),name)
@@ -202,10 +209,10 @@ class TidSearchTests(unittest.TestCase):
             request=TidRngRequest(mode=mode,sid_random=True,op_rng_range=9999,f1_rng_range=-2,f2_rng_range=11,
                 op_max_range=-1,f1_max_range=5,f2_max_range=7,op_target_frame=0)
             m,p,_=self.setup_machine(request, offset=0)
-            self.assertEqual(tuple(m.state[a+"_Max_Range"] for a in ("OP","F1","F2")), (0,0,10) if mode else (0,4,6))
+            self.assertEqual(tuple(m.state[a+"_Max_Range"] for a in ("OP","F1","F2")), (9998,0,10) if mode else (0,4,6))
             if mode:
                 self.assertEqual(m.state["OP目标帧"],m.state["OP脚本固定帧"])
-                self.assertEqual(m.state["OP_RNG_Max_Range"],0)
+                self.assertEqual(m.state["OP_RNG_Min_Range"],0)
                 self.assertGreaterEqual(m.state["OPms"],0)
             self.assertNotIn("搜索范围过大",function(m.source,p+"_乱数模式操作延迟校验"))
 
@@ -220,7 +227,7 @@ class TidSearchTests(unittest.TestCase):
         for _ in range(15):
             state=self.state(m,p)
             validate_checkpoint(state,request)
-            line=CHECKPOINT_V2_PREFIX+"|".join(f"{k}={v}" for k,v in state.items())+"|END=1"
+            line=CHECKPOINT_V3_PREFIX+"|".join(f"{k}={v}" for k,v in state.items())+"|END=1"
             self.assertEqual(parse_checkpoint(line,request),state)
             seen.add((state["OP"],state["F1"],state["F2"]))
             resumed=instrument_tid_checkpoint(source,request,state)
@@ -287,7 +294,7 @@ class TidSearchTests(unittest.TestCase):
                         actual=runner.id_main_override
                         self.assertIsNotNone(actual)
                         started.append(actual.read_text(encoding="utf-8"))
-                        runner.progress.feed(CHECKPOINT_V2_PREFIX+"|".join(f"{k}={v}" for k,v in state.items())+"|END=1")
+                        runner.progress.feed(CHECKPOINT_V3_PREFIX+"|".join(f"{k}={v}" for k,v in state.items())+"|END=1")
                         runner.progress.feed(DONE_MARKER)
                     else:
                         self.assertIsNone(runner.progress)
@@ -309,7 +316,7 @@ class TidSearchTests(unittest.TestCase):
                     next_request=replace(request,sid_advance_correction=1)
                     next_context=progress_context(next_request,"火红","a"*64,payload)
                     with TidProgressSession(root/"progress",next_context,resume=False) as paused:
-                        paused.feed(CHECKPOINT_V2_PREFIX+"|".join(f"{k}={v}" for k,v in state.items())+"|END=1")
+                        paused.feed(CHECKPOINT_V3_PREFIX+"|".join(f"{k}={v}" for k,v in state.items())+"|END=1")
                     started.clear()
                     with patch("run_tid_starter_flow.validate_tid_runtime",return_value=EasyConRuntimeCheck(True,(),())), patch("run_tid_starter_flow.update_starter_precalibration"):
                         run_tid_plan(runner,root,Path("unused"),is_flow=True,progress_dir=root/"progress",game="火红")

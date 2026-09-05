@@ -9,7 +9,7 @@ import re
 
 from .tid_starter_save import split_tid_modules
 
-SEARCH_MARKER = "# TID_SEARCH_V2"
+SEARCH_MARKER = "# TID_SEARCH_V3"
 AXES = ("OP", "F1", "F2")
 
 
@@ -199,4 +199,5 @@ def extend_tid_search(text: str, request) -> str:
     module = module.replace("            IF $digits_ok == 0 or $curr1 * 10000 + $curr2 * 1000 + $curr3 * 100 + $curr4 * 10 + $curr5 > 65535\n",
                             "            IF $curr1 * 10000 + $curr2 * 1000 + $curr3 * 100 + $curr4 * 10 + $curr5 > 65535\n                $digits_ok = 0\n            ENDIF\n" + guard, 1)
     module += "\n" + "\n\n".join(extra) + "\n\n"
-    return head + (module if prefix == "EN" else english) + (module if prefix == "JP" else japanese) + tail
+    from .tid_search_policy import optimize_tid_search
+    return optimize_tid_search(head + (module if prefix == "EN" else english) + (module if prefix == "JP" else japanese) + tail, request)

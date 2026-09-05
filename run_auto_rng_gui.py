@@ -2229,11 +2229,11 @@ class AutoRngApp:
         ttk.Label(tid_frames, text="接近距离 / 次数").grid(row=7, column=0, sticky="e", padx=5)
         ttk.Entry(tid_frames, textvariable=self.tid_near_distance_var, width=12).grid(row=7, column=1, padx=8, pady=3)
         ttk.Entry(tid_frames, textvariable=self.tid_near_hits_var, width=12).grid(row=7, column=2, padx=8, pady=3)
-        self._help_marker(tid_frames, "目标区间确认", "同一参数的去噪窗口内，对每个目标分别统计环形距离内的结果。允许不同TID，默认±100内3次；跨参数不累加。达到次数立即切换，窗口满仍未达到则继续穷举。距离不是帧补偿。").grid(row=7, column=4)
+        self._help_marker(tid_frames, "目标区间确认", "同一参数窗口按目标分别统计，默认±100内3次后切换。局部范围完整搜索一遍后返回原穷举位置；最近16个完成区域随进度保存。同一目标在已搜区域内不反复切入。距离不是帧补偿。").grid(row=7, column=4)
         ttk.Label(tid_frames, text="自动切换后半径").grid(row=8, column=0, sticky="e", padx=5)
         for column, variable in enumerate((self.tid_auto_op_range_var, self.tid_auto_f1_range_var, self.tid_auto_f2_range_var), 1):
             ttk.Entry(tid_frames, textvariable=variable, width=12).grid(row=8, column=column, padx=8, pady=3)
-        ttk.Label(tid_frames, text="半径超出可执行下限时自动缩小；负数归零，按原搜索步长2向下取偶数。", foreground="#475569").grid(
+        ttk.Label(tid_frames, text="越过下限时只裁剪负向范围，保留正向范围；负半径归零，按步长2向下取偶数。", foreground="#475569").grid(
             row=9, column=0, columnspan=5, sticky="w", padx=5, pady=3)
 
         tid_settings = ttk.LabelFrame(tid_tab, text="3. 游戏设置与固定延迟", padding=8)
@@ -3580,7 +3580,8 @@ class AutoRngApp:
                 if state.get("MODE", 0) == 1:
                     text = (f"{status}：{'穷举自动转乱数' if state['SWITCHED'] else '乱数'}，目标TID {state['TARGET']:05d}，"
                             f"中心OP/F1/F2 {state['OP_CENTER']}/{state['F1_CENTER']}/{state['F2_CENTER']}，"
-                            f"半径 {state['OP_RANGE']}/{state['F1_RANGE']}/{state['F2_RANGE']}，"
+                            "偏移范围OP/F1/F2 " + "/".join(
+                                f"[-{state.get(a + '_NEG', state[a + '_RANGE'])},+{state[a + '_RANGE']}]" for a in ("OP", "F1", "F2")) + "，"
                             f"当前壳层 ±{state['RADIUS']}，累计 {state['COUNT']} 次。")
                     if flow is not None and not flow.deferred_identity:
                         correction = saved.get("context", context)["request"]["sid_advance_correction"]
@@ -3588,6 +3589,8 @@ class AutoRngApp:
                 else:
                     text = (f"{status}：穷举层级 {state['STAGE']}，OP/F1/F2偏移 "
                             f"{state['OP']}/{state['F1']}/{state['F2']}，累计 {state['COUNT']} 次。")
+                if "COMPLETED_REGIONS" in state and request.auto_rng:
+                    text += f" 已完成局部区域 {state['COMPLETED_REGIONS']} 个（记住最近16个）。"
             self.tid_progress_status_var.set(text)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             self.tid_progress_status_var.set(f"暂不能匹配搜索进度：{exc}")
@@ -6389,7 +6392,8 @@ class AutoRngApp:
             if request.auto_rng:
                 lines.append(f"自动转乱数：同参数窗口内至少{request.near_tid_hits}次落在同目标±{request.near_tid_distance}内；"
                              f"切换后半径OP/F1/F2={request.auto_op_rng_range}/{request.auto_f1_rng_range}/{request.auto_f2_rng_range}。")
-        lines.append("搜索半径越过可执行下限时自动缩小，负数归零，并按步长2向下取偶数；实际值见运行日志。")
+                lines.append("局部范围完整搜索一遍未命中则返回穷举；整窗口选择候选，最近16个完成区域随进度保存。")
+        lines.append("越过可执行下限时只裁剪负向范围，保留正向范围；负半径归零，按步长2向下取偶数。")
         if request.calibration_check:
             lines.append("启动后先测量 OP/F1/F2/F3，自动回填实际 OP 修正并关闭检测，再生成、预检和执行正式计划；无需再次点击开始。")
         elif not starter_save_template and request.language == "日文":

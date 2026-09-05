@@ -67,6 +67,7 @@ jobs:
           automation/tid_calibration.py
           automation/tid_checkpoint.py
           automation/tid_search.py
+          automation/tid_search_policy.py
           automation/tid_starter_save.py
           automation/tid_starter_flow.py
           rng/sid_reverse.py
@@ -101,6 +102,7 @@ jobs:
           tests.test_tid_records
           tests.test_tid_session
           tests.test_tid_search
+          tests.test_tid_search_policy
           tests.test_process_control
           tests.test_precalibration
           tests.test_sid_traversal
