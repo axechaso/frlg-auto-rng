@@ -912,6 +912,14 @@ class FrlgPreviewWindow(QMainWindow):
         self.overview_scroll.setVisible(wide)
         self.overview_button.setVisible(not wide)
         self.footer_status.setVisible(self.width() >= 1180)
+        tid_page = getattr(self, "current_page", "sid") == "tid"
+        self.tid_refresh_button.setVisible(tid_page)
+        compact_footer = tid_page and self.width() < 1000
+        if getattr(self, "_footer_compact", None) != compact_footer:
+            self._footer_compact = compact_footer
+            for button in (self.overview_button, self.tid_refresh_button, self.search_button,
+                           self.cancel_button, self.start_button, self.stop_button):
+                button.setStyleSheet("padding-left: 10px; padding-right: 10px;" if compact_footer else "")
 
     @staticmethod
     def _set_seed_choice_help(combo: QComboBox, choices: tuple) -> None:
@@ -1610,7 +1618,6 @@ class FrlgPreviewWindow(QMainWindow):
         resume.layout.addWidget(self.tid_resume_check)
         self.tid_progress_status = _label("未读取本机进度；当前表单在关闭窗口后丢弃。", role="muted")
         resume.layout.addWidget(self.tid_progress_status)
-        self._actions(resume, "刷新进度")
         layout.addWidget(resume)
         for check in (self.tid_flow_check, self.tid_any_check, self.tid_manual_delay, self.tid_auto_rng_check):
             check.toggled.connect(self._refresh_tid_controls)
@@ -1789,6 +1796,8 @@ class FrlgPreviewWindow(QMainWindow):
         self.overview_button = _button("方案与设备", enabled=True)
         self.overview_button.clicked.connect(self._show_overview)
         layout.addWidget(self.overview_button)
+        self.tid_refresh_button = _button("刷新进度")
+        layout.addWidget(self.tid_refresh_button)
         self.search_button = _button("搜索并生成方案", "primary")
         self.search_button.setToolTip(NOT_CONNECTED)
         layout.addWidget(self.search_button)
