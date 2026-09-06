@@ -37,6 +37,11 @@ class FormReader:
     def expansion(self):
         if not self.w.advanced_check.isChecked():
             return {}
+        fields = [f"expansion_{i}_{axis}" for i in range(1, 4) for axis in ("seed", "adv")]
+        if self.f["layers"].value() == 3 and all(not self.text(key).strip() for key in fields):
+            # A portable config may inherit defaults before a script pack is
+            # selected. Keep None so the generator reads its own template.
+            return {}
         return dict(reverse_expansion_layers=self.f["layers"].value(),
             reverse_expansion_seed_tolerances=tuple(self.integer(f"expansion_{i}_seed") for i in range(1, 4)),
             reverse_expansion_frame_half_widths=tuple(self.integer(f"expansion_{i}_adv") for i in range(1, 4)))

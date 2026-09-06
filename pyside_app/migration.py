@@ -69,6 +69,9 @@ class CompleteWindow(FrlgWindow):
         self.fields["script_entry"].currentIndexChanged.connect(self.sync_script)
         self.fields["source"].editingFinished.connect(self.sync_script)
         self.fields["script_path"].setPlaceholderText("选择 ECS 文件")
+        for key, widget in self.fields.items():
+            if key.startswith("expansion_"):
+                widget.setPlaceholderText("沿用所选脚本的默认值")
         self.migration_ready = True
         self._connected_text()
         self._refresh_wild_controls()

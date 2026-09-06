@@ -121,6 +121,20 @@ class RemainingQtTests(unittest.TestCase):
         self.assertEqual(request.locations[0], "Viridian Forest")
         self.assertEqual(request.effort_values[0][0], 252)
 
+    def test_egg_config_can_inherit_defaults_without_local_script_pack(self):
+        self.configure_egg()
+        self.w.fields["source"].setText(str(self.root / "missing-script-pack"))
+        for key, widget in self.w.fields.items():
+            if key.startswith("expansion_"):
+                widget.clear()
+        self.w.fields["layers"].setValue(3)
+        request = self.w.reader.egg()
+        self.assertIsNone(request.reverse_expansion_layers)
+        self.assertIsNone(self.w.egg_payload(True)["reverse_expansion_seed_tolerances"])
+        self.w.fields["expansion_1_seed"].setText("12")
+        with self.assertRaises(ValueError):
+            self.w.reader.egg()
+
     def test_tid_exhaustive_additional_targets_and_flow_policy(self):
         w = self.w
         w.select_page("tid")
