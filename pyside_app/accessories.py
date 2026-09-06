@@ -27,15 +27,19 @@ class Accessories(QObject):
         self.last_log = ""
         self.ignored_prefix = ""
         for title, action in (("虚拟手柄", self.open_controller), ("监视窗口", self.open_monitor),
+            ("手柄键位", self.open_controller_mapping),
             ("检查/更新 Seed 表", self.update_seeds), ("选择标签文件（可多选）", self.choose_labels),
             ("选择标签文件夹", self.choose_label_directory), ("清除当前设备覆盖", self.clear_overrides)):
             window._bind(title, action)
+        window.actions["虚拟手柄"].setToolTip("使用顶部所选串口打开手柄浮窗；键位在共通设置中修改。")
+        window.actions["手柄键位"].setToolTip("按手柄位置设置键盘映射，不打开手柄主窗口。")
         clear = next(button for button in self.card.findChildren(QPushButton) if button.text() == "清空诊断列表")
         clear.clicked.disconnect()
         clear.clicked.connect(self.clear_issues)
         update = next(button for button in window.findChildren(QPushButton) if button.text() == "检查程序更新")
         update.setToolTip("当前为源码运行的 Qt 入口；程序更新仍通过 Git 获取。发布版更新器会替换正式 Tk 包，不能用于此入口。")
         window.fields["video"].currentIndexChanged.connect(self.refresh_labels)
+        window.fields["port"].currentIndexChanged.connect(self.port_changed)
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.diagnose)
@@ -123,10 +127,17 @@ class Accessories(QObject):
     def open_controller(self):
         if self.controller is None:
             self.controller = ControllerWindow(self.w)
-        self.controller.shutting_down = False
-        self.controller.show()
-        self.controller.raise_()
-        self.controller.activateWindow()
+        self.controller.open_overlay()
+
+    def open_controller_mapping(self):
+        if self.controller is None:
+            self.controller = ControllerWindow(self.w)
+        self.controller.edit_mapping()
+
+    def port_changed(self, *_):
+        if self.controller and (self.controller.controller or self.controller.job):
+            self.controller.overlay.exit_control()
+            self.w.set_status("串口已切换；点击顶部“虚拟手柄”连接新串口。")
 
     def open_monitor(self):
         if self.monitor is None:

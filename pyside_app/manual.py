@@ -48,6 +48,8 @@ class ControllerWindow(QDialog):
         self.keyboard_pressed = {}
         self.mouse_pressed = set()
         self.shutting_down = False
+        self.overlay_only = False
+        self.overlay_requested = False
         self.keyboard_active = True
         self.mapping_path = host.paths.user / "pyside6_controller_keymap.json"
         self.mapping = dict(DEFAULT_KEYS)
@@ -116,11 +118,38 @@ class ControllerWindow(QDialog):
         if self.shutting_down:
             self.shutting_down = False
             self.keyboard_active = True
+        self.start_keyboard()
+        QTimer.singleShot(0, self.pad.setFocus)
+
+    def start_keyboard(self):
         try:
             self.keyboard.start()
         except OSError as exc:
             self.key_status.setText(f"{exc}；暂用窗口内键盘输入。")
-        QTimer.singleShot(0, self.pad.setFocus)
+            if self.overlay_only:
+                self.host.set_status(f"手柄键盘监听未启动：{exc}")
+
+    def report_status(self, text):
+        self.status.setText(text)
+        if self.overlay_only:
+            self.host.set_status(text)
+
+    def open_overlay(self):
+        if self.host.running or self.host.job:
+            self.host.set_status("请先停止自动运行或等待当前任务完成，再打开手柄浮窗。")
+            return
+        self.overlay_only = True
+        self.overlay_requested = True
+        self.shutting_down = False
+        self.hide()
+        self.start_keyboard()
+        self.overlay.show_control()
+        self.overlay.raise_()
+        port = self.host.fields["port"].currentData()
+        if self.controller and (not self.controller.is_connected or self.controller.port_name != port):
+            self.disconnect()
+        if not self.controller and not self.job:
+            self.toggle_connection()
 
     def mouse_press(self, key):
         self.pad.setFocus()
@@ -144,10 +173,10 @@ class ControllerWindow(QDialog):
             return
         port = self.host.fields["port"].currentData()
         if not port or self.host.running or self.host.job:
-            self.status.setText("请先选择串口，并停止当前自动运行或预检。")
+            self.report_status("请先在顶部选择串口，并停止当前自动运行或预检。")
             return
         self.connect_button.setEnabled(False)
-        self.status.setText(f"正在连接 {port}……")
+        self.report_status(f"正在连接 {port}……")
         def connect(cancel, progress):
             from easycon import EasyConController, GamePadKey
             controller = EasyConController()
@@ -169,17 +198,31 @@ class ControllerWindow(QDialog):
     def connected(self):
         job, self.job = self.job, None
         self.connect_button.setEnabled(True)
-        if self.job_error:
-            self.status.setText(f"连接失败：{self.job_error}")
+        stale = self.overlay_only and (not self.overlay_requested or (self.job_result and self.job_result[0].port_name != self.host.fields["port"].currentData()))
+        if stale:
+            if self.job_result:
+                try:
+                    self.job_result[0].disconnect()
+                except Exception as exc:
+                    self.report_status(f"旧串口连接释放失败：{exc}")
+            if self.overlay_requested:
+                QTimer.singleShot(0, self.retry_overlay_connection)
+        elif self.job_error:
+            self.report_status(f"连接失败：{self.job_error}")
         else:
             self.controller, self.native = self.job_result
             self.connect_button.setText("断开")
-            self.status.setText(f"已连接 {self.controller.port_name}")
-            self.pad.setFocus()
+            self.report_status(f"手柄已连接 {self.controller.port_name}")
+            if not self.overlay_only:
+                self.pad.setFocus()
         job.deleteLater()
         if self.shutting_down:
             self.disconnect()
             self.close()
+
+    def retry_overlay_connection(self):
+        if self.overlay_requested and not self.shutting_down:
+            self.toggle_connection()
 
     def disconnect(self):
         self.release_all()
@@ -190,7 +233,7 @@ class ControllerWindow(QDialog):
                 self.status.setText(f"串口断开时返回错误：{exc}")
         self.controller = self.native = None
         self.connect_button.setText("连接")
-        self.status.setText("未连接")
+        self.report_status("手柄未连接")
         self.overlay.update()
 
     def sync_direction(self):
@@ -227,7 +270,7 @@ class ControllerWindow(QDialog):
                 self.controller.press(getattr(self.native, key))
         except Exception as exc:
             self.release_all()
-            self.status.setText(f"按键发送失败：{exc}")
+            self.report_status(f"按键发送失败：{exc}")
         self.refresh_keys()
 
     def release(self, key):
@@ -265,6 +308,8 @@ class ControllerWindow(QDialog):
     def keyboard_allowed(self, receiver=None):
         if self.shutting_down or not self.keyboard_active or self.host.running or self.host.job:
             return False
+        if self.overlay_only and (not self.controller or not self.controller.is_connected):
+            return False
         windows = self.keyboard_windows()
         modal = QApplication.activeModalWidget()
         if modal is not None and modal not in windows:
@@ -290,6 +335,11 @@ class ControllerWindow(QDialog):
         if not self.overlay.isVisible() and ((obj in windows and event.type() in (QEvent.Type.WindowDeactivate, QEvent.Type.Hide)) or event.type() == QEvent.Type.ApplicationDeactivate):
             self.release_all()
         receiver = obj.window() if isinstance(obj, QWidget) else None
+        if receiver is self.overlay and self.overlay.isVisible() and event.type() in (QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress, QEvent.Type.KeyRelease) and event.key() == Qt.Key.Key_Escape:
+            if event.type() == QEvent.Type.KeyPress:
+                self.overlay.exit_control()
+            event.accept()
+            return True
         if self.keyboard_allowed(receiver) and event.type() in (QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
             if event.key() == Qt.Key.Key_Escape and self.overlay.isVisible():
                 if event.type() == QEvent.Type.KeyPress:
@@ -352,6 +402,7 @@ class ControllerWindow(QDialog):
 
     def closeEvent(self, event):
         self.shutting_down = True
+        self.overlay_requested = False
         self.keyboard.stop()
         self.disconnect()
         self.overlay.hide()
@@ -401,6 +452,12 @@ class ControllerOverlay(QWidget):
         self.set_active(False)
         self.hide()
         self.controller.key_status.setText("浮窗已关闭，键盘控制已停止；点击“手柄浮窗”可重新启用。")
+        if self.controller.overlay_only:
+            self.controller.overlay_requested = False
+            if self.controller.job:
+                self.controller.job.cancelled.set()
+            self.controller.disconnect()
+            self.controller.keyboard.stop()
 
     def showEvent(self, event):
         self.timer.start()

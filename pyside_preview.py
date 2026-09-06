@@ -752,10 +752,17 @@ class FrlgPreviewWindow(QMainWindow):
         banner = QFrame()
         banner.setObjectName("previewBanner")
         banner.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.quick_layout = QGridLayout(banner)
+        self.quick_layout = QVBoxLayout(banner)
         self.quick_layout.setContentsMargins(12, 8, 12, 8)
-        self.quick_layout.setHorizontalSpacing(12)
-        self.quick_layout.setVerticalSpacing(10)
+        self.quick_layout.setSpacing(10)
+        self.quick_rows = []
+        for _ in range(3):
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(10)
+            self.quick_layout.addWidget(row)
+            self.quick_rows.append(row)
         self.home_buffer_check = _button("低分自适应", "quickToggle", enabled=True)
         self.home_buffer_check.setAccessibleName("HOME_BUFFER 稳定低分自适应")
         self.home_buffer_check.setToolTip("HOME_BUFFER 稳定低分自适应：正式版作用于 2.0、TID 和 SID，默认关闭；只接受连续稳定的唯一最高分，不影响其他 OCR。")
@@ -774,6 +781,7 @@ class FrlgPreviewWindow(QMainWindow):
             combo.setObjectName(key)
             combo.setAccessibleName(title)
             combo.setFixedHeight(36)
+            combo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
             group = QWidget()
             group_layout = QHBoxLayout(group)
             group_layout.setContentsMargins(0, 0, 0, 0)
@@ -811,6 +819,37 @@ class FrlgPreviewWindow(QMainWindow):
         self.settings_button = _button("共通设置", enabled=True)
         self.settings_button.setFixedSize(82, 36)
         self.settings_button.clicked.connect(lambda: self.settings_dialog.show())
+        self.quick_device_groups = []
+        for key, title in (("port", "串口"), ("video", "采集卡")):
+            combo = _combo("尚未检测")
+            combo.setObjectName(key)
+            combo.setAccessibleName(title)
+            combo.setFixedHeight(36)
+            combo.setMinimumWidth(64 if key == "port" else 88)
+            combo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            combo.setEnabled(False)
+            self.fields[key] = combo
+            group = QWidget()
+            group_layout = QHBoxLayout(group)
+            group_layout.setContentsMargins(0, 0, 0, 0)
+            group_layout.setSpacing(8)
+            label = _label(title, name="fieldLabel")
+            label.setWordWrap(False)
+            group_layout.addWidget(label)
+            group_layout.addWidget(combo, 1)
+            group.setFixedHeight(36)
+            self.quick_device_groups.append(group)
+        self.quick_tools = QWidget()
+        self.quick_tools.setFixedHeight(36)
+        self.quick_tools.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        tools_layout = QHBoxLayout(self.quick_tools)
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+        tools_layout.setSpacing(8)
+        for title in ("重新检测", "虚拟手柄", "监视窗口"):
+            button = _button(title, "quickToggle")
+            button.setFixedSize(86, 36)
+            button.setStyleSheet("min-height: 0; padding: 0 7px;")
+            tools_layout.addWidget(button)
         self._quick_compact = None
         self._layout_quick_settings()
         header_layout.addWidget(banner)
@@ -923,12 +962,6 @@ class FrlgPreviewWindow(QMainWindow):
             row.addStretch(1)
             row.addWidget(_label(detail, role="muted"))
             ready.layout.addLayout(row)
-        buttons = QHBoxLayout()
-        for title in ("重新检测", "虚拟手柄", "监视窗口"):
-            button = _button(title)
-            button.setStyleSheet("padding-left: 7px; padding-right: 7px;")
-            buttons.addWidget(button)
-        ready.layout.addLayout(buttons)
         layout.addWidget(ready)
         layout.addStretch(1)
         return panel
@@ -977,28 +1010,26 @@ class FrlgPreviewWindow(QMainWindow):
         if self._quick_compact == compact:
             return
         self._quick_compact = compact
-        widgets = (self.home_buffer_check, self.precalibration_check,
-                   *self.quick_seed_groups, self.advanced_group, self.settings_button)
-        for widget in widgets:
-            self.quick_layout.removeWidget(widget)
-        for column in range(6):
-            self.quick_layout.setColumnStretch(column, 0)
+        for row in self.quick_rows:
+            while row.layout().count():
+                row.layout().takeAt(0)
         if compact:
-            positions = ((0, 0, 1), (0, 1, 1),
-                         (1, 0, 2), (1, 2, 2), (0, 2, 1), (0, 3, 1))
-            self.quick_layout.setColumnStretch(1, 1)
-            self.quick_layout.setColumnStretch(2, 1)
+            rows = ((self.home_buffer_check, self.precalibration_check, *self.quick_device_groups),
+                    tuple(self.quick_seed_groups),
+                    (self.quick_tools, self.advanced_group, self.settings_button))
         else:
-            positions = tuple((0, column, 1) for column in range(6))
-            self.quick_layout.setColumnStretch(2, 1)
-            self.quick_layout.setColumnStretch(3, 1)
-        for index, (widget, (row, column, span)) in enumerate(zip(widgets, positions)):
-            alignment = Qt.AlignmentFlag(0)
-            if compact and index in (0, 1):
-                alignment = Qt.AlignmentFlag.AlignLeft
-            elif compact and index in (4, 5):
-                alignment = Qt.AlignmentFlag.AlignRight
-            self.quick_layout.addWidget(widget, row, column, 1, span, alignment)
+            rows = ((self.home_buffer_check, self.precalibration_check, *self.quick_seed_groups),
+                    (*self.quick_device_groups, self.quick_tools, self.advanced_group, self.settings_button))
+        flexible = (*self.quick_seed_groups, *self.quick_device_groups)
+        for index, row in enumerate(self.quick_rows):
+            row.setVisible(index < len(rows))
+            if index >= len(rows):
+                continue
+            for widget in rows[index]:
+                if compact and index == 2 and widget is self.advanced_group:
+                    row.layout().addStretch(1)
+                row.layout().addWidget(widget, 1 if widget in flexible else 0)
+                widget.show()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -1435,12 +1466,8 @@ class FrlgPreviewWindow(QMainWindow):
         self._form(runtime, [
             ("source", "2.0 自动乱数脚本包", _line(placeholder="路径选择尚未接入")),
             ("ezcon", "ezcon.exe", _line(placeholder="要求 1.6.4-a+9c86137")),
-            ("port", "串口", _combo("尚未检测")),
-            ("video", "采集卡", _combo("尚未检测（编号与名称）")),
         ], 2)
-        self.fields["port"].setEnabled(False)
-        self.fields["video"].setEnabled(False)
-        self._actions(runtime, "选择脚本包", "选择 ezcon.exe", "检查/更新 Seed 表", "检查程序更新", columns=2)
+        self._actions(runtime, "选择脚本包", "选择 ezcon.exe", "检查/更新 Seed 表", "检查程序更新", "手柄键位", columns=2)
         runtime.layout.addWidget(_label("源码模式不使用程序自更新。", role="muted"))
         layout.addWidget(runtime)
         layout.addWidget(self._path_card("SID 查找脚本", "2.0 自动乱数脚本包（SID 独立路径）", "sid_source"))

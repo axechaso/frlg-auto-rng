@@ -519,6 +519,8 @@ class FrlgWindow(FrlgPreviewWindow):
             self.updating = False
             new_selection = (self.fields["port"].currentData(), self.fields["video"].currentData(),
                              videos.get(self.fields["video"].currentData()))
+            if old_selection[0] != new_selection[0] and hasattr(self, "accessories"):
+                self.accessories.port_changed()
             if old_selection != new_selection:
                 self.invalidate()
             self.result_panel.setPlainText(output)

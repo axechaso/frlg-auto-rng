@@ -23,6 +23,8 @@ class ControllerTests(unittest.TestCase):
         self.host.paths = SimpleNamespace(user=Path(self.temp.name))
         self.host.running = False
         self.host.job = None
+        self.host.set_status = Mock()
+        self.host.fields = {"port": Mock(currentData=Mock(return_value="FAKE"))}
         self.host.accessories = SimpleNamespace(monitor=None)
         self.w = ControllerWindow(self.host)
         self.transport = Mock(is_connected=True, port_name="FAKE")
@@ -69,6 +71,86 @@ class ControllerTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.w.pressed)
         self.transport.release.assert_called_once_with(self.w.native.A)
+
+    def test_top_button_only_opens_reusable_overlay_and_exit_releases_port(self):
+        self.w.open_overlay()
+        self.app.processEvents()
+        self.assertFalse(self.w.isVisible())
+        self.assertTrue(self.w.overlay.isVisible())
+        self.assertTrue(self.w.keyboard_allowed())
+        self.w.open_overlay()
+        self.assertIs(self.w.controller, self.transport)
+        self.transport.disconnect.assert_not_called()
+        self.w.keyboard.feed(0x43, True)
+        self.app.processEvents()
+        self.assertIn("A", self.w.pressed)
+        self.w.overlay.exit_control()
+        self.assertIsNone(self.w.controller)
+        self.assertFalse(self.w.pressed)
+        self.transport.disconnect.assert_called_once()
+
+    def test_overlay_connects_selected_port_without_showing_controller_window(self):
+        from PySide6.QtTest import QTest
+        self.w.controller = None
+        self.host.fields["port"].currentData.return_value = "COM7"
+        connection = Mock(is_connected=True, port_name="COM7", baudrate=115200)
+        with patch("easycon.EasyConController", return_value=connection):
+            self.w.open_overlay()
+            for _ in range(100):
+                if self.w.job is None:
+                    break
+                QTest.qWait(10)
+            self.assertIsNone(self.w.job)
+        self.assertIs(self.w.controller, connection)
+        connection.try_connect_port.assert_called_once_with("COM7", 115200, timeout=1.0)
+        self.assertFalse(self.w.isVisible())
+        self.assertTrue(self.w.overlay.isVisible())
+
+    def test_overlay_reports_missing_port_without_opening_large_window(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        self.w.controller = None
+        self.host.fields["port"].currentData.return_value = None
+        with patch("easycon.EasyConController") as constructor:
+            self.w.open_overlay()
+            constructor.assert_not_called()
+        self.assertFalse(self.w.isVisible())
+        self.assertTrue(self.w.overlay.isVisible())
+        self.assertFalse(self.w.keyboard_allowed())
+        self.assertIn("选择串口", self.host.set_status.call_args.args[0])
+        QTest.keyClick(self.w.overlay, Qt.Key.Key_Escape)
+        self.assertFalse(self.w.overlay.isVisible())
+
+    def test_closing_overlay_during_connection_discards_late_result(self):
+        import threading
+        self.w.controller = None
+        self.w.job = Mock(cancelled=threading.Event())
+        self.w.job_error = ""
+        self.w.job_result = (self.transport, self.w.native)
+        self.w.open_overlay()
+        self.w.overlay.exit_control()
+        self.assertTrue(self.w.job.cancelled.is_set())
+        self.transport.disconnect.side_effect = OSError("port disappeared")
+        self.w.connected()
+        self.assertIsNone(self.w.controller)
+        self.assertIsNone(self.w.job)
+        self.transport.disconnect.assert_called_once()
+
+    def test_closing_overlay_cancels_queued_retry_after_port_change(self):
+        import threading
+        self.w.controller = None
+        self.w.job = Mock(cancelled=threading.Event())
+        self.w.job_error = ""
+        self.w.job_result = (self.transport, self.w.native)
+        self.host.fields["port"].currentData.return_value = "COM9"
+        self.w.open_overlay()
+        self.w.connected()
+        self.w.overlay.exit_control()
+        with patch.object(self.w, "toggle_connection") as reconnect:
+            self.app.processEvents()
+            reconnect.assert_not_called()
+        self.assertIsNone(self.w.controller)
+        self.transport.disconnect.assert_called_once()
 
     def test_sticks_and_hat_diagonals_recenter_independently(self):
         self.w.press("LS_UP")
