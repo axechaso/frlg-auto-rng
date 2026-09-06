@@ -1625,6 +1625,8 @@ class FrlgPreviewWindow(QMainWindow):
 
     def _refresh_tid_controls(self) -> None:
         flow = self.tid_flow_check.isChecked()
+        for name in ("tid_sound", "tid_button", "tid_seed_button", "tid_name_entry"):
+            self.fields[name].setEnabled(self.advanced_check.isChecked())
         exhaustive = self.fields["tid_mode"].currentIndex() == 1
         if flow and exhaustive:
             combo = self.fields["tid_sid_mode"]
