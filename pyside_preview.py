@@ -1445,6 +1445,7 @@ class FrlgPreviewWindow(QMainWindow):
         if hasattr(self, "settings_dialog"):
             self._refresh_common_settings()
             self._refresh_wild_controls()
+            self._refresh_tid_controls()
 
     def _refresh_common_settings(self) -> None:
         advanced = self.advanced_check.isChecked()
@@ -1645,7 +1646,10 @@ class FrlgPreviewWindow(QMainWindow):
             check.setEnabled((not flow or exhaustive) and not any_tid)
         for name, widget in self.fields.items():
             if name.startswith("starter_"):
-                widget.setEnabled(flow and (name != "starter_retry" or not (exhaustive or fixed)))
+                enabled = flow and (name != "starter_retry" or not (exhaustive or fixed))
+                if name in ("starter_sound", "starter_button", "starter_seed_button"):
+                    enabled = enabled and self.advanced_check.isChecked()
+                widget.setEnabled(enabled)
         for axis in ("op", "f1", "f2", "f3"):
             self.fields[f"tid_{axis}_delay"].setEnabled(self.tid_manual_delay.isChecked())
         if hasattr(self, "settings_dialog"):
