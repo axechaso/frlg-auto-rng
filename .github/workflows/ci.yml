@@ -48,6 +48,14 @@ jobs:
           pyside_app/jobs.py
           pyside_app/profiles.py
           pyside_app/window.py
+          pyside_app/migration.py
+          pyside_app/workflows.py
+          pyside_app/forms.py
+          pyside_app/egg_config.py
+          pyside_app/tid_state.py
+          pyside_app/results.py
+          pyside_app/accessories.py
+          pyside_app/manual.py
           run_auto_rng_gui.py
           run_auto_planner.py
           run_easycon_logged.py
@@ -95,6 +103,7 @@ jobs:
           tests.test_pyside_preview
           tests.test_pyside_services
           tests.test_pyside_backend
+          tests.test_pyside_remaining
           tests.test_sid_reverse
           tests.test_sid_reverse118
           tests.test_sid_reverse_capture

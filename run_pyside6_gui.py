@@ -8,7 +8,7 @@ from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QApplication
 
 from pyside_app.services import AppPaths
-from pyside_app.window import FrlgWindow
+from pyside_app.migration import CompleteWindow
 
 
 def main(argv=None):
@@ -28,7 +28,7 @@ def main(argv=None):
     app.setFont(QFont("Microsoft YaHei UI", 9))
     app.setWindowIcon(QIcon(str(Path(__file__).resolve().parent / "assets/pyside_preview/app-icon.ico")))
     paths = AppPaths(user=args.data_dir.resolve(), output=args.data_dir.resolve() / "runtime") if args.data_dir else AppPaths()
-    window = FrlgWindow(paths=paths, auto_detect=not (args.no_device_check or args.screenshot))
+    window = CompleteWindow(paths=paths, auto_detect=not (args.no_device_check or args.screenshot))
     width, height = map(int, args.size.lower().split("x"))
     window.resize(width, height)
     window.select_page(args.page)

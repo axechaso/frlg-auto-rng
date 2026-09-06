@@ -6,7 +6,23 @@
 
 已完整阅读目标仓库的 `HANDOFF.md`、`UI_TEXT.md`、`PYSIDE6_PREVIEW.md`。目标仓库没有 `docs/开发交接.md`，该文件实际位于 `C:\Users\axenx\Downloads\NS火叶全自动一键乱数1.1.8\docs\开发交接.md`，已按用户要求阅读。历史文档存在过时验收记录，本轮页面合同以当前 Tk 源码为准。
 
-2026-09-06：以下映射继续记录纯预览入口。独立功能入口 `run_pyside6_gui.py` 已接入存档、设备、实测记录、野生 / 静态搜索生成、预检、运行和日志；详细服务映射与未完成项见 [功能版说明](PYSIDE6_FUNCTIONAL.md)。源 ECS、算法和 Tk 入口未改动。
+2026-09-06：下方历史表继续记录纯预览入口。独立功能入口 `run_pyside6_gui.py` 已接入全部业务页面及设备辅助工具；正式服务和执行边界见 [功能版说明](PYSIDE6_FUNCTIONAL.md)。源 ECS、算法和 Tk 入口未改动。
+
+## 功能入口的当前状态（2026-09-06）
+
+| 页面 / 位置 | 正式 Tk 功能来源 | Qt 功能状态 |
+| --- | --- | --- |
+| SID 查找 | `collect_sid_request`、SID 逐只采集运行器 | 六只资料 / EV、生成、预检、开始 / 停止、真实报告与候选摘要已接入。 |
+| TID 乱数 | `collect_tid_request`、`collect_tid_starter_flow_request`、`_install_tid_persistence` | 日版 / 美版、单独建档 / 连续御三家、校准回填、自动转乱数、参数保存与原有进度恢复已接入。 |
+| TID 实测表 | `TidRecordStore` | 查询、详情、全量 CSV 已接入。 |
+| 野生 / 静态 | `collect_request` / `collect_easycon_options` | 搜索、指定模式、筛选、抓捕 / 道具与高级选项已接入；SID 遍历新增真实运行器和同参数断点读取。 |
+| 孵蛋 | `collect_egg_request`、亲本 / 完整 JSON 配置 | 目录校验、双亲 IV、Held / Pickup、生成、预检、启动 / 停止、配置导入 / 导出已接入。 |
+| 脚本测试 | `prepare_script_test_runtime` | 正式 / 时间轴 / 自选入口、兼容 / 原始 CLI、详细日志与运行前核对已接入。 |
+| 日志底部 | `diagnose_label_log` / `LabelOverrideStore` | 日志诊断、按设备导入 / 拖放 / 清除标签覆盖已接入；保留底部折叠位置。 |
+| 运行准备 | `EasyConController`、DSHOW / MJPEG | Qt 手柄、改键 / 浮窗、监视 / 重连 / 置顶已接入。 |
+| 共通设置 | `update_seed_tables` | Seed 表更新按钮已接入；源码程序更新禁用并说明原因。 |
+
+“已接入”表示已连接现有服务，不表示 Switch 全流程实机验收。新增窗口与全部业务页面实际打开检查，真实脚本生成 / format 预检通过，未自动执行游戏操作。
 
 ## 页面顺序与公共区域
 

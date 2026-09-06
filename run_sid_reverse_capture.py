@@ -365,15 +365,20 @@ def _write_slot_project(
     output_dir: Path,
     base_request: SIDReverseRunRequest,
     slot: int,
+    label_override_profile: Path | None = None,
 ) -> Path:
     request = replace(base_request, party_count=1, start_slot=slot)
-    return write_sid_reverse_project(
+    main_path = write_sid_reverse_project(
         source_dir,
         output_dir,
         request,
         copy_assets=slot == 1,
         plan_filename=f"slot-{slot}-plan.json",
     )
+    if label_override_profile is not None:
+        from device_label_overrides import apply_profile_to_projects, load_label_override_profile
+        apply_profile_to_projects(output_dir, load_label_override_profile(label_override_profile))
+    return main_path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -414,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-path", type=Path)
     parser.add_argument("--report-path", type=Path)
     parser.add_argument("--stop-file", type=Path)
+    parser.add_argument("--label-override-profile", type=Path)
     parser.add_argument(
         "--fingerprint-warnings",
         action="store_true",
@@ -495,6 +501,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.output,
                     base_request,
                     slot,
+                    **({"label_override_profile": args.label_override_profile} if args.label_override_profile else {}),
                 )
                 check = validate_runtime(
                     args.ezcon,
