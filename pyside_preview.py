@@ -1457,6 +1457,7 @@ class FrlgPreviewWindow(QMainWindow):
 
     def _refresh_common_settings(self) -> None:
         advanced = self.advanced_check.isChecked()
+        self.fields["sid_threshold"].setEnabled(advanced)
         egg = self.input_mode == "egg"
         calibration = self.fields["seed_calibration"]
         choices = SEED_CALIBRATION_CHOICES[:3 if egg else 2]
@@ -1632,7 +1633,8 @@ class FrlgPreviewWindow(QMainWindow):
 
     def _refresh_tid_controls(self) -> None:
         flow = self.tid_flow_check.isChecked()
-        for name in ("tid_sound", "tid_button", "tid_seed_button", "tid_name_entry"):
+        for name in ("tid_sound", "tid_button", "tid_seed_button", "tid_name_entry",
+                     "tid_f2_candidate", "tid_f1_candidate", "tid_hits", "tid_window", "tid_threshold"):
             self.fields[name].setEnabled(self.advanced_check.isChecked())
         exhaustive = self.fields["tid_mode"].currentIndex() == 1
         if flow and exhaustive:
