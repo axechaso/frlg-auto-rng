@@ -951,12 +951,14 @@ ENDFUNC
         self.assertNotIn("\n        DOWN\n", surf_gate)
         battle_gate = configured[
             configured.index("FUNC 孵蛋测试_等待池塘野生战斗") : configured.index(
-                "FUNC 孵蛋测试_前往池塘并甜甜香气抓捕"
+                "FUNC 孵蛋测试_池塘冲浪甜甜香气抓捕"
             )
         ]
         self.assertIn("$孵蛋库_池塘野生出现匹配 > 90", battle_gate)
         self.assertIn("$孵蛋库_池塘抓捕就绪匹配 > 95", battle_gate)
         self.assertNotIn("\n        A\n", battle_gate)
+        self.assertIn("FUNC 孵蛋测试_前往池塘并甜甜香气抓捕", configured)
+        self.assertIn("RETURN 孵蛋测试_池塘冲浪甜甜香气抓捕", configured)
         self.assertIn("本轮安全重启", configured)
         sweet_scent_route = configured.split(
             "PRINT 【孵蛋Seed验证】冲浪结束，打开菜单并使用队首甜甜香气",
@@ -1482,7 +1484,13 @@ ENDFUNC
         self.assertNotIn("@蛋孵化", togepi)
         self.assertNotIn("FOR\n        LEFT DOWN", togepi)
         self.assertIn("FUNC 获取波克比_执行专用骑车", configured)
-        self.assertIn("RETURN 获取波克比_执行专用骑车($目标全国图鉴编号)", togepi)
+        self.assertIn("RETURN 4", togepi)
+        self.assertIn("FUNC 获取波克比_领取后前往水之迷宫抓捕", configured)
+        self.assertIn("FUNC 获取波克比_Seed复核后执行专用骑车", configured)
+        self.assertIn(
+            "RETURN 获取波克比_执行专用骑车($目标全国图鉴编号)",
+            configured,
+        )
         togepi_cycle = configured.split("FUNC 获取波克比_执行专用骑车", 1)[1].split(
             "ENDFUNC", 1
         )[0]
@@ -1659,7 +1667,10 @@ ENDFUNC
             "ENDFUNC", 1
         )[0]
         self.assertNotIn("@蛋孵化", togepi)
-        self.assertIn("获取波克比_执行专用骑车", togepi)
+        self.assertIn("RETURN 4", togepi)
+        self.assertIn("FUNC 获取波克比_领取后前往水之迷宫抓捕", static_library)
+        self.assertIn("FUNC 获取波克比_Seed复核后执行专用骑车", static_library)
+        self.assertIn("RETURN 获取波克比_执行专用骑车", static_library)
         soft_reset = library.split(
             "FUNC 孵蛋测试_软重启并跳过回忆", 1
         )[1].split("ENDFUNC", 1)[0]

@@ -22,6 +22,7 @@ from tenlines_seed_updater import (
 )
 
 from .planner import RunPlan
+from .calibration_trust_gates import apply_calibration_trust_gates_text
 from .precalibration import (
     DEFAULT_STORE_PATH as DEFAULT_PRECALIBRATION_STORE_PATH,
     PrecalibrationContext,
@@ -155,8 +156,12 @@ PREVIOUS_SCRIPT_SHA256S += (
     "750eb3349405395edb1879c0bc12f8e53888e6e73d0efde223ae40f17f31530c",
     # First Version 2.0 package with selectable log/parity/expansion fields.
     "183393d7190add9aeb8ea806efcdd14590ee89c887f908abca66580ca928c191",
+    # Version 2.0 package before the latest upstream egg-flow edits.
+    "43a5a9c220db51177f4cc6a9171148a0094b63f3ba49a3d8eb339243203aeca2",
+    # Latest upstream package before per-axis calibration trust gates.
+    "4c3760ce6d96a80f70d1722122713787601c79e510019376edc83dc7703bb8e2",
 )
-EXPECTED_SCRIPT_SHA256 = "43a5a9c220db51177f4cc6a9171148a0094b63f3ba49a3d8eb339243203aeca2"
+EXPECTED_SCRIPT_SHA256 = "dc0249d5e3fe01cc7d89c23851eab16be3bb84d21805cb9a12d532b1bed7ceac"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
@@ -245,6 +250,11 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # Current materialization after the remaining repository overlays were
     # normalized to the 2.0 user-facing version name.
     "4f78b8f30219092e4608eb342d63fd8fde76cbaf9e112b2df17a271ea949008c",
+    # Current Version 2.0 materialization with per-axis calibration trust
+    # gates and the upstream Togepi post-pickup Seed verification helpers.
+    # Diagnostic candidates remain visible but cannot drive an untrusted
+    # Seed, TV-frame or remaining-frame controller.
+    "98efbac0927f5cd9998b3dd85b375459cf2430d508bcc1ea757217e84fdbe1ae",
 )
 
 
@@ -3650,6 +3660,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     standard_configured = _apply_seed_hold_observation_window_text(
         standard_configured
     )
+    standard_configured = apply_calibration_trust_gates_text(standard_configured)
     standard_configured = _apply_seed_mode3_help_start_text(standard_configured)
     standard_path.write_text(standard_configured, encoding="utf-8")
 
@@ -3672,6 +3683,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         EGG_PARTY_SLOT_MAIN_OVERRIDE_PATH.read_text(encoding="utf-8"),
     )
     configured = _apply_seed_hold_observation_window_text(configured)
+    configured = apply_calibration_trust_gates_text(configured)
     configured = _apply_egg_seed_controller_runtime_override_text(
         configured,
         EGG_SEED_CONTROLLER_OVERRIDE_PATH.read_text(encoding="utf-8"),
@@ -3789,6 +3801,7 @@ def write_configured_project(
         options.home_buffer_adaptive_threshold,
     )
     configured = _apply_seed_hold_observation_window_text(configured)
+    configured = apply_calibration_trust_gates_text(configured)
     if options.japanese_starter:
         configured = _apply_japanese_starter_runtime_text(configured)
     if precalibration["enabled"]:
@@ -3967,6 +3980,7 @@ def write_configured_egg_project(
         party_slot_main_override_text,
     )
     configured = _apply_seed_hold_observation_window_text(configured)
+    configured = apply_calibration_trust_gates_text(configured)
     seed_controller_override_text = EGG_SEED_CONTROLLER_OVERRIDE_PATH.read_text(
         encoding="utf-8"
     )

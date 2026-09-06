@@ -76,6 +76,7 @@ jobs:
           sid_traversal.py
           tenlines_seed_updater.py
           automation/easycon118.py
+          automation/calibration_trust_gates.py
           automation/precalibration.py
           automation/seed_common_regions.py
           automation/script_test.py
@@ -121,6 +122,7 @@ jobs:
           tests.test_save_profiles
           tests.test_seed_table_updater
           tests.test_seed_common_regions
+          tests.test_calibration_trust_gates
           tests.test_tenlines_fixes
           tests.test_tid_rng137
           tests.test_tid_calibration

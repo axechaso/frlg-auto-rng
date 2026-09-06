@@ -38,6 +38,54 @@ FUNC 获取波克比_执行专用骑车($目标全国图鉴编号: INT): INT
     RETURN 1
 ENDFUNC
 
+FUNC 获取波克比_领取后前往水之迷宫抓捕($识图阈值: INT, $出闪后继续抓捕: INT): INT
+    # 领取波克比蛋后，从赠蛋老人处直走到水边。路线只使用摇杆，避免长按十字键走路。
+    PRINT 【波克比Seed验证】领取完成，向下前往水之迷宫水边
+    LS DOWN
+    WAIT 1500
+    LS RESET
+    WAIT 300
+    RETURN 孵蛋测试_池塘冲浪甜甜香气抓捕($识图阈值, $出闪后继续抓捕)
+ENDFUNC
+
+FUNC 获取波克比_Seed复核后执行专用骑车($目标全国图鉴编号: INT, $进入TV: INT): INT
+    # 野生能力页位于第6槽；逐层退出后从水面回到岸上，再使用快捷键自行车。
+    PRINT 【波克比】目标Seed已确认，退出野生能力页并开始孵化
+    FOR $波克比专用孵化循环索引 = 1 TO 5
+        B
+        WAIT 1500
+    NEXT
+    LS UP
+    WAIT 200
+    LS RESET
+    WAIT 850
+    IF $进入TV == 0
+        Y
+        WAIT 1000
+    ELSE
+        # Teachy TV占用快捷键时，沿用原波克比流程从背包第二页第四格使用自行车。
+        X
+        WAIT 500
+        DOWN
+        WAIT 500
+        DOWN
+        WAIT 500
+        A
+        WAIT 1500
+        RIGHT
+        WAIT 1500
+        FOR 3
+            DOWN
+            WAIT 500
+        NEXT
+        A
+        WAIT 500
+        A
+        WAIT 1500
+    ENDIF
+    RETURN 获取波克比_执行专用骑车($目标全国图鉴编号)
+ENDFUNC
+
 # 175: 波克比 / Togepi
 FUNC 获取波克比($F2: INT, $目标全国图鉴编号: INT, $进入TV: INT): INT
     $F2执行 = $F2
@@ -65,29 +113,7 @@ FUNC 获取波克比($F2: INT, $目标全国图鉴编号: INT, $进入TV: INT): 
     WAIT 1500
     B
     WAIT 1000
-    IF $进入TV == 0
-        Y
-        WAIT 500
-    ELSE
-        X
-        WAIT 500
-        DOWN
-        WAIT 500
-        DOWN
-        WAIT 500
-        A
-        WAIT 1500
-        RIGHT
-        WAIT 1500
-        FOR 3
-            DOWN
-            WAIT 500
-        NEXT
-        A
-        WAIT 500
-        A
-        WAIT 1500
-    ENDIF
-
-    RETURN 获取波克比_执行专用骑车($目标全国图鉴编号)
+    # 4 = 已领取波克比蛋，交还主脚本执行水之迷宫野生Seed复核。
+    # 只有确认目标Seed后，主脚本才调用专用骑车孵化。
+    RETURN 4
 ENDFUNC

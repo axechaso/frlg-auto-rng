@@ -294,6 +294,13 @@ class TidStarterFlowTests(unittest.TestCase):
 
         self.assertIn("$Seed校准方案 = 0", starter)
         self.assertIn("$Seed启动方案 = 1", starter)
+        self.assertIn(
+            "# GUI 2.0 校准可信门控：不可信维度只观察，不写窗、不下发修正",
+            starter,
+        )
+        self.assertIn("IF $Seed本轮可信 == 0", starter)
+        self.assertIn("IF $TV帧本轮可信 == 0", starter)
+        self.assertIn("IF $剩余帧本轮可信 == 0", starter)
         self.assertEqual(STARTER_SEED_CALIBRATION_SCHEME, 0)
 
     def test_exhaustive_plan_defers_starter_search_until_actual_identity(self):
