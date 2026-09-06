@@ -122,7 +122,7 @@ class CompleteWindow(FrlgWindow):
                 raise ValueError(f"SID 遍历目标最低 ADV 不能大于 {DEFAULT_TARGET_MAX_ADVANCES}")
             options = replace(base.options, continue_capture_after_shiny=False, item_rng_mode=False, party_empty_slots=1)
             start_text = f["wild_traversal_start"].text().strip()
-            start = int(start_text) if self.advanced_check.isChecked() and start_text else None
+            start = r.integer("wild_traversal_start") if self.advanced_check.isChecked() and start_text else None
             sid_traversal_start_advance(self.named_rival, start)
             mode = "sid_traversal"
             extra = {"options": options, "named_rival": self.named_rival, "start_advance": start,

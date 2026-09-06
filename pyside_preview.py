@@ -231,6 +231,9 @@ QCheckBox {
     spacing: 8px;
     color: #46536a;
 }
+QCheckBox:disabled {
+    color: #8998ac;
+}
 QCheckBox::indicator {
     width: 17px;
     height: 17px;

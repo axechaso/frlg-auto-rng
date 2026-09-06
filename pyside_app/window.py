@@ -34,6 +34,7 @@ from tid_records import TidRecordStore
 from tid_session import write_json_atomic
 
 from .jobs import Job
+from .diagnostics import explain_error, parse_integer
 from .profiles import ProfileManager
 from .services import AppPaths, WildInputs, prepare_wild, prepare_run, display_log_line
 
@@ -133,6 +134,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.pending_output = ""
         self.pending_visible = False
+        self.runtime_issues = {}
         self.log_view.document().setMaximumBlockCount(4000)
         self.select_page("wild")
         if auto_detect:
@@ -282,10 +284,7 @@ class FrlgWindow(FrlgPreviewWindow):
     def collect_inputs(self):
         f = self.fields
         def integer(key, title):
-            try:
-                return int(f[key].text().strip())
-            except ValueError:
-                raise ValueError(f"{title}请填写整数") from None
+            return parse_integer(f[key].text(), title)
 
         seed_index = f["wild_seed_mode"].currentIndex()
         direct = f["wild_search_mode"].currentIndex() == 1
@@ -455,9 +454,19 @@ class FrlgWindow(FrlgPreviewWindow):
         self.refresh_state()
 
     def show_error(self, text):
-        self.set_status(text)
-        self.result_panel.setPlainText(text)
-        QMessageBox.warning(self, "操作未完成", text)
+        explanation = explain_error(text)
+        if explanation is None:
+            self.set_status(text)
+            self.result_panel.setPlainText(text)
+            QMessageBox.warning(self, "操作未完成", text)
+            return
+        self.set_status(explanation.summary)
+        self.result_panel.setPlainText(explanation.message + "\n\n原始错误：\n" + text)
+        dialog = QMessageBox(QMessageBox.Icon.Warning, "操作未完成", explanation.message,
+                             QMessageBox.StandardButton.Ok, self)
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setDetailedText(text)
+        dialog.exec()
 
     def search(self):
         if self.input_mode != "wild" or self.running or self.job:
@@ -567,6 +576,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.launch_job(lambda _cancel, _status: prepare_run(prepared, port, video, self.devices[1][video]), ready, "正在重新核对设备、脚本与正式运行器……")
 
     def _process_started(self):
+        self.runtime_issues.clear()
         self.running = True
         self.select_page("logs")
         self.set_status("正在运行；完整日志持续写入工程目录。")
@@ -584,7 +594,9 @@ class FrlgWindow(FrlgPreviewWindow):
         if self.pending_visible:
             cursor = self.log_view.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.End)
-            cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+            # BlockUnderCursor can include the preceding paragraph separator;
+            # deleting another character then clips the previous complete line.
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
             cursor.removeSelectedText()
             if self.log_view.document().blockCount() > 1:
                 cursor.deletePreviousChar()
@@ -592,6 +604,11 @@ class FrlgWindow(FrlgPreviewWindow):
         for line in pieces:
             cleaned = display_log_line(line)
             if cleaned is not None:
+                explanation = explain_error(cleaned)
+                if explanation and explanation.key not in self.runtime_issues:
+                    self.runtime_issues[explanation.key] = explanation
+                    self.log_view.appendPlainText("[问题说明] " + explanation.message)
+                    self.set_status(explanation.summary)
                 self.log_view.appendPlainText(cleaned)
         if self.pending_output:
             self.log_view.appendPlainText(self.pending_output.rstrip("\r"))
@@ -613,7 +630,13 @@ class FrlgWindow(FrlgPreviewWindow):
                 self._append_log("\n预校准已更新。\n" if record else "\n没有完整命中记录，预校准未更新。\n")
             except (OSError, ValueError, TypeError) as exc:
                 self._append_log(f"\n预校准更新失败，原记录保留：{exc}\n")
-        self.set_status(f"运行进程已结束（退出码 {code}）；请查看日志中的实际结果。")
+        if self.runtime_issues:
+            for explanation in self.runtime_issues.values():
+                self._append_log("\n[本次运行问题] " + explanation.message + "\n")
+            issue = next(iter(self.runtime_issues.values()))
+            self.set_status(f"运行已结束（退出码 {code}）：{issue.summary}")
+        else:
+            self.set_status(f"运行进程已结束（退出码 {code}）；请查看日志中的实际结果。")
         if self.closing:
             self.close()
 

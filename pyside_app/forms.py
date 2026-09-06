@@ -6,6 +6,7 @@ from automation import EggRunRequest, SIDReverseRunRequest, TidRngRequest, TidSt
 from automation.tid_search import parse_target_tids
 from assets.game_text import SPECIES_ZH_TO_EN, LOCATION_ZH_TO_EN
 from rng.tenlines_utils import get_species_id
+from .diagnostics import parse_integer
 
 
 def species_id(value):
@@ -26,10 +27,7 @@ class FormReader:
         return widget.currentText() if hasattr(widget, "currentText") else widget.text()
 
     def integer(self, key):
-        try:
-            return int(self.text(key).strip())
-        except ValueError:
-            raise ValueError(f"{self.f[key].accessibleName() or key}请填写整数") from None
+        return parse_integer(self.text(key), self.f[key].accessibleName() or key)
 
     def index(self, key):
         return self.f[key].currentIndex()
@@ -74,7 +72,7 @@ class FormReader:
             max_candies=self.f["sid_candies"].value(), recognition_threshold=self.f["sid_threshold"].value(),
             home_buffer_adaptive_threshold=self.w.home_buffer_check.isChecked(),
             dex_overrides=tuple(species_id(row[0].text()) if i < count else 0 for i, row in enumerate(rows)),
-            initial_levels=tuple(int(row[1].text()) if i < count else 1 for i, row in enumerate(rows)),
+            initial_levels=tuple(parse_integer(row[1].text(), f"队伍第 {i + 1} 只 · 初始等级") if i < count else 1 for i, row in enumerate(rows)),
             source_types=tuple(row[2].currentIndex() if i < count else 0 for i, row in enumerate(rows)),
             locations=tuple(LOCATION_ZH_TO_EN.get(row[3].text().strip(), row[3].text().strip()) if i < count else "" for i, row in enumerate(rows)),
             effort_values=tuple(tuple(s.value() for s in row[4:]) if i < count else (0,) * 6 for i, row in enumerate(rows)))
