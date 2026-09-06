@@ -192,7 +192,14 @@ class TidState(QObject):
                 state = saved["state"]
                 status = "已命中完成，下次重新开始" if saved["status"] == "completed" else "存在同参数进度"
                 if state.get("MODE", 0) == 1:
-                    text = f"{status}：{'穷举转乱数' if state['SWITCHED'] else '乱数'}，目标 TID {state['TARGET']:05d}，中心 OP/F1/F2 {state['OP_CENTER']}/{state['F1_CENTER']}/{state['F2_CENTER']}，当前壳层 ±{state['RADIUS']}，累计 {state['COUNT']} 次。"
+                    ranges = "；".join(
+                        f"{axis} [-{state.get(axis + '_NEG', state[axis + '_RANGE'])}, +{state[axis + '_RANGE']}]"
+                        for axis in ("OP", "F1", "F2"))
+                    text = (
+                        f"{status}：{'穷举转乱数' if state['SWITCHED'] else '乱数'}，目标 TID {state['TARGET']:05d}\n"
+                        f"中心 OP/F1/F2：{state['OP_CENTER']}/{state['F1_CENTER']}/{state['F2_CENTER']}\n"
+                        f"实际偏移范围：{ranges}\n"
+                        f"当前壳层 ±{state['RADIUS']}，累计 {state['COUNT']} 次。")
                 else:
                     text = f"{status}：穷举层级 {state['STAGE']}，OP/F1/F2 偏移 {state['OP']}/{state['F1']}/{state['F2']}，累计 {state['COUNT']} 次。"
                 if request.auto_rng and "COMPLETED_REGIONS" in state:
