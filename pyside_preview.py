@@ -232,11 +232,35 @@ QCheckBox {
     color: #46536a;
 }
 QCheckBox:disabled {
-    color: #8998ac;
+    color: #667387;
 }
 QCheckBox::indicator {
     width: 17px;
     height: 17px;
+    border: 1px solid #8d9ab0;
+    border-radius: 4px;
+    background: #ffffff;
+    image: none;
+}
+QCheckBox::indicator:enabled:hover, QCheckBox::indicator:enabled:focus {
+    border-color: #6177f2;
+    background: #eef1ff;
+}
+QCheckBox::indicator:enabled:checked {
+    border-color: #586ee3;
+    background: #6177f2;
+    image: url("@CHECK_WHITE@");
+}
+QCheckBox::indicator:enabled:checked:hover, QCheckBox::indicator:enabled:checked:focus {
+    border-color: #475dd0;
+    background: #5268df;
+}
+QCheckBox::indicator:disabled {
+    border-color: #8995a7;
+    background: #cdd4df;
+}
+QCheckBox::indicator:disabled:checked {
+    image: url("@CHECK_GRAY@");
 }
 QPushButton[kind="ghost"] {
     min-height: 34px;
@@ -456,6 +480,8 @@ QTabBar::tab:disabled { color: #aab3c3; }
 _PREVIEW_ICONS = Path(__file__).resolve().parent / "assets" / "pyside_preview"
 APP_STYLE = APP_STYLE.replace("@SPIN_UP@", (_PREVIEW_ICONS / "chevron-up.svg").as_posix())
 APP_STYLE = APP_STYLE.replace("@SPIN_DOWN@", (_PREVIEW_ICONS / "chevron-down.svg").as_posix())
+APP_STYLE = APP_STYLE.replace("@CHECK_WHITE@", (_PREVIEW_ICONS / "check-white.svg").as_posix())
+APP_STYLE = APP_STYLE.replace("@CHECK_GRAY@", (_PREVIEW_ICONS / "check-gray.svg").as_posix())
 
 STATS = ("HP", "攻击", "防御", "特攻", "特防", "速度")
 NOT_CONNECTED = "界面预览：此操作尚未接入后端。"
