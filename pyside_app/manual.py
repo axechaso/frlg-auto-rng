@@ -15,6 +15,7 @@ from tid_session import write_json_atomic
 from .jobs import Job
 from .controller_layout import ControllerLayout, DEFAULT_KEYS, LABELS, load_mapping_values, validate_mapping
 from .controller_keyboard import ControllerKeyboard
+from .monitor_view import VideoSurface, ZOOM_WIDTHS, video_rect
 
 DIRECTIONS = {(0, -1): "TOP", (0, 1): "DOWN", (-1, 0): "LEFT", (1, 0): "RIGHT",
               (-1, -1): "TOP_LEFT", (1, -1): "TOP_RIGHT", (-1, 1): "DOWN_LEFT", (1, 1): "DOWN_RIGHT"}
@@ -511,6 +512,9 @@ class FrameReader:
                 capture = cv2.VideoCapture(self.source, cv2.CAP_DSHOW)
                 if not capture.isOpened():
                     raise ValueError("采集卡打开失败，请确认未被其他程序占用")
+                capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 while not self.stop.is_set():
                     ok, frame = capture.read()
                     if ok:
@@ -536,7 +540,11 @@ class MonitorWindow(QDialog):
         self.setWindowTitle("监视窗口")
         self.setStyleSheet(TOOL_STYLE)
         self.resize(720, 490)
-        layout = QVBoxLayout(self)
+        self.picture_only = False
+        self.wheel_delta = 0
+        self.video_layout = layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(6)
         self.toolbar = QWidget()
         tools = QHBoxLayout(self.toolbar)
         self.status = QLabel("等待连接")
@@ -545,17 +553,21 @@ class MonitorWindow(QDialog):
         self.status.setMaximumHeight(48)
         self.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         tools.addWidget(self.status, 1)
-        for text, callback in (("重连", self.restart), ("置顶", self.toggle_topmost)):
+        self.zoom_buttons = {}
+        for text, callback in (("−", lambda: self.zoom_by(-1)), ("+", lambda: self.zoom_by(1)), ("重连", self.restart), ("置顶", self.toggle_topmost)):
             button = QPushButton(text)
+            button.setAutoDefault(False)
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            if text in ("−", "+"):
+                button.setFixedWidth(36)
+                button.setToolTip("缩小画面" if text == "−" else "放大画面")
+                self.zoom_buttons[text] = button
             button.clicked.connect(callback)
             tools.addWidget(button)
         layout.addWidget(self.toolbar)
-        self.picture = QLabel("双击仅显示画面；滚轮缩放窗口")
-        self.picture.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.picture.setMinimumSize(240, 160)
-        self.picture.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        self.picture.setStyleSheet("background:#142038;color:#c7d4e9;border-radius:8px")
-        self.picture.installEventFilter(self)
+        self.picture = VideoSurface(self)
+        self.picture.double_clicked.connect(self.toggle_picture_only)
+        self.picture.wheel_scrolled.connect(self.wheel_zoom)
         layout.addWidget(self.picture, 1)
         self.render_after = 0
         self.timer = QTimer(self)
@@ -600,7 +612,41 @@ class MonitorWindow(QDialog):
         if self.reader:
             self.status.setText(self.reader.status)
             if self.reader.frame is not None and time.monotonic() >= self.render_after:
-                self.picture.setPixmap(QPixmap.fromImage(self.reader.frame).scaled(self.picture.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                self.picture.set_frame(self.reader.frame)
+
+    def resize_video(self, width):
+        if self.isMaximized() or self.isFullScreen():
+            self.showNormal()
+        # Settle once more after the width changes: a long connection status
+        # can wrap and change toolbar height at the smaller zoom levels.
+        for _ in range(2):
+            self.layout().activate()
+            self.window_chrome.shell.layout().activate()
+            self.video_layout.activate()
+            extra_width = self.width() - self.picture.width()
+            extra_height = self.height() - self.picture.height()
+            bounds = self.screen().availableGeometry()
+            limit = min(1280, bounds.width() - extra_width, (bounds.height() - extra_height) * 16 / 9)
+            fitted = max(160, int(min(max(320, width), limit)))
+            self.resize(fitted + extra_width, round(fitted * 9 / 16) + extra_height)
+
+    def zoom_by(self, direction):
+        width = video_rect(self.picture.width(), self.picture.height()).width()
+        candidates = [value for value in ZOOM_WIDTHS if value > width + 2] if direction > 0 else [value for value in ZOOM_WIDTHS if value < width - 2]
+        target = min(candidates) if direction > 0 and candidates else max(candidates) if candidates else width
+        self.resize_video(target)
+
+    def toggle_picture_only(self):
+        width = video_rect(self.picture.width(), self.picture.height()).width()
+        self.picture_only = not self.picture_only
+        self.picture.content_only = self.picture_only
+        self.picture.drag_offset = None
+        self.toolbar.setVisible(not self.picture_only)
+        self.video_layout.setContentsMargins(*([0] * 4 if self.picture_only else [10] * 4))
+        self.video_layout.setSpacing(0 if self.picture_only else 6)
+        self.window_chrome.set_content_only(self.picture_only)
+        self.resize_video(width)
+        self.picture.setFocus()
 
     def resizeEvent(self, event):
         self.render_after = time.monotonic() + .12
@@ -610,15 +656,19 @@ class MonitorWindow(QDialog):
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, not bool(self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
         self.show()
 
-    def eventFilter(self, obj, event):
-        if obj is self.picture and event.type() == QEvent.Type.MouseButtonDblClick:
-            self.toolbar.setVisible(not self.toolbar.isVisible())
-            return True
-        if obj is self.picture and event.type() == QEvent.Type.Wheel:
-            factor = 1.1 if event.angleDelta().y() > 0 else 1 / 1.1
-            self.resize(max(320, int(self.width() * factor)), max(240, int(self.height() * factor)))
-            return True
-        return super().eventFilter(obj, event)
+    def wheel_zoom(self, delta):
+        self.wheel_delta += delta
+        while abs(self.wheel_delta) >= 120:
+            direction = 1 if self.wheel_delta > 0 else -1
+            self.zoom_by(direction)
+            self.wheel_delta -= direction * 120
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape and self.picture_only:
+            self.toggle_picture_only()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def closeEvent(self, event):
         self.stop_capture()

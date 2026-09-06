@@ -57,6 +57,7 @@ jobs:
           pyside_app/results.py
           pyside_app/accessories.py
           pyside_app/manual.py
+          pyside_app/monitor_view.py
           pyside_app/controller_layout.py
           pyside_app/controller_keyboard.py
           run_auto_rng_gui.py
@@ -109,6 +110,7 @@ jobs:
           tests.test_pyside_backend
           tests.test_pyside_remaining
           tests.test_pyside_controller
+          tests.test_pyside_monitor
           tests.test_pyside_progress_refill
           tests.test_sid_reverse
           tests.test_sid_reverse118

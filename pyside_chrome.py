@@ -144,13 +144,15 @@ class WindowChrome(QObject):
         super().__init__(window)
         self.window = window
         self.dark = dark
+        self.content_only = False
         window.setWindowFlag(Qt.WindowType.FramelessWindowHint)
         self.titlebar = TitleBar(window, dark=dark)
         self.shell = QFrame()
         self.shell.setObjectName("windowShell")
         color = "#2f4060" if dark else "#d9e2ef"
         background = "#17213a" if dark else "#f3f6fb"
-        self.shell.setStyleSheet(f"QFrame#windowShell {{background: {background}; border: 1px solid {color};}}")
+        self.normal_shell_style = f"QFrame#windowShell {{background: {background}; border: 1px solid {color};}}"
+        self.shell.setStyleSheet(self.normal_shell_style)
         shell_layout = QVBoxLayout(self.shell)
         shell_layout.setContentsMargins(1, 1, 1, 1)
         shell_layout.setSpacing(0)
@@ -184,11 +186,18 @@ class WindowChrome(QObject):
         window.installEventFilter(self)
         self.refresh()
 
+    def set_content_only(self, enabled):
+        self.content_only = bool(enabled)
+        # Reset the stylesheet as well as the layout margin: repolishing a
+        # dynamic property alone leaves QFrame's old one-pixel contents inset.
+        self.shell.setStyleSheet("QFrame#windowShell {background:black; border:0px;}" if self.content_only else self.normal_shell_style)
+        self.refresh()
+
     def refresh(self):
         window = self.window
         maximized = window.isMaximized() or window.isFullScreen()
-        self.shell.layout().setContentsMargins(*([0] * 4 if maximized else [1] * 4))
-        self.titlebar.setVisible(not window.isFullScreen())
+        self.shell.layout().setContentsMargins(*([0] * 4 if maximized or self.content_only else [1] * 4))
+        self.titlebar.setVisible(not window.isFullScreen() and not self.content_only)
         for button in self.titlebar.buttons.values():
             button.refresh()
         w, h, grip, corner = window.width(), window.height(), 5, 12
