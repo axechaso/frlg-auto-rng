@@ -12,8 +12,8 @@ import sys
 from html import escape
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QIcon
+from PySide6.QtCore import QEvent, QSignalBlocker, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
+    QStyle,
+    QStyleOption,
     QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
@@ -531,6 +533,20 @@ class PreviewComboBox(QComboBox):
         # QComboBox resets the popup's scrollbar policy when opening. Restore
         # the visible scroll affordance after it has sized the list.
         self.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+
+class CompletionPopup(QListView):
+    def event(self, event):
+        result = super().event(event)
+        if event.type() == QEvent.Type.Paint:
+            # A translucent top-level item view paints its viewport separately.
+            # Paint the stylesheet's rounded surface on the outer window too.
+            option = QStyleOption()
+            option.initFrom(self)
+            painter = QPainter(self)
+            self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, option, painter, self)
+            painter.end()
+        return result
 
 
 def _combo(*items: str, current: int = 0) -> QComboBox:

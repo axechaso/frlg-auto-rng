@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, QTimer, Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QCheckBox, QComboBox, QCompleter, QFileDialog, QLabel, QMessageBox, QSpinBox
+from PySide6.QtWidgets import QCheckBox, QComboBox, QCompleter, QFileDialog, QLabel, QMessageBox, QSpinBox, QStyledItemDelegate
 
 from app_paths import RESOURCE_ROOT
 from assets.game_text import SPECIES_EN_TO_ZH
@@ -18,6 +18,7 @@ from rng.tenlines_utils import get_species_name
 from rng.sid_reverse import find_earliest_shiny_sid, parse_pid_hex, sid_min_advances_for_f3, DEFAULT_TID_SID_SEARCH_ADVANCES
 from sid_traversal import DEFAULT_TARGET_MAX_ADVANCES, sid_traversal_start_advance
 from tid_session import write_json_atomic
+from pyside_preview import APP_STYLE, CompletionPopup
 from .window import FrlgWindow
 from .forms import FormReader, species_id
 from .workflows import WorkflowInputs, prepare_workflow, prepare_workflow_run
@@ -65,6 +66,20 @@ class CompleteWindow(FrlgWindow):
             completer = QCompleter(choices, edit)
             completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
             completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            completer.setMaxVisibleItems(8)
+            popup = CompletionPopup()
+            completer.setPopup(popup)
+            popup.setObjectName("comboPopupList")
+            # A completer popup is a separate window and does not inherit the
+            # main window's stylesheet. Share the existing dropdown appearance.
+            popup.setStyleSheet(APP_STYLE)
+            popup.setItemDelegate(QStyledItemDelegate(popup))
+            popup.setUniformItemSizes(True)
+            popup.setMouseTracking(True)
+            popup.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            popup.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            popup.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+            popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             edit.setCompleter(completer)
         self.fields["script_entry"].currentIndexChanged.connect(self.sync_script)
         self.fields["source"].editingFinished.connect(self.sync_script)
