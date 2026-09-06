@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QDialog,
     QFrame,
     QGraphicsDropShadowEffect,
     QGridLayout,
@@ -44,6 +43,8 @@ from PySide6.QtWidgets import (
 )
 
 from app_version import APP_VERSION
+from pyside_chrome import ThemedDialog as QDialog
+from pyside_chrome import decorate_window
 from assets.pyside_preview.help_text import ACTION_HELP, CARD_HELP, FIELD_HELP, HELP_TEXT
 from assets.game_text import (
     CATEGORY_EN_TO_ZH, WILD_CATEGORIES, FILTER_SHINY_ZH_TO_EN,
@@ -71,6 +72,9 @@ APP_STYLE = r"""
 }
 QMainWindow, QWidget#appRoot, QScrollArea, QScrollArea > QWidget > QWidget {
     background: #f3f6fb;
+}
+QScrollArea {
+    border: none;
 }
 QFrame#sidebar {
     background: #17213a;
@@ -350,6 +354,13 @@ QPlainTextEdit#logView {
     font-family: "Cascadia Mono", "Consolas";
     font-size: 12px;
 }
+QPlainTextEdit#resultPanel {
+    background: #ffffff;
+    color: #344765;
+    border: 1px solid #e3e8f1;
+    border-radius: 12px;
+    padding: 12px;
+}
 QScrollBar:vertical {
     width: 11px;
     margin: 3px;
@@ -604,6 +615,7 @@ class FrlgPreviewWindow(QMainWindow):
         self.advanced_dialog = self._build_advanced_settings()
         self._install_help()
         self.select_page("sid")
+        decorate_window(self, dark=True)
 
     def _build_sidebar(self) -> QWidget:
         sidebar = QFrame()
@@ -785,6 +797,7 @@ class FrlgPreviewWindow(QMainWindow):
         self.result_dialog.resize(700, 480)
         result_layout = QVBoxLayout(self.result_dialog)
         self.result_panel = QPlainTextEdit()
+        self.result_panel.setObjectName("resultPanel")
         self.result_panel.setReadOnly(True)
         self.result_panel.setPlainText("方案与预检结果\n尚未接入方案生成或预检服务。此处没有可运行的计划。")
         result_layout.addWidget(self.result_panel)

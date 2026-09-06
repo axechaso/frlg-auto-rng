@@ -43,6 +43,7 @@ jobs:
           tid_session.py
           process_control.py
           pyside_preview.py
+          pyside_chrome.py
           run_pyside6_gui.py
           pyside_app/services.py
           pyside_app/jobs.py
@@ -101,6 +102,7 @@ jobs:
           tests.test_label_matcher
           tests.test_manual_tools
           tests.test_pyside_preview
+          tests.test_pyside_chrome
           tests.test_pyside_services
           tests.test_pyside_backend
           tests.test_pyside_remaining

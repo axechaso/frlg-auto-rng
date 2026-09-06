@@ -7,7 +7,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QImage, QKeySequence, QPainter, QPixmap
-from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QMessageBox, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QMessageBox, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from pyside_chrome import ThemedDialog as QDialog
 
 from app_paths import DATA_ROOT, RESOURCE_ROOT, USER_DATA_ROOT
 from tid_session import write_json_atomic

@@ -1,8 +1,9 @@
 """Qt editor for the existing, validated SaveProfileStore."""
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QDialog, QGridLayout, QHBoxLayout, QListWidget, QMessageBox, QVBoxLayout,
+    QGridLayout, QHBoxLayout, QListWidget, QMessageBox, QVBoxLayout,
 )
+from pyside_chrome import ThemedDialog as QDialog
 from pyside_preview import Card, FrlgPreviewWindow, _button, _combo, _line
 
 
