@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QAbstractButton, QComboBox
 from automation.tid_rng137 import resolve_tid_template
 from automation.tid_calibration import calibrated_tid_request, tid_request_from_dict
 from automation.tid_search import progress_supported
+from automation.tid_checkpoint import _exhaustive_start
 from rng.starter_sid_verification import sid_advance_scan_offsets
 from tid_session import load_tid_settings, write_json_atomic, progress_context, read_progress, latest_progress
 
@@ -21,6 +22,7 @@ class TidState(QObject):
         self.path = window.paths.user / "tid_settings.json"
         self.blocked = False
         self.pending = None
+        self.refill = None
         self.unknown = {}
         self.widgets = {key + "_var": widget for key, widget in window.fields.items() if key.startswith("tid_")}
         aliases = {"tid_pid": "tid_shiny_pid", "tid_button": "tid_button_mode", "tid_close": "tid_close_delay",
@@ -70,6 +72,7 @@ class TidState(QObject):
                 window.updating = False
             self.pending = saved.get("pending_calibration")
             window._refresh_tid_controls()
+            self.restore_refill(saved.get("qt_progress_refill"))
             self.restore_calibration()
         except (ValueError, OSError, TypeError, KeyError) as exc:
             self.blocked = True
@@ -77,7 +80,7 @@ class TidState(QObject):
         for widget in self.widgets.values():
             signal = widget.toggled if isinstance(widget, QAbstractButton) else widget.currentIndexChanged if isinstance(widget, QComboBox) else widget.textChanged
             signal.connect(self.schedule)
-        window._bind("刷新进度", self.refresh_progress)
+        window._bind("刷新进度", lambda: self.refresh_progress(fill_starts=True))
         self.poll_timer = QTimer(self)
         self.poll_timer.setInterval(1500)
         self.poll_timer.timeout.connect(self.poll)
@@ -105,15 +108,34 @@ class TidState(QObject):
 
     def schedule(self, *_):
         if not self.w.updating and not self.blocked:
+            sender = self.sender()
+            if sender in [self.w.fields[f"tid_{axis}_start"] for axis in ("op", "f1", "f2")] or (
+                sender is self.w.tid_resume_check and not sender.isChecked()
+            ):
+                self.refill = None
             self.save_timer.start()
 
-    def save(self):
+    def save(self, *, refresh=True):
         self.save_timer.stop()
         if self.blocked:
             return
         try:
-            write_json_atomic(self.path, {"schema": 1, "values": self.values(), "pending_calibration": self.pending})
-            self.refresh_progress()
+            values = self.values()
+            if self.refill:
+                # Recheck edits before persisting the display/origin association.
+                try:
+                    self.w.reader.tid()
+                except (ValueError, TypeError):
+                    self.refill = None
+            if self.refill:
+                for axis, value in self.refill["original_starts"].items():
+                    values[f"tid_{axis}_start_var"] = value
+            payload = {"schema": 1, "values": values, "pending_calibration": self.pending}
+            if self.refill:
+                payload["qt_progress_refill"] = self.refill
+            write_json_atomic(self.path, payload)
+            if refresh:
+                self.refresh_progress()
         except OSError as exc:
             self.w.tid_progress_status.setText(f"TID 参数保存失败：{exc}")
 
@@ -164,25 +186,100 @@ class TidState(QObject):
         self.save()
         self.w.set_status("固定延迟与 OP 修正已回填；运行器按实测参数继续。")
 
-    def refresh_progress(self):
+    def _context(self, request):
+        request = replace(request, calibration_check=False)
+        flow = self.w.reader.flow(request)
+        if flow:
+            request = flow.to_flow_tid_request()
+        template = resolve_tid_template(self.w.fields["tid_source"].text(), request.language)
+        flow_payload = {**asdict(flow), "tid_request": flow.tid_request.to_dict()} if flow else None
+        context = progress_context(request, self.w.fields["tid_game"].currentText(),
+            hashlib.sha256(template.read_bytes()).hexdigest(), flow_payload)
+        return request, flow, context
+
+    def effective_request(self, request):
+        """The visible checkpoint position does not redefine its search origin."""
+        binding = self.refill
+        if not binding:
+            return request
+        if self.w.tid_resume_check.isChecked() and all(
+            self.w.fields[f"tid_{axis}_start"].text() == text
+            for axis, text in binding["displayed_starts"].items()
+        ):
+            candidate = replace(request, **{
+                f"{axis}_start": int(value) for axis, value in binding["original_starts"].items()})
+            try:
+                if self._context(candidate)[2] == binding["context"]:
+                    return candidate
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        self.refill = None
+        return request
+
+    def restore_refill(self, binding):
+        # The shared draft retains original starts so the unchanged Tk entry
+        # addresses the same checkpoint. Only Qt restores this display layer.
+        if not isinstance(binding, dict) or binding.get("schema") != 1:
+            return
+        for key in ("original_starts", "displayed_starts"):
+            values = binding.get(key)
+            if not isinstance(values, dict) or set(values) != {"op", "f1", "f2"}:
+                return
+            if any(not isinstance(value, str) or not value.isascii() or not value.isdecimal() for value in values.values()):
+                return
+        if not self.w.tid_resume_check.isChecked() or any(
+            self.w.fields[f"tid_{axis}_start"].text() != value for axis, value in binding["original_starts"].items()
+        ):
+            return
+        try:
+            if self._context(self.w.reader.tid())[2] != binding.get("context"):
+                return
+        except (OSError, ValueError, KeyError, TypeError):
+            return
+        self.refill = binding
+        for axis, text in binding["displayed_starts"].items():
+            widget = self.w.fields[f"tid_{axis}_start"]
+            with QSignalBlocker(widget):
+                widget.setText(text)
+
+    def _fill_progress_starts(self, saved, request, context):
+        if self.w.running or self.w.job is not None:
+            return "运行中或后台任务处理中，仅刷新进度；停止后可回填穷举起点。"
+        if saved["status"] == "completed":
+            return "已完成的检查点不回填穷举起点。"
+        if request.mode != 0:
+            return "当前是手动乱数进度，不回填穷举起点。"
+        state = saved["state"]
+        starts = {
+            axis.lower(): str(state[axis + "_CENTER"] if state.get("SWITCHED") else
+                _exhaustive_start(request, axis) + state[axis])
+            for axis in ("OP", "F1", "F2")
+        }
+        originals = self.refill["original_starts"] if self.refill else {
+            axis: self.w.fields[f"tid_{axis}_start"].text() for axis in starts}
+        for axis, text in starts.items():
+            with QSignalBlocker(self.w.fields[f"tid_{axis}_start"]):
+                self.w.fields[f"tid_{axis}_start"].setText(text)
+        self.refill = {"schema": 1, "context": context, "original_starts": originals,
+            "displayed_starts": starts} if self.w.tid_resume_check.isChecked() else None
+        self.w.invalidate()
+        self.save(refresh=False)
+        return "已回填 OP / F1 / F2 穷举起点；续跑仍恢复原检查点。" if self.refill else "已回填穷举起点；当前未勾选续跑，将按回填起点开始新搜索。"
+
+    def refresh_progress(self, *, fill_starts=False):
         if self.blocked:
             return
         try:
-            request = replace(self.w.reader.tid(), calibration_check=False)
+            request = replace(self.effective_request(self.w.reader.tid()), calibration_check=False)
             if not progress_supported(request):
                 self.w.tid_progress_status.setText("参数自动保存；乱数半径全为 0，重复同一参数点，无需恢复搜索位置。")
                 return
-            flow = self.w.reader.flow(request)
-            if flow:
-                request = flow.to_flow_tid_request()
-            template = resolve_tid_template(self.w.fields["tid_source"].text(), request.language)
-            flow_payload = {**asdict(flow), "tid_request": flow.tid_request.to_dict()} if flow else None
-            context = progress_context(request, self.w.fields["tid_game"].currentText(), hashlib.sha256(template.read_bytes()).hexdigest(), flow_payload)
+            request, flow, context = self._context(request)
             directory = self.w.paths.user / "tid_progress"
             saved = read_progress(directory, context)
             if flow and not flow.deferred_identity:
                 contexts = [progress_context(replace(request, sid_advance_correction=request.sid_advance_correction + offset),
-                    context["game"], context["template_sha256"], flow_payload) for offset in sid_advance_scan_offsets(flow.sid_retry_radius)]
+                    context["game"], context["template_sha256"], context["flow_request"]) for offset in sid_advance_scan_offsets(flow.sid_retry_radius)]
                 latest = latest_progress(directory, contexts)
                 if latest:
                     saved = latest[1]
@@ -204,6 +301,8 @@ class TidState(QObject):
                     text = f"{status}：穷举层级 {state['STAGE']}，OP/F1/F2 偏移 {state['OP']}/{state['F1']}/{state['F2']}，累计 {state['COUNT']} 次。"
                 if request.auto_rng and "COMPLETED_REGIONS" in state:
                     text += f" 已完成局部区域 {state['COMPLETED_REGIONS']} 个。"
+                if fill_starts:
+                    text += "\n" + self._fill_progress_starts(saved, request, context)
             self.w.tid_progress_status.setText(text)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             self.w.tid_progress_status.setText(f"参数自动保存；暂不能匹配进度：{exc}")

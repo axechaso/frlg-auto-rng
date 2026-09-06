@@ -108,7 +108,8 @@ class FormReader:
         values.update({name: check.isChecked() for name, check in zip(("same_id", "sequential_id", "include_65535", "single_digit_id"), w.tid_special_checks)})
         request = TidRngRequest(**values)
         request.validate()
-        return request
+        state = getattr(w, "tid_state", None)
+        return state.effective_request(request) if state else request
 
     def flow(self, request):
         if not self.w.tid_flow_check.isChecked():

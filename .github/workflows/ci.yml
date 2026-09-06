@@ -106,6 +106,7 @@ jobs:
           tests.test_pyside_services
           tests.test_pyside_backend
           tests.test_pyside_remaining
+          tests.test_pyside_progress_refill
           tests.test_sid_reverse
           tests.test_sid_reverse118
           tests.test_sid_reverse_capture
