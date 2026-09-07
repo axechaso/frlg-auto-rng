@@ -21,6 +21,9 @@ class WindowsReleaseScriptTests(unittest.TestCase):
             '"--exclude-module", "tkinterdnd2"',
             '"--hidden-import", "run_pyside6_gui"',
             '"--screenshot"',
+            '$ForeignIcuPatterns',
+            '"icuuc.dll", "icudt*.dll", "icuin*.dll"',
+            'Remove-Item -Force -LiteralPath $ForeignIcu.FullName',
         ):
             self.assertIn(required, source)
         self.assertGreaterEqual(source.count('"--collect-submodules", "truststore"'), 2)

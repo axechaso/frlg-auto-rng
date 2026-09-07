@@ -93,6 +93,28 @@ try {
     Pop-Location
 }
 
+# Qt 6.11 on Windows links Qt6Core against the unversioned Windows ICU API.
+# A build host can have a third-party icuuc.dll (for example Poppler's ICU 78)
+# earlier on PATH; PyInstaller may then collect that incompatible DLL into
+# _internal.  It exports only version-suffixed symbols and makes QtCore fail
+# with ERROR_PROC_NOT_FOUND.  PySide6's wheel deliberately does not ship this
+# DLL, so remove only foreign ICU files collected at the _internal root and
+# let Windows resolve its own System32 ICU implementation.
+$MainInternalRoot = Join-Path $PyInstallerDist "FRLG-Auto-RNG\_internal"
+$SystemIcu = Join-Path $env:WINDIR "System32\icuuc.dll"
+if (-not (Test-Path -LiteralPath $SystemIcu -PathType Leaf)) {
+    throw "当前 Windows 缺少 PySide6 所需的系统 ICU：$SystemIcu"
+}
+$ForeignIcuPatterns = @("icuuc.dll", "icudt*.dll", "icuin*.dll")
+foreach ($ForeignIcuPattern in $ForeignIcuPatterns) {
+    Get-ChildItem -LiteralPath $MainInternalRoot -File -Filter $ForeignIcuPattern -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $ForeignIcu = $_
+            Write-Host "移除构建环境误收的 ICU：$($ForeignIcu.Name)"
+            Remove-Item -Force -LiteralPath $ForeignIcu.FullName
+        }
+}
+
 $updaterArgs = @(
     "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
     "--name", "FRLG-Auto-RNG-Updater", "--distpath", $UpdaterDist,
