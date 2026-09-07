@@ -3,7 +3,8 @@ param(
     [string]$EasyConPublish = "",
     [string]$OutputName = "",
     [string]$BuildTag = "",
-    [string]$LocalAssets = ""
+    [string]$LocalAssets = "",
+    [string]$NotesFile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,6 +35,11 @@ if (Test-Path -LiteralPath $BuildRoot) {
 }
 if (-not $LocalAssets) { $LocalAssets = Join-Path $Root "local_assets" }
 $LocalAssets = (Resolve-Path -LiteralPath $LocalAssets).Path
+if (-not $NotesFile) { $NotesFile = Join-Path $Root "docs\releases\v$AppVersion.md" }
+$NotesFile = (Resolve-Path -LiteralPath $NotesFile).Path
+if (-not (Test-Path -LiteralPath $NotesFile -PathType Leaf)) {
+    throw "找不到发布说明：$NotesFile"
+}
 
 # tkinter is part of the CPython distribution, not a pip package.  Some
 # installations cannot be inspected by PyInstaller's Tcl/Tk hook (for
@@ -176,7 +182,7 @@ foreach ($IntermediatePath in @($PyInstallerDist, $PyInstallerWork, $UpdaterDist
 Compress-Archive -Force -Path (Join-Path $ReleaseRoot "*") -DestinationPath $ZipPath
 Push-Location $Root
 try {
-    & $Python -m tools.create_update_manifest --package $ZipPath --unpacked-root $ReleaseRoot
+    & $Python -m tools.create_update_manifest --package $ZipPath --unpacked-root $ReleaseRoot --notes-file $NotesFile
     if ($LASTEXITCODE -ne 0) { throw "更新清单生成失败" }
 } finally {
     Pop-Location

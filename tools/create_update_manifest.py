@@ -36,7 +36,7 @@ def create_manifest(
     package: Path,
     unpacked_root: Path,
     *,
-    notes: str = "FRLG Auto RNG 0.2.2：修复发布包中文标签路径兼容性。",
+    notes: str = "FRLG Auto RNG 0.9 PySide6版。",
     release_url: str | None = None,
 ) -> dict[str, object]:
     package = Path(package).resolve()
@@ -77,9 +77,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--package", required=True, type=Path)
     parser.add_argument("--unpacked-root", required=True, type=Path)
-    parser.add_argument("--notes", default="FRLG Auto RNG 0.2.2：修复发布包中文标签路径兼容性。")
+    notes = parser.add_mutually_exclusive_group()
+    notes.add_argument("--notes")
+    notes.add_argument("--notes-file", type=Path)
     args = parser.parse_args(argv)
-    manifest = create_manifest(args.package, args.unpacked_root, notes=args.notes)
+    if args.notes_file is not None:
+        release_notes = args.notes_file.read_text(encoding="utf-8")
+    else:
+        release_notes = args.notes or "FRLG Auto RNG 0.9 PySide6版。"
+    manifest = create_manifest(args.package, args.unpacked_root, notes=release_notes)
     print(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
     return 0
 

@@ -3,6 +3,7 @@ param(
     [string]$BuildRoot,
     [string]$Tag = "",
     [string]$Title = "",
+    [string]$NotesFile = "",
     [switch]$DryRun
 )
 
@@ -13,7 +14,13 @@ $AppVersion = (& python -c "import sys; sys.path.insert(0, r'$RepoRoot'); from a
 if (-not $AppVersion) { throw "无法读取 app_version.py" }
 if (-not $Tag) { $Tag = "v$AppVersion" }
 if ($Tag -ne "v$AppVersion") { throw "发布标签必须是 v$AppVersion" }
-if (-not $Title) { $Title = "FRLG Auto RNG $AppVersion 整包更新器版" }
+if (-not $Title) { $Title = "FRLG Auto RNG $AppVersion PySide6版" }
+if (-not $NotesFile) { $NotesFile = Join-Path $RepoRoot "docs\releases\v$AppVersion.md" }
+$NotesFile = (Resolve-Path -LiteralPath $NotesFile).Path
+if (-not (Test-Path -LiteralPath $NotesFile -PathType Leaf) -or
+    -not (Get-Content -LiteralPath $NotesFile -Raw -Encoding UTF8).Trim()) {
+    throw "发布说明不存在或为空：$NotesFile"
+}
 
 $BuildRoot = (Resolve-Path -LiteralPath $BuildRoot).Path
 $Package = Join-Path $BuildRoot "FRLG-Auto-RNG-$AppVersion-windows-x64.zip"
@@ -109,7 +116,7 @@ try {
         return
     }
 
-    & gh release create $Tag --repo $Repository --draft --title $Title --notes "FRLG Auto RNG $AppVersion。整包绿色版，支持后续版本应用内更新。"
+    & gh release create $Tag --repo $Repository --draft --title $Title --notes-file $NotesFile
     if ($LASTEXITCODE -ne 0) { throw "创建草稿 Release 失败" }
     try {
         & gh release upload $Tag $Package $Manifest $ShaFile --repo $Repository

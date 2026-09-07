@@ -1,10 +1,13 @@
 import hashlib
+import io
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from tools.create_update_manifest import create_manifest
+from tools.create_update_manifest import create_manifest, main
 
 
 class UpdateManifestToolTests(unittest.TestCase):
@@ -16,7 +19,7 @@ class UpdateManifestToolTests(unittest.TestCase):
             (unpacked / "FRLG-Auto-RNG.exe").write_bytes(b"main")
             (unpacked / "_internal").mkdir()
             (unpacked / "_internal" / "x").write_bytes(b"internal")
-            package = root / "FRLG-Auto-RNG-0.2.2-windows-x64.zip"
+            package = root / "FRLG-Auto-RNG-0.9-windows-x64.zip"
             package.write_bytes(b"zip bytes")
             result = create_manifest(package, unpacked, notes="notes")
             expected_hash = hashlib.sha256(b"zip bytes").hexdigest()
@@ -41,7 +44,37 @@ class UpdateManifestToolTests(unittest.TestCase):
             package.write_bytes(b"x")
             with self.assertRaises(ValueError):
                 create_manifest(package, unpacked)
-            package = root / "FRLG-Auto-RNG-0.2.2-windows-x64.zip"
+            package = root / "FRLG-Auto-RNG-0.9-windows-x64.zip"
             package.write_bytes(b"x")
             with self.assertRaises(ValueError):
                 create_manifest(package, root / "empty")
+
+    def test_manifest_cli_reads_release_notes_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            unpacked = root / "release"
+            unpacked.mkdir()
+            (unpacked / "FRLG-Auto-RNG.exe").write_bytes(b"main")
+            package = root / "FRLG-Auto-RNG-0.9-windows-x64.zip"
+            package.write_bytes(b"zip")
+            notes = root / "v0.9.md"
+            expected = "# FRLG Auto RNG 0.9\n\nPySide6 正式版。\n"
+            notes.write_text(expected, encoding="utf-8")
+
+            with patch.object(sys, "stdout", io.StringIO()):
+                code = main(
+                    [
+                        "--package",
+                        str(package),
+                        "--unpacked-root",
+                        str(unpacked),
+                        "--notes-file",
+                        str(notes),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            manifest = json.loads(
+                (root / "update-manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["notes"], expected)

@@ -10,6 +10,7 @@ class WindowsReleaseScriptTests(unittest.TestCase):
         source = (ROOT / "tools" / "build_windows_release.ps1").read_text(encoding="utf-8")
         self.assertIn("FRLG-Auto-RNG-Updater", source)
         self.assertIn("tools.create_update_manifest", source)
+        self.assertIn("--notes-file", source)
         self.assertIn("--onefile", source)
         self.assertIn("--version-json-file", source)
         self.assertIn('"truststore==0.10.4"', source)
@@ -26,6 +27,7 @@ class WindowsReleaseScriptTests(unittest.TestCase):
             "gh release upload $Tag $Package $Manifest $ShaFile",
             "make_latest=true",
             "草稿 Release 已保留",
+            "--notes-file $NotesFile",
         ):
             self.assertIn(required, source)
         self.assertNotIn("Remove-Item", source)
