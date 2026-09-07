@@ -92,6 +92,17 @@ class RemainingQtTests(unittest.TestCase):
         self.w.egg_ack.setChecked(True)
         return request
 
+    def test_formal_window_has_no_migration_placeholders(self):
+        from PySide6.QtWidgets import QWidget
+
+        stale = []
+        for widget in self.w.findChildren(QWidget):
+            text = widget.text() if hasattr(widget, "text") else ""
+            tooltip = widget.toolTip()
+            if any(marker in f"{text}\n{tooltip}" for marker in ("尚未接入", "仍在迁移")):
+                stale.append((type(widget).__name__, text, tooltip))
+        self.assertEqual(stale, [])
+
     def test_egg_full_roundtrip_and_acknowledgement(self):
         expected = self.configure_egg()
         actual = self.w.reader.egg()

@@ -263,6 +263,10 @@ class CompleteWindow(FrlgWindow):
             if widget.property("helpKey") != "update":
                 tooltip = re.sub(r"(?:本预览|此预览|当前预览|预览)[^。<]*。?", "", widget.toolTip())
                 tooltip = tooltip.replace("路径选择与校验尚未接入。", "")
+                tooltip = tooltip.replace("预检与运行尚未接入。", "开始前会执行预检，并使用所选后端运行。")
+                tooltip = tooltip.replace("反查服务尚未接入", "反查由正式服务执行")
+                tooltip = tooltip.replace("断点与运行服务尚未接入", "断点与运行由正式服务处理")
+                tooltip = tooltip.replace("延迟和 OP 修正使用 ms；测量与自动回填服务尚未接入。", "延迟和 OP 修正使用 ms；检测结果校验后自动回填。")
                 widget.setToolTip(tooltip)
         self.traversal_check.setToolTip("按原有 SID 遍历运行器处理；停止后保留当前候选，同参数下次继续。")
 

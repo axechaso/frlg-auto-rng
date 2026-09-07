@@ -165,9 +165,9 @@ class FrlgWindow(FrlgPreviewWindow):
             "源码模式不使用程序自更新。": "源码模式不使用程序自更新；更新入口仍在迁移。",
             "日志尾读与运行状态尚未接入；这里不展示模拟运行记录。": "显示真实运行输出；完整日志同时写入生成工程目录。",
             "数据库尚未接入，未读取本机记录。正式界面最多显示 1000 项，CSV 导出包含全部筛选结果。": "与正式工具共用实测数据库。最多显示 1000 项，CSV 导出包含全部筛选结果。",
-            "界面初版 · 不执行真实脚本": "PySide6 · 野生 / 静态已接入",
+            "界面初版 · 不执行真实脚本": "PySide6 · 正式服务",
             "设备与运行服务尚未接入": "使用正式 EasyCon 服务",
-            "尚未检测采集卡，未读取任何设备标签覆盖。": "生成时自动使用正式工具已保存的设备标签覆盖；诊断和导入入口仍在迁移。",
+            "尚未检测采集卡，未读取任何设备标签覆盖。": "生成时自动使用已保存的设备标签覆盖；可在日志页诊断、导入或清除覆盖。",
         }
         for label in self.findChildren(QLabel):
             if label.text() in replacements:
@@ -182,12 +182,12 @@ class FrlgWindow(FrlgPreviewWindow):
             elif widget.property("helpKey") == "source":
                 widget.setToolTip("从所选正式 2.0 脚本包生成野生 / 静态工程；原始脚本与标签保持不变。")
             elif widget.property("helpKey") == "labels":
-                widget.setToolTip("按采集设备名称读取正式工具已保存的覆盖，仅应用到生成工程。此处的诊断、导入和编辑仍在迁移。")
+                widget.setToolTip("按采集设备名称读取已保存的覆盖，仅应用到生成工程；可在日志页诊断、导入或清除覆盖。")
         self.profile_chip.setToolTip("选择或管理与正式工具共用的存档；手动修改字段不会覆盖已保存的存档。")
         self.log_view.setPlainText("尚无运行输出。点击开始运行后在这里查看日志。")
         self.result_panel.setPlainText("尚无方案。搜索完成后显示真实结果与正式预检详情。")
         self.log_view.setToolTip("原始运行日志保存在生成工程中；显示区隐藏完整的已知机器检查点，保留错误和未知记录。")
-        self.traversal_check.setToolTip("SID 遍历运行仍在迁移；本轮已接入普通野生 / 静态与道具乱数。")
+        self.traversal_check.setToolTip("按原有 SID 遍历运行器处理；停止后保留当前候选，同参数下次继续。")
         for key in ("source", "ezcon", "port", "video"):
             self.fields[key].setToolTip("选择正式脚本包或本次运行设备；启动前会重新核对设备与运行时。")
         for key in ("wild_seed_mode", "wild_direct_seed", "wild_direct_adv"):
@@ -358,7 +358,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.start_button.setEnabled(valid and not busy and bool(self.fields["port"].currentData()) and self.fields["video"].currentData() is not None)
         self.stop_button.setEnabled(self.running)
         self.traversal_check.setEnabled(False)
-        self.footer_status.setText(self.status_text if wild or self.current_page in ("logs", "tid_records") else "本页生成与运行仍在迁移")
+        self.footer_status.setText(self.status_text)
         self.summary_badge.setText("已接入正式服务" if wild else "本页生成服务待接入")
         self.summary_context.setText("完成左侧条件后生成")
         self.summary_symbol.clear()

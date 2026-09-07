@@ -27,7 +27,7 @@ class PySidePreviewTests(unittest.TestCase):
         self.assertFalse(imports & {"run_auto_rng_gui", "automation", "rng", "subprocess", "socket", "save_profiles", "tid_records", "tid_session"})
         self.assertEqual(
             (ROOT / "requirements-pyside-preview.txt").read_text(encoding="utf-8").splitlines()[-1],
-            "PySide6>=6.7,<7",
+            "PySide6==6.11.2",
         )
 
     @unittest.skipUnless(importlib.util.find_spec("PySide6"), "PySide6 is an optional preview dependency")
