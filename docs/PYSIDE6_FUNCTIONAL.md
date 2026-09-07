@@ -1,8 +1,8 @@
-# PySide6 功能版
+# PySide6 0.9 正式界面
 
 正常启动时，主窗口会显示一次开源致谢与赞助公告；其中项目和开发者名称可点击，两张赞助图保持原比例展示。勾选“下次启动不再显示”并进入工具后，偏好单独保存在用户目录的 `startup_notice.json`；自动截图模式始终跳过公告。
 
-2026-09-06：在野生 / 静态接入基础上，继续迁移 SID、TID、孵蛋和辅助工具。界面沿用已经确认的双栏布局、顶部快捷开关、紧凑存档与设备摘要；业务调用放在 `pyside_app/`，不修改正式 Tk 入口、乱数算法或源 ECS。
+2026-09-07：PySide6 已成为源码和 `0.9` 绿色版的正式入口。界面沿用已经确认的双栏布局、顶部快捷开关、紧凑存档与设备摘要；业务调用放在 `pyside_app/` 并复用已有搜索、生成、运行和持久化服务，不修改乱数算法或源 ECS。旧 Tk 仅保留在源码仓库作历史参考，不进入 `0.9` 安装包。
 
 ## 启动与操作
 
@@ -12,7 +12,7 @@
 .\.venv\Scripts\python.exe run_pyside6_gui.py
 ```
 
-首次需要安装项目依赖及可选 Qt 依赖：`requirements-auto.txt`、`requirements-pyside-preview.txt`。这是源码入口；发布 EXE 和正式 Tk 启动方式保持原样。
+首次需要安装 `requirements-auto.txt`；其中已经包含正式界面所需的 PySide6。`requirements-pyside-preview.txt` 只用于独立视觉预览。发布 EXE 直接启动本界面，目标电脑不需要另装 Python、PySide6 或 Tcl/Tk。
 
 主窗口采用与侧栏相连的深蓝标题栏，设置、存档、方案、手柄和监视窗口使用浅色标题栏与细描边，去掉系统灰底和设置滚动区的方框。标题栏保留火稚鸡图标、拖动、最小化 / 最大化 / 还原 / 关闭；边缘缩放交给 Qt 的系统窗口接口。应用内弹窗保留原有输入与确认 / 取消语义；系统文件选择器和标准消息框继续使用系统外观。
 
@@ -80,14 +80,14 @@ TID 的“刷新进度”位于底部生成计划按钮左侧，仅在 TID 页�
 | 标签 | 按设备名称调用 `LabelOverrideStore` 导入 / 拖放 / 清除覆盖；日志诊断调用 `diagnose_label_log`。SID 运行器新增可选覆盖参数，确保第一只重新复制资产后以及后续槽位仍保留同一设备覆盖。 |
 | Seed 表 | 按钮调用原有 `tenlines_seed_updater.update_seed_tables`；用户点击确认后联网并预检，成功切换后清搜索缓存。 |
 
-唯一继续禁用的业务按钮是“检查程序更新”：当前 Qt 为源码入口，现有发布包与更新器仍针对正式 Tk；本轮没有切换打包入口。完整功能映射见 `PYSIDE6_PAGE_MAP.md`，纯视觉预览与功能版应区分使用。
+“检查程序更新”已经接入现有 GitHub Release 更新协议：源码模式只检查并提示下载方式，冻结版可下载完整 `0.9+` 安装包、校验大小与 SHA-256、写入更新请求并调用独立更新器替换程序目录。正在运行 EasyCon 时允许检查，但安装会等本轮停止后再执行。完整功能映射见 `PYSIDE6_PAGE_MAP.md`，纯视觉预览与正式界面应区分使用。
 
 ## 数据与代码边界
 
 - 现有存档、实测数据库、预校准和标签覆盖位于 `%LOCALAPPDATA%\FRLG-Auto-RNG`。
 - Qt 自己的 2.0 / SID / TID 脚本包及 exe 路径保存在同目录 `pyside6_settings.json`；TID 草稿使用正式 `tid_settings.json`。孵蛋配置可导出；其余本次筛选条件保留在窗口内。
-- Qt 键位写入用户目录 `pyside6_controller_keymap.json`；初次使用可读取此前 `manual_controller_keymap.json` 的 18 键配置，保存不覆盖旧文件或正式 Tk 键位。
-- 每次生成使用独立 `runtime/pyside6/<流程>-<id>/`，保存搜索结果、工程清单、ECS 副本与独立运行日志，不覆盖正式 Tk 工程或上一次结果。脚本测试按用户所选路径原地执行。
+- Qt 键位写入用户目录 `pyside6_controller_keymap.json`；初次使用可读取此前 `manual_controller_keymap.json` 的 18 键配置，保存不覆盖旧文件。
+- 每次生成使用独立 `runtime/pyside6/<流程>-<id>/`，保存搜索结果、工程清单、ECS 副本与独立运行日志，不覆盖上一次结果。脚本测试按用户所选路径原地执行。
 - `--data-dir <目录>` 可隔离测试用资料与生成目录。`--screenshot <PNG>` 实际显示窗口后截图，自动跳过设备检测，不执行脚本。
 - `pyside_preview.py` / `启动-PySide6界面预览.bat` 仍是纯内存预览，不导入业务模块；本文件描述的接入只属于 `run_pyside6_gui.py`。
 

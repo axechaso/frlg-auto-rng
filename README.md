@@ -6,15 +6,15 @@
 
 详细开发交接请先阅读 [新设备与新对话交接文档](docs/HANDOFF.md)，功能边界和验收状态见 [自动乱数首版说明](docs/INITIAL_AUTO_RNG.md)。
 
-当前绿色版发布为 `0.2.2`。该版本包含完整整包更新器，并修复 0.2.1 发布包中文扩展标签文件名在部分 Windows 环境下乱码、导致 ECS 生成失败的问题；旧版可直接通过更新器升级。源码模式不执行程序自更新。更新只替换程序目录，不会覆盖 `%LOCALAPPDATA%\FRLG-Auto-RNG` 中的配置、日志、进度、Seed 表或设备标签覆盖。
+当前发布版本为 `0.9`，正式界面与冻结包入口均已切换为 PySide6。安装包不携带旧 Tk 界面、`tkinterdnd2` 或 Tcl/Tk 运行库；旧 Tk 源码只留在仓库中作为历史实现与迁移参照。`0.2.2` 绿色版可以直接通过内置更新器升级到 `0.9`。源码模式只检查并提示版本，不替换源码目录；绿色版更新只替换程序目录，不会覆盖 `%LOCALAPPDATA%\FRLG-Auto-RNG` 中的配置、日志、进度、Seed 表、设备标签覆盖或公告偏好。
 
 开发约定：每完成一轮较大的功能改动并通过本地验证，就提交并推送到私有 `origin`，让 GitHub Actions 自动复核；零散小修改可以合并到下一轮大改一起推送。
 
 ## 当前完成情况
 
-- GUI 提供“SID 查找”“TID 乱数”“野生 / 静态”“孵蛋”四个输入选项卡；“TID 实测表”位于第三页，“运行日志”常驻末尾。EasyCon 设置、运行按钮和结果区共用；非必要说明收进带标题的悬浮帮助，状态、错误、安全确认和危险警告保持常驻。勾选“高级模式”后才额外显示“脚本测试（高级）”页，同时把已登记脚本、标签、EasyCon、OCR 和兼容运行器的指纹不一致降级为明确警告；Seed 方案旁的正式版/时间轴版选择会实际用于普通、孵蛋及御三家生成，自选 ECS 仍只用于直接测试。界面用词清单见 [界面文案与术语](docs/UI_TEXT.md)。
-- 仓库另附独立的 `pyside_preview.py`，以 `7438e0e` 初版为基础，逐页对照 Tk 补齐 SID、TID、TID 实测表、野生 / 静态、孵蛋、高级脚本测试及日志布局，保留深色侧栏、卡片、共通设置和固定操作栏。表单支持内存交互，业务后端尚未接入，对应操作禁用；不导入正式 Tk 控制器、写入配置或启动 EasyCon。安装 `requirements-pyside-preview.txt` 后可双击 `启动-PySide6界面预览.bat` 查看。范围见 [PySide6 迁移预览](docs/PYSIDE6_PREVIEW.md)，逐项接入清单见 [功能页面映射](docs/PYSIDE6_PAGE_MAP.md)。
-- 另有 `run_pyside6_gui.py` / `启动-PySide6功能版.bat`，沿用已确认的界面，实际接入野生 / 静态搜索、生成、预检、启动 / 停止及共用存档、设备、TID 记录和日志。正常启动会显示开源致谢与赞助公告，可勾选“下次启动不再显示”；自动截图不弹出。其余模式仍在迁移，旧 Tk 只保留作迁移参考，后续界面功能和打包全面转向 PySide6；范围与试用方法见 [PySide6 功能版](docs/PYSIDE6_FUNCTIONAL.md)。
+- PySide6 正式界面提供“SID 查找”“TID 乱数”“野生 / 静态”“孵蛋”四个输入选项卡；“TID 实测表”位于第三页，“运行日志”常驻末尾。EasyCon 设置、运行按钮和结果区共用；非必要说明收进带标题的悬浮帮助，状态、错误、安全确认和危险警告保持常驻。勾选“高级模式”后才额外显示“脚本测试（高级）”页，同时把已登记脚本、标签、EasyCon、OCR 和兼容运行器的指纹不一致降级为明确警告；Seed 方案旁的正式版/时间轴版选择会实际用于普通、孵蛋及御三家生成，自选 ECS 仍只用于直接测试。界面用词清单见 [界面文案与术语](docs/UI_TEXT.md)。
+- 仓库另附独立的 `pyside_preview.py` 纯视觉预览，供继续调整布局时使用；它不连接业务后端，也不会进入发布安装包。范围见 [PySide6 迁移预览](docs/PYSIDE6_PREVIEW.md)。
+- `run_pyside6_gui.py` / `启动-PySide6功能版.bat` 是 `0.9` 的正式源码入口，SID、TID、TID 实测表、野生 / 静态、孵蛋、脚本测试、设备、手柄、监视、标签、Seed 表和程序更新均已接入现有共享服务。正常启动会显示开源致谢与赞助公告，可勾选“下次启动不再显示”；自动截图不弹出。功能与验收边界见 [PySide6 正式界面](docs/PYSIDE6_FUNCTIONAL.md)。
 - 共通设置可选择“命中后更新预校准”，默认关闭。开启后只在完整命中时保存 Seed 与当前流程允许的帧修正，记录按游戏、机型、Seed 模式、Seed 启动方案、脚本入口和流程类型隔离；御三家使用独立上下文，TID/SID 不参与。正式版普通定点只复用 Seed，其他受支持流程和时间轴版可复用帧修正。
 - 顶部“存档信息”按 PokeFinder 的 Profile 思路保存名称、游戏版本、TID、SID，并额外保存本工具需要的 Switch 机型。可新建、编辑、复制、删除或设为当前；选择后自动同步四页相关字段，“未选择（手动输入）”不会覆盖现有输入。
 - 整个页面可以纵向滚动；结果框拥有独立滚动条，较小屏幕也能看到底部。
@@ -288,7 +288,7 @@ r3 的实际 OP 机型补偿也会记入详情和 CSV：新版 NS2 的 −750ms 
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE = "1"
-.\.venv\Scripts\python.exe -m py_compile run_auto_rng_gui.py
+.\.venv\Scripts\python.exe -m py_compile run_pyside6_gui.py package_entry.py pyside_app\app_update.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
@@ -304,7 +304,8 @@ easycon/                    原 PyEasyCon 协议、识图和标签兼容层
 rng/                        Ten Lines Python/C++ 搜索代码
 tests/                      单元测试
 tools/                      2.0 导入、标签审计、EasyCon 准备工具
-run_auto_rng_gui.py         当前 GUI 主入口
+run_pyside6_gui.py          0.9 正式 GUI 主入口
+run_auto_rng_gui.py         旧 Tk 历史实现（不进入发布包）
 run_auto_planner.py         命令行计划器
 requirements-auto.txt       新自动流程最小依赖
 local_assets/easycon118/    导入的 2.0 快照（兼容目录名），Git 忽略
