@@ -1,3 +1,2 @@
-# Optional dependency for the standalone visual prototype.
-# The production Tk entry and current release package do not require this file.
-PySide6>=6.7,<7
+# Shared by the standalone preview, formal source entry, and Windows release.
+PySide6==6.11.2

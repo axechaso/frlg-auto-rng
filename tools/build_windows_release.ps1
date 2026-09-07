@@ -41,27 +41,6 @@ if (-not (Test-Path -LiteralPath $NotesFile -PathType Leaf)) {
     throw "找不到发布说明：$NotesFile"
 }
 
-# tkinter is part of the CPython distribution, not a pip package.  Some
-# installations cannot be inspected by PyInstaller's Tcl/Tk hook (for
-# example when Tcl cannot be initialized on the build machine), so resolve
-# and pass the runtime files explicitly.
-$PythonBase = (& $Python -c "import sys; print(sys.base_prefix)" | Select-Object -Last 1).Trim()
-if (-not $PythonBase -or -not (Test-Path -LiteralPath $PythonBase)) {
-    throw "无法确定 Python 基础安装目录：$PythonBase"
-}
-$TkinterBinary = Join-Path $PythonBase "DLLs\_tkinter.pyd"
-$TclBinary = Join-Path $PythonBase "DLLs\tcl86t.dll"
-$TkBinary = Join-Path $PythonBase "DLLs\tk86t.dll"
-$TkinterPackage = Join-Path $PythonBase "Lib\tkinter"
-$TclData = Join-Path $PythonBase "tcl\tcl8.6"
-$TkData = Join-Path $PythonBase "tcl\tk8.6"
-$TclModules = Join-Path $PythonBase "tcl\tcl8"
-foreach ($required in @($TkinterBinary, $TclBinary, $TkBinary, $TkinterPackage, $TclData, $TkData, $TclModules)) {
-    if (-not (Test-Path -LiteralPath $required)) {
-        throw "找不到 tkinter/Tcl 运行时文件：$required"
-    }
-}
-
 if (-not $EasyConPublish) {
     $candidate = Get-ChildItem -LiteralPath (Join-Path $Root "dist") -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Join-Path $_.FullName "easycon\publish" } |
@@ -73,12 +52,8 @@ if (-not $EasyConPublish -or -not (Test-Path -LiteralPath (Join-Path $EasyConPub
     throw "找不到 EasyCon publish 目录。请用 -EasyConPublish 指定包含 ezcon.exe 的目录。"
 }
 
-& $Python -m pip install --disable-pip-version-check "pyinstaller==6.15.0" "tkinterdnd2==0.6.2" "truststore==0.10.4"
-if ($LASTEXITCODE -ne 0) { throw "PyInstaller / tkinterdnd2 / truststore 安装失败" }
-$TkinterDndHookDir = Join-Path $Root "tools"
-if (-not (Test-Path -LiteralPath (Join-Path $TkinterDndHookDir "hook-tkinterdnd2.py"))) {
-    throw "缺少 tkinterdnd2 PyInstaller hook，无法保证打包版拖放组件完整"
-}
+& $Python -m pip install --disable-pip-version-check "pyinstaller==6.15.0" "PySide6==6.11.2" "truststore==0.10.4"
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller / PySide6 / truststore 安装失败" }
 
 $PyInstallerWork = Join-Path $BuildRoot "pyinstaller"
 $PyInstallerDist = Join-Path $BuildRoot "dist"
@@ -95,20 +70,13 @@ $args = @(
     "--hidden-import", "run_sid_traversal",
     "--hidden-import", "run_tid_starter_flow",
     "--hidden-import", "run_easycon_logged",
+    "--hidden-import", "run_pyside6_gui",
     "--hidden-import", "calibration_bind",
     "--hidden-import", "cv2",
-    "--hidden-import", "tkinter",
-    "--hidden-import", "_tkinter",
-    "--hidden-import", "tkinterdnd2",
+    "--collect-all", "PySide6",
     "--collect-submodules", "truststore",
-    "--additional-hooks-dir", $TkinterDndHookDir,
-    "--add-binary", "$TkinterBinary;.",
-    "--add-binary", "$TclBinary;.",
-    "--add-binary", "$TkBinary;.",
-    "--add-data", "$TkinterPackage;tkinter",
-    "--add-data", "$TclData;_tcl_data",
-    "--add-data", "$TkData;_tk_data",
-    "--add-data", "$TclModules;tcl8",
+    "--exclude-module", "tkinter",
+    "--exclude-module", "tkinterdnd2",
     "--add-data", "$(Join-Path $Root 'assets');assets",
     "--add-data", "$(Join-Path $Root 'rng\resources');rng\resources",
     "--add-data", "$LocalAssets;local_assets",
@@ -204,6 +172,25 @@ if ($probe.version -ne $AppVersion -or $probe.repository -ne "axechaso/frlg-auto
     throw "冻结主程序内嵌版本与构建版本不一致"
 }
 Remove-Item -Force -LiteralPath $versionProbe
+
+$smokeRoot = Join-Path $probeTempRoot ("frlg-auto-rng-pyside-smoke-" + [guid]::NewGuid().ToString("N"))
+$smokeData = Join-Path $smokeRoot "user"
+$smokePng = Join-Path $smokeRoot "pyside6.png"
+New-Item -ItemType Directory -Path $smokeRoot | Out-Null
+try {
+    $smokeProcess = Start-Process -FilePath $frozenMain -ArgumentList @(
+        "--screenshot", $smokePng,
+        "--data-dir", $smokeData,
+        "--no-device-check"
+    ) -Wait -PassThru -WindowStyle Hidden
+    if ($smokeProcess.ExitCode -ne 0 -or
+        -not (Test-Path -LiteralPath $smokePng -PathType Leaf) -or
+        (Get-Item -LiteralPath $smokePng).Length -le 0) {
+        throw "冻结 PySide6 主界面冒烟失败（退出码 $($smokeProcess.ExitCode)）"
+    }
+} finally {
+    Remove-Item -Force -Recurse -LiteralPath $smokeRoot -ErrorAction SilentlyContinue
+}
 Write-Host "发布目录：$ReleaseRoot"
 Write-Host "发布压缩包：$ZipPath"
 Write-Host "更新清单：$(Join-Path $BuildRoot 'update-manifest.json')"
