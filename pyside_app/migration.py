@@ -41,7 +41,8 @@ class CompleteWindow(FrlgWindow):
         self.script_verbose = next(check for check in self.findChildren(QCheckBox) if check.text() == "输出 EasyCon 详细日志")
         for title, handler in (("保存亲本配置", lambda: self.save_egg(False)), ("载入亲本配置", lambda: self.load_egg(False)),
                 ("保存全部配置", lambda: self.save_egg(True)), ("载入全部配置", lambda: self.load_egg(True)),
-                ("6V 闪 SID", self.calculate_shiny_sid), ("选择脚本", self.choose_script)):
+                ("6V 闪 SID", self.calculate_shiny_sid), ("选择脚本", self.choose_script),
+                ("检查程序更新", lambda: self.app_update.check(force=True))):
             self._bind(title, handler)
         for key in ("sid_source", "tid_source"):
             entry = self.fields[key]
@@ -93,7 +94,9 @@ class CompleteWindow(FrlgWindow):
         self.refresh_state()
         from .tid_state import TidState
         from .accessories import Accessories
+        from .app_update import AppUpdateController
         self.tid_state = TidState(self)
+        self.app_update = AppUpdateController(self)
         self.accessories = Accessories(self)
         self.refresh_state()
 
@@ -215,6 +218,8 @@ class CompleteWindow(FrlgWindow):
                     label.setText(str(value))
                 self.summary_note.setText(note)
         self.summary_note.setMinimumHeight(max(28, self.summary_note.heightForWidth(max(180, self.summary_note.width()))))
+        if hasattr(self, "app_update"):
+            self.app_update.refresh()
 
     def _lock_run_inputs(self):
         super()._lock_run_inputs()
@@ -398,6 +403,8 @@ class CompleteWindow(FrlgWindow):
             self.tid_state.poll()
 
     def closeEvent(self, event):
+        if hasattr(self, "app_update"):
+            self.app_update.close()
         if hasattr(self, "tid_state"):
             self.tid_state.save()
         if hasattr(self, "accessories") and not self.accessories.close():

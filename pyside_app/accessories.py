@@ -36,8 +36,6 @@ class Accessories(QObject):
         clear = next(button for button in self.card.findChildren(QPushButton) if button.text() == "清空诊断列表")
         clear.clicked.disconnect()
         clear.clicked.connect(self.clear_issues)
-        update = next(button for button in window.findChildren(QPushButton) if button.text() == "检查程序更新")
-        update.setToolTip("当前为源码运行的 Qt 入口；程序更新仍通过 Git 获取。发布版更新器会替换正式 Tk 包，不能用于此入口。")
         window.fields["video"].currentIndexChanged.connect(self.refresh_labels)
         window.fields["port"].currentIndexChanged.connect(self.port_changed)
         self.timer = QTimer(self)
