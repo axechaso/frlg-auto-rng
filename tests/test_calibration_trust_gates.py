@@ -67,6 +67,13 @@ FUNC 执行自动校准与等待更新(): INT
     IF $本轮剩余帧校准允许 == 1 and $消耗帧真绝对 <= $直接选择接近阈值
         $消耗帧本轮收敛 = 1
     ENDIF
+
+    $帧命中保持本轮抑制 = 0
+    $帧命中保持本轮刷新 = 0
+    IF $消耗帧本轮可信 == 1 and $本轮消耗帧误差 == 0
+        $帧命中保持启用 = 1
+        $帧命中保持计数 = 0
+    ENDIF
     RETURN 1
 ENDFUNC
 
@@ -112,6 +119,18 @@ class CalibrationTrustGateTests(unittest.TestCase):
         self.assertIn("IF $Seed本轮可信 == 1 and $Seed差绝对 <= 1", configured)
         self.assertIn(
             "IF $消耗帧本轮可信 == 1 and $本轮剩余帧校准允许 == 1",
+            configured,
+        )
+
+    def test_frame_hold_requires_same_round_seed_and_advance_hit(self):
+        configured = apply_calibration_trust_gates_text(legacy_fixture())
+
+        self.assertIn(
+            "IF $消耗帧本轮可信 == 1 and $命中差索引 == 0 and $本轮消耗帧误差 == 0",
+            configured,
+        )
+        self.assertNotIn(
+            "IF $消耗帧本轮可信 == 1 and $本轮消耗帧误差 == 0",
             configured,
         )
 

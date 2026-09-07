@@ -15,9 +15,11 @@ if TYPE_CHECKING:
 
 
 TID_STARTER_SAVE_NAME = "NS火叶TID-SID到御三家球前存档-测试.ecs"
-TID_STARTER_SAVE_SHA256 = "ecfeaa5d2209992711afaa17e6967c287bd657b9c38085762b785db1b081baf5"
+TID_STARTER_SAVE_SHA256 = "c2e6f316e2ef66d4968fb26327761d7be29fcb593d15b72c017a2d356b454504"
 TID_STARTER_SAVE_SUPPORTED_SHA256 = {
     TID_STARTER_SAVE_SHA256,
+    # Previous combined source before the English naming page wait became 600 ms.
+    "ecfeaa5d2209992711afaa17e6967c287bd657b9c38085762b785db1b081baf5",
     "3b8cb56328817dcf5adec8c6271a530fae8aab3ce6b784b29a73d22797c366c5",
     "54decdea179cf86689426444779cef90b6bedaa490932843901b83d541f97b35",
     # 2026-08-27-r4 and earlier audited revisions remain valid inputs.
@@ -41,10 +43,28 @@ _USER_END = "# ======================== 用户自定义区结束"
 _COMPACT_USER_END = "\n$KeyDelay = 50\n"
 _COMPACT_TAIL = "IF $连续流程_游戏版本 != 0 and $连续流程_游戏版本 != 1\n"
 _ID_END = "# 工具 ID 阶段结束：桥接与存档只在第二阶段执行。\nRETURN 0\n"
+_EN_NAME_PAGE_WAIT_550 = "$select基础次数 += 1\n        550"
+_EN_NAME_PAGE_WAIT_600 = "$select基础次数 += 1\n        600"
 
 
 def is_starter_save_template(text: str) -> bool:
     return _EN_MARKER in text and _JP_MARKER in text
+
+
+def stabilize_english_name_page_wait(text: str) -> str:
+    """Give the English naming page 50 ms more time before cursor movement."""
+    if "FUNC EN_切换到目标页" not in text:
+        return text
+    old_count = text.count(_EN_NAME_PAGE_WAIT_550)
+    new_count = text.count(_EN_NAME_PAGE_WAIT_600)
+    if old_count == 1 and new_count == 0:
+        return text.replace(_EN_NAME_PAGE_WAIT_550, _EN_NAME_PAGE_WAIT_600, 1)
+    if old_count == 0 and new_count == 1:
+        return text
+    raise ValueError(
+        "英文取名翻页等待结构不唯一："
+        f"550ms={old_count}，600ms={new_count}"
+    )
 
 
 def split_tid_modules(text: str) -> tuple[str, str, str, str]:
@@ -112,6 +132,8 @@ def configure_starter_save_id(
     head, english, japanese, _tail = split_tid_modules(template)
     prefix = "EN" if request.language == "英文" else "JP"
     selected = english if prefix == "EN" else japanese
+    if prefix == "EN":
+        selected = stabilize_english_name_page_wait(selected)
     request.validate(selected)
     values = request.to_user_values()
     values[f"${prefix}_TARGET_TID"] = values.pop("_TARGET_TID")

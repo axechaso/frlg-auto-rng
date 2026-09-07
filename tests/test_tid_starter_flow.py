@@ -11,7 +11,11 @@ from automation.easycon118 import EGG_TEMPLATE_NAME, STANDARD_TEMPLATE_NAME, Eas
 from automation.tid_rng137 import (
     DEFAULT_TID_SOURCE_PATH, TID_LEGACY_SCRIPT_NAMES, TID_SCRIPT_NAMES, TidRngRequest,
 )
-from automation.tid_starter_save import TID_STARTER_SAVE_NAME, is_starter_save_template
+from automation.tid_starter_save import (
+    TID_STARTER_SAVE_NAME,
+    is_starter_save_template,
+    stabilize_english_name_page_wait,
+)
 from automation.tid_starter_flow import (
     DEFAULT_TID_SID_SEARCH_ADVANCES,
     STARTER_SEED_CALIBRATION_SCHEME,
@@ -34,6 +38,23 @@ HAS_TID_ASSETS = any(
 
 
 class TidStarterFlowTests(unittest.TestCase):
+    def test_old_english_name_page_wait_is_upgraded_idempotently(self):
+        legacy = """\
+FUNC EN_切换到目标页
+    FOR $MoveDelta
+        Y DOWN
+        WAIT 50
+        Y UP
+        $select基础次数 += 1
+        550
+    NEXT
+ENDFUNC
+"""
+        upgraded = stabilize_english_name_page_wait(legacy)
+        self.assertIn("$select基础次数 += 1\n        600", upgraded)
+        self.assertNotIn("$select基础次数 += 1\n        550", upgraded)
+        self.assertEqual(stabilize_english_name_page_wait(upgraded), upgraded)
+
     def test_random_mode_can_leave_sid_unrandomized_and_defer_starter_identity(self):
         request = TidStarterFlowRequest(
             tid_request=TidRngRequest(
@@ -302,6 +323,10 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertIn("IF $Seed本轮可信 == 0", starter)
         self.assertIn("IF $TV帧本轮可信 == 0", starter)
         self.assertIn("IF $剩余帧本轮可信 == 0", starter)
+        self.assertIn(
+            "IF $消耗帧本轮可信 == 1 and $命中差索引 == 0 and $本轮消耗帧误差 == 0",
+            starter,
+        )
         self.assertEqual(STARTER_SEED_CALIBRATION_SCHEME, 0)
 
     def test_exhaustive_plan_defers_starter_search_until_actual_identity(self):
@@ -362,6 +387,19 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertIn("TIDFLOW|BRIDGE|DONE=1", bridge)
         self.assertNotIn("OP_当前目标", bridge)
         self.assertNotIn("总F12", bridge)
+
+    @unittest.skipUnless(HAS_TID_ASSETS, "requires TID assets")
+    def test_english_name_page_flip_waits_50ms_longer_before_moving(self):
+        source = (DEFAULT_TID_SOURCE_PATH / TID_STARTER_SAVE_NAME).read_text(
+            encoding="utf-8"
+        )
+        page_start = source.index("FUNC EN_切换到目标页")
+        page_end = source.index("ENDFUNC", page_start)
+        page = source[page_start:page_end]
+
+        self.assertIn("Y UP\n        $select基础次数 += 1\n        600", page)
+        self.assertNotIn("Y UP\n        $select基础次数 += 1\n        550", page)
+        self.assertIn("$select基础次数 += 1", page)
 
     def test_runtime_validation_combines_id_and_bridge_checks(self):
         with tempfile.TemporaryDirectory() as directory:

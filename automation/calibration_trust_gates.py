@@ -5,6 +5,12 @@ from __future__ import annotations
 
 FUNCTION_SIGNATURE = "FUNC 执行自动校准与等待更新(): INT"
 MARKER = "# GUI 2.0 校准可信门控：不可信维度只观察，不写窗、不下发修正"
+_FRAME_HOLD_ADV_ONLY = (
+    "IF $消耗帧本轮可信 == 1 and $本轮消耗帧误差 == 0"
+)
+_FRAME_HOLD_JOINT_HIT = (
+    "IF $消耗帧本轮可信 == 1 and $命中差索引 == 0 and $本轮消耗帧误差 == 0"
+)
 
 
 def _replace_once(text: str, old: str, new: str, label: str) -> str:
@@ -22,6 +28,22 @@ def _function_block(text: str) -> tuple[int, int, str]:
     return start, end, text[start:end]
 
 
+def _require_joint_frame_hold_hit(block: str) -> str:
+    """Start frame hold only after one trusted round hits both target axes."""
+    adv_only_count = block.count(_FRAME_HOLD_ADV_ONLY)
+    joint_count = block.count(_FRAME_HOLD_JOINT_HIT)
+    if adv_only_count == 1 and joint_count == 0:
+        return block.replace(_FRAME_HOLD_ADV_ONLY, _FRAME_HOLD_JOINT_HIT, 1)
+    if adv_only_count == 0 and joint_count == 1:
+        return block
+    if adv_only_count == 0 and joint_count == 0:
+        return block
+    raise ValueError(
+        "自动校准函数的帧命中保持条件不唯一："
+        f"ADV单轴={adv_only_count}，Seed+ADV双轴={joint_count}"
+    )
+
+
 def apply_calibration_trust_gates_text(template_text: str) -> str:
     """Freeze only an untrusted axis while keeping diagnostics and evidence scans.
 
@@ -33,6 +55,10 @@ def apply_calibration_trust_gates_text(template_text: str) -> str:
     if FUNCTION_SIGNATURE not in template_text:
         return template_text
     start, end, block = _function_block(template_text)
+    joint_block = _require_joint_frame_hold_hit(block)
+    if joint_block != block:
+        template_text = template_text[:start] + joint_block + template_text[end:]
+        start, end, block = _function_block(template_text)
     if MARKER in block:
         configured = template_text
         replacements = {
