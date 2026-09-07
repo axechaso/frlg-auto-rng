@@ -81,10 +81,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"未知后台工作模式: {worker}", file=sys.stderr)
         return 2
 
-    from run_auto_rng_gui import main as gui_main
+    from run_pyside6_gui import main as gui_main
 
-    gui_main()
-    return 0
+    return int(gui_main(argv) or 0)
 
 
 if __name__ == "__main__":

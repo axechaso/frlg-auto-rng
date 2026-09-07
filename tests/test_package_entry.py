@@ -18,8 +18,8 @@ class PackageEntryTests(unittest.TestCase):
         self.assertEqual(
             json.loads(output.getvalue()),
             {
-                "version": "0.2.2",
-                "version_code": 2026090302,
+                "version": "0.9",
+                "version_code": 2026090701,
                 "update_schema": 1,
                 "repository": "axechaso/frlg-auto-rng",
             },
@@ -31,13 +31,33 @@ class PackageEntryTests(unittest.TestCase):
             self.assertEqual(
                 package_entry.main(["--version-json-file", str(path)]), 0
             )
-            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.2.2")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.9")
+
+    def test_normal_launch_uses_pyside6_entry(self):
+        calls = []
+        qt = SimpleNamespace(main=lambda argv=None: calls.append(list(argv or ())) or 0)
+        legacy = SimpleNamespace(
+            main=lambda: self.fail("packaged startup must not enter the Tk GUI")
+        )
+        with patch.dict(
+            sys.modules,
+            {"run_pyside6_gui": qt, "run_auto_rng_gui": legacy},
+        ):
+            self.assertEqual(package_entry.main(["--no-device-check"]), 0)
+        self.assertEqual(calls, [["--no-device-check"]])
 
     def test_health_marker_is_written_before_gui(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "health.json"
-            gui = SimpleNamespace(main=lambda: None)
-            with patch.dict(sys.modules, {"run_auto_rng_gui": gui}):
+            calls = []
+            qt = SimpleNamespace(main=lambda argv=None: calls.append(list(argv or ())) or 0)
+            legacy = SimpleNamespace(
+                main=lambda: self.fail("update health launch must not enter the Tk GUI")
+            )
+            with patch.dict(
+                sys.modules,
+                {"run_pyside6_gui": qt, "run_auto_rng_gui": legacy},
+            ):
                 code = package_entry.main(
                     [
                         "--update-health-file",
@@ -49,8 +69,9 @@ class PackageEntryTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(
                 json.loads(path.read_text(encoding="utf-8")),
-                {"token": "a" * 32, "version_code": 2026090302},
+                {"token": "a" * 32, "version_code": 2026090701},
             )
+            self.assertEqual(calls, [[]])
 
     def test_invalid_internal_arguments_are_rejected(self):
         self.assertEqual(package_entry.main(["--version-json-file"]), 2)

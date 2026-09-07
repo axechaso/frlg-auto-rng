@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 
-APP_VERSION = "0.2.2"
-APP_VERSION_CODE = 2026090302
+APP_VERSION = "0.9"
+APP_VERSION_CODE = 2026090701
 UPDATE_SCHEMA = 1
 GITHUB_REPOSITORY = "axechaso/frlg-auto-rng"
 PACKAGE_PREFIX = "FRLG-Auto-RNG"
