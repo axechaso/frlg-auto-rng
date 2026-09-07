@@ -175,7 +175,7 @@ ENDFUNC
         self.assertEqual(request.to_starter_search_request().setting_key, "mono_h_a")
         self.assertEqual(plan.starter_run_plan.initial_seed.settings.setting_key, "mono_h_a")
         self.assertGreaterEqual(plan.earliest_sid_chain_advance, 0)
-        self.assertEqual(plan.sid_retry_corrections[:5], (5, 6, 4, 7, 3))
+        self.assertEqual(plan.sid_retry_corrections[:5], (5, 7, 3, 9, 1))
         self.assertFalse(plan.request.to_flow_tid_request().include_65535)
 
     @unittest.skipUnless(HAS_TID_ASSETS and SOURCE_118.is_dir(), "requires TID assets")
@@ -539,7 +539,7 @@ ENDFUNC
             self.assertEqual(payload["lab_bridge_source"], TID_STARTER_SAVE_NAME)
         else:
             self.assertNotIn("FUNC JP_", id_text)
-        self.assertIn("$SID_ADV修正 = 1", id_attempt_1)
+        self.assertIn("$SID_ADV修正 = 2", id_attempt_1)
         self.assertIn("TIDFLOW|BRIDGE|DONE=1", bridge_text)
         self.assertIn('$目标Seed = "9CA9"', starter_text)
         self.assertIn("$目标消耗帧 = 1513", starter_text)

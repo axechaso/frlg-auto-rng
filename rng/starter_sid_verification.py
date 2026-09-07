@@ -217,12 +217,13 @@ def find_earliest_shiny_starter(request: StarterSearchRequest) -> StarterTarget:
 
 
 def sid_advance_scan_offsets(radius: int) -> tuple[int, ...]:
-    """Return a deterministic correction order: 0,+1,-1,+2,-2,..."""
+    """Return same-parity corrections before trying opposite parity."""
     if radius < 0:
         raise ValueError("SID ADV扫描半径不能为负数")
     result = [0]
-    for distance in range(1, radius + 1):
-        result.extend((distance, -distance))
+    for parity_start in (2, 1):
+        for distance in range(parity_start, radius + 1, 2):
+            result.extend((distance, -distance))
     return tuple(result)
 
 

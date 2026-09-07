@@ -11,6 +11,7 @@ from automation.tid_rng137 import resolve_tid_template
 from automation.tid_calibration import calibrated_tid_request, tid_request_from_dict
 from automation.tid_search import progress_supported
 from automation.tid_checkpoint import _exhaustive_start
+from automation.tid_starter_flow import parse_successful_sid_advance_correction
 from rng.starter_sid_verification import sid_advance_scan_offsets
 from tid_session import load_tid_settings, write_json_atomic, progress_context, read_progress, latest_progress
 
@@ -144,6 +145,28 @@ class TidState(QObject):
             self.pending = {"path": str(command.log_path.with_suffix(".calibration.json")),
                 "request": prepared.inputs.request.to_dict(), "values": self.values()}
             self.save()
+
+    def apply_successful_sid_correction(self, log_path: Path, exit_code: int) -> int | None:
+        """Persist a retry correction only after the runner confirms a shiny starter."""
+        if exit_code != 0:
+            return None
+        try:
+            correction = parse_successful_sid_advance_correction(
+                log_path.read_text(encoding="utf-8", errors="replace")
+            )
+        except OSError:
+            return None
+        if correction is None:
+            return None
+        self.w.updating = True
+        try:
+            self.w.fields["tid_sid_correction"].setText(str(correction))
+        finally:
+            self.w.updating = False
+        self.refill = None
+        self.w.invalidate()
+        self.save()
+        return correction
 
     def poll(self):
         if self.blocked:

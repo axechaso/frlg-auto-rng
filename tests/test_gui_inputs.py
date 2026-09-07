@@ -347,7 +347,7 @@ class GuiIvInputTests(unittest.TestCase):
         self.assertIsNone(app._page_scrollregion_job)
         self.assertEqual(app.page_canvas.configured, [{"scrollregion": (0, 0, 100, 200)}])
 
-    def test_save_profile_applies_to_all_relevant_pages(self):
+    def test_save_profile_shares_current_identity_without_overwriting_tid_targets(self):
         class FakeVariable:
             def __init__(self, value=""):
                 self.value = value
@@ -379,6 +379,8 @@ class GuiIvInputTests(unittest.TestCase):
             _refresh_save_profile_selector=lambda _profile_id: None,
             invalidate_plan=lambda: None,
         )
+        app.tid_target_var.set("00123")
+        app.tid_sid_var.set("00456")
         profile = SaveProfile.create("叶绿档", "叶绿", 123, 456, 2, language="日文")
         AutoRngApp._apply_save_profile(app, profile, persist=False)
 
@@ -391,9 +393,16 @@ class GuiIvInputTests(unittest.TestCase):
         self.assertEqual(app.sid_var.get(), "456")
         self.assertEqual(app.tid_game_var.get(), "叶绿")
         self.assertEqual(app.tid_nx_var.get(), "Switch 2")
-        self.assertEqual(app.tid_target_var.get(), "123")
-        self.assertEqual(app.tid_sid_var.get(), "456")
+        self.assertEqual(app.tid_target_var.get(), "00123")
+        self.assertEqual(app.tid_sid_var.get(), "00456")
         self.assertEqual(app.tid_language_var.get(), "日文")
+        for target_tid, target_sid in (("", ""), ("00000", "38449")):
+            with self.subTest(target_tid=target_tid, target_sid=target_sid):
+                app.tid_target_var.set(target_tid)
+                app.tid_sid_var.set(target_sid)
+                AutoRngApp._apply_save_profile(app, profile, persist=False)
+                self.assertEqual(app.tid_target_var.get(), target_tid)
+                self.assertEqual(app.tid_sid_var.get(), target_sid)
 
     def test_seed_choices_only_apply_when_advanced_mode_is_enabled(self):
         class FakeVariable:

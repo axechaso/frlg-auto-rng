@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from pyside_app.services import AppPaths
 from pyside_app.migration import CompleteWindow
+from pyside_app.startup_notice import StartupNoticeDialog, should_show_startup_notice
 
 
 def main(argv=None):
@@ -33,6 +34,8 @@ def main(argv=None):
     window.resize(width, height)
     window.select_page(args.page)
     window.show()
+    if should_show_startup_notice(paths.user, automated=bool(args.screenshot)):
+        StartupNoticeDialog(paths.user, window).exec()
     if args.screenshot:
         def capture():
             args.screenshot.parent.mkdir(parents=True, exist_ok=True)

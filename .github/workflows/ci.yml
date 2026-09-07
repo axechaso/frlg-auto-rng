@@ -60,6 +60,7 @@ jobs:
           pyside_app/monitor_view.py
           pyside_app/controller_layout.py
           pyside_app/controller_keyboard.py
+          pyside_app/startup_notice.py
           run_auto_rng_gui.py
           run_auto_planner.py
           run_easycon_logged.py
@@ -114,6 +115,7 @@ jobs:
           tests.test_pyside_controller
           tests.test_pyside_monitor
           tests.test_pyside_progress_refill
+          tests.test_pyside_startup_notice
           tests.test_sid_reverse
           tests.test_sid_reverse118
           tests.test_sid_reverse_capture

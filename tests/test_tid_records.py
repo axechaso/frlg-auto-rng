@@ -129,6 +129,28 @@ class TidRecordTests(unittest.TestCase):
             store.append("run", list(enumerate(rows)), Path("test.log"))
             self.assertEqual(len(store.rows()), 3)
 
+    def test_game_settings_are_kept_separate_and_preserved_in_existing_store_and_csv(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = TidRecordStore(root / "tid.sqlite3")
+            settings = ((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 2, 0), (0, 0, 1), (0, 0, 2))
+            for index, (sound, button, seed_button) in enumerate(settings):
+                request = TidRngRequest(sound=sound, button_mode=button, seed_button=seed_button)
+                saved = TidRecordContext.from_request("火红", request)
+                rows = TidLogParser(saved).feed(observation() * 2)
+                store.append(str(index), list(enumerate(rows)), root / "test.log")
+            reopened = TidRecordStore(store.path)
+            records = reopened.rows()
+            self.assertEqual({(r["sound"], r["button_mode"], r["seed_button"]) for r in records}, set(settings))
+            self.assertTrue(all(r["occurrences"] == 2 for r in records))
+            path = root / "tid.csv"
+            self.assertEqual(reopened.export_csv(path), len(settings))
+            exported = list(csv.DictReader(io.StringIO(path.read_text(encoding="utf-8-sig"))))
+            self.assertEqual(
+                {(int(r["Sound"]), int(r["ButtonMode"]), int(r["SeedButton"])) for r in exported},
+                set(settings),
+            )
+
     def test_r3_ns2_offset_never_merges_with_older_ns2_records(self):
         with tempfile.TemporaryDirectory() as temp:
             store = TidRecordStore(Path(temp) / "tid.sqlite3")

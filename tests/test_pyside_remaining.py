@@ -155,6 +155,38 @@ class RemainingQtTests(unittest.TestCase):
         self.assertEqual(values["tid_target_var"], "00123")
         self.assertEqual(values["tid_op_rng_range_var"], w.fields["tid_op_radius"].text())
 
+    def test_profile_switch_edit_and_restart_preserve_tid_target_draft(self):
+        w = self.w
+        w.select_page("tid")
+        w.fields["tid_target"].setText("00123")
+        w.fields["tid_sid"].setText("00456")
+        first = w.profile_store.add("English", "火红", 31056, 38449, 1)
+        w.profile_store.add("Japanese", "叶绿", 7, 8, 2, language="日文")
+        w.reload_profiles(apply=True)
+        self.assertEqual(w.fields["tid_target"].text(), "00123")
+        self.assertEqual(w.fields["tid_sid"].text(), "00456")
+        w.profile_selector.setCurrentIndex(w.profile_selector.findData(first.profile_id))
+        w.profile_store.update(first.profile_id, "English", "火红", 22222, 33333, 1)
+        w.reload_profiles(apply=True)
+        request = w.reader.tid()
+        self.assertEqual((request.target_tid, request.target_sid), (123, 456))
+        self.assertEqual(w.fields["wild_tid"].text(), "22222")
+        self.assertEqual(w.fields["wild_sid"].text(), "33333")
+        window_class = type(w)
+        w.close()
+        w.deleteLater()
+        self.app.processEvents()
+        values = json.loads((self.root / "tid_settings.json").read_text(encoding="utf-8"))["values"]
+        self.assertEqual((values["tid_target_var"], values["tid_sid_var"]), ("00123", "00456"))
+        self.w = window_class(paths=AppPaths(user=self.root, output=self.root / "runtime"), auto_detect=False)
+        self.w.show_error = self.errors.append
+        self.w.reload_profiles(apply=True)
+        self.assertEqual(self.w.fields["tid_target"].text(), "00123")
+        self.assertEqual(self.w.fields["tid_sid"].text(), "00456")
+        self.assertEqual(self.w.fields["wild_tid"].text(), "22222")
+        self.assertEqual(self.w.fields["wild_sid"].text(), "33333")
+        self.assertEqual(self.errors, [])
+
     def test_calibration_checks_identity_and_only_fills_measured_fields(self):
         from automation.tid_calibration import calibrated_tid_request
         w = self.w

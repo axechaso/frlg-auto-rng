@@ -1416,9 +1416,9 @@ class FrlgPreviewWindow(QMainWindow):
             ("record_tid", "TID", _line(placeholder="留空查询全部")),
         ])
         self._actions(filters, "查询 / 刷新", "导出 CSV")
-        self.records_table = self._table(("TID", "游戏", "机型", "语言", "OP", "F1", "F2", "出现次数", "主角名称", "OP 修正（ms）", "最近记录时间"), height=280)
+        self.records_table = self._table(("TID", "游戏", "机型", "语言", "声音", "按键模式", "Seed 启动键", "OP", "F1", "F2", "出现次数", "主角名称", "OP 修正（ms）", "最近记录时间"), height=280)
         self.records_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        for column, width in enumerate((90, 65, 85, 60, 65, 65, 65, 75, 90, 105, 160)):
+        for column, width in enumerate((90, 65, 85, 60, 85, 85, 105, 65, 65, 65, 75, 90, 105, 160)):
             self.records_table.setColumnWidth(column, width)
         filters.layout.addWidget(self.records_table)
         filters.layout.addWidget(_label("数据库尚未接入，未读取本机记录。正式界面最多显示 1000 项，CSV 导出包含全部筛选结果。", role="muted"))

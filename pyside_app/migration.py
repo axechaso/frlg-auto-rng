@@ -379,6 +379,19 @@ class CompleteWindow(FrlgWindow):
                     self.workflow_summary = traversal_report_summary(json.loads(report_text))
             if prepared.inputs.mode in ("tid", "sid"):
                 self.workflow = None  # Workers may regenerate stages after calibration.
+            flow = prepared.inputs.extra.get("flow") if prepared.inputs.mode == "tid" else None
+            if flow is not None and not flow.deferred_identity:
+                correction = self.tid_state.apply_successful_sid_correction(
+                    self.run_command.log_path, code
+                )
+                if correction is not None:
+                    self._append_log(
+                        f"\n[SID ADV自动校准] 已将确认闪光时的修正 {correction:+d} "
+                        "保存为下次重试基准。\n"
+                    )
+                    self.set_status(
+                        f"御三家已确认闪光；SID ADV 修正 {correction:+d} 已自动保存。"
+                    )
         self.refresh_state()
         if hasattr(self, "accessories"):
             self.accessories.run_finished()

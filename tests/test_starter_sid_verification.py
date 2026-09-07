@@ -76,8 +76,11 @@ class StarterSIDVerificationTests(unittest.TestCase):
                 )
             )
 
-    def test_scan_order_is_symmetric(self):
-        self.assertEqual(sid_advance_scan_offsets(3), (0, 1, -1, 2, -2, 3, -3))
+    def test_scan_order_exhausts_same_parity_before_opposite_parity(self):
+        self.assertEqual(
+            sid_advance_scan_offsets(5),
+            (0, 2, -2, 4, -4, 1, -1, 3, -3, 5, -5),
+        )
 
     def test_wrong_pid_continues_normal_starter_rng(self):
         target = self._target(pid=0x12345678)

@@ -221,6 +221,36 @@ class ProgressRefillTests(unittest.TestCase):
         self.assertEqual(self.starts(), dict.fromkeys(("op", "f1", "f2"), "0"))
         self.assertIsNone(self.w.tid_state.refill)
 
+    def test_confirmed_shiny_sid_correction_is_saved_as_the_next_base(self):
+        log_path = self.root / "tid-flow.log"
+        log_path.write_text(
+            "[SID未命中] retry\n"
+            "[流程完成] 已确认闪光御三家；成功使用SID ADV修正 -2。\n",
+            encoding="utf-8",
+        )
+        apply_result = getattr(self.w.tid_state, "apply_successful_sid_correction", None)
+        self.assertTrue(callable(apply_result))
+        self.assertEqual(apply_result(log_path, 0), -2)
+        self.assertEqual(self.w.fields["tid_sid_correction"].text(), "-2")
+        saved = json.loads((self.root / "tid_settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["values"]["tid_sid_adv_correction_var"], "-2")
+
+        self.close_window()
+        self.open_window()
+        self.assertEqual(self.w.fields["tid_sid_correction"].text(), "-2")
+
+    def test_failed_flow_never_learns_sid_correction_even_if_log_contains_old_success(self):
+        original = self.w.fields["tid_sid_correction"].text()
+        log_path = self.root / "failed-tid-flow.log"
+        log_path.write_text(
+            "[流程完成] 已确认闪光御三家；成功使用SID ADV修正 +6。\n",
+            encoding="utf-8",
+        )
+        apply_result = getattr(self.w.tid_state, "apply_successful_sid_correction", None)
+        self.assertTrue(callable(apply_result))
+        self.assertIsNone(apply_result(log_path, 5))
+        self.assertEqual(self.w.fields["tid_sid_correction"].text(), original)
+
 
 if __name__ == "__main__":
     unittest.main()

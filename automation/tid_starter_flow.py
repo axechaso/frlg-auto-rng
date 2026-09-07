@@ -69,6 +69,16 @@ from .tid_starter_save import (
 # Its startup path remains selectable independently through the GUI request.
 STARTER_SEED_CALIBRATION_SCHEME = 0
 
+_SUCCESSFUL_SID_CORRECTION = re.compile(
+    r"\[流程完成\]\s*已确认闪光御三家；成功使用SID ADV修正\s*([+-]?\d+)。"
+)
+
+
+def parse_successful_sid_advance_correction(log_text: str) -> int | None:
+    """Return the absolute SID ADV correction from a confirmed-shiny result."""
+    matches = _SUCCESSFUL_SID_CORRECTION.findall(log_text)
+    return int(matches[-1], 10) if matches else None
+
 
 @dataclass(frozen=True)
 class TidStarterFlowRequest:

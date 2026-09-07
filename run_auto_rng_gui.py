@@ -1386,7 +1386,7 @@ class AutoRngApp:
         self._add_tooltip(
             self.save_profile_combo,
             "当前存档",
-            "选择存档会同步各页面的游戏、主机、TID 和 SID；手动输入模式不会自动覆盖现有参数。",
+            "选择存档会同步游戏、主机和当前存档身份，不覆盖 TID 乱数的目标 TID / SID；手动输入模式不会自动覆盖现有参数。",
         )
         ttk.Button(
             profile_frame,
@@ -3024,11 +3024,9 @@ class AutoRngApp:
             self.tid_var.set(str(profile.tid))
             self.sid_var.set(str(profile.sid))
 
-            # TID 页的目标身份可以直接来自已登记或计划创建的存档。
+            # 存档的当前身份不覆盖 TID 页手动填写的目标身份。
             self.tid_game_var.set(profile.game)
             self.tid_nx_var.set(switch_name)
-            self.tid_target_var.set(str(profile.tid))
-            self.tid_sid_var.set(str(profile.sid))
             if language_var is not None:
                 language_var.set(profile.language)
             self._on_game_change()

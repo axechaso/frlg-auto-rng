@@ -57,6 +57,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.devices_checked = False
         self.run_input_states = None
         self.record_rows = []
+        self.record_store_signature = None
         self.profile_store = SaveProfileStore(self.paths.user / "save_profiles.json")
         self.profiles_available = True
         self.record_store = TidRecordStore(self.paths.user / "tid_records.sqlite3")
@@ -136,6 +137,10 @@ class FrlgWindow(FrlgPreviewWindow):
         self.pending_visible = False
         self.runtime_issues = {}
         self.log_view.document().setMaximumBlockCount(4000)
+        self.record_poll_timer = QTimer(self)
+        self.record_poll_timer.setInterval(1000)
+        self.record_poll_timer.timeout.connect(self._poll_record_store)
+        self.record_poll_timer.start()
         self.select_page("wild")
         if auto_detect:
             QTimer.singleShot(150, self.detect_devices)
@@ -329,6 +334,8 @@ class FrlgWindow(FrlgPreviewWindow):
     def select_page(self, key):
         super().select_page(key)
         if getattr(self, "live_ready", False):
+            if key == "tid_records":
+                self.refresh_records()
             self.refresh_state()
 
     def _refresh_common_settings(self):
@@ -417,9 +424,9 @@ class FrlgWindow(FrlgPreviewWindow):
                 widget.setEnabled(enabled)
             self.run_input_states = None
 
-    def launch_job(self, work, success, status):
-        if self.job is not None or self.running:
-            return
+    def launch_job(self, work, success, status, *, allow_while_running=False):
+        if self.job is not None or (self.running and not allow_while_running):
+            return False
         self.status_text = status
         job = Job(work, self)
         self.job = job
@@ -448,6 +455,7 @@ class FrlgWindow(FrlgPreviewWindow):
         job.finished.connect(finish)
         self.refresh_state()
         job.start()
+        return True
 
     def set_status(self, text):
         self.status_text = text
@@ -639,6 +647,8 @@ class FrlgWindow(FrlgPreviewWindow):
             self.set_status(f"运行已结束（退出码 {code}）：{issue.summary}")
         else:
             self.set_status(f"运行进程已结束（退出码 {code}）；请查看日志中的实际结果。")
+        if self.current_page == "tid_records" and not self.closing:
+            QTimer.singleShot(0, self.refresh_records)
         if self.closing:
             self.close()
 
@@ -664,6 +674,8 @@ class FrlgWindow(FrlgPreviewWindow):
             pass
 
     def closeEvent(self, event):
+        if hasattr(self, "record_poll_timer"):
+            self.record_poll_timer.stop()
         if self.job or self.running:
             self.closing = True
             self.cancel()
@@ -690,11 +702,12 @@ class FrlgWindow(FrlgPreviewWindow):
 
     def apply_profile(self, profile):
         self.updating = True
+        # A save's current identity is separate from the TID page's target IDs.
         values = {"wild_game": profile.game, "profile_game": profile.game, "egg_game": profile.game,
                   "wild_nx": profile.switch_name, "egg_nx": profile.switch_name, "sid_game": profile.game,
                   "sid_nx": profile.switch_name, "sid_tid": str(profile.tid), "wild_tid": str(profile.tid),
                   "wild_sid": str(profile.sid), "tid_game": profile.game, "tid_nx": profile.switch_name,
-                  "tid_target": f"{profile.tid:05d}", "tid_sid": str(profile.sid), "tid_language": profile.language}
+                  "tid_language": profile.language}
         for key, value in values.items():
             widget = self.fields[key]
             with QSignalBlocker(widget):
@@ -743,27 +756,82 @@ class FrlgWindow(FrlgPreviewWindow):
         return {"tid": value, "game": self.fields["record_game"].currentText() if self.fields["record_game"].currentIndex() else None,
                 "nx_model": self.fields["record_nx"].currentIndex() or None}
 
+    def _record_game_settings(self, row):
+        labels = []
+        for key, field in (("sound", "tid_sound"), ("button_mode", "tid_button"), ("seed_button", "tid_seed_button")):
+            value = row.get(key)
+            combo = self.fields[field]
+            if value is None:
+                labels.append("未记录")
+            elif type(value) is int and 0 <= value < combo.count():
+                labels.append(combo.itemText(value))
+            else:
+                labels.append(f"未知({value})")
+        return tuple(labels)
+
+    def _record_store_signature(self):
+        try:
+            stat = self.record_store.path.stat()
+        except OSError:
+            return None
+        return stat.st_mtime_ns, stat.st_size
+
+    @staticmethod
+    def _record_row_identity(row):
+        return tuple(row.get(key) for key in (
+            "tid", "game", "nx_model", "language", "OP", "F1", "F2", "select_count",
+            "player_name", "gender", "sound", "button_mode", "seed_button", "name_entry_button",
+            "op_fixed_delay", "f1_fixed_delay", "f2_fixed_delay", "op_correction",
+            "op_model_offset", "select_correction", "home_buffer_delay",
+        ))
+
+    def _poll_record_store(self):
+        if self.current_page != "tid_records" or self.job is not None:
+            return
+        if self._record_store_signature() != self.record_store_signature:
+            self.refresh_records()
+
     def refresh_records(self):
         try:
             filters = self.record_filters()
         except ValueError as exc:
             self.show_error(str(exc))
             return
+        signature = self._record_store_signature()
+        selected = None
+        index = self.records_table.currentRow()
+        if 0 <= index < len(self.record_rows):
+            selected = self._record_row_identity(self.record_rows[index])
         def finished(rows):
+            self.record_store_signature = signature
             self.record_rows = rows
             self.records_table.setRowCount(len(rows))
+            selected_index = None
             for i, row in enumerate(rows):
-                values = (f"{row['tid']:05d}", row["game"], f"Switch {row['nx_model']}", row["language"], row["OP"], row["F1"], row["F2"], row["occurrences"], row["player_name"], row["op_correction"], row["last_seen"])
+                values = (f"{row['tid']:05d}", row["game"], f"Switch {row['nx_model']}", row["language"],
+                          *self._record_game_settings(row), row["OP"], row["F1"], row["F2"], row["occurrences"],
+                          row["player_name"], row["op_correction"], row["last_seen"])
                 for j, value in enumerate(values):
                     self.records_table.setItem(i, j, QTableWidgetItem(str(value)))
+                if selected is not None and self._record_row_identity(row) == selected:
+                    selected_index = i
+            if selected_index is not None:
+                self.records_table.selectRow(selected_index)
+            self.record_details()
             self.set_status(f"已读取 {len(rows)} 项 TID 实测记录；导出包含全部筛选结果。")
-        self.launch_job(lambda _cancel, _status: self.record_store.rows(**filters), finished, "正在读取实测记录……")
+        self.launch_job(
+            lambda _cancel, _status: self.record_store.rows(**filters),
+            finished,
+            "正在读取实测记录……",
+            allow_while_running=True,
+        )
 
     def record_details(self):
         index = self.records_table.currentRow()
         if not 0 <= index < len(self.record_rows):
             return
         row = self.record_rows[index]
+        sound, button_mode, seed_button = self._record_game_settings(row)
         page = self.stack.widget(self.page_indices["tid_records"])
         label = next(l for l in page.findChildren(QLabel) if l.text().startswith("尚未接入记录详情") or l.objectName() == "liveRecordDetails")
         label.setObjectName("liveRecordDetails")
@@ -773,8 +841,8 @@ class FrlgWindow(FrlgPreviewWindow):
             f"主角：{row['player_name']} · {row.get('gender', '—')}　最近：{row['last_seen']}\n"
             f"OP 修正：{row['op_correction']} ms　固定延迟："
             f"{row.get('op_fixed_delay', '—')} / {row.get('f1_fixed_delay', '—')} / {row.get('f2_fixed_delay', '—')} ms\n"
-            f"HOME_BUFFER：{row.get('home_buffer_delay', '—')} ms　"
-            f"{row.get('sound', '—')} / {row.get('button_mode', '—')} / {row.get('seed_button', '—')}"
+            f"HOME_BUFFER：{row.get('home_buffer_delay', '—')} ms\n"
+            f"声音：{sound}　按键模式：{button_mode}　Seed 启动键：{seed_button}"
         )
 
     def export_records(self):

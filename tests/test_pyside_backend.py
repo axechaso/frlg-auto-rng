@@ -107,17 +107,142 @@ class PySideBackendTests(unittest.TestCase):
         self.assertFalse(w.start_button.isEnabled())
         self.assertIsNone(w.prepared)
 
-    def test_profile_application_preserves_tid_delays_and_shares_identity(self):
+    def test_profile_application_preserves_tid_targets_and_delays_and_shares_current_identity(self):
         w = self.window
+        w.fields["tid_target"].setText("00123")
+        w.fields["tid_sid"].setText("00456")
         w.fields["tid_op_delay"].setText("31234")
         profile = w.profile_store.add("Test", "叶绿", "00007", 123, 2, language="日文")
         w.reload_profiles(apply=True)
         self.assertEqual(w.fields["wild_tid"].text(), "7")
-        self.assertEqual(w.fields["tid_target"].text(), "00007")
+        self.assertEqual(w.fields["wild_sid"].text(), "123")
+        self.assertEqual(w.fields["sid_tid"].text(), "7")
+        self.assertEqual(w.fields["tid_target"].text(), "00123")
+        self.assertEqual(w.fields["tid_sid"].text(), "00456")
         self.assertEqual(w.fields["tid_op_delay"].text(), "31234")
         self.assertEqual(w.fields["profile_language"].currentIndex(), 1)
         self.assertEqual(w.fields["egg_nx"].currentText(), "Switch 2")
         self.assertEqual(w.profile_store.get(profile.profile_id).tid, 7)
+
+    def test_profile_selection_does_not_fill_empty_or_default_tid_targets(self):
+        w = self.window
+        first = w.profile_store.add("English", "火红", 12345, 54321, 1)
+        second = w.profile_store.add("Japanese", "叶绿", 7, 8, 2, language="日文")
+        w.reload_profiles()
+        for targets in (("", ""), ("00000", "38449")):
+            with self.subTest(targets=targets):
+                for field, value in zip(("tid_target", "tid_sid"), targets):
+                    w.fields[field].setText(value)
+                for profile in (first, second):
+                    w.profile_selector.setCurrentIndex(w.profile_selector.findData(profile.profile_id))
+                    self.assertEqual(tuple(w.fields[key].text() for key in ("tid_target", "tid_sid")), targets)
+                    self.assertEqual(w.fields["wild_tid"].text(), str(profile.tid))
+                    self.assertEqual(w.fields["wild_sid"].text(), str(profile.sid))
+                    self.assertEqual(w.fields["tid_language"].currentText(), profile.language)
+        self.assertEqual(self.errors, [])
+
+    def test_records_show_saved_tid_game_settings_independent_of_current_forms(self):
+        from dataclasses import replace
+        from PySide6.QtWidgets import QLabel
+        from tid_records import TidLogParser, TidRecordStore
+        from tests.test_tid_records import context, observation
+        w = self.window
+        settings = {
+            (0, 0, 0): ("MONO", "HELP", "A"),
+            (1, 1, 1): ("STEREO", "LR", "START"),
+            (1, 2, 2): ("STEREO", "L=A", "L(L=A)"),
+        }
+        for index, (sound, button, seed_button) in enumerate(settings):
+            saved = replace(context(), sound=sound, button_mode=button, seed_button=seed_button)
+            entry = TidLogParser(saved).feed(observation("00007"))[0]
+            w.record_store.append(str(index), [(1, entry)], self.root / "test.log")
+        w.record_store = TidRecordStore(w.record_store.path)
+        for field in ("tid_sound", "tid_button", "tid_seed_button"):
+            w.fields[field].setCurrentIndex(0)
+        for field in ("starter_sound", "starter_button", "starter_seed_button"):
+            w.fields[field].setCurrentIndex(1)
+        w.refresh_records()
+        self.wait_until(lambda: w.job is None)
+        self.assertEqual(w.records_table.rowCount(), 3)
+        for index, row in enumerate(w.record_rows):
+            labels = settings[(row["sound"], row["button_mode"], row["seed_button"])]
+            expected = ("00007", row["game"], "Switch 1", row["language"], *labels,
+                        "3693", "2693", "2105", "1", row["player_name"], "0", row["last_seen"])
+            self.assertEqual(tuple(w.records_table.item(index, column).text() for column in range(14)), expected)
+            w.records_table.setCurrentCell(index, 0)
+            detail = w.findChild(QLabel, "liveRecordDetails").text()
+            self.assertIn(f"声音：{labels[0]}　按键模式：{labels[1]}　Seed 启动键：{labels[2]}", detail)
+        self.assertEqual(self.errors, [])
+
+    def test_entering_tid_records_page_reads_existing_database_rows(self):
+        from tid_records import TidLogParser
+        from tests.test_tid_records import context, observation
+        w = self.window
+        entry = TidLogParser(context()).feed(observation("00007"))[0]
+        w.record_store.append("existing", [(1, entry)], self.root / "existing.log")
+
+        w.select_page("tid_records")
+        self.wait_until(lambda: w.job is None)
+
+        self.assertEqual(w.records_table.rowCount(), 1)
+        self.assertEqual(w.records_table.item(0, 0).text(), "00007")
+
+    def test_open_tid_records_page_refreshes_after_external_database_write(self):
+        from tid_records import TidLogParser, TidRecordStore
+        from tests.test_tid_records import context, observation
+        w = self.window
+        w.select_page("tid_records")
+        self.wait_until(lambda: w.job is None)
+        self.assertEqual(w.records_table.rowCount(), 0)
+
+        entry = TidLogParser(context()).feed(observation("54321"))[0]
+        TidRecordStore(w.record_store.path).append("live", [(1, entry)], self.root / "live.log")
+        self.wait_until(lambda: w.records_table.rowCount() == 1, limit=3000)
+
+        self.assertEqual(w.records_table.item(0, 0).text(), "54321")
+        self.assertEqual(self.errors, [])
+
+    def test_open_tid_records_page_keeps_refreshing_while_easycon_is_running(self):
+        from tid_records import TidLogParser, TidRecordStore
+        from tests.test_tid_records import context, observation
+        w = self.window
+        w.running = True
+        try:
+            w.select_page("tid_records")
+            self.wait_until(lambda: w.job is None)
+            entry = TidLogParser(context()).feed(observation("24223"))[0]
+            TidRecordStore(w.record_store.path).append("running", [(1, entry)], self.root / "running.log")
+            self.wait_until(lambda: w.records_table.rowCount() == 1, limit=3000)
+            self.assertEqual(w.records_table.item(0, 0).text(), "24223")
+        finally:
+            w.running = False
+        self.assertEqual(self.errors, [])
+
+    def test_record_settings_missing_or_invalid_are_not_replaced_by_current_defaults(self):
+        from PySide6.QtWidgets import QLabel
+        from tid_records import TidLogParser
+        from tests.test_tid_records import context, observation
+        w = self.window
+        entry = TidLogParser(context()).feed(observation())[0]
+        w.record_store.append("test", [(1, entry)], self.root / "test.log")
+        saved = w.record_store.rows()[0]
+        cases = (
+            ({}, ("未记录", "未记录", "未记录")),
+            ({"sound": None, "button_mode": -1, "seed_button": 3}, ("未记录", "未知(-1)", "未知(3)")),
+            ({"sound": "bad", "button_mode": True, "seed_button": 1.5}, ("未知(bad)", "未知(True)", "未知(1.5)")),
+        )
+        for settings, expected in cases:
+            with self.subTest(settings=settings):
+                row = {key: value for key, value in saved.items() if key not in ("sound", "button_mode", "seed_button")}
+                row.update(settings)
+                with patch.object(w.record_store, "rows", return_value=[row]):
+                    w.refresh_records()
+                    self.wait_until(lambda: w.job is None)
+                self.assertEqual(tuple(w.records_table.item(0, column).text() for column in (4, 5, 6)), expected)
+                w.records_table.setCurrentCell(0, 0)
+                detail = w.findChild(QLabel, "liveRecordDetails").text()
+                self.assertIn(f"声音：{expected[0]}　按键模式：{expected[1]}　Seed 启动键：{expected[2]}", detail)
+        self.assertEqual(self.errors, [])
 
     def test_cancellation_discards_completed_job_result(self):
         from PySide6.QtTest import QTest

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from automation.easycon118 import EasyConRuntimeCheck
+import automation.tid_starter_flow as starter_flow
 
 from run_tid_starter_flow import (
     FlowRunner,
@@ -32,6 +33,20 @@ class _FakeProcess:
 
 
 class TidStarterRunnerTests(unittest.TestCase):
+    def test_only_confirmed_shiny_completion_exposes_successful_sid_correction(self):
+        parser = getattr(starter_flow, "parse_successful_sid_advance_correction", None)
+        self.assertTrue(callable(parser))
+        self.assertEqual(
+            parser("[流程完成] 已确认闪光御三家；成功使用SID ADV修正 -2。\n"),
+            -2,
+        )
+        self.assertEqual(
+            parser("noise\n[流程完成] 已确认闪光御三家；成功使用SID ADV修正 +4。\n"),
+            4,
+        )
+        self.assertIsNone(parser("[SID未命中] 将使用下一个SID ADV修正重新建档。\n"))
+        self.assertIsNone(parser("[流程结束] 已用完SID ADV重试范围。\n"))
+
     def test_console_output_falls_back_when_active_code_page_cannot_encode_chinese(self):
         class Cp1252Stream:
             encoding = "cp1252"
