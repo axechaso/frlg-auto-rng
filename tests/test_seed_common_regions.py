@@ -14,8 +14,8 @@ from automation.seed_common_regions import ASSET, upgrade_entry, upgrade_library
 
 
 class CommonReplay:
-    def __init__(self, seed_span=100, adv_span=30):
-        source = ASSET.read_text(encoding="utf-8")
+    def __init__(self, seed_span=100, adv_span=30, source=None):
+        source = source if source is not None else ASSET.read_text(encoding="utf-8")
         self.v = {n: ast.literal_eval(value) for n, value in re.findall(r"(?m)^\$(\w+) = (\d+|\[[^\n]*\])$", source)}
         self.v.update(共同区Seed总跨度=seed_span, 共同区ADV总跨度=adv_span)
         self.logs = []

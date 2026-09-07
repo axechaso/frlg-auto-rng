@@ -76,6 +76,42 @@ IF $C_轮数 != 12 or $C_最佳覆盖 != 12 or $C_超限 != 0
 ENDIF
 PRINT NATIVE_COMMON_REGION_PASS
 """;
+source += """
+
+CALL 共同区重置
+$test = 共同区设置严格模式(1)
+FOR $round = 0 TO 3
+    CALL 共同区开始扫描
+    $test = 共同区收集配对(40000 + $round * 20,1500 + $round,100 + $round)
+    $test = 共同区收集配对(40500 + $round,1600 + $round * 2,200 + $round)
+    $test = 共同区提交()
+NEXT
+$test = 共同区选择本轮配对()
+IF $test != 0 or $C_可用 != 1 or $C_最佳ADV跨度 != 3 or $C_最佳Seed跨度 != 60
+    PRINT ASSERT_FAIL: strict-adv-first
+    RETURN
+ENDIF
+CALL 共同区开始扫描
+FOR $point = 0 TO 200
+    $test = 共同区收集配对($point,$point,$point)
+NEXT
+$test = 共同区提交()
+$test = 共同区选择本轮配对()
+IF $test != -1
+    PRINT ASSERT_FAIL: strict-overflow
+    RETURN
+ENDIF
+CALL 共同区开始扫描
+$test = 共同区收集配对(40060,1503,103)
+$test = 共同区收集配对(40503,1606,203)
+$test = 共同区提交()
+$test = 共同区选择本轮配对()
+IF $test != 0 or $C_轮数 != 4 or $C_重复数 != 1
+    PRINT ASSERT_FAIL: strict-recover-duplicate
+    RETURN
+ENDIF
+PRINT NATIVE_STARTER_COMMON_PASS
+""";
 if (args.Length == 2 && args[1] == "--stress")
     source = source.Replace("FOR $point = 0 TO 39", "FOR $point = 0 TO 199")
         .Replace("40000 + $point * 17,1400 + $point * 7 + $round,100 + $point", "40000 + ($point % 40) * 17,1400 + $point * 7 + $round,100 + $point % 40");
@@ -100,7 +136,7 @@ sealed class CheckOutput : IOutputAdapter
     {
         if (message.Contains("ASSERT_FAIL")) Failed = true;
         if (message.Contains("NATIVE_COMMON_REGION_PASS")) Passed = true;
-        if (message.Contains("ASSERT_FAIL") || message.Contains("NATIVE_COMMON_REGION_PASS")) Console.WriteLine(message);
+        if (message.Contains("ASSERT_FAIL") || message.Contains("NATIVE_COMMON_REGION_PASS") || message.Contains("NATIVE_STARTER_COMMON_PASS")) Console.WriteLine(message);
     }
     public void Alert(string message) => throw new Exception(message);
 }

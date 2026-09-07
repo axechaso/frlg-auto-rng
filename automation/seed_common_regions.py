@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 
 from app_paths import RESOURCE_ROOT
+from .starter_calibration import upgrade_starter_calibration
 
 ASSET = RESOURCE_ROOT / "assets/easycon118_extensions/seed_common_regions.ecs"
 LIBRARY = "lib/25_校准_投票决策.ecs"
@@ -48,6 +49,9 @@ def upgrade_library(text: str) -> str:
         old = _function(text, "投票重置")
         if "CALL 共同区重置" not in old:
             text = text.replace(old, old.replace("ENDFUNC", "    CALL 共同区重置\nENDFUNC"))
+        old = _function(text, "投票重置")
+        if "IF $C_严格 == 0" not in old:
+            text = text.replace(old, old.replace("    CALL 共同区重置\n", "    IF $C_严格 == 0\n        CALL 共同区重置\n    ENDIF\n"))
     asset = ASSET.read_text(encoding="utf-8").rstrip()
     for name, value in settings.items():
         asset = re.sub(rf"(?m)^\${name} = \d+$", f"${name} = {value}", asset)
@@ -57,6 +61,10 @@ def upgrade_library(text: str) -> str:
 
 
 def upgrade_entry(text: str) -> str:
+    return upgrade_starter_calibration(_upgrade_legacy_entry(text))
+
+
+def _upgrade_legacy_entry(text: str) -> str:
     text = text.replace("\r\n", "\n")
     if "FUNC 处理匹配候选" not in text:
         return text  # Minimal fixtures / unrelated standalone scripts.

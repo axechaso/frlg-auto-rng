@@ -79,6 +79,7 @@ jobs:
           automation/calibration_trust_gates.py
           automation/precalibration.py
           automation/seed_common_regions.py
+          automation/starter_calibration.py
           automation/script_test.py
           automation/sid_reverse118.py
           automation/tid_rng137.py
@@ -122,6 +123,7 @@ jobs:
           tests.test_save_profiles
           tests.test_seed_table_updater
           tests.test_seed_common_regions
+          tests.test_starter_calibration
           tests.test_calibration_trust_gates
           tests.test_tenlines_fixes
           tests.test_tid_rng137

@@ -19,7 +19,7 @@ def prepare(root):
     originals = {name: (root / name).read_text(encoding="utf-8") for name in (*ENTRIES, LIBRARY)}
     changed = {name: upgrade_entry(text) if name in ENTRIES else upgrade_library(text)
                for name, text in originals.items()}
-    allowed = {"重置本轮候选状态", "处理匹配候选", "执行识图反查直到候选唯一", "执行自动校准与等待更新"}
+    allowed = {"重置本轮候选状态", "处理匹配候选", "执行识图反查直到候选唯一", "执行自动校准与等待更新", "执行RNG启动与目标获取"}
     for name in ENTRIES:
         old, new = functions(originals[name]), functions(changed[name])
         for fn, body in old.items():
@@ -30,6 +30,15 @@ def prepare(root):
         fn = "执行自动校准与等待更新"
         if fn in old:
             stripped = re.sub(r"(?m)^\s*CALL 共同区重置\n", "", new[fn])
+            stripped = stripped.replace("""    IF $御三家严格筛选 == 1 and $御三家共同证据可信 == 1
+        $Seed本轮可信 = 1
+        $TV帧本轮可信 = 1
+        IF $本轮剩余帧校准允许 == 1
+            $剩余帧本轮可信 = 1
+            $消耗帧本轮可信 = 1
+        ENDIF
+    ENDIF
+""", "") if "# STARTER_CALIBRATION_V1" not in originals[name] else stripped
             # Compare nonblank lines, because insertion preserves caller indentation.
             assert [s for s in stripped.splitlines() if s.strip()] == [s for s in old[fn].splitlines() if s.strip()]
     return originals, changed

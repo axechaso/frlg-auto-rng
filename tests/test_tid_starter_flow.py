@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation.easycon118 import EGG_TEMPLATE_NAME, EasyConRuntimeCheck
+from automation.easycon118 import EGG_TEMPLATE_NAME, STANDARD_TEMPLATE_NAME, EasyConRuntimeCheck
 from automation.tid_rng137 import (
     DEFAULT_TID_SOURCE_PATH, TID_LEGACY_SCRIPT_NAMES, TID_SCRIPT_NAMES, TidRngRequest,
 )
@@ -23,6 +23,7 @@ from automation.tid_starter_flow import (
     resolve_exhaustive_starter_plan,
     validate_tid_starter_flow_runtime,
     write_tid_starter_flow_bundle,
+    write_resolved_exhaustive_starter_project,
 )
 
 SOURCE_118 = Path(__file__).resolve().parents[1] / "local_assets" / "easycon118"
@@ -336,6 +337,24 @@ class TidStarterFlowTests(unittest.TestCase):
         self.assertEqual(resolved.starter_target.sid, 8832)
         self.assertEqual(resolved.starter_run_plan.request.tid, 12345)
         self.assertEqual(resolved.starter_run_plan.request.sid, 8832)
+
+    @unittest.skipUnless(SOURCE_118.is_dir(), "requires starter assets")
+    def test_dynamic_starter_generation_installs_paired_selection_in_both_templates(self):
+        for template in (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME):
+            with self.subTest(template=template), tempfile.TemporaryDirectory() as directory:
+                request = TidStarterFlowRequest(
+                    TidRngRequest(mode=0, sid_random=True), "火红", "小火龙",
+                    starter_min_advances=1500, starter_max_advances=1600,
+                    starter_template_name=template,
+                )
+                resolved = resolve_exhaustive_starter_plan(request, actual_tid=31056, sid_advance=2279)
+                main = write_resolved_exhaustive_starter_project(SOURCE_118, Path(directory) / "03_starter_118", resolved)
+                text = main.read_text(encoding="utf-8")
+                self.assertEqual(text.count("# STARTER_CALIBRATION_V1"), 1)
+                self.assertLess(text.index("共同区提交()"), text.index("$御三家筛选结果 = 御三家应用共同候选()"))
+                self.assertIn("御三家有界兜底窗", text)
+                self.assertEqual("$御三家菜单耗时MS = TIME() - $御三家菜单起始MS" in text, template == STANDARD_TEMPLATE_NAME)
+                self.assertIn("FUNC 共同区选择本轮配对", (main.parent / "lib/25_校准_投票决策.ecs").read_text(encoding="utf-8"))
 
     def test_bridge_uses_only_selected_starter_horizontal_distance(self):
         bridge = render_lab_bridge_ecs("杰尼龟")

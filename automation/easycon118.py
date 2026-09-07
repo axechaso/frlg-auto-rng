@@ -160,8 +160,10 @@ PREVIOUS_SCRIPT_SHA256S += (
     "43a5a9c220db51177f4cc6a9171148a0094b63f3ba49a3d8eb339243203aeca2",
     # Latest upstream package before per-axis calibration trust gates.
     "4c3760ce6d96a80f70d1722122713787601c79e510019376edc83dc7703bb8e2",
+    # Package before starter paired final selection and measured menu budgeting.
+    "dc0249d5e3fe01cc7d89c23851eab16be3bb84d21805cb9a12d532b1bed7ceac",
 )
-EXPECTED_SCRIPT_SHA256 = "dc0249d5e3fe01cc7d89c23851eab16be3bb84d21805cb9a12d532b1bed7ceac"
+EXPECTED_SCRIPT_SHA256 = "8d3d70aaa58bb809fe76cd5466623996f925829ea30200a09f5862d6258b57b8"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
@@ -255,6 +257,9 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # Diagnostic candidates remain visible but cannot drive an untrusted
     # Seed, TV-frame or remaining-frame controller.
     "98efbac0927f5cd9998b3dd85b375459cf2430d508bcc1ea757217e84fdbe1ae",
+    # Starter final selection uses current paired evidence before calibration;
+    # formal menu elapsed time is included in its F2 wait budget.
+    "81599b13fc46ccc301d5e43411cfc04040a548a6e1d10927c35c6cbb187b8d88",
 )
 
 
