@@ -10,7 +10,8 @@
 - 新增不依赖 UI 的 `worker_commands.py`，普通/静态、SID 查找/遍历、TID及动态御三家、孵蛋和高级测试统一走它。冻结版用 `EXE --worker <模式>`，源码继续 `python -u script.py`，pythonw 转用同目录 python。各流程的计划、设备、监视端口、私有停止文件、标签覆盖与续跑参数原样传递。未改 ECS 或乱数校准。
 - 真实旧 EXE 直调四种 worker 的帮助均成功，但实际中文管道输出是系统 GBK；Qt 按 UTF-8 解码会乱码。后台入口现在显式设置 stdout/stderr 的 UTF-8、逐行与即时刷新。真实新 EXE 的 UTF-8管道、文件日志、退出码7和停止返回130均通过；另用 QProcess 验证输出在子进程退出前到达，以及运行中停止。测试子进程只输出文本，未连接设备或游戏。
 - 6 项新增回归覆盖源码/pythonw/冻结分发、四类入口、所有 Qt 运行分支及配置保留。完整634项回归中632项通过，2项清单测试因写死0.9包名失败；改为读取当前版本后，与后台/更新/日志相关的39项重跑全部通过。构建新增真实 EXE 后台检查，CI纳入新增测试。
-- 版本 `0.9.1 / 2026090801`；修复包 `.build/windows-release-pyside6-0-9-1-workerfix/FRLG-Auto-RNG-0.9.1-windows-x64.zip` 为592491627字节（565.04 MiB），SHA-256 `5250c1b27187316f170efa98abe37f44566b4fdd9aea11be3df77a9a93f88f40`。版本探针、后台检查与无设备界面截图冒烟均通过，更新清单及SHA文件已生成；本次尚未上传GitHub Release，旧0.9发布资产保留。
+- 版本 `0.9.1 / 2026090801`；修复包 `.build/windows-release-pyside6-0-9-1-workerfix/FRLG-Auto-RNG-0.9.1-windows-x64.zip` 为592491627字节（565.04 MiB），SHA-256 `5250c1b27187316f170efa98abe37f44566b4fdd9aea11be3df77a9a93f88f40`。版本探针、后台检查与无设备界面截图冒烟均通过。已于2026-09-08从提交 `b0b639b` 发布为最新稳定版：<https://github.com/axechaso/frlg-auto-rng/releases/tag/v0.9.1>；旧0.9发布资产保留。
+- 发布提交的 Windows/Python 3.12 CI 全部通过：<https://github.com/axechaso/frlg-auto-rng/actions/runs/34220976848>。公开更新清单和SHA文件与本地逐字节一致，GitHub ZIP资产摘要及大小匹配；使用临时缓存、无认证公开请求，验证版本码 `2026090701` 与 `2026090302` 均检测到 `0.9.1`，未改用户配置或操作硬件。
 
 ## 2026-09-08 移除界面开发阶段说明
 
