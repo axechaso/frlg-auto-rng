@@ -69,6 +69,36 @@ EGG_FORMAL_WAIT_MARKER = "# FORMAL_EGG_WAIT_V1"
 EXPECTED_TEMPLATE_NAMES = (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME)
 PRECALIBRATION_RUNTIME_MARKER = "# GUI_PRECALIBRATION_V1"
 EXPECTED_SCRIPT_FILE_COUNT = 33
+EGG_PARENT_TYPES_COMMENT_OLD = (
+    '# 亲本A固定填写雌方或无性别方，亲本B固定填写雄方；性别填写 "雌" / "雄" / "无性别"。'
+)
+EGG_PARENT_TYPES_COMMENT_CURRENT = (
+    '# 亲本A/B类型填写 "雄" / "雌" / "无性别" / "百变怪"，顺序与 Ten Lines 保持一致。\n'
+    '# 合法组合为雄+雌，或恰好一只是百变怪。'
+)
+EGG_PARENT_PAIRING_OLD = '''    IF ($孵蛋亲本A性别 != "雌" and $孵蛋亲本A性别 != "无性别") or ($孵蛋亲本B性别 != "雄" and $孵蛋亲本B性别 != "无性别")
+        PRINT 孵蛋亲本性别填写无效: A填写雌或无性别，B填写雄或无性别
+        RETURN 0
+    ENDIF
+    IF $孵蛋亲本A性别 == "无性别" and $孵蛋亲本B性别 == "无性别"
+        PRINT 两只亲本不能同时填写无性别
+        RETURN 0
+    ENDIF'''
+EGG_PARENT_PAIRING_CURRENT = '''    IF ($孵蛋亲本A性别 != "雄" and $孵蛋亲本A性别 != "雌" and $孵蛋亲本A性别 != "无性别" and $孵蛋亲本A性别 != "百变怪") or ($孵蛋亲本B性别 != "雄" and $孵蛋亲本B性别 != "雌" and $孵蛋亲本B性别 != "无性别" and $孵蛋亲本B性别 != "百变怪")
+        PRINT 孵蛋亲本类型填写无效: 只能填写雄、雌、无性别或百变怪
+        RETURN 0
+    ENDIF
+    IF $孵蛋亲本A性别 != "百变怪" and $孵蛋亲本B性别 != "百变怪"
+        IF ($孵蛋亲本A性别 != "雄" or $孵蛋亲本B性别 != "雌") and ($孵蛋亲本A性别 != "雌" or $孵蛋亲本B性别 != "雄")
+            PRINT 孵蛋亲本组合无效: 需要雄+雌或一只百变怪
+            RETURN 0
+        ENDIF
+    ELSE
+        IF $孵蛋亲本A性别 == "百变怪" and $孵蛋亲本B性别 == "百变怪"
+            PRINT 孵蛋亲本组合无效: 两只百变怪不能孵蛋
+            RETURN 0
+        ENDIF
+    ENDIF'''
 # The legacy package is still accepted by the importer, then upgraded in the
 # ignored local cache.  Generators only run against the materialized corpus so
 # direct EasyCon execution and GUI-generated execution use the same fixes.
@@ -164,8 +194,11 @@ PREVIOUS_SCRIPT_SHA256S += (
     "dc0249d5e3fe01cc7d89c23851eab16be3bb84d21805cb9a12d532b1bed7ceac",
     # Package before frame hold required the same round to hit Seed and ADV.
     "8d3d70aaa58bb809fe76cd5466623996f925829ea30200a09f5862d6258b57b8",
+    # Version 2.0 package before both egg parents exposed the Ten Lines Ditto
+    # type and validated the complete four-type parent pairing rules.
+    "208cbab1b9635c21873350a4891e90cc982fb59b26631f664eec6a8eed422b2f",
 )
-EXPECTED_SCRIPT_SHA256 = "208cbab1b9635c21873350a4891e90cc982fb59b26631f664eec6a8eed422b2f"
+EXPECTED_SCRIPT_SHA256 = "d607e8a2702be9a7cacecb24cb0bdf59083188954c76b5196e2b7e23b62647db"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
@@ -264,6 +297,9 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "81599b13fc46ccc301d5e43411cfc04040a548a6e1d10927c35c6cbb187b8d88",
     # Frame hold now starts only on a trusted same-round Seed+ADV exact hit.
     "f2b2c1c3efbd9d67fbe699c4a9f026b43c8e8486380768165b30af4dd3a13a0f",
+    # Current materialization with complete Ten Lines parent types, including
+    # Ditto, in both egg entry-script validations.
+    "9a9bb56a2b9f380f7f57301fa1741938811127bec8a60656e92e5ad35ef28724",
 )
 
 
@@ -1038,6 +1074,19 @@ class EasyCon118Options:
     reverse_expansion_frame_half_widths: tuple[int, int, int] | None = None
 
 
+EGG_PARENT_GENDERS = frozenset({"雄", "雌", "无性别", "百变怪"})
+
+
+def is_valid_egg_parent_pair(parent_a_gender: str, parent_b_gender: str) -> bool:
+    """Match the parent-pair rules used by Ten Lines' FRLG Egg search."""
+    if (parent_a_gender, parent_b_gender) in {("雄", "雌"), ("雌", "雄")}:
+        return True
+    return (
+        parent_a_gender != parent_b_gender
+        and "百变怪" in {parent_a_gender, parent_b_gender}
+    )
+
+
 @dataclass(frozen=True)
 class EggRunRequest:
     """User-provided Ten Lines Egg result for the experimental same-seed flow."""
@@ -1103,12 +1152,12 @@ class EggRunRequest:
             raise ValueError("孵蛋蛋种全国图鉴编号必须在 1-386 之间")
         if self.compatibility not in {20, 50, 70}:
             raise ValueError("孵蛋双亲相性只能填写 20、50 或 70")
-        if self.parent_a_gender not in {"雌", "无性别"}:
-            raise ValueError("孵蛋亲本 A 必须是雌或无性别")
-        if self.parent_b_gender not in {"雄", "无性别"}:
-            raise ValueError("孵蛋亲本 B 必须是雄或无性别")
-        if self.parent_a_gender == self.parent_b_gender == "无性别":
-            raise ValueError("两只亲本不能同时填写无性别")
+        if self.parent_a_gender not in EGG_PARENT_GENDERS:
+            raise ValueError("孵蛋亲本 A 必须是雄、雌、无性别或百变怪")
+        if self.parent_b_gender not in EGG_PARENT_GENDERS:
+            raise ValueError("孵蛋亲本 B 必须是雄、雌、无性别或百变怪")
+        if not is_valid_egg_parent_pair(self.parent_a_gender, self.parent_b_gender):
+            raise ValueError("孵蛋亲本组合必须是雄+雌，或一只百变怪搭配另一只非百变怪")
         if not isinstance(self.start_from_prepared_254, bool):
             raise ValueError("孵蛋254步启动模式必须是布尔值")
         if not isinstance(self.home_buffer_adaptive_threshold, bool):
@@ -2431,6 +2480,7 @@ def _apply_japanese_seed_mode10(library_path: Path, game_cn: str, game: str) -> 
 
 def configure_egg_template_text(template_text: str, request: EggRunRequest) -> str:
     """Configure the 1.6.4a-only experimental same-seed egg entry."""
+    template_text = _apply_egg_parent_pairing_text(template_text)
     configured = _configure_user_values(
         template_text,
         egg_request_to_user_values(request),
@@ -2465,6 +2515,32 @@ def configure_egg_template_text(template_text: str, request: EggRunRequest) -> s
     )
     configured = _apply_egg_summary_fix_text(configured)
     return _apply_egg_reverse_lookup_policy_text(configured)
+
+
+def _apply_egg_parent_pairing_text(template_text: str) -> str:
+    """Upgrade legacy A/B restrictions to Ten Lines' four parent types."""
+    if EGG_PARENT_PAIRING_CURRENT in template_text:
+        configured = template_text
+    elif EGG_PARENT_PAIRING_OLD in template_text:
+        configured = template_text.replace(
+            EGG_PARENT_PAIRING_OLD,
+            EGG_PARENT_PAIRING_CURRENT,
+            1,
+        )
+    elif "FUNC 孵蛋流程_解析并校验配置" in template_text:
+        raise ValueError("孵蛋模板缺少已知的亲本组合校验，拒绝自动改写")
+    else:
+        # Small unit-test/user-value fixtures do not contain the runtime
+        # validation function and therefore have nothing to upgrade.
+        return template_text
+
+    if EGG_PARENT_TYPES_COMMENT_OLD in configured:
+        configured = configured.replace(
+            EGG_PARENT_TYPES_COMMENT_OLD,
+            EGG_PARENT_TYPES_COMMENT_CURRENT,
+            1,
+        )
+    return configured
 
 
 def _apply_egg_summary_fix_text(template_text: str) -> str:
@@ -3670,6 +3746,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         standard_configured
     )
     standard_configured = apply_calibration_trust_gates_text(standard_configured)
+    standard_configured = _apply_egg_parent_pairing_text(standard_configured)
     standard_configured = _apply_seed_mode3_help_start_text(standard_configured)
     standard_path.write_text(standard_configured, encoding="utf-8")
 
@@ -3693,6 +3770,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     )
     configured = _apply_seed_hold_observation_window_text(configured)
     configured = apply_calibration_trust_gates_text(configured)
+    configured = _apply_egg_parent_pairing_text(configured)
     configured = _apply_egg_seed_controller_runtime_override_text(
         configured,
         EGG_SEED_CONTROLLER_OVERRIDE_PATH.read_text(encoding="utf-8"),

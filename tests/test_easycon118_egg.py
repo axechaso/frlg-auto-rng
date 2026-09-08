@@ -59,6 +59,7 @@ from automation.easycon118 import (
     _apply_egg_formal_parity_runtime_override_text,
     _apply_egg_party_slot_candy_runtime_override_text,
     _apply_egg_party_slot_main_runtime_override_text,
+    _apply_egg_parent_pairing_text,
     _apply_egg_pickup_parity_menu_text,
     _apply_egg_reverse_lookup_policy_text,
     _apply_egg_reverse_lookup_window_text,
@@ -460,6 +461,8 @@ ENDFUNC
         configured = configure_egg_template_text(
             template,
             egg_request(
+                parent_a_gender="百变怪",
+                parent_b_gender="无性别",
                 seed_startup_scheme=1,
                 seed_calibration_scheme=1,
                 debug_log_output=0,
@@ -476,6 +479,8 @@ ENDFUNC
         self.assertIn('$Seed校准方案 = 1', configured)
         self.assertIn('$调试日志输出 = 0', configured)
         self.assertIn('$帧奇偶修正方案 = 1', configured)
+        self.assertIn('$孵蛋亲本A性别 = "百变怪"', configured)
+        self.assertIn('$孵蛋亲本B性别 = "无性别"', configured)
         self.assertIn('$扩窗层数上限 = 1', configured)
         self.assertIn('$扩窗第1层Seed容差 = 12', configured)
         self.assertIn('$扩窗第3层帧半宽 = 6000', configured)
@@ -499,7 +504,9 @@ ENDFUNC
             ({"target_seed": "GGGG"}, "Seed"),
             ({"pickup_advances": 9800}, "1800"),
             ({"compatibility": 60}, "20、50 或 70"),
-            ({"parent_a_gender": "雄"}, "亲本 A"),
+            ({"parent_a_gender": "未知"}, "亲本 A"),
+            ({"parent_a_gender": "百变怪", "parent_b_gender": "百变怪"}, "亲本组合"),
+            ({"parent_a_gender": "无性别", "parent_b_gender": "雄"}, "亲本组合"),
             ({"parent_a_ivs": (31, 31, 31, 31, 31, 32)}, "0-31"),
             ({"start_from_prepared_254": 1}, "布尔值"),
             ({"seed_startup_scheme": 2}, "Seed启动方案"),
@@ -509,6 +516,36 @@ ENDFUNC
             with self.subTest(changes=changes):
                 with self.assertRaisesRegex(ValueError, message):
                     egg_request(**changes).validate()
+
+    def test_request_accepts_ten_lines_ditto_parent_pairs(self):
+        for parent_a, parent_b in (
+            ("百变怪", "雄"),
+            ("百变怪", "无性别"),
+            ("雌", "百变怪"),
+            ("雄", "雌"),
+            ("雌", "雄"),
+        ):
+            with self.subTest(parent_a=parent_a, parent_b=parent_b):
+                egg_request(parent_a_gender=parent_a, parent_b_gender=parent_b).validate()
+
+    def test_legacy_parent_pairing_is_upgraded_and_idempotent(self):
+        legacy = '''# 亲本A固定填写雌方或无性别方，亲本B固定填写雄方；性别填写 "雌" / "雄" / "无性别"。
+FUNC 孵蛋流程_解析并校验配置(): INT
+    IF ($孵蛋亲本A性别 != "雌" and $孵蛋亲本A性别 != "无性别") or ($孵蛋亲本B性别 != "雄" and $孵蛋亲本B性别 != "无性别")
+        PRINT 孵蛋亲本性别填写无效: A填写雌或无性别，B填写雄或无性别
+        RETURN 0
+    ENDIF
+    IF $孵蛋亲本A性别 == "无性别" and $孵蛋亲本B性别 == "无性别"
+        PRINT 两只亲本不能同时填写无性别
+        RETURN 0
+    ENDIF
+ENDFUNC'''
+        upgraded = _apply_egg_parent_pairing_text(legacy)
+        self.assertIn('"百变怪"', upgraded)
+        self.assertIn("亲本A/B类型填写", upgraded)
+        self.assertIn("两只百变怪不能孵蛋", upgraded)
+        self.assertNotIn("A填写雌或无性别", upgraded)
+        self.assertEqual(_apply_egg_parent_pairing_text(upgraded), upgraded)
 
     def test_settings_runtime_override_is_bounded_and_idempotent(self):
         original = """\

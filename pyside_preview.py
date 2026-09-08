@@ -1839,14 +1839,14 @@ class FrlgPreviewWindow(QMainWindow):
         parents_layout = QVBoxLayout(self.egg_parents)
         parents_layout.setContentsMargins(0, 0, 0, 0)
         parents_layout.setSpacing(12)
-        for name, choices in (("A", ("雌", "无性别")), ("B", ("雄", "无性别"))):
+        for name, current in (("A", 1), ("B", 0)):
             grid = QGridLayout()
             grid.setSpacing(8)
             help_key = f"egg_parent_{name.lower()}"
-            gender = _combo(*choices)
+            gender = _combo("雄", "雌", "无性别", "百变怪", current=current)
             gender.setFixedSize(88, 36)
             self._field(grid, 0, 0, f"亲本 {name}", gender, help_key=help_key)
-            gender.setAccessibleName(f"亲本 {name} 性别")
+            gender.setAccessibleName(f"亲本 {name} 类型")
             grid.setColumnStretch(0, 0)
             for c, stat in enumerate(STATS, 1):
                 spin = self._spin(31, 0, 31)

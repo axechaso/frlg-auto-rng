@@ -148,6 +148,25 @@ class RemainingQtTests(unittest.TestCase):
         self.assertEqual(combo.currentText(), "两只似乎不喜欢对方（20）")
         self.assertEqual(button.text(), "English")
 
+    def test_egg_parent_selectors_include_ditto_and_preserve_it_in_configs(self):
+        self.configure_egg()
+        expected = ["雄", "雌", "无性别", "百变怪"]
+        parent_a, parent_b = (row[0] for row in self.w.egg_parent_widgets)
+        self.assertEqual([parent_a.itemText(i) for i in range(parent_a.count())], expected)
+        self.assertEqual([parent_b.itemText(i) for i in range(parent_b.count())], expected)
+
+        parent_a.setCurrentText("百变怪")
+        parent_b.setCurrentText("无性别")
+        self.assertEqual(self.w.reader.egg().parent_a_gender, "百变怪")
+        payload = self.w.egg_payload(False)
+        self.assertEqual(payload["parent_a_gender"], "百变怪")
+        self.assertEqual(payload["parent_b_gender"], "无性别")
+
+        parent_a.setCurrentText("雌")
+        self.w.apply_egg_config(payload, False)
+        self.assertEqual(parent_a.currentText(), "百变怪")
+        self.assertEqual(parent_b.currentText(), "无性别")
+
     def test_sid_active_slots_and_effort_values(self):
         w = self.w
         w.select_page("sid")

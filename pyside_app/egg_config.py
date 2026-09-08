@@ -1,5 +1,6 @@
 """Portable egg configuration adapters matching the formal Tk file contract."""
 from automation import EggRunRequest
+from automation.easycon118 import EGG_PARENT_GENDERS, is_valid_egg_parent_pair
 EGG_CONFIG_VERSION = 1
 EGG_PARENT_CONFIG_KIND = "egg_parent"
 EGG_FULL_CONFIG_KIND = "egg_full"
@@ -118,12 +119,12 @@ def build_egg_parent_config_payload(
         raise ValueError("双亲相性只能填写 20、50 或 70")
     parent_a_gender = str(parent_a_gender).strip()
     parent_b_gender = str(parent_b_gender).strip()
-    if parent_a_gender not in {"雌", "无性别"}:
-        raise ValueError("孵蛋亲本 A 必须是雌或无性别")
-    if parent_b_gender not in {"雄", "无性别"}:
-        raise ValueError("孵蛋亲本 B 必须是雄或无性别")
-    if parent_a_gender == parent_b_gender == "无性别":
-        raise ValueError("两只亲本不能同时填写无性别")
+    if parent_a_gender not in EGG_PARENT_GENDERS:
+        raise ValueError("孵蛋亲本 A 必须是雄、雌、无性别或百变怪")
+    if parent_b_gender not in EGG_PARENT_GENDERS:
+        raise ValueError("孵蛋亲本 B 必须是雄、雌、无性别或百变怪")
+    if not is_valid_egg_parent_pair(parent_a_gender, parent_b_gender):
+        raise ValueError("孵蛋亲本组合必须是雄+雌，或一只百变怪搭配另一只非百变怪")
     for values, label in ((parent_a_ivs, "亲本A"), (parent_b_ivs, "亲本B")):
         if isinstance(values, (str, bytes)):
             raise ValueError(f"{label}必须包含六项 IV")

@@ -58,13 +58,13 @@
 | --- | --- |
 | `local_assets/easycon118/NS火叶SID反查-采集测试.ecs` 参数区 | SID 确认与糖果：先存档、逐只读档、糖果消耗不保存；六槽各自的物种、初始等级、来源、相遇地点与 EV 分开提示；页面识别与糖果阈值区分 |
 | `local_assets/easycon118/NS火叶全自动一键乱数2.0.ecs` 及时间轴版参数区 | 十六进制 Seed、目标 ADV 单位、Seed 校准逐项含义、固定 HOME 启动顺序、两种帧奇偶方案 |
-| 同脚本孵蛋参数区与 `local_assets/easycon118/lib/27_孵蛋测试流程.ecs` | 蛋种、同 Seed 的 Held / Pickup、至少 1800 ADV 间隔、20 / 50 / 70 相性、亲本 A / B 性别与实际 IV |
+| 同脚本孵蛋参数区与 `local_assets/easycon118/lib/27_孵蛋测试流程.ecs` | 蛋种、同 Seed 的 Held / Pickup、至少 1800 ADV 间隔、20 / 50 / 70 相性、亲本 A / B 类型与实际 IV |
 | `local_assets/tid_rng137/【TID+SID乱数&穷举】英文版-火红叶绿1.3.7.txt` 及日文版参数区 | 主角名与性别变更需重测、日文浊音拆写、Sound / Button Mode / Seed Button、旧数据的取名进入键、SELECT 次数、HOME / 关闭等待、去噪命中与窗口、候选阈值及场景 OCR |
 
 复核边界：
 
 - SID 以 `automation/sid_reverse118.py` 为准：糖果 0–20、识图 1–100、单项 EV 0–255 / 总和不超过 510；预览两个数值框的上下限同步校正，不增加业务校验或执行能力。
-- 孵蛋以 `automation/easycon118.py` 为准：Seed 0000–FFFF、Held 大于 0、Pickup 至少晚 1800 ADV；亲本 B 可为雄或无性别，未照搬旧注释中“B 固定雄”的限制。
+- 孵蛋以 `automation/easycon118.py` 为准：Seed 0000–FFFF、Held 大于 0、Pickup 至少晚 1800 ADV；亲本 A/B 均可选雄、雌、无性别或百变怪。合法组合为雄+雌（顺序不限），或恰好一只百变怪；无性别亲本必须与百变怪配对。
 - TID 以 `automation/tid_rng137.py` 与 `automation/tid_search_policy.py` 为准：去噪命中数不能超过窗口；候选按同参数整窗口证据选择，号码距离不等于帧补偿。未搬入旧注释“任意一个去噪值改 1 即可关闭”的不完整建议。
 - 旧 TID 脚本头的“1.60 以上”、内部调试开关、尚未支持的 Seed 模式和运行实现细节未搬入界面；正式运行时约束仍为 EasyCon 1.6.4-a+9c86137。
 
