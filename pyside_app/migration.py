@@ -427,11 +427,17 @@ class CompleteWindow(FrlgWindow):
 
     def _load_settings(self):
         super()._load_settings()
+        from .path_settings import restore_resource_path
+
         try:
             values = json.loads((self.paths.user / "pyside6_settings.json").read_text(encoding="utf-8"))
-            for key in ("sid_source", "tid_source"):
-                if isinstance(values.get(key), str):
-                    self.fields[key].setText(values[key])
+            for key, default, suffix in (
+                ("sid_source", self.paths.source, "_internal/local_assets/easycon118"),
+                ("tid_source", self.paths.tid_source, "_internal/local_assets/tid_rng137"),
+            ):
+                self.fields[key].setText(restore_resource_path(
+                    values.get(key), default, bundled_suffix=suffix,
+                ))
         except (OSError, ValueError, TypeError, AttributeError):
             pass
 

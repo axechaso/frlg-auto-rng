@@ -1232,6 +1232,13 @@ def probe_easycon_devices(
     mapping so its dropdown can show both the EasyCon index and device name.
     """
     ezcon_path = Path(ezcon_path).resolve()
+    if not ezcon_path.is_file():
+        raise FileNotFoundError(
+            f"设备检测找不到 EasyCon 程序：{ezcon_path}\n"
+            "请在共通设置中点击“选择 ezcon.exe”，选择当前解压目录下的 "
+            "_internal\\easycon\\publish\\ezcon.exe，然后重新检测。\n"
+            "如果该文件也不存在，请重新完整解压发布包。"
+        )
     run_options = dict(
         capture_output=True,
         text=True,

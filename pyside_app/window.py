@@ -34,6 +34,7 @@ from tid_records import TidRecordStore
 from tid_session import write_json_atomic
 
 from .jobs import Job
+from .path_settings import restore_resource_path
 from .diagnostics import explain_error, parse_integer
 from .profiles import ProfileManager
 from .services import AppPaths, WildInputs, prepare_wild, prepare_run, display_log_line
@@ -675,9 +676,13 @@ class FrlgWindow(FrlgPreviewWindow):
             values = json.loads((self.paths.user / "pyside6_settings.json").read_text(encoding="utf-8"))
             if not isinstance(values, dict):
                 return
-            for key in ("source", "ezcon"):
-                if isinstance(values.get(key), str):
-                    self.fields[key].setText(values[key])
+            for key, default, suffix in (
+                ("source", self.paths.source, "_internal/local_assets/easycon118"),
+                ("ezcon", self.paths.ezcon, "_internal/easycon/publish/ezcon.exe"),
+            ):
+                self.fields[key].setText(restore_resource_path(
+                    values.get(key), default, bundled_suffix=suffix, file=key == "ezcon",
+                ))
         except (OSError, ValueError, TypeError):
             pass
 
