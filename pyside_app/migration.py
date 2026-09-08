@@ -477,7 +477,7 @@ class CompleteWindow(FrlgWindow):
 
     def egg_payload(self, full):
         a, b = self.egg_parent_widgets
-        parent = dict(species_id=species_id(self.fields["egg_species"].text()), compatibility=self.reader.integer("egg_compatibility"),
+        parent = dict(species_id=species_id(self.fields["egg_species"].text()), compatibility=self.reader.selected_integer("egg_compatibility"),
             parent_a_gender=a[0].currentText(), parent_b_gender=b[0].currentText(),
             parent_a_ivs=[s.value() for s in a[1:]], parent_b_ivs=[s.value() for s in b[1:]])
         if not full:
@@ -515,7 +515,10 @@ class CompleteWindow(FrlgWindow):
         # Parse and validate the entire file before changing any fields.
         config = (parse_egg_full_config_payload if full else parse_egg_parent_config_payload)(config)
         self.fields["egg_species"].setText(SPECIES_EN_TO_ZH.get(get_species_name(config["egg_species_id"]), str(config["egg_species_id"])))
-        self.fields["egg_compatibility"].setCurrentText(str(config["compatibility"]))
+        compatibility_index = self.fields["egg_compatibility"].findData(config["compatibility"])
+        if compatibility_index < 0:
+            raise ValueError("双亲相性只能填写 20、50 或 70")
+        self.fields["egg_compatibility"].setCurrentIndex(compatibility_index)
         for letter, widgets in zip(("a", "b"), self.egg_parent_widgets):
             widgets[0].setCurrentText(config[f"parent_{letter}_gender"])
             for widget, value in zip(widgets[1:], config[f"parent_{letter}_ivs"]):

@@ -29,6 +29,10 @@ class FormReader:
     def integer(self, key):
         return parse_integer(self.text(key), self.f[key].accessibleName() or key)
 
+    def selected_integer(self, key):
+        widget = self.f[key]
+        return parse_integer(str(widget.currentData()), widget.accessibleName() or key)
+
     def index(self, key):
         return self.f[key].currentIndex()
 
@@ -51,7 +55,7 @@ class FormReader:
         request = EggRunRequest(game=self.w.game_code(), seed_mode=self.index("egg_seed_mode") - 1,
             target_seed=self.text("egg_seed"), held_advances=self.integer("egg_held"),
             pickup_advances=self.integer("egg_pickup"), species_id=species_id(self.text("egg_species")),
-            compatibility=self.integer("egg_compatibility"), parent_a_gender=parents[0][0].currentText(),
+            compatibility=self.selected_integer("egg_compatibility"), parent_a_gender=parents[0][0].currentText(),
             parent_b_gender=parents[1][0].currentText(), parent_a_ivs=tuple(s.value() for s in parents[0][1:]),
             parent_b_ivs=tuple(s.value() for s in parents[1][1:]),
             start_from_prepared_254=self.index("egg_start") == 1,

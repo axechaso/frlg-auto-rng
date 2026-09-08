@@ -65,6 +65,19 @@ NAV_ITEMS = (
     ("logs", "运行日志", "实时状态与历史输出"),
 )
 
+EGG_COMPATIBILITY_LABELS = {
+    "zh": (
+        (20, "两只似乎不喜欢对方"),
+        (50, "两只似乎相处得来"),
+        (70, "两只似乎相处得很好"),
+    ),
+    "en": (
+        (20, "The two don't seem to like each other"),
+        (50, "The two seem to get along"),
+        (70, "The two seem to get along very well"),
+    ),
+}
+
 
 APP_STYLE = r"""
 * {
@@ -1065,13 +1078,24 @@ class FrlgPreviewWindow(QMainWindow):
         return page, layout
 
     @staticmethod
-    def _field(grid: QGridLayout, row: int, column: int, title: str, widget: QWidget, *, help_key: str | None = None) -> None:
+    def _field(
+        grid: QGridLayout,
+        row: int,
+        column: int,
+        title: str,
+        widget: QWidget,
+        *,
+        help_key: str | None = None,
+        label_action: QWidget | None = None,
+    ) -> None:
         box = QVBoxLayout()
         box.setSpacing(5)
         heading = QHBoxLayout()
         heading.setSpacing(6)
         label = _label(title, name="fieldLabel")
         heading.addWidget(label, 1)
+        if label_action is not None:
+            heading.addWidget(label_action)
         help_key = help_key or FIELD_HELP.get(widget.objectName())
         if help_key:
             label.setToolTip(_help_html(help_key))
@@ -1084,15 +1108,23 @@ class FrlgPreviewWindow(QMainWindow):
         grid.setColumnStretch(column, 1)
         widget.setAccessibleName(title)
 
-    def _form(self, card: Card, entries: list[tuple[str, str, QWidget]], columns: int = 3) -> None:
+    def _form(self, card: Card, entries: list[tuple], columns: int = 3) -> None:
         grid = QGridLayout()
         grid.setSpacing(12)
         for column in range(columns):
             grid.setColumnStretch(column, 1)
-        for i, (key, title, widget) in enumerate(entries):
+        for i, entry in enumerate(entries):
+            key, title, widget, *extra = entry
             widget.setObjectName(key)
             self.fields[key] = widget
-            self._field(grid, i // columns, i % columns, title, widget)
+            self._field(
+                grid,
+                i // columns,
+                i % columns,
+                title,
+                widget,
+                label_action=extra[0] if extra else None,
+            )
         card.layout.addLayout(grid)
 
     @staticmethod
@@ -1783,12 +1815,26 @@ class FrlgPreviewWindow(QMainWindow):
         layout.addWidget(conditions)
 
         target = Card("孵蛋目标", "先从 Ten Lines Egg 页取得同一个初始 Seed 下的 Held 和 Pickup；Pickup 至少晚 1800 ADV。")
+        compatibility = _combo(
+            *(f"{text}（{value}）" for value, text in EGG_COMPATIBILITY_LABELS["zh"]),
+            current=2,
+        )
+        for index, (value, _text) in enumerate(EGG_COMPATIBILITY_LABELS["zh"]):
+            compatibility.setItemData(index, value)
+        self.egg_compatibility_language = "zh"
+        self.egg_compatibility_language_button = _button("English", "preset", enabled=True)
+        self.egg_compatibility_language_button.setObjectName("eggCompatibilityLanguage")
+        self.egg_compatibility_language_button.setAccessibleName("切换双亲相性说明语言")
+        self.egg_compatibility_language_button.setToolTip("切换为英文；只改变相性说明文字，不改变 20 / 50 / 70 数值。")
+        self.egg_compatibility_language_button.clicked.connect(self._toggle_egg_compatibility_language)
         self._form(target, [
             ("egg_seed", "目标 Seed（同 Seed）", _line("75D1")),
             ("egg_held", "Held / 生成帧（ADV）", _line("8021")),
             ("egg_pickup", "Pickup / 领取帧（ADV）", _line("10021")),
-            ("egg_compatibility", "双亲相性", _combo("20", "50", "70", current=2)),
         ])
+        self._form(target, [
+            ("egg_compatibility", "双亲相性", compatibility, self.egg_compatibility_language_button),
+        ], 1)
         self.egg_parents = QWidget()
         parents_layout = QVBoxLayout(self.egg_parents)
         parents_layout.setContentsMargins(0, 0, 0, 0)
@@ -1824,6 +1870,25 @@ class FrlgPreviewWindow(QMainWindow):
             egg.currentIndexChanged.connect(wild.setCurrentIndex)
         layout.addStretch(1)
         return page
+
+    def _toggle_egg_compatibility_language(self) -> None:
+        language = "en" if self.egg_compatibility_language == "zh" else "zh"
+        combo = self.fields["egg_compatibility"]
+        with QSignalBlocker(combo):
+            for index, (value, text) in enumerate(EGG_COMPATIBILITY_LABELS[language]):
+                suffix = f"（{value}）" if language == "zh" else f" ({value})"
+                combo.setItemText(index, f"{text}{suffix}")
+        self.egg_compatibility_language = language
+        if language == "zh":
+            self.egg_compatibility_language_button.setText("English")
+            self.egg_compatibility_language_button.setToolTip(
+                "切换为英文；只改变相性说明文字，不改变 20 / 50 / 70 数值。"
+            )
+        else:
+            self.egg_compatibility_language_button.setText("中文")
+            self.egg_compatibility_language_button.setToolTip(
+                "切换为中文；只改变相性说明文字，不改变 20 / 50 / 70 数值。"
+            )
 
     def _build_logs_page(self) -> QWidget:
         page, layout = self._page_canvas()

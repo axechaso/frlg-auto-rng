@@ -116,6 +116,38 @@ class RemainingQtTests(unittest.TestCase):
             self.w.reader.egg()
         self.assertEqual(self.w.reader.egg(require_ack=False), actual)
 
+    def test_egg_compatibility_defaults_to_chinese_and_language_toggle_keeps_value(self):
+        self.configure_egg()
+        combo = self.w.fields["egg_compatibility"]
+        button = self.w.egg_compatibility_language_button
+
+        self.assertEqual([combo.itemData(i) for i in range(combo.count())], [20, 50, 70])
+        self.assertEqual(
+            [combo.itemText(i) for i in range(combo.count())],
+            ["两只似乎不喜欢对方（20）", "两只似乎相处得来（50）", "两只似乎相处得很好（70）"],
+        )
+        self.assertEqual(combo.currentData(), 70)
+        self.assertEqual(button.text(), "English")
+
+        combo.setCurrentIndex(combo.findData(50))
+        button.click()
+        self.assertEqual(combo.currentData(), 50)
+        self.assertEqual(combo.currentText(), "The two seem to get along (50)")
+        self.assertEqual(button.text(), "中文")
+        self.assertEqual(self.w.reader.egg().compatibility, 50)
+        self.assertEqual(self.w.egg_payload(False)["compatibility"], 50)
+
+        payload = self.w.egg_payload(False)
+        payload["compatibility"] = 20
+        self.w.apply_egg_config(payload, False)
+        self.assertEqual(combo.currentData(), 20)
+        self.assertEqual(combo.currentText(), "The two don't seem to like each other (20)")
+
+        button.click()
+        self.assertEqual(combo.currentData(), 20)
+        self.assertEqual(combo.currentText(), "两只似乎不喜欢对方（20）")
+        self.assertEqual(button.text(), "English")
+
     def test_sid_active_slots_and_effort_values(self):
         w = self.w
         w.select_page("sid")
