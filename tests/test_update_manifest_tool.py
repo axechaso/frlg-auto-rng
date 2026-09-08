@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app_version import APP_VERSION
 from tools.create_update_manifest import create_manifest, main
 
 
@@ -19,7 +20,7 @@ class UpdateManifestToolTests(unittest.TestCase):
             (unpacked / "FRLG-Auto-RNG.exe").write_bytes(b"main")
             (unpacked / "_internal").mkdir()
             (unpacked / "_internal" / "x").write_bytes(b"internal")
-            package = root / "FRLG-Auto-RNG-0.9-windows-x64.zip"
+            package = root / f"FRLG-Auto-RNG-{APP_VERSION}-windows-x64.zip"
             package.write_bytes(b"zip bytes")
             result = create_manifest(package, unpacked, notes="notes")
             expected_hash = hashlib.sha256(b"zip bytes").hexdigest()
@@ -44,7 +45,7 @@ class UpdateManifestToolTests(unittest.TestCase):
             package.write_bytes(b"x")
             with self.assertRaises(ValueError):
                 create_manifest(package, unpacked)
-            package = root / "FRLG-Auto-RNG-0.9-windows-x64.zip"
+            package = root / f"FRLG-Auto-RNG-{APP_VERSION}-windows-x64.zip"
             package.write_bytes(b"x")
             with self.assertRaises(ValueError):
                 create_manifest(package, root / "empty")
@@ -55,10 +56,10 @@ class UpdateManifestToolTests(unittest.TestCase):
             unpacked = root / "release"
             unpacked.mkdir()
             (unpacked / "FRLG-Auto-RNG.exe").write_bytes(b"main")
-            package = root / "FRLG-Auto-RNG-0.9-windows-x64.zip"
+            package = root / f"FRLG-Auto-RNG-{APP_VERSION}-windows-x64.zip"
             package.write_bytes(b"zip")
-            notes = root / "v0.9.md"
-            expected = "# FRLG Auto RNG 0.9\n\nPySide6 正式版。\n"
+            notes = root / f"v{APP_VERSION}.md"
+            expected = f"# FRLG Auto RNG {APP_VERSION}\n\nPySide6 正式版。\n"
             notes.write_text(expected, encoding="utf-8")
 
             with patch.object(sys, "stdout", io.StringIO()):

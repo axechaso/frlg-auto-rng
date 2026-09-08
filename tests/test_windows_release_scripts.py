@@ -11,6 +11,7 @@ class WindowsReleaseScriptTests(unittest.TestCase):
         for required in (
             "FRLG-Auto-RNG-Updater",
             "tools.create_update_manifest",
+            "tools.verify_frozen_workers --exe $frozenMain",
             "--notes-file",
             "--onefile",
             "--version-json-file",

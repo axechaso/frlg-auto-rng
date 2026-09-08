@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import socket
-import sys
 import uuid
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
@@ -25,6 +24,7 @@ from device_label_overrides import LabelOverrideStore, apply_profile_to_projects
 from sid_traversal import traversal_context, DEFAULT_TARGET_MAX_ADVANCES
 from tid_records import TidRecordContext
 from tid_session import write_json_atomic
+from worker_commands import build_worker_command
 from .services import AppPaths, RunCommand
 
 
@@ -213,14 +213,14 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
         common.append("--fingerprint-warnings")
     request = inputs.request
     if inputs.mode == "sid":
-        worker = "run_sid_reverse_capture.py"
+        worker = "sid-capture"
         args = ["--request-json", str(prepared.directory / "plan.json"), "--game", request.game,
                 "--source", str(inputs.source), "--output", str(prepared.directory),
                 "--report-path", str(log.with_suffix(".report.txt")), *common]
         if prepared.profile:
             args += ["--label-override-profile", str(prepared.profile)]
     elif inputs.mode == "tid":
-        worker = "run_tid_starter_flow.py"
+        worker = "tid-flow"
         context = log.with_suffix(".tid-context.json")
         TidRecordContext.from_request(inputs.extra["game"], request).save(context)
         args = ["--flow-dir" if inputs.extra.get("flow") else "--tid-dir", str(prepared.directory),
@@ -234,7 +234,7 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
         if prepared.profile:
             args += ["--label-override-profile", str(prepared.profile)]
     elif inputs.mode == "sid_traversal":
-        worker = "run_sid_traversal.py"
+        worker = "sid-traversal"
         args = ["--request-json", str(prepared.directory / "traversal.json"), "--source", str(inputs.source),
                 "--output", str(prepared.directory / "attempts"), "--progress-dir", str(inputs.extra["progress_dir"]),
                 "--max-advances", str(inputs.extra["max_advances"]),
@@ -247,7 +247,7 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
         if prepared.profile:
             args += ["--label-override-profile", str(prepared.profile)]
     else:
-        worker = "run_easycon_logged.py"
+        worker = "easycon-log"
         backend = inputs.extra.get("backend", SCRIPT_TEST_BACKEND_COMPAT)
         if backend == SCRIPT_TEST_BACKEND_ORIGINAL:
             runner, preview_port = inputs.ezcon, 0
@@ -264,8 +264,6 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
             write_json_atomic(log.with_suffix(".json"), {"script": str(prepared.project),
                 "script_sha256": hashlib.sha256(prepared.project.read_bytes()).hexdigest(),
                 "backend": backend, "runner": str(runner), "port": port, "video": video, "command": command})
-    interpreter = Path(sys.executable)
-    if interpreter.name.lower() == "pythonw.exe":
-        interpreter = interpreter.with_name("python.exe")
-    return RunCommand(str(interpreter), ("-u", str(RESOURCE_ROOT / worker), *args), log, stop,
+    command = build_worker_command(worker, args)
+    return RunCommand(command[0], tuple(command[1:]), log, stop,
                       f"http://127.0.0.1:{preview_port}/mjpeg" if preview_port else "", check)

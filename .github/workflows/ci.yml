@@ -42,6 +42,7 @@ jobs:
           tid_records.py
           tid_session.py
           process_control.py
+          worker_commands.py
           pyside_preview.py
           pyside_chrome.py
           run_pyside6_gui.py
@@ -76,6 +77,7 @@ jobs:
           package_entry.py
           tools/create_update_manifest.py
           tools/verify_windows_upgrade.py
+          tools/verify_frozen_workers.py
           sid_traversal.py
           tenlines_seed_updater.py
           automation/easycon118.py
@@ -146,6 +148,7 @@ jobs:
           tests.test_tid_starter_runner
           tests.test_app_version
           tests.test_package_entry
+          tests.test_worker_commands
           tests.test_app_updater
           tests.test_update_installer
           tests.test_update_manifest_tool

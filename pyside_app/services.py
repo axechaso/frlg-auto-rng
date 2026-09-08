@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import re
 import socket
-import sys
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -19,6 +18,7 @@ from automation import (
     prepare_compat_runner, build_run_command, probe_easycon_devices,
 )
 from device_label_overrides import LabelOverrideStore, apply_profile_to_projects
+from worker_commands import build_worker_command
 
 
 @dataclass(frozen=True)
@@ -161,15 +161,10 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
     stop_path = log_path.with_suffix(".stop")
     command = build_run_command(runner, prepared.project, port=port, video_device=video,
                                 video_type="DSHOW", preview_port=preview_port)
-    arguments = ("-u", str(RESOURCE_ROOT / "run_easycon_logged.py"),
+    worker_command = build_worker_command("easycon-log", (
                  "--log-path", str(log_path), "--cwd", str(prepared.project.parent),
-                 "--stop-file", str(stop_path), "--", *command)
-    # pythonw has no stdout even when QProcess supplies pipes. The log wrapper
-    # needs the console interpreter; QProcess still owns its hidden process.
-    interpreter = Path(sys.executable)
-    if interpreter.name.lower() == "pythonw.exe":
-        interpreter = interpreter.with_name("python.exe")
-    return RunCommand(str(interpreter), arguments, log_path, stop_path,
+                 "--stop-file", str(stop_path), "--", *command))
+    return RunCommand(worker_command[0], tuple(worker_command[1:]), log_path, stop_path,
                       f"http://127.0.0.1:{preview_port}/mjpeg",
                       EasyConRuntimeCheck(True, (), tuple(warnings)))
 

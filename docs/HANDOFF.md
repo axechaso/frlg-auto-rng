@@ -4,6 +4,14 @@
 
 快照日期：2026-09-08。
 
+## 2026-09-08 PySide6 0.9.1 后台进程启动修复
+
+- 用户的 0.9 SID 日志报 `FRLG-Auto-RNG.exe: error: unrecognized arguments: -u ...run_sid_reverse_capture.py`。根因是 Qt 的两个运行服务仍按源码方式拼接 `sys.executable -u script.py`；冻结后 `sys.executable` 是 GUI EXE，因此进入界面解析器。`package_entry.py` 已有四类 `--worker` 分发，但界面没有使用。此前界面截图、版本与升级测试不能证明后台启动接线正确。
+- 新增不依赖 UI 的 `worker_commands.py`，普通/静态、SID 查找/遍历、TID及动态御三家、孵蛋和高级测试统一走它。冻结版用 `EXE --worker <模式>`，源码继续 `python -u script.py`，pythonw 转用同目录 python。各流程的计划、设备、监视端口、私有停止文件、标签覆盖与续跑参数原样传递。未改 ECS 或乱数校准。
+- 真实旧 EXE 直调四种 worker 的帮助均成功，但实际中文管道输出是系统 GBK；Qt 按 UTF-8 解码会乱码。后台入口现在显式设置 stdout/stderr 的 UTF-8、逐行与即时刷新。真实新 EXE 的 UTF-8管道、文件日志、退出码7和停止返回130均通过；另用 QProcess 验证输出在子进程退出前到达，以及运行中停止。测试子进程只输出文本，未连接设备或游戏。
+- 6 项新增回归覆盖源码/pythonw/冻结分发、四类入口、所有 Qt 运行分支及配置保留。完整634项回归中632项通过，2项清单测试因写死0.9包名失败；改为读取当前版本后，与后台/更新/日志相关的39项重跑全部通过。构建新增真实 EXE 后台检查，CI纳入新增测试。
+- 版本 `0.9.1 / 2026090801`；修复包 `.build/windows-release-pyside6-0-9-1-workerfix/FRLG-Auto-RNG-0.9.1-windows-x64.zip` 为592491627字节（565.04 MiB），SHA-256 `5250c1b27187316f170efa98abe37f44566b4fdd9aea11be3df77a9a93f88f40`。版本探针、后台检查与无设备界面截图冒烟均通过，更新清单及SHA文件已生成；本次尚未上传GitHub Release，旧0.9发布资产保留。
+
 ## 2026-09-08 移除界面开发阶段说明
 
 - PySide6 孵蛋页移除橙色“尚未完成整轮实机验收”常驻提示，孵蛋确认悬浮说明不再显示实机验收或预览接入状态；御三家连续乱数卡片同步去掉相同开发阶段说明。

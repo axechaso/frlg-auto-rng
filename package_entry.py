@@ -56,6 +56,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         argv = []
     if argv[:1] == ["--worker"]:
+        # Frozen Python can ignore PYTHONIOENCODING / -u. Qt consumes UTF-8
+        # incrementally, so explicitly configure inherited output pipes.
+        for stream in (sys.stdout, sys.stderr):
+            if stream is not None and hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace",
+                                   newline="\n", line_buffering=True, write_through=True)
         if len(argv) < 2:
             print("缺少后台工作模式", file=sys.stderr)
             return 2

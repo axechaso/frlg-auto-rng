@@ -163,6 +163,15 @@ foreach ($RequiredLabel in @("闪公图标.IL", "冲浪.IL")) {
     }
 }
 
+$frozenMain = Join-Path $ReleaseRoot "FRLG-Auto-RNG.exe"
+Push-Location $Root
+try {
+    & $Python -m tools.verify_frozen_workers --exe $frozenMain
+    if ($LASTEXITCODE -ne 0) { throw "冻结后台工作进程检查失败，停止打包" }
+} finally {
+    Pop-Location
+}
+
 $ZipPath = Join-Path $BuildRoot "$OutputName.zip"
 # The release folder is self-contained. Remove PyInstaller's temporary copy
 # before compression so the archive does not require another full package's
@@ -181,7 +190,6 @@ try {
     Pop-Location
 }
 
-$frozenMain = Join-Path $ReleaseRoot "FRLG-Auto-RNG.exe"
 # PyInstaller's windowed bootloader can lose non-ASCII command-line paths on
 # some Windows hosts.  Keep the probe in a temporary path and use a separate
 # process so its real exit code is available even without a console.
