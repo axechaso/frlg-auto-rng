@@ -16,7 +16,6 @@ class WindowsReleaseScriptTests(unittest.TestCase):
             "--version-json-file",
             '"truststore==0.10.4"',
             '"PySide6==6.11.2"',
-            '"--collect-all", "PySide6"',
             '"--exclude-module", "tkinter"',
             '"--exclude-module", "tkinterdnd2"',
             '"--hidden-import", "run_pyside6_gui"',
@@ -26,6 +25,7 @@ class WindowsReleaseScriptTests(unittest.TestCase):
             'Remove-Item -Force -LiteralPath $ForeignIcu.FullName',
         ):
             self.assertIn(required, source)
+        self.assertNotIn('"--collect-all", "PySide6"', source)
         self.assertGreaterEqual(source.count('"--collect-submodules", "truststore"'), 2)
         for removed in (
             "$TkinterBinary",

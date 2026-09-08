@@ -73,7 +73,10 @@ $args = @(
     "--hidden-import", "run_pyside6_gui",
     "--hidden-import", "calibration_bind",
     "--hidden-import", "cv2",
-    "--collect-all", "PySide6",
+    # PyInstaller's PySide6 hook follows the Qt modules imported by the app and
+    # collects their required plugins.  Collecting the whole PySide6 wheel also
+    # ships unused QML/tooling plugins, adds hundreds of MiB, and can make Qt
+    # fail during process shutdown because unrelated plugin DLLs are loaded.
     "--collect-submodules", "truststore",
     "--exclude-module", "tkinter",
     "--exclude-module", "tkinterdnd2",
