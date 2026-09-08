@@ -1072,6 +1072,10 @@ class EasyCon118Options:
     reverse_expansion_layers: int | None = None
     reverse_expansion_seed_tolerances: tuple[int, int, int] | None = None
     reverse_expansion_frame_half_widths: tuple[int, int, int] | None = None
+    # Static Togepi performs a separate wild encounter after pickup to verify
+    # the Seed.  Its one-shot frame window must not share the ordinary layered
+    # reverse-search controls.
+    togepi_seed_reverse_frame_half_width: int | None = None
 
 
 EGG_PARENT_GENDERS = frozenset({"雄", "雌", "无性别", "百变怪"})
@@ -1121,6 +1125,11 @@ class EggRunRequest:
     reverse_expansion_layers: int | None = None
     reverse_expansion_seed_tolerances: tuple[int, int, int] | None = None
     reverse_expansion_frame_half_widths: tuple[int, int, int] | None = None
+    # The post-pickup wild encounter has its own Seed-search window.  ``None``
+    # preserves the selected 2.0 template values for older saved configs.
+    egg_seed_reverse_seed_tolerance: int | None = None
+    egg_seed_reverse_min_advances: int | None = None
+    egg_seed_reverse_max_advances: int | None = None
 
     @property
     def nx_model(self) -> int:
@@ -1739,11 +1748,43 @@ def _reverse_expansion_values(
 def reverse_expansion_to_ecs_values(
     options: EasyCon118Options | EggRunRequest,
 ) -> dict[str, int]:
-    return _reverse_expansion_values(
+    values = _reverse_expansion_values(
         options.reverse_expansion_layers,
         options.reverse_expansion_seed_tolerances,
         options.reverse_expansion_frame_half_widths,
     )
+    togepi_half_width = getattr(options, "togepi_seed_reverse_frame_half_width", None)
+    if togepi_half_width is not None:
+        try:
+            togepi_half_width = int(togepi_half_width)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("波克比 Seed 反查帧半宽必须是整数") from exc
+        if togepi_half_width < 0:
+            raise ValueError("波克比 Seed 反查帧半宽不能为负数")
+        values["波克比野生反查帧半宽"] = togepi_half_width
+
+    egg_window = (
+        getattr(options, "egg_seed_reverse_seed_tolerance", None),
+        getattr(options, "egg_seed_reverse_min_advances", None),
+        getattr(options, "egg_seed_reverse_max_advances", None),
+    )
+    if any(value is not None for value in egg_window):
+        if any(value is None for value in egg_window):
+            raise ValueError("孵蛋 Seed 反查必须同时填写 Seed 容差、最小消耗帧和最大消耗帧")
+        try:
+            seed_tolerance, minimum, maximum = (int(value) for value in egg_window)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("孵蛋 Seed 反查窗口必须是整数") from exc
+        if seed_tolerance < 0 or minimum < 0:
+            raise ValueError("孵蛋 Seed 容差和最小消耗帧不能为负数")
+        if maximum < minimum:
+            raise ValueError("孵蛋 Seed 反查最大消耗帧不能小于最小消耗帧")
+        values.update({
+            "孵蛋野生Seed容差": seed_tolerance,
+            "孵蛋野生最小消耗帧": minimum,
+            "孵蛋野生最大消耗帧": maximum,
+        })
+    return values
 
 
 def plan_to_user_values(
@@ -2186,6 +2227,8 @@ def validate_generated_egg_project_consistency(
         "seed_calibration_scheme", "debug_log_output",
         "reverse_expansion_layers", "reverse_expansion_seed_tolerances",
         "reverse_expansion_frame_half_widths",
+        "egg_seed_reverse_seed_tolerance", "egg_seed_reverse_min_advances",
+        "egg_seed_reverse_max_advances",
     ):
         actual = manifest_request.get(key)
         expected = expected_request.get(key)

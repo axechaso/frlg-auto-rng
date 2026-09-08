@@ -1515,7 +1515,7 @@ class FrlgPreviewWindow(QMainWindow):
     def _build_advanced_settings(self) -> QDialog:
         dialog = QDialog(self)
         dialog.setWindowTitle("高级设置")
-        dialog.resize(760, 680)
+        dialog.resize(760, 460)
         dialog.setMinimumSize(650, 480)
         body = QVBoxLayout(dialog)
         scroll = QScrollArea()
@@ -1528,19 +1528,79 @@ class FrlgPreviewWindow(QMainWindow):
             ("script_entry", "2.0 脚本入口", _combo("正式版脚本", "时间轴版脚本")),
         ], 1)
         layout.addWidget(self.entry_options)
-        self.advanced_options = Card("高级反查设置", "每层是相对目标中心的绝对半宽，扩大窗口会增加耗时；0 层关闭。孵蛋固定菜单奇偶。")
+        self.advanced_options = Card("高级反查设置", "奇偶调整保留在这里；三类反查窗口分别进入独立页面配置。孵蛋固定使用菜单奇偶。")
         self._form(self.advanced_options, [
             ("parity", "奇偶调整", _combo("方案 1：菜单调整", "方案 0：F1 +1 / F2 -1")),
-            ("layers", "扩窗层数", self._spin(3, 0, 3)),
-        ], 2)
-        self._form(self.advanced_options, [
-            (f"expansion_{i}_{axis}", f"第 {i} 层 · {title}（±）", _line(placeholder="模板默认值待接入"))
-            for i in range(1, 4) for axis, title in (("seed", "Seed 容差"), ("adv", "消耗帧半宽"))
-        ], 2)
+        ], 1)
+        self.reverse_config_dialogs = {
+            "wild": self._build_reverse_config_dialog(
+                "野生 / 定点反查",
+                "反查无结果时按层扩大 Seed 与消耗帧窗口；每层都是相对目标中心的绝对半宽。",
+                [
+                    (f"expansion_{i}_{axis}", f"第 {i} 层 · {title}（±）", _line(placeholder="沿用所选脚本的默认值"))
+                    for i in range(1, 4) for axis, title in (("seed", "Seed 容差"), ("adv", "消耗帧半宽"))
+                ],
+                leading_entries=[("layers", "扩窗层数", self._spin(3, 0, 3))],
+            ),
+            "togepi": self._build_reverse_config_dialog(
+                "波克比 Seed 反查",
+                "领取波克比后，在水之迷宫捕获野生宝可梦复核 Seed。Seed 容差沿用本轮目标，下面设置目标帧两侧的窗口。",
+                [("togepi_reverse_adv", "消耗帧半宽（±）", _line("5000"))],
+                columns=1,
+            ),
+            "egg": self._build_reverse_config_dialog(
+                "孵蛋 Seed 反查",
+                "领取蛋后捕获野生宝可梦复核 Seed。首次无候选时，脚本仍按既有逻辑追加 Seed ±5、最大消耗帧 +1000。",
+                [
+                    ("egg_reverse_seed", "Seed 容差（±）", _line("5")),
+                    ("egg_reverse_min_adv", "最小消耗帧", _line("500")),
+                    ("egg_reverse_max_adv", "最大消耗帧", _line("6500")),
+                ],
+                columns=2,
+            ),
+        }
+        reverse_buttons = QGridLayout()
+        reverse_buttons.setSpacing(10)
+        self.reverse_config_buttons = []
+        for column, (key, title) in enumerate((
+            ("wild", "野生 / 定点反查"),
+            ("togepi", "波克比 Seed 反查"),
+            ("egg", "孵蛋 Seed 反查"),
+        )):
+            button = _button(title, enabled=True)
+            button.setAccessibleName(f"配置{title}")
+            button.setToolTip(f"打开“{title}”独立配置")
+            button.clicked.connect(self.reverse_config_dialogs[key].show)
+            reverse_buttons.addWidget(button, 0, column)
+            reverse_buttons.setColumnStretch(column, 1)
+            self.reverse_config_buttons.append(button)
+        self.advanced_options.layout.addLayout(reverse_buttons)
         layout.addWidget(self.advanced_options)
         layout.addStretch(1)
         scroll.setWidget(page)
         body.addWidget(scroll)
+        close = _button("完成", enabled=True)
+        close.clicked.connect(dialog.hide)
+        body.addWidget(close)
+        return dialog
+
+    def _build_reverse_config_dialog(
+        self, title: str, subtitle: str, entries: list[tuple], *,
+        columns: int = 2, leading_entries: list[tuple] | None = None,
+    ) -> QDialog:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.resize(700, 570 if title == "野生 / 定点反查" else 360)
+        dialog.setMinimumSize(560, 320)
+        body = QVBoxLayout(dialog)
+        page, layout = self._page_canvas()
+        card = Card(title, subtitle)
+        if leading_entries:
+            self._form(card, leading_entries, 1)
+        self._form(card, entries, columns)
+        layout.addWidget(card)
+        layout.addStretch(1)
+        body.addWidget(page)
         close = _button("完成", enabled=True)
         close.clicked.connect(dialog.hide)
         body.addWidget(close)
@@ -1552,6 +1612,8 @@ class FrlgPreviewWindow(QMainWindow):
         self.advanced_button.setEnabled(enabled)
         if not enabled and hasattr(self, "advanced_dialog"):
             self.advanced_dialog.hide()
+            for dialog in getattr(self, "reverse_config_dialogs", {}).values():
+                dialog.hide()
         if not enabled and self.input_mode == "script_test":
             self.select_page("wild")
         if hasattr(self, "settings_dialog"):
@@ -1593,9 +1655,12 @@ class FrlgPreviewWindow(QMainWindow):
             "Seed 校准与启动在主窗口顶部；以下参数仅保存在本次预览中。"
             if applies else
             "当前模式不使用反查扩窗与奇偶设置。Seed 校准与启动在主窗口顶部。")
+        reverse_fields = {"layers", "togepi_reverse_adv", "egg_reverse_seed", "egg_reverse_min_adv", "egg_reverse_max_adv"}
         for name, widget in self.fields.items():
-            if name == "layers" or name.startswith("expansion_"):
+            if name in reverse_fields or name.startswith("expansion_"):
                 widget.setEnabled(advanced and applies)
+        for button in getattr(self, "reverse_config_buttons", ()):
+            button.setEnabled(advanced and applies)
         self.fields["parity"].setEnabled(advanced and applies and not egg)
         if egg:
             self.fields["parity"].setCurrentIndex(0)

@@ -82,6 +82,9 @@ def validate_wild_inputs(inputs: WildInputs) -> None:
         for values in (options.reverse_expansion_seed_tolerances, options.reverse_expansion_frame_half_widths):
             if values is None or len(values) != 3 or any(value < 0 for value in values):
                 raise ValueError("三层扩窗参数必须是非负整数")
+    if (options.togepi_seed_reverse_frame_half_width is not None
+            and options.togepi_seed_reverse_frame_half_width < 0):
+        raise ValueError("波克比 Seed 反查帧半宽不能为负数")
 
 
 def prepare_wild(

@@ -451,6 +451,9 @@ ENDFUNC
             "扩窗第3层Seed容差", "扩窗第3层帧半宽",
         ):
             template += f"\n${name} = 0"
+        template += "\n$孵蛋野生Seed容差 = 5"
+        template += "\n$孵蛋野生最小消耗帧 = 500"
+        template += "\n$孵蛋野生最大消耗帧 = 6500"
         for name in (
             "孵蛋Held无蛋表Seed", "孵蛋Held无蛋表目标帧", "孵蛋Held无蛋表相性",
             "孵蛋Held无蛋表Offset", "孵蛋Held无蛋表最小帧", "孵蛋Held无蛋表最大帧",
@@ -469,6 +472,9 @@ ENDFUNC
                 reverse_expansion_layers=1,
                 reverse_expansion_seed_tolerances=(12, 24, 36),
                 reverse_expansion_frame_half_widths=(2000, 4000, 6000),
+                egg_seed_reverse_seed_tolerance=7,
+                egg_seed_reverse_min_advances=700,
+                egg_seed_reverse_max_advances=8700,
             ),
         )
         self.assertIn('$静态或野生 = "孵蛋"', configured)
@@ -484,6 +490,9 @@ ENDFUNC
         self.assertIn('$扩窗层数上限 = 1', configured)
         self.assertIn('$扩窗第1层Seed容差 = 12', configured)
         self.assertIn('$扩窗第3层帧半宽 = 6000', configured)
+        self.assertIn('$孵蛋野生Seed容差 = 7', configured)
+        self.assertIn('$孵蛋野生最小消耗帧 = 700', configured)
+        self.assertIn('$孵蛋野生最大消耗帧 = 8700', configured)
         self.assertIn('$孵蛋双亲A_DEF = 29', configured)
         self.assertIn('$孵蛋双亲B_SPA = 3', configured)
         self.assertIn('$孵蛋Held无蛋表Seed = "75D1"', configured)

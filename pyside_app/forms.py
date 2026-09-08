@@ -48,6 +48,15 @@ class FormReader:
             reverse_expansion_seed_tolerances=tuple(self.integer(f"expansion_{i}_seed") for i in range(1, 4)),
             reverse_expansion_frame_half_widths=tuple(self.integer(f"expansion_{i}_adv") for i in range(1, 4)))
 
+    def egg_seed_reverse(self):
+        if not self.w.advanced_check.isChecked():
+            return {}
+        return dict(
+            egg_seed_reverse_seed_tolerance=self.integer("egg_reverse_seed"),
+            egg_seed_reverse_min_advances=self.integer("egg_reverse_min_adv"),
+            egg_seed_reverse_max_advances=self.integer("egg_reverse_max_adv"),
+        )
+
     def egg(self, *, require_ack=True):
         if require_ack and not self.w.egg_ack.isChecked():
             raise ValueError("请先确认孵蛋前置条件")
@@ -62,7 +71,8 @@ class FormReader:
             home_buffer_adaptive_threshold=self.w.home_buffer_check.isChecked(),
             seed_startup_scheme=self.index("seed_startup") if self.w.advanced_check.isChecked() else 0,
             seed_calibration_scheme=self.index("seed_calibration") if self.w.advanced_check.isChecked() else 2,
-            update_precalibration=self.w.precalibration_check.isChecked(), debug_log_output=self.index("output_log"), **self.expansion())
+            update_precalibration=self.w.precalibration_check.isChecked(), debug_log_output=self.index("output_log"),
+            **self.expansion(), **self.egg_seed_reverse())
         request.validate()
         return request
 

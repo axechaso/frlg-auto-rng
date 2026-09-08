@@ -301,6 +301,7 @@ class CompatibilityTests(unittest.TestCase):
             "扩窗第3层Seed容差", "扩窗第3层帧半宽",
         ):
             template += f"\n${name} = 0"
+        template += "\n$波克比野生反查帧半宽 = 5000"
         configured = configure_template_text(
             template,
             result.plan,
@@ -312,6 +313,7 @@ class CompatibilityTests(unittest.TestCase):
                 reverse_expansion_layers=2,
                 reverse_expansion_seed_tolerances=(11, 22, 33),
                 reverse_expansion_frame_half_widths=(1000, 2000, 3000),
+                togepi_seed_reverse_frame_half_width=4321,
             ),
         )
         self.assertIn('$Seed模式 = 6', configured)
@@ -326,6 +328,7 @@ class CompatibilityTests(unittest.TestCase):
         self.assertIn('$扩窗层数上限 = 2', configured)
         self.assertIn('$扩窗第2层Seed容差 = 22', configured)
         self.assertIn('$扩窗第3层帧半宽 = 3000', configured)
+        self.assertIn('$波克比野生反查帧半宽 = 4321', configured)
 
         values = plan_to_user_values(result.plan)
         self.assertEqual(values["目标宝可梦名称"], "")

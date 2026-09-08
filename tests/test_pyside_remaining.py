@@ -109,12 +109,31 @@ class RemainingQtTests(unittest.TestCase):
         self.assertEqual(actual.species_id, 148)
         self.assertEqual(actual.parent_a_ivs, expected.parent_a_ivs)
         self.assertEqual(actual.pickup_advances, expected.pickup_advances)
+        self.assertEqual(actual.egg_seed_reverse_seed_tolerance, 5)
+        self.assertEqual(actual.egg_seed_reverse_min_advances, 500)
+        self.assertEqual(actual.egg_seed_reverse_max_advances, 6500)
         payload = self.w.egg_payload(True)
+        self.assertEqual(payload["egg_seed_reverse_seed_tolerance"], 5)
+        self.assertEqual(payload["egg_seed_reverse_min_advances"], 500)
+        self.assertEqual(payload["egg_seed_reverse_max_advances"], 6500)
         self.w.apply_egg_config(payload, True)
         self.assertFalse(self.w.egg_ack.isChecked())
         with self.assertRaisesRegex(ValueError, "前置"):
             self.w.reader.egg()
         self.assertEqual(self.w.reader.egg(require_ack=False), actual)
+
+        from pyside_app.egg_config import parse_egg_full_config_payload
+        legacy = dict(payload)
+        for key in (
+            "egg_seed_reverse_seed_tolerance",
+            "egg_seed_reverse_min_advances",
+            "egg_seed_reverse_max_advances",
+        ):
+            legacy.pop(key)
+        parsed = parse_egg_full_config_payload(legacy)
+        self.assertIsNone(parsed["egg_seed_reverse_seed_tolerance"])
+        self.assertIsNone(parsed["egg_seed_reverse_min_advances"])
+        self.assertIsNone(parsed["egg_seed_reverse_max_advances"])
 
     def test_egg_compatibility_defaults_to_chinese_and_language_toggle_keeps_value(self):
         self.configure_egg()

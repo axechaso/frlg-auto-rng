@@ -200,6 +200,9 @@ def build_egg_full_config_payload(
     reverse_expansion_layers=None,
     reverse_expansion_seed_tolerances=None,
     reverse_expansion_frame_half_widths=None,
+    egg_seed_reverse_seed_tolerance=None,
+    egg_seed_reverse_min_advances=None,
+    egg_seed_reverse_max_advances=None,
 ) -> dict:
     """Validate and build a complete egg-page configuration."""
     parent = build_egg_parent_config_payload(
@@ -261,6 +264,20 @@ def build_egg_full_config_payload(
             )
         except (TypeError, ValueError) as exc:
             raise ValueError("反查扩窗配置必须包含整数层数、三层 Seed 容差和三层帧半宽") from exc
+    egg_seed_window = (
+        egg_seed_reverse_seed_tolerance,
+        egg_seed_reverse_min_advances,
+        egg_seed_reverse_max_advances,
+    )
+    if any(value is not None for value in egg_seed_window):
+        if any(value is None for value in egg_seed_window):
+            raise ValueError("孵蛋 Seed 反查必须同时包含 Seed 容差、最小消耗帧和最大消耗帧")
+        try:
+            egg_seed_reverse_seed_tolerance, egg_seed_reverse_min_advances, egg_seed_reverse_max_advances = (
+                int(value) for value in egg_seed_window
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("孵蛋 Seed 反查窗口必须是整数") from exc
     game_code = ("fr" if game == "火红" else "lg") + ("_nx2" if nx_model == 2 else "_nx")
     request = EggRunRequest(
         game=game_code,
@@ -290,6 +307,9 @@ def build_egg_full_config_payload(
             if reverse_expansion_frame_half_widths is None
             else tuple(reverse_expansion_frame_half_widths)
         ),
+        egg_seed_reverse_seed_tolerance=egg_seed_reverse_seed_tolerance,
+        egg_seed_reverse_min_advances=egg_seed_reverse_min_advances,
+        egg_seed_reverse_max_advances=egg_seed_reverse_max_advances,
     )
     request.validate()
     return {
@@ -323,6 +343,9 @@ def build_egg_full_config_payload(
             if request.reverse_expansion_frame_half_widths is None
             else list(request.reverse_expansion_frame_half_widths)
         ),
+        "egg_seed_reverse_seed_tolerance": request.egg_seed_reverse_seed_tolerance,
+        "egg_seed_reverse_min_advances": request.egg_seed_reverse_min_advances,
+        "egg_seed_reverse_max_advances": request.egg_seed_reverse_max_advances,
     }
 
 
@@ -359,4 +382,7 @@ def parse_egg_full_config_payload(payload) -> dict:
         payload.get("reverse_expansion_layers"),
         payload.get("reverse_expansion_seed_tolerances"),
         payload.get("reverse_expansion_frame_half_widths"),
+        payload.get("egg_seed_reverse_seed_tolerance"),
+        payload.get("egg_seed_reverse_min_advances"),
+        payload.get("egg_seed_reverse_max_advances"),
     )

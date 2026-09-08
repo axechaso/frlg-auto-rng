@@ -196,7 +196,8 @@ class FrlgWindow(FrlgPreviewWindow):
     def _connect_inputs(self):
         self.input_keys = [k for k in self.fields if k.startswith("wild_") or k.startswith("expansion_")]
         self.input_keys += ["profile_game", "profile_language", "source", "ezcon", "port", "video",
-                            "seed_calibration", "seed_startup", "script_entry", "parity", "layers", "output_log"]
+                            "seed_calibration", "seed_startup", "script_entry", "parity", "layers", "output_log",
+                            "togepi_reverse_adv", "egg_reverse_seed", "egg_reverse_min_adv", "egg_reverse_max_adv"]
         for key in self.input_keys:
             widget = self.fields[key]
             signal = widget.currentIndexChanged if isinstance(widget, QComboBox) else widget.valueChanged if isinstance(widget, QSpinBox) else widget.textChanged
@@ -278,6 +279,12 @@ class FrlgWindow(FrlgPreviewWindow):
             text = (Path(self.fields["source"].text()) / template).read_text(encoding="utf-8-sig")
             pairs = [("layers", "扩窗层数上限")]
             pairs += [(f"expansion_{i}_{axis}", f"扩窗第{i}层{name}") for i in range(1, 4) for axis, name in (("seed", "Seed容差"), ("adv", "帧半宽"))]
+            pairs += [
+                ("togepi_reverse_adv", "波克比野生反查帧半宽"),
+                ("egg_reverse_seed", "孵蛋野生Seed容差"),
+                ("egg_reverse_min_adv", "孵蛋野生最小消耗帧"),
+                ("egg_reverse_max_adv", "孵蛋野生最大消耗帧"),
+            ]
             for key, name in pairs:
                 match = re.search(rf"(?m)^\s*\${re.escape(name)}\s*=\s*(\d+)\s*$", text)
                 if match:
@@ -316,6 +323,7 @@ class FrlgWindow(FrlgPreviewWindow):
             reverse_expansion_layers=f["layers"].value() if advanced else None,
             reverse_expansion_seed_tolerances=tuple(integer(f"expansion_{i}_seed", f"第 {i} 层 Seed 容差") for i in range(1, 4)) if advanced else None,
             reverse_expansion_frame_half_widths=tuple(integer(f"expansion_{i}_adv", f"第 {i} 层帧半宽") for i in range(1, 4)) if advanced else None,
+            togepi_seed_reverse_frame_half_width=integer("togepi_reverse_adv", "波克比 Seed 反查帧半宽") if advanced else None,
         )
         video = f["video"].currentData()
         capture_name = self.devices[1].get(video, "")

@@ -487,6 +487,9 @@ class CompleteWindow(FrlgWindow):
             pickup_advances=request.pickup_advances, start_from_prepared_254=request.start_from_prepared_254,
             home_buffer_adaptive_threshold=request.home_buffer_adaptive_threshold, seed_startup_scheme=request.seed_startup_scheme,
             seed_calibration_scheme=request.seed_calibration_scheme, debug_log_output=request.debug_log_output,
+            egg_seed_reverse_seed_tolerance=request.egg_seed_reverse_seed_tolerance,
+            egg_seed_reverse_min_advances=request.egg_seed_reverse_min_advances,
+            egg_seed_reverse_max_advances=request.egg_seed_reverse_max_advances,
             **parent, **self.reader.expansion())
 
     def save_egg(self, full):
@@ -533,13 +536,22 @@ class CompleteWindow(FrlgWindow):
             self.home_buffer_check.setChecked(config["home_buffer_adaptive_threshold"])
             for key, source in (("seed_startup", "seed_startup_scheme"), ("seed_calibration", "seed_calibration_scheme"), ("output_log", "debug_log_output")):
                 self.fields[key].setCurrentIndex(config[source])
+            # Load current script defaults first, then overlay every value that
+            # was explicitly saved.  Version-1 files without the new per-flow
+            # Seed window fields therefore remain portable.
+            self._read_expansion_defaults()
             if config["reverse_expansion_layers"] is not None:
                 self.fields["layers"].setValue(config["reverse_expansion_layers"])
                 for axis, source in (("seed", "reverse_expansion_seed_tolerances"), ("adv", "reverse_expansion_frame_half_widths")):
                     for i, value in enumerate(config[source], 1):
                         self.fields[f"expansion_{i}_{axis}"].setText(str(value))
-            else:
-                self._read_expansion_defaults()
+            for key, source in (
+                ("egg_reverse_seed", "egg_seed_reverse_seed_tolerance"),
+                ("egg_reverse_min_adv", "egg_seed_reverse_min_advances"),
+                ("egg_reverse_max_adv", "egg_seed_reverse_max_advances"),
+            ):
+                if config[source] is not None:
+                    self.fields[key].setText(str(config[source]))
         self.egg_ack.setChecked(False)
         self.invalidate()
         self.set_status("配置已载入，请重新确认本次孵蛋前置条件。")
