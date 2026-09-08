@@ -2,7 +2,7 @@
 
 本文是当前火红/叶绿全自动乱数初步实现的开发快照。换设备或新建 Codex 对话时，先让新对话完整阅读本文件、根目录 `README.md` 和 `docs/INITIAL_AUTO_RNG.md`，再检查工作区实际状态。
 
-快照日期：2026-09-07。
+快照日期：2026-09-08。
 
 ## 2026-09-07 PySide6 0.9 打包与更新
 
@@ -11,6 +11,10 @@
 - PySide6 的“检查程序更新”已接入原整包更新协议。`0.2.2` 可直接下载 `0.9` 清单和 ZIP，校验大小与 SHA-256 后完成替换；程序目录外的 `%LOCALAPPDATA%\FRLG-Auto-RNG` 用户数据保持不变，失败健康检查会回滚旧安装。
 - 发布说明唯一来源为 `docs/releases/v0.9.md`；打包与发布脚本读取同一文件。发布标签固定为 `v0.9`，标题固定为 `FRLG Auto RNG 0.9 PySide6版`，资产名固定为 `FRLG-Auto-RNG-0.9-windows-x64.zip`、同名 `.sha256` 与 `update-manifest.json`。
 - 源码运行只检查版本并提示，不自动覆盖工作区；绿色包更新时若 EasyCon 正在运行，可以先检查，但必须等待本轮停止后再安装。公告“不再提示”偏好与配置、日志、TID 进度、Seed 表和标签覆盖一并位于用户目录，不随整包替换。
+- `v0.9` 已于 2026-09-08 从 `main` 提交 `6216aeb` 正式发布：<https://github.com/axechaso/frlg-auto-rng/releases/tag/v0.9>。ZIP 为 `592482263` 字节（约 `565.04 MiB`），SHA-256 为 `510593dfdc8044fd0b0e14bbafcac441104d78b2dc43af5c17c7df6f5104efb1`；另有 100 字节的 `.sha256` 和 2991 字节的 `update-manifest.json`。
+- 发布构建改为让 PyInstaller 的 PySide6 hook 按实际导入收集 Qt 模块，不再 `--collect-all PySide6`。这既把 ZIP 从约 806 MB 降到约 565 MiB，也消除了未使用 Qt 插件参与退出清理时的 `Qt6Core.dll / 0xc0000409`；同时移除构建机误收的 Poppler ICU，最终包不含旧 Tk/Tcl、`tkinterdnd2` 或外来 ICU，目标电脑不需要 Python。
+- 最终证据：项目 624 项测试通过；下载脚本包 37 个 `Tools/check_*.py` 通过；冻结 PySide6 版本探针返回 `0.9 / 2026090701`，最终包连续三次截图冒烟均为退出码 0。使用 GitHub 公开 `v0.2.2` 包的升级结果为 `installed=true`、`user_data_unchanged=true`、`rollback_verified=true`；未认证公开客户端下载整包后重算的大小和 SHA-256 与本地、清单及 GitHub 资产摘要一致。对应 CI：<https://github.com/axechaso/frlg-auto-rng/actions/runs/34173332875>。
+- 上述为软件、打包、更新与离屏界面验证；本次发布过程未连接单片机、采集卡或 Switch，也未代替各流程的长期实机验收。
 
 ## 2026-09-07 界面开发全面转向 PySide6
 
