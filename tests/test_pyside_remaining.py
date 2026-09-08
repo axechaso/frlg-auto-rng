@@ -152,7 +152,7 @@ class RemainingQtTests(unittest.TestCase):
         button.click()
         self.assertEqual(combo.currentData(), 50)
         self.assertEqual(combo.currentText(), "The two seem to get along (50)")
-        self.assertEqual(button.text(), "中文")
+        self.assertEqual(button.text(), "日本語")
         self.assertEqual(self.w.reader.egg().compatibility, 50)
         self.assertEqual(self.w.egg_payload(False)["compatibility"], 50)
 
@@ -161,6 +161,22 @@ class RemainingQtTests(unittest.TestCase):
         self.w.apply_egg_config(payload, False)
         self.assertEqual(combo.currentData(), 20)
         self.assertEqual(combo.currentText(), "The two don't seem to like each other (20)")
+
+        button.click()
+        self.assertEqual(combo.currentData(), 20)
+        self.assertEqual(
+            [combo.itemText(i) for i in range(combo.count())],
+            [
+                "2ひきの なかは それほど よくないがなぁ（20）",
+                "2ひきの なかは まずまずの ようじゃ（50）",
+                "2ひきの なかは とっても よい ようじゃ（70）",
+            ],
+        )
+        self.assertEqual(combo.currentText(), "2ひきの なかは それほど よくないがなぁ（20）")
+        self.assertEqual(button.text(), "中文")
+        self.w.egg_ack.setChecked(True)
+        self.assertEqual(self.w.reader.egg().compatibility, 20)
+        self.assertEqual(self.w.egg_payload(False)["compatibility"], 20)
 
         button.click()
         self.assertEqual(combo.currentData(), 20)

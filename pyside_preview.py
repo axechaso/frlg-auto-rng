@@ -76,6 +76,11 @@ EGG_COMPATIBILITY_LABELS = {
         (50, "The two seem to get along"),
         (70, "The two seem to get along very well"),
     ),
+    "ja": (
+        (20, "2ひきの なかは それほど よくないがなぁ"),
+        (50, "2ひきの なかは まずまずの ようじゃ"),
+        (70, "2ひきの なかは とっても よい ようじゃ"),
+    ),
 }
 
 
@@ -1936,17 +1941,24 @@ class FrlgPreviewWindow(QMainWindow):
         return page
 
     def _toggle_egg_compatibility_language(self) -> None:
-        language = "en" if self.egg_compatibility_language == "zh" else "zh"
+        language_order = ("zh", "en", "ja")
+        current_index = language_order.index(self.egg_compatibility_language)
+        language = language_order[(current_index + 1) % len(language_order)]
         combo = self.fields["egg_compatibility"]
         with QSignalBlocker(combo):
             for index, (value, text) in enumerate(EGG_COMPATIBILITY_LABELS[language]):
-                suffix = f"（{value}）" if language == "zh" else f" ({value})"
+                suffix = f" ({value})" if language == "en" else f"（{value}）"
                 combo.setItemText(index, f"{text}{suffix}")
         self.egg_compatibility_language = language
         if language == "zh":
             self.egg_compatibility_language_button.setText("English")
             self.egg_compatibility_language_button.setToolTip(
                 "切换为英文；只改变相性说明文字，不改变 20 / 50 / 70 数值。"
+            )
+        elif language == "en":
+            self.egg_compatibility_language_button.setText("日本語")
+            self.egg_compatibility_language_button.setToolTip(
+                "切换为日文；只改变相性说明文字，不改变 20 / 50 / 70 数值。"
             )
         else:
             self.egg_compatibility_language_button.setText("中文")
