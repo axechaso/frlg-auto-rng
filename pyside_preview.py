@@ -1685,7 +1685,7 @@ class FrlgPreviewWindow(QMainWindow):
         ])
         layout.addWidget(delays)
 
-        starter = Card("御三家连续乱数", "TID → 球前存档 → 御三家；第三阶段游戏设置独立。流程尚未完成整轮实机验收。")
+        starter = Card("御三家连续乱数", "TID → 球前存档 → 御三家；第三阶段游戏设置独立。")
         self.tid_flow_check = self._check("TID 阶段完成后继续御三家", True)
         starter.layout.addWidget(self.tid_flow_check)
         self._form(starter, [
@@ -1861,7 +1861,6 @@ class FrlgPreviewWindow(QMainWindow):
         self.egg_ack = self._check("我已确认孵蛋前置条件，允许启动流程")
         self.egg_ack.setToolTip("请确认 254 步基础档、队伍空位、甜甜香气宝可梦与 Ten Lines 目标参数。确认不持久化，配置载入后需当次重新勾选。")
         target.layout.addWidget(self.egg_ack)
-        target.layout.addWidget(_label("孵蛋尚未完成整轮实机验收。此预览未接入生成或运行服务。", role="warning"))
         self._actions(target, "保存亲本配置", "载入亲本配置", "保存全部配置", "载入全部配置", columns=2)
         layout.addWidget(target)
         for suffix in ("game", "nx"):

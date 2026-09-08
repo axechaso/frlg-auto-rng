@@ -99,7 +99,7 @@ class RemainingQtTests(unittest.TestCase):
         for widget in self.w.findChildren(QWidget):
             text = widget.text() if hasattr(widget, "text") else ""
             tooltip = widget.toolTip()
-            if any(marker in f"{text}\n{tooltip}" for marker in ("尚未接入", "仍在迁移")):
+            if any(marker in f"{text}\n{tooltip}" for marker in ("尚未接入", "仍在迁移", "实机验收")):
                 stale.append((type(widget).__name__, text, tooltip))
         self.assertEqual(stale, [])
 
