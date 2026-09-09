@@ -103,6 +103,18 @@ class RemainingQtTests(unittest.TestCase):
                 stale.append((type(widget).__name__, text, tooltip))
         self.assertEqual(stale, [])
 
+    def test_static_target_type_exposes_roaming_species(self):
+        self.w.fields["wild_method"].setCurrentIndex(1)
+        category = self.w.fields["wild_category"]
+        categories = [category.itemData(index) for index in range(category.count())]
+        self.assertIn("Roaming", categories)
+        category.setCurrentIndex(categories.index("Roaming"))
+        species = self.w.fields["wild_species"]
+        self.assertEqual(
+            [species.itemData(index) for index in range(species.count())],
+            ["Raikou", "Entei", "Suicune"],
+        )
+
     def test_egg_full_roundtrip_and_acknowledgement(self):
         expected = self.configure_egg()
         actual = self.w.reader.egg()

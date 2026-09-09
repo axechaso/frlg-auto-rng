@@ -11,11 +11,10 @@ STATIC_CATEGORIES_118 = (
     "Roaming",
 )
 
-# FRLG roamers use the Gen 3 truncated-IV bug and also depend on the save's
-# starter choice.  The first-release ranker only handles normal six-IV states.
-PLANNER_STATIC_CATEGORIES = tuple(
-    category for category in STATIC_CATEGORIES_118 if category != "Roaming"
-)
+# The planner has a dedicated FRLG roamer search path for the Gen 3
+# truncated-IV bug, so every static category implemented by the 2.0 script is
+# available to the UI.
+PLANNER_STATIC_CATEGORIES = STATIC_CATEGORIES_118
 
 _COMMON_TARGETS = {
     "Starter": ("Bulbasaur", "Charmander", "Squirtle"),

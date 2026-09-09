@@ -59,17 +59,17 @@ def get_route_support(
     method_key = (method or "").strip().lower()
     is_wild = method_key == "wild" or method_key.startswith("wild ") or "wild" in method_key
     if not is_wild:
-        if category == "Roaming":
-            return RouteSupport(
-                RouteSupportLevel.EXPERIMENTAL,
-                "漫游兽截断 IV 分层与存档御三家约束尚未实现；不开放自动运行。",
-                False,
-            )
         if not game or not pokemon or not is_supported_static_target(game, category, pokemon):
             return RouteSupport(
                 RouteSupportLevel.UNSUPPORTED,
                 "该游戏版本、静态类别与宝可梦组合不在 2.0 支持白名单中。",
                 False,
+            )
+        if category == "Roaming":
+            return RouteSupport(
+                RouteSupportLevel.BASELINE_118,
+                "2.0 游走流程；按截断 IV 规则搜索，运行前确认存档的御三家对应所选游走兽。",
+                True,
             )
         return RouteSupport(
             RouteSupportLevel.BASELINE_118,

@@ -215,18 +215,41 @@ class CompatibilityTests(unittest.TestCase):
             max_advances=1000,
         ).validate()
 
-    def test_roaming_is_blocked_until_bugged_iv_ranking_is_implemented(self):
-        with self.assertRaisesRegex(ValueError, "截断 IV"):
-            AutoSearchRequest(
-                game="fr_nx",
-                tid=1,
-                sid=2,
-                method="Static 1",
-                category="Roaming",
-                location="Roaming",
-                pokemon="Raikou",
-                max_advances=1000,
-            ).validate()
+    def test_roaming_uses_the_dedicated_bugged_iv_path(self):
+        roaming = AutoSearchRequest(
+            game="fr_nx",
+            tid=1,
+            sid=2,
+            method="Static 1",
+            category="Roaming",
+            location="Roaming",
+            pokemon="Raikou",
+            max_advances=1000,
+            shiny="Star/Square",
+        )
+        roaming.validate()
+        support = get_route_support(
+            roaming.method,
+            roaming.category,
+            roaming.location,
+            game=roaming.game,
+            pokemon=roaming.pokemon,
+        )
+        self.assertEqual(support.level, RouteSupportLevel.BASELINE_118)
+        self.assertTrue(support.can_start)
+
+    def test_roaming_rejects_impossible_or_unbounded_filters(self):
+        base = dict(
+            game="fr_nx", tid=1, sid=2, method="Static 1",
+            category="Roaming", location="Roaming", pokemon="Raikou",
+            max_advances=1000,
+        )
+        with self.assertRaisesRegex(ValueError, "必须选择.*闪光"):
+            AutoSearchRequest(**base, shiny="Any").validate()
+        with self.assertRaisesRegex(ValueError, "攻击个体值只能是 0-7"):
+            AutoSearchRequest(**base, iv_min=(0, 8, 0, 0, 0, 0)).validate()
+        with self.assertRaisesRegex(ValueError, "固定为 0"):
+            AutoSearchRequest(**base, iv_min=(0, 0, 1, 0, 0, 0)).validate()
 
     def test_safari_support_matrix_is_conservative(self):
         west_rod = get_route_support("Wild", "SuperRod", "Safari Zone West")
@@ -271,8 +294,8 @@ class CompatibilityTests(unittest.TestCase):
         self.assertFalse(is_supported_static_target("fr_nx", "GameCorner", "Pinsir"))
         self.assertTrue(is_supported_static_target("lg_nx", "GameCorner", "Pinsir"))
         self.assertFalse(is_supported_static_target("lg_nx", "GameCorner", "Scyther"))
-        self.assertEqual(len(PLANNER_STATIC_CATEGORIES), 7)
-        self.assertNotIn("Roaming", PLANNER_STATIC_CATEGORIES)
+        self.assertEqual(len(PLANNER_STATIC_CATEGORIES), 8)
+        self.assertIn("Roaming", PLANNER_STATIC_CATEGORIES)
 
     def test_rock_smash_is_search_only_even_outside_safari(self):
         support = get_route_support("Wild", "RockSmash", "Route 10")

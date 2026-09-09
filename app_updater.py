@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
+import certifi
 import truststore
 
 from app_version import (
@@ -42,7 +43,7 @@ MAX_ZIP_ENTRIES = 100_000
 TOKEN_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 CERTIFICATE_ERROR_MESSAGE = (
-    "Windows 系统证书库无法验证 GitHub 的 HTTPS 证书。"
+    "Windows 系统证书库和程序内置证书库都无法验证 GitHub 的 HTTPS 证书。"
     "请检查系统时间、Windows 根证书更新或 HTTPS 代理证书后重试；"
     "程序不会关闭证书验证。"
 )
@@ -334,10 +335,23 @@ def _read_response(response: object, maximum: int) -> bytes:
 
 
 def _system_urlopen(request: urllib.request.Request, *, timeout: float):
-    """Open HTTPS using the native OS trust store without weakening TLS."""
+    """Open HTTPS with two verified CA sources and never disable TLS checks."""
 
-    context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    return urllib.request.urlopen(request, timeout=timeout, context=context)
+    system_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    try:
+        return urllib.request.urlopen(
+            request, timeout=timeout, context=system_context,
+        )
+    except Exception as exc:
+        if not _is_certificate_error(exc):
+            raise
+    # Some packaged Windows environments cannot build the complete issuer
+    # chain from the machine store.  Retry with Mozilla's bundled CA set while
+    # retaining hostname and certificate verification.
+    bundled_context = ssl.create_default_context(cafile=certifi.where())
+    return urllib.request.urlopen(
+        request, timeout=timeout, context=bundled_context,
+    )
 
 
 def _is_certificate_error(error: BaseException) -> bool:

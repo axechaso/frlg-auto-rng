@@ -310,6 +310,101 @@ def search_static(iv_min, iv_max, method, tsv, gender_ratio=127,
             }
 
 
+def search_bugged_roamer(iv_min, iv_max, method, tsv, gender_ratio=127,
+                         filter_obj=None, iv_total=None, cancel_check=None):
+    """Search FRLG roamers by PID and their retained IV byte.
+
+    FireRed/LeafGreen stores only the low byte of the first IV word for its
+    roaming beast.  Recovering a normal six-IV state, as StaticSearcher3 does,
+    misses valid states and ranks the discarded bits.  For shiny searches the
+    PID space is small enough to enumerate exactly: 65,536 PID lows multiplied
+    by the requested shiny XOR values.  Each PID is reversed to the encounter
+    seed, then the retained IV byte is generated and filtered.
+    """
+    if method == METHOD_2:
+        raise ValueError("FRLG bugged roamers do not support Method 2")
+    if method not in (METHOD_1, METHOD_4):
+        raise ValueError(f"Unsupported FRLG roamer method: {method}")
+
+    shiny_filter = None if filter_obj is None else filter_obj.shiny
+    if shiny_filter == 2:      # square
+        shiny_xors = range(0, 1)
+    elif shiny_filter == 1:    # star
+        shiny_xors = range(1, 8)
+    elif shiny_filter == 3:    # star or square
+        shiny_xors = range(0, 8)
+    else:
+        raise ValueError("FRLG roamer search requires a shiny filter")
+
+    if any(not (lo <= 0 <= hi) for lo, hi in zip(iv_min[2:], iv_max[2:])):
+        return
+    hp_min, hp_max = max(0, iv_min[0]), min(31, iv_max[0])
+    atk_min, atk_max = max(0, iv_min[1]), min(7, iv_max[1])
+    if hp_min > hp_max or atk_min > atk_max:
+        return
+
+    seen = set()
+    for pid_low in range(0x10000):
+        if cancel_check is not None and pid_low % 256 == 0 and cancel_check():
+            return
+        for shiny_xor in shiny_xors:
+            pid_high = (tsv ^ pid_low ^ shiny_xor) & 0xFFFF
+            pid = pid_low | (pid_high << 16)
+            nature = pid % 25
+            if filter_obj and not filter_obj.compare_nature(nature):
+                continue
+
+            # Reuse the exact consecutive-u16 recovery used by Method 1.  The
+            # six IV fields here are only a lossless packing of the two PID
+            # halves; candidates are checked against both complete 16-bit
+            # outputs below.
+            recovered = recover_pokerng_iv_method12(
+                pid_high & 31,
+                (pid_high >> 5) & 31,
+                (pid_high >> 10) & 31,
+                (pid_low >> 5) & 31,
+                (pid_low >> 10) & 31,
+                pid_low & 31,
+            )
+            for after_pid_high in recovered:
+                if after_pid_high >> 16 != pid_high:
+                    continue
+                after_pid_low = pokerng_next(after_pid_high)
+                if after_pid_low >> 16 != pid_low:
+                    continue
+
+                iv_rng = after_pid_low
+                if method == METHOD_4:
+                    iv_rng = pokerng_next(iv_rng)
+                iv_rng = pokerng_next(iv_rng)
+                iv_byte = (iv_rng >> 16) & 0xFF
+                hp = iv_byte & 31
+                atk = (iv_byte >> 5) & 7
+                if not (hp_min <= hp <= hp_max and atk_min <= atk <= atk_max):
+                    continue
+                ivs = (hp, atk, 0, 0, 0, 0)
+                if iv_total is not None and hp + atk != iv_total:
+                    continue
+
+                start_seed = pokerngr_next(after_pid_high)
+                if start_seed in seen:
+                    continue
+                ability = pid & 1
+                gender = get_gender(pid, gender_ratio)
+                shiny = get_shiny(pid, tsv)
+                hp_type, hp_power = get_hidden_power(ivs)
+                if filter_obj and not filter_obj.compare_state(
+                        ivs, nature, shiny, gender, hp_type, ability=ability):
+                    continue
+                seen.add(start_seed)
+                yield {
+                    "seed": start_seed, "pid": pid, "ivs": ivs,
+                    "ability": ability, "gender": gender, "nature": nature,
+                    "shiny": shiny, "hidden_type": hp_type,
+                    "hidden_power": hp_power,
+                }
+
+
 # ============================================================
 # WildSearcher3 - 1:1 port of C++ WildSearcher3::search (Lead::None only)
 # ============================================================

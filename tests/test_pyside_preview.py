@@ -138,7 +138,12 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         window.fields["wild_method"].setCurrentIndex(1)
         self.assertFalse(window.item_check.isChecked())
         self.assertFalse(window.item_check.isEnabled())
-        self.assertEqual(window.fields["wild_category"].count(), 7)
+        categories = [
+            window.fields["wild_category"].itemText(index)
+            for index in range(window.fields["wild_category"].count())
+        ]
+        self.assertEqual(len(categories), 8)
+        self.assertIn("游走", categories)
         window.fields["wild_game"].setCurrentIndex(1)
         window.fields["egg_nx"].setCurrentIndex(1)
         self.assertEqual(window.fields["egg_game"].currentIndex(), 1)

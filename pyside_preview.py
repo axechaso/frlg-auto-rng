@@ -1363,7 +1363,10 @@ class FrlgPreviewWindow(QMainWindow):
 
     def _refresh_wild_type(self) -> None:
         wild = self.fields["wild_method"].currentIndex() == 0
-        categories = WILD_CATEGORIES if wild else ("Starter", "Fossil", "Gift", "GameCorner", "Stationary", "Legend", "Event")
+        categories = WILD_CATEGORIES if wild else (
+            "Starter", "Fossil", "Gift", "GameCorner",
+            "Stationary", "Legend", "Event", "Roaming",
+        )
         combo = self.fields["wild_category"]
         combo.clear()
         combo.addItems([CATEGORY_EN_TO_ZH.get(name, name) for name in categories])

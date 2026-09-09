@@ -1,6 +1,14 @@
 import unittest
 
-from rng.tenlines import SearcherFilter, iter_iv_combinations
+from rng.tenlines import (
+    METHOD_1,
+    METHOD_4,
+    SearcherFilter,
+    get_shiny,
+    iter_iv_combinations,
+    pokerng_next,
+    search_bugged_roamer,
+)
 from rng.tenlines_utils import (
     IVs,
     IVsRange,
@@ -85,6 +93,84 @@ class TenLinesFixTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(SearchWorkLimitError, "搜索尚未完成"):
             next(tiers)
+
+    def test_bugged_roamer_search_recovers_the_exact_forward_state(self):
+        start_seed = 0x12345678
+        pid_high_state = pokerng_next(start_seed)
+        pid_high = pid_high_state >> 16
+        pid_low_state = pokerng_next(pid_high_state)
+        pid_low = pid_low_state >> 16
+        pid = pid_low | (pid_high << 16)
+        iv_state = pokerng_next(pid_low_state)
+        iv_byte = (iv_state >> 16) & 0xFF
+        ivs = (iv_byte & 31, (iv_byte >> 5) & 7, 0, 0, 0, 0)
+        tsv = pid_low ^ pid_high
+        self.assertEqual(get_shiny(pid, tsv), 2)
+
+        filter_obj = SearcherFilter(
+            shiny=2,
+            iv_min=list(ivs),
+            iv_max=list(ivs),
+        )
+        results = list(search_bugged_roamer(
+            list(ivs), list(ivs), METHOD_1, tsv,
+            filter_obj=filter_obj, iv_total=sum(ivs),
+        ))
+        self.assertTrue(any(
+            item["seed"] == start_seed
+            and item["pid"] == pid
+            and item["ivs"] == ivs
+            for item in results
+        ))
+
+    def test_bugged_roamer_method4_skips_one_rng_output_before_ivs(self):
+        start_seed = 0x8BADF00D
+        pid_high_state = pokerng_next(start_seed)
+        pid_high = pid_high_state >> 16
+        pid_low_state = pokerng_next(pid_high_state)
+        pid_low = pid_low_state >> 16
+        pid = pid_low | (pid_high << 16)
+        skipped_state = pokerng_next(pid_low_state)
+        iv_state = pokerng_next(skipped_state)
+        iv_byte = (iv_state >> 16) & 0xFF
+        ivs = (iv_byte & 31, (iv_byte >> 5) & 7, 0, 0, 0, 0)
+        tsv = pid_low ^ pid_high
+        filter_obj = SearcherFilter(
+            shiny=2,
+            iv_min=list(ivs),
+            iv_max=list(ivs),
+        )
+        results = list(search_bugged_roamer(
+            list(ivs), list(ivs), METHOD_4, tsv,
+            filter_obj=filter_obj, iv_total=sum(ivs),
+        ))
+        self.assertTrue(any(
+            item["seed"] == start_seed
+            and item["pid"] == pid
+            and item["ivs"] == ivs
+            for item in results
+        ))
+
+    def test_roaming_tiers_rank_only_the_retained_hp_and_attack(self):
+        tiers = search_target_tiers(
+            game="fr_nx",
+            tid=0x0B71,
+            sid=0x84EA,
+            method="Static 1",
+            category="Roaming",
+            location="Roaming",
+            pokemon="Raikou",
+            shiny="Square",
+            ivs_range=IVsRange(
+                IVs(10, 4, 0, 0, 0, 0),
+                IVs(10, 4, 31, 31, 31, 31),
+            ),
+        )
+        iv_total, results = next(tiers)
+        rows = list(results)
+        self.assertEqual(iv_total, 14)
+        self.assertTrue(rows)
+        self.assertTrue(all(row.ivs == IVs(10, 4, 0, 0, 0, 0) for row in rows))
 
 
 if __name__ == "__main__":

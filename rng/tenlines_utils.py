@@ -8,7 +8,8 @@ from typing import Iterable, Iterator, List, Tuple, Optional
 from .tenlines import (
     SearcherFilter,
     METHOD_1, METHOD_2, METHOD_4,
-    painting_seeds, frlg_seeds, load_frlg_seed_data, search_static, search_wild,
+    painting_seeds, frlg_seeds, load_frlg_seed_data, search_static,
+    search_bugged_roamer, search_wild,
     calibration_static, calibration_wild,
     get_contiguous_seed_list,
     HELD_BUTTON_OFFSETS,
@@ -760,9 +761,16 @@ def iter_search_targets(
                               iv_total=iv_total, cancel_check=cancel_check)
         else:
             gender_ratio = get_personal(species_id, game)["gender"] if species_id is not None else 127
-            gen = search_static(filter_iv_min, filter_iv_max, m, tsv,
-                                gender_ratio=gender_ratio, filter_obj=filter_obj,
-                                iv_total=iv_total, cancel_check=cancel_check)
+            if category == "Roaming":
+                gen = search_bugged_roamer(
+                    filter_iv_min, filter_iv_max, m, tsv,
+                    gender_ratio=gender_ratio, filter_obj=filter_obj,
+                    iv_total=iv_total, cancel_check=cancel_check,
+                )
+            else:
+                gen = search_static(filter_iv_min, filter_iv_max, m, tsv,
+                                    gender_ratio=gender_ratio, filter_obj=filter_obj,
+                                    iv_total=iv_total, cancel_check=cancel_check)
         for g in gen:
             target_seed = g['seed']
             if not is_wild and species_id is not None:
@@ -825,25 +833,48 @@ def search_target_tiers(*, max_iv_combinations=25_000_000, **kwargs):
     )
     lower = ivs_range.ivs_lower_bound
     upper = ivs_range.ivs_upper_bound
-    minimum = sum((
-        lower.hp, lower.attack, lower.defense,
-        lower.sp_attack, lower.sp_defense, lower.speed,
-    ))
-    maximum = sum((
-        upper.hp, upper.attack, upper.defense,
-        upper.sp_attack, upper.sp_defense, upper.speed,
-    ))
+    _, is_wild = parse_method(kwargs.get("method"))
+    bugged_roamer = not is_wild and kwargs.get("category") == "Roaming"
+    if bugged_roamer:
+        if any(value > 0 for value in (
+            lower.defense, lower.sp_attack, lower.sp_defense, lower.speed,
+        )):
+            return
+        atk_min = max(0, lower.attack)
+        atk_max = min(7, upper.attack)
+        if atk_min > atk_max:
+            return
+        minimum = lower.hp + atk_min
+        maximum = upper.hp + atk_max
+    else:
+        minimum = sum((
+            lower.hp, lower.attack, lower.defense,
+            lower.sp_attack, lower.sp_defense, lower.speed,
+        ))
+        maximum = sum((
+            upper.hp, upper.attack, upper.defense,
+            upper.sp_attack, upper.sp_defense, upper.speed,
+        ))
     iv_min = [lower.hp, lower.attack, lower.defense,
               lower.sp_attack, lower.sp_defense, lower.speed]
     iv_max = [upper.hp, upper.attack, upper.defense,
               upper.sp_attack, upper.sp_defense, upper.speed]
     method_count = len(parse_method(kwargs.get("method"))[0])
+    shiny = kwargs.get("shiny")
+    roamer_pid_work = {
+        "Square": 0x10000,
+        "Star": 7 * 0x10000,
+        "Star/Square": 8 * 0x10000,
+    }.get(shiny, 0)
     searched_work = 0
     cancel_check = kwargs.get("cancel_check")
     for iv_total in range(maximum, minimum - 1, -1):
         if cancel_check is not None and cancel_check():
             return
-        tier_work = _count_iv_combinations(iv_min, iv_max, iv_total) * method_count
+        if bugged_roamer:
+            tier_work = roamer_pid_work * method_count
+        else:
+            tier_work = _count_iv_combinations(iv_min, iv_max, iv_total) * method_count
         if max_iv_combinations is not None and searched_work + tier_work > max_iv_combinations:
             raise SearchWorkLimitError(
                 "搜索已达到首版安全工作量上限，搜索尚未完成，不能判定为无结果。"

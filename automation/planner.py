@@ -128,11 +128,15 @@ class AutoSearchRequest:
                 raise ValueError("指定消耗帧必须为非负整数")
         if "Wild" in self.method and not self.location:
             raise ValueError("野生搜索必须选择遭遇地点")
-        if "Wild" not in self.method and self.category == "Roaming":
-            raise ValueError(
-                "首版尚未实现火叶漫游兽的截断 IV 分层和御三家存档约束，"
-                "已阻止生成可能错误的方案"
-            )
+        if "Wild" not in self.method and self.category == "Roaming" and not self.direct_mode:
+            if self.method == "Static 2":
+                raise ValueError("火红/叶绿游走兽不支持 Static 2，请使用 Static 1 或 Static 4")
+            if self.shiny not in {"Star", "Square", "Star/Square"}:
+                raise ValueError("游走搜索必须选择星形闪光、方形闪光或星形/方形闪光")
+            if self.iv_min[1] > 7:
+                raise ValueError("游走兽的攻击个体值只能是 0-7，请降低攻击最低值")
+            if any(value > 0 for value in self.iv_min[2:]):
+                raise ValueError("游走兽的防御、特攻、特防和速度个体值固定为 0")
         if "Wild" not in self.method and not is_supported_static_target(
             self.game, self.category, get_species_name(species_id)
         ):

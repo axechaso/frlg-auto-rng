@@ -107,6 +107,36 @@ class AppUpdaterTests(unittest.TestCase):
         factory.assert_called_once_with(ssl.PROTOCOL_TLS_CLIENT)
         urlopen.assert_called_once_with(request, timeout=9.0, context=context)
 
+    def test_system_opener_retries_certificate_failure_with_bundled_ca(self):
+        request = app_updater.urllib.request.Request("https://api.github.com/")
+        system_context = mock.Mock(name="system_context")
+        bundled_context = mock.Mock(name="bundled_context")
+        verification = ssl.SSLCertVerificationError(
+            1, "unable to get local issuer certificate",
+        )
+        response = BytesResponse(b"ok")
+        with (
+            mock.patch.object(
+                app_updater.truststore, "SSLContext",
+                return_value=system_context,
+            ),
+            mock.patch.object(app_updater.certifi, "where", return_value="ca.pem") as where,
+            mock.patch.object(
+                app_updater.ssl, "create_default_context",
+                return_value=bundled_context,
+            ) as create_context,
+            mock.patch.object(
+                app_updater.urllib.request,
+                "urlopen",
+                side_effect=[urllib.error.URLError(verification), response],
+            ) as urlopen,
+        ):
+            self.assertIs(app_updater._system_urlopen(request, timeout=9.0), response)
+        where.assert_called_once_with()
+        create_context.assert_called_once_with(cafile="ca.pem")
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertIs(urlopen.call_args_list[1].kwargs["context"], bundled_context)
+
     def test_certificate_failure_is_actionable_and_never_retried_insecurely(self):
         calls = []
 
@@ -115,7 +145,7 @@ class AppUpdaterTests(unittest.TestCase):
             verification = ssl.SSLCertVerificationError(1, "unable to get local issuer certificate")
             raise urllib.error.URLError(verification)
 
-        with self.assertRaisesRegex(UpdateError, "Windows 系统证书库") as raised:
+        with self.assertRaisesRegex(UpdateError, "程序内置证书库") as raised:
             app_updater._open(
                 rejected,
                 app_updater.urllib.request.Request("https://api.github.com/"),
