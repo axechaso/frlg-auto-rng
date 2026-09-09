@@ -87,7 +87,7 @@ TID 的“刷新进度”位于底部生成计划按钮左侧，仅在 TID 页�
 - 现有存档、实测数据库、预校准和标签覆盖位于 `%LOCALAPPDATA%\FRLG-Auto-RNG`。
 - Qt 自己的 2.0 / SID / TID 脚本包及 exe 路径保存在同目录 `pyside6_settings.json`；TID 草稿使用正式 `tid_settings.json`。孵蛋配置可导出；其余本次筛选条件保留在窗口内。
 - Qt 键位写入用户目录 `pyside6_controller_keymap.json`；初次使用可读取此前 `manual_controller_keymap.json` 的 18 键配置，保存不覆盖旧文件。
-- 每次生成使用独立 `runtime/pyside6/<流程>-<id>/`，保存搜索结果、工程清单、ECS 副本与独立运行日志，不覆盖上一次结果。脚本测试按用户所选路径原地执行。
+- 每次生成使用独立 `runtime/pyside6/<流程>-<id>/`，不覆盖正在使用的结果；每种流程保留最近 3 个工程，下一次成功生成任一方案时一并清理各类超额 UUID 工程。清理前把 `.log/.json/.txt` 归档到用户目录 `logs/generated-plans/<流程>-<id>/`，只删除工具严格命名的运行目录；取消任务或工作流生成抛错留下的半成品立即删除。脚本测试按用户所选路径原地执行。
 - `--data-dir <目录>` 可隔离测试用资料与生成目录。`--screenshot <PNG>` 实际显示窗口后截图，自动跳过设备检测，不执行脚本。
 - `pyside_preview.py` / `启动-PySide6界面预览.bat` 仍是纯内存预览，不导入业务模块；本文件描述的接入只属于 `run_pyside6_gui.py`。
 

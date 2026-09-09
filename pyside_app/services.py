@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import socket
 import uuid
 from dataclasses import asdict, dataclass
@@ -19,6 +20,73 @@ from automation import (
 )
 from device_label_overrides import LabelOverrideStore, apply_profile_to_projects
 from worker_commands import build_worker_command
+
+
+GENERATED_PLAN_RETENTION = 3
+_GENERATED_PLAN_DIRECTORY = re.compile(
+    r"^(wild|egg|sid|tid|sid_traversal|script_test)-[0-9a-f]{32}$"
+)
+_ARCHIVE_SUFFIXES = {".json", ".log", ".txt"}
+
+
+def cleanup_generated_plan_directories(
+    output_root: Path,
+    *,
+    archive_root: Path | None = None,
+    keep: tuple[Path, ...] = (),
+    retention: int = GENERATED_PLAN_RETENTION,
+) -> tuple[Path, ...]:
+    """Prune generated UUID projects without touching unrelated directories.
+
+    The newest ``retention`` directories of each workflow type are kept.  Small
+    text diagnostics are copied out before removing an old runtime tree, so the
+    large ECS/ImgLabel copies do not accumulate while useful logs remain.
+    Cleanup is best-effort and must never turn a valid newly generated plan into
+    a UI failure.
+    """
+    output_root = Path(output_root)
+    if retention < 1 or not output_root.is_dir():
+        return ()
+    try:
+        resolved_root = output_root.resolve()
+        keep_paths = {Path(path).resolve() for path in keep}
+        groups: dict[str, list[Path]] = {}
+        for path in output_root.iterdir():
+            if not path.is_dir():
+                continue
+            match = _GENERATED_PLAN_DIRECTORY.fullmatch(path.name)
+            if match is not None:
+                groups.setdefault(match.group(1), []).append(path)
+    except OSError:
+        return ()
+
+    removed: list[Path] = []
+    for paths in groups.values():
+        try:
+            paths.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
+        except OSError:
+            continue
+        protected = {path.resolve() for path in paths[:retention]} | keep_paths
+        for path in paths[retention:]:
+            try:
+                resolved = path.resolve()
+                if resolved in protected or resolved.parent != resolved_root:
+                    continue
+                if archive_root is not None:
+                    archive = Path(archive_root) / path.name
+                    for source in path.rglob("*"):
+                        if not source.is_file() or source.suffix.lower() not in _ARCHIVE_SUFFIXES:
+                            continue
+                        target = archive / source.relative_to(path)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(source, target)
+                shutil.rmtree(path)
+                removed.append(path)
+            except OSError:
+                # A different running app can still own a log file.  In that
+                # case retain the directory instead of disrupting its process.
+                continue
+    return tuple(removed)
 
 
 @dataclass(frozen=True)
@@ -98,15 +166,27 @@ def prepare_wild(
     result = search_best_plan(inputs.request, cancel_check=cancel)
     if cancel():
         raise SearchCancelledError("已取消搜索")
-    # Each attempt owns a new directory. Neither the Tk runtime nor previous
-    # generated plans/logs can be overwritten by a failed or cancelled job.
+    # Each attempt owns a new directory so an in-use plan is never overwritten;
+    # successful preparation below trims older generated directories.
     output = paths.output / ("wild-" + uuid.uuid4().hex)
     output.mkdir(parents=True, exist_ok=False)
     plan_path = output / "search-result.json"
-    plan_path.write_text(json.dumps(result.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        plan_path.write_text(json.dumps(result.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        shutil.rmtree(output, ignore_errors=True)
+        raise
     if not result.plan.route_support.can_start:
-        return PreparedWild(inputs, result, None, plan_path,
-                            EasyConRuntimeCheck(False, ("此路线只支持搜索，正式服务不允许自动运行。",), ()))
+        prepared = PreparedWild(
+            inputs, result, None, plan_path,
+            EasyConRuntimeCheck(False, ("此路线只支持搜索，正式服务不允许自动运行。",), ()),
+        )
+        cleanup_generated_plan_directories(
+            paths.output,
+            archive_root=paths.user / "logs" / "generated-plans",
+            keep=(output,),
+        )
+        return prepared
     project = None
     try:
         progress("已找到方案，正在生成脚本并执行正式预检……")
@@ -125,12 +205,20 @@ def prepare_wild(
                                                template_name=inputs.template_name)
         check = validate_runtime(inputs.ezcon, project, fingerprint_warning_only=inputs.advanced)
     except SearchCancelledError:
+        shutil.rmtree(output, ignore_errors=True)
         raise
     except Exception as exc:
         check = EasyConRuntimeCheck(False, (f"生成 / 预检失败：{exc}",), ())
     if cancel():
+        shutil.rmtree(output, ignore_errors=True)
         raise SearchCancelledError("已取消操作")
-    return PreparedWild(inputs, result, project, plan_path, check)
+    prepared = PreparedWild(inputs, result, project, plan_path, check)
+    cleanup_generated_plan_directories(
+        paths.output,
+        archive_root=paths.user / "logs" / "generated-plans",
+        keep=(output,),
+    )
+    return prepared
 
 
 def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str) -> RunCommand:

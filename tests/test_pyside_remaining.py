@@ -21,6 +21,22 @@ class WorkflowTests(unittest.TestCase):
                 prepare_workflow(inputs, AppPaths(output=root / "out"), cancel=lambda: True)
             self.assertFalse((root / "out").exists())
 
+    def test_failed_generation_removes_partial_workflow_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            inputs = WorkflowInputs("egg", egg_request(), root, root / "ezcon.exe")
+            with patch(
+                "pyside_app.workflows.write_configured_egg_project",
+                side_effect=ValueError("broken template"),
+            ):
+                with self.assertRaisesRegex(ValueError, "broken template"):
+                    prepare_workflow(
+                        inputs,
+                        AppPaths(user=root, output=root / "runtime"),
+                        cancel=lambda: False,
+                    )
+            self.assertEqual(list((root / "runtime").glob("egg-*")), [])
+
     def test_worker_commands_keep_resume_devices_and_private_stop(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

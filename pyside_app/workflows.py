@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import socket
 import uuid
 from dataclasses import asdict, dataclass, field, replace
@@ -25,7 +26,7 @@ from sid_traversal import traversal_context, DEFAULT_TARGET_MAX_ADVANCES
 from tid_records import TidRecordContext
 from tid_session import write_json_atomic
 from worker_commands import build_worker_command
-from .services import AppPaths, RunCommand
+from .services import AppPaths, RunCommand, cleanup_generated_plan_directories
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,29 @@ def prepare_workflow(inputs: WorkflowInputs, paths: AppPaths, *, cancel, progres
         raise SearchCancelledError("已取消")
     directory = paths.output / f"{inputs.mode}-{uuid.uuid4().hex}"
     directory.mkdir(parents=True, exist_ok=False)
+    try:
+        prepared = _prepare_workflow_in_directory(
+            inputs, paths, directory, cancel=cancel, progress=progress,
+        )
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    cleanup_generated_plan_directories(
+        paths.output,
+        archive_root=paths.user / "logs" / "generated-plans",
+        keep=(directory,),
+    )
+    return prepared
+
+
+def _prepare_workflow_in_directory(
+    inputs: WorkflowInputs,
+    paths: AppPaths,
+    directory: Path,
+    *,
+    cancel,
+    progress=lambda text: None,
+):
     progress("正在生成并执行正式预检……")
     warnings = []
     request = inputs.request
