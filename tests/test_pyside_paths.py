@@ -65,7 +65,9 @@ class ResourcePathTests(unittest.TestCase):
             missing = Path(temp) / "removed" / "ezcon.exe"
             with self.assertRaises(FileNotFoundError) as caught:
                 probe_easycon_devices(missing)
-            self.assertIn(str(missing), str(caught.exception))
+            # Windows hosted runners may expose %TEMP% through an 8.3 alias
+            # (RUNNER~1) while Path.resolve() expands it to runneradmin.
+            self.assertIn(str(missing.resolve()), str(caught.exception))
             self.assertIn("共通设置", str(caught.exception))
             self.assertIn("完整解压", str(caught.exception))
             run.assert_not_called()
@@ -123,8 +125,8 @@ class StartupPathTests(unittest.TestCase):
                     for key, value in defaults.items():
                         self.assertEqual(window.fields[key].text(), str(value), key)
                     self.assertEqual([call.args[0] for call in run.call_args_list], [
-                        [str(defaults["ezcon"]), "port", "--list"],
-                        [str(defaults["ezcon"]), "video", "--list"],
+                        [str(defaults["ezcon"].resolve()), "port", "--list"],
+                        [str(defaults["ezcon"].resolve()), "video", "--list"],
                     ])
                 finally:
                     window.close()
