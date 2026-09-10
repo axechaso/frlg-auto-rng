@@ -213,6 +213,12 @@ class RemainingQtTests(unittest.TestCase):
 
     def test_egg_parent_selectors_include_ditto_and_preserve_it_in_configs(self):
         self.configure_egg()
+        self.assertEqual(
+            self.w.egg_parent_order_notice.text(),
+            "请填写双亲的个体值。亲本 A 是第一只寄放到培育屋的宝可梦，亲本 B 是第二只寄放的宝可梦；"
+            "寄放顺序会影响个体值遗传，请按实际顺序填写。",
+        )
+        self.assertTrue(self.w.egg_parent_order_notice.isVisibleTo(self.w))
         expected = ["雄", "雌", "无性别", "百变怪"]
         parent_a, parent_b = (row[0] for row in self.w.egg_parent_widgets)
         self.assertEqual([parent_a.itemText(i) for i in range(parent_a.count())], expected)

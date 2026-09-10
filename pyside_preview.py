@@ -1930,6 +1930,14 @@ class FrlgPreviewWindow(QMainWindow):
                 spin.setAccessibleName(f"亲本 {name} {stat} IV")
             parents_layout.addLayout(grid)
         target.layout.addWidget(_label("亲本个体值 IV", name="fieldLabel"))
+        self.egg_parent_order_notice = _label(
+            "请填写双亲的个体值。亲本 A 是第一只寄放到培育屋的宝可梦，亲本 B 是第二只寄放的宝可梦；"
+            "寄放顺序会影响个体值遗传，请按实际顺序填写。",
+            role="muted",
+        )
+        self.egg_parent_order_notice.setObjectName("eggParentOrderNotice")
+        self.egg_parent_order_notice.setAccessibleName("孵蛋亲本顺序说明")
+        target.layout.addWidget(self.egg_parent_order_notice)
         target.layout.addWidget(self.egg_parents)
         self.egg_ack = self._check("我已确认孵蛋前置条件，允许启动流程")
         self.egg_ack.setToolTip("请确认 254 步基础档、队伍空位、甜甜香气宝可梦与 Ten Lines 目标参数。确认不持久化，配置载入后需当次重新勾选。")
