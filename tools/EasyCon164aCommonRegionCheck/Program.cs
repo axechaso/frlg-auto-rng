@@ -34,6 +34,16 @@ ENDFUNC
 $test = 0
 $round = 0
 $point = 0
+$test = 共同区设置严格模式(0)
+CALL 共同区开始扫描
+$test = 共同区收集配对(40000,1500,100)
+$test = 共同区提交()
+$test = 共同区选择本轮配对()
+IF $C_轮数 != 0 or $C_本数 != 0 or $test != -1
+    PRINT ASSERT_FAIL: starter-disabled
+    RETURN
+ENDIF
+$C_御三家启用 = 1
 CALL 共同区重置
 $test = 共同区收集配对(40000,1500,100)
 $test = 共同区提交()

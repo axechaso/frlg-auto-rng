@@ -300,6 +300,9 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # Current materialization with complete Ten Lines parent types, including
     # Ditto, in both egg entry-script validations.
     "9a9bb56a2b9f380f7f57301fa1741938811127bec8a60656e92e5ad35ef28724",
+    # Starter common-region scanning, collection, scoring and submission are
+    # isolated from normal targets in both direct-run 2.0 entries.
+    "5fb10f4c1e91756ac69ea51b190c3823c88947bfcc0773c250efe82bf304edab",
 )
 
 
