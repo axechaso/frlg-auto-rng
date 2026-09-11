@@ -62,6 +62,7 @@ from .tid_starter_save import (
     is_starter_save_template,
     render_starter_save_bridge,
     set_starter_save_sid_correction,
+    split_tid_modules,
 )
 
 
@@ -617,7 +618,21 @@ def enable_any_tid_handoff(template: str, *, require_denoise: bool = True) -> st
     Leave all timing, recognition and search helpers unchanged. The original
     print helper computes the actual SID ADV before emitting identity markers.
     """
-    prefix = "EN_" if re.search(r"(?m)^FUNC EN_匹配\s*$", template) else ""
+    if is_starter_save_template(template):
+        parts = list(split_tid_modules(template))
+        languages = re.findall(r"(?m)^\$连续流程_游戏版本[ \t]*=[ \t]*([^\r\n]*)$", parts[0])
+        if len(languages) != 1 or languages[0].strip() not in {"0", "1"}:
+            raise ValueError("任意TID衔接缺少唯一有效的当前游戏语言设置")
+        # Both sets of functions remain in the combined template. Only the
+        # active module may receive the exit branch or supply its guard checks.
+        active = int(languages[0].strip()) + 1
+        parts[active] = enable_any_tid_handoff(parts[active], require_denoise=require_denoise)
+        return "".join(parts)
+    prefixes = [prefix for prefix in ("EN_", "JP_", "")
+                if re.search(rf"(?m)^FUNC {prefix}匹配\s*$", template)]
+    if len(prefixes) != 1:
+        raise ValueError("任意TID衔接缺少唯一的匹配/参数输出结构")
+    prefix = prefixes[0]
     anchor = f"            CALL {prefix}匹配\n"
     if template.count(anchor) != 1 or f"FUNC {prefix}打印参数\n" not in template:
         raise ValueError("任意TID衔接缺少唯一的匹配/参数输出结构")

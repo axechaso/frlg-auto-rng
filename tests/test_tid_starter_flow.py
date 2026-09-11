@@ -14,6 +14,7 @@ from automation.tid_rng137 import (
 from automation.tid_starter_save import (
     TID_STARTER_SAVE_NAME,
     is_starter_save_template,
+    split_tid_modules,
     stabilize_english_name_page_wait,
 )
 from automation.tid_starter_flow import (
@@ -115,39 +116,106 @@ ENDFUNC
         with self.assertRaisesRegex(ValueError, "完整识别"):
             enable_any_tid_handoff("            CALL EN_匹配\nFUNC EN_匹配\nENDFUNC\nFUNC EN_打印参数\nENDFUNC\n")
 
+    @staticmethod
+    def handoff_module(prefix):
+        return (
+            "            IF $digits_ok == 0\n                CONTINUE\n            ENDIF\n"
+            f"            CALL {prefix}去噪\n            CALL {prefix}匹配\n"
+            f"FUNC {prefix}匹配\nENDFUNC\nFUNC {prefix}打印参数\nENDFUNC\n"
+        )
+
+    @classmethod
+    def combined_handoff_template(cls, language):
+        return (
+            f"$连续流程_游戏版本 = {language}\n"
+            "# ===== 英文版 TID/SID 主体（顶层全局分支） =====\n"
+            + cls.handoff_module("EN_")
+            + "# ===== 日文版 TID/SID 主体（顶层全局分支） =====\n"
+            + cls.handoff_module("JP_")
+            + "# 工具 ID 阶段结束：桥接与存档只在第二阶段执行。\nRETURN 0\n"
+        )
+
+    def test_combined_any_tid_handoff_only_changes_active_language(self):
+        for language, prefix in ((0, "EN_"), (1, "JP_")):
+            for denoise in (False, True):
+                with self.subTest(language=language, denoise=denoise):
+                    template = self.combined_handoff_template(language)
+                    generated = enable_any_tid_handoff(template, require_denoise=denoise)
+                    before, after = split_tid_modules(template), split_tid_modules(generated)
+                    for index in range(4):
+                        if index != language + 1:
+                            self.assertEqual(before[index], after[index])
+                    active = after[language + 1]
+                    self.assertEqual(generated.count("# TIDFLOW_ANY_TID_BEGIN"), 1)
+                    self.assertIn(f"CALL {prefix}打印参数", active)
+                    self.assertEqual("$denoise_hit_count >= $denoise_need_hit" in active, denoise)
+                    self.assertIn("$ID >= 0 and $ID <= 65535", active)
+                    self.assertIn("$脚本固定延迟检查开关 == 0", active)
+                    self.assertLess(active.index("IF $digits_ok == 0"), active.index("# TIDFLOW_ANY_TID_BEGIN"))
+                    self.assertLess(active.index(f"CALL {prefix}打印参数"), active.index("PRINT TIDFLOW|ID|SID_ADV="))
+
+    def test_combined_any_tid_handoff_rejects_missing_or_ambiguous_language(self):
+        template = self.combined_handoff_template(1)
+        for replacement in ("", "$连续流程_游戏版本 = 2\n", "$连续流程_游戏版本 = 0\n$连续流程_游戏版本 = 1\n"):
+            with self.subTest(replacement=replacement), self.assertRaisesRegex(ValueError, "语言"):
+                enable_any_tid_handoff(template.replace("$连续流程_游戏版本 = 1\n", replacement, 1))
+
+    def test_japanese_guard_cannot_be_borrowed_from_inactive_english(self):
+        parts = list(split_tid_modules(self.combined_handoff_template(1)))
+        parts[2] = parts[2].replace("            IF $digits_ok == 0\n", "            IF $other == 0\n")
+        with self.assertRaisesRegex(ValueError, "完整识别"):
+            enable_any_tid_handoff("".join(parts))
+
+    def test_standalone_any_tid_handoff_keeps_legacy_prefixes(self):
+        for prefix in ("EN_", "JP_", ""):
+            with self.subTest(prefix=prefix):
+                generated = enable_any_tid_handoff(self.handoff_module(prefix), require_denoise=False)
+                self.assertIn(f"CALL {prefix}打印参数", generated)
+                self.assertEqual(generated.count("# TIDFLOW_ANY_TID_BEGIN"), 1)
+
     @unittest.skipUnless(HAS_TID_ASSETS and SOURCE_118.is_dir(), "requires TID assets")
     def test_any_tid_handoff_changes_only_the_opt_in_success_branch(self):
-        request = TidStarterFlowRequest(
-            TidRngRequest(mode=0, sid_random=True, target_tid=65535, same_id=True),
-            "火红", "妙蛙种子", starter_max_advances=1600,
-        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            texts = []
-            for enabled in (False, True):
-                output = root / str(enabled)
-                plan = build_tid_starter_flow_plan(replace(request, accept_any_tid=enabled))
-                write_tid_starter_flow_bundle(DEFAULT_TID_SOURCE_PATH, output, plan, starter_source_dir=SOURCE_118)
-                texts.append((output / "01_id" / "main.ecs").read_text(encoding="utf-8"))
-                self.assertEqual((output / "01_id" / "main_attempt_000.ecs").read_text(encoding="utf-8"), texts[-1])
-            normal, any_tid = texts
-            pattern = r"(?ms)^            # TIDFLOW_ANY_TID_BEGIN\n.*?^            # TIDFLOW_ANY_TID_END\n"
-            blocks = re.findall(pattern, any_tid)
-            self.assertEqual(len(blocks), 1)
-            block = blocks[0]
-            self.assertIn("$denoise_hit_count >= $denoise_need_hit", block)
-            self.assertIn("$ID >= 0 and $ID <= 65535", block)
-            self.assertIn("PRINT TIDFLOW|ID|TID= & $ID", block)
-            self.assertIn("PRINT TIDFLOW|ID|SID_ADV= & $adv", block)
-            self.assertLess(block.index("打印参数"), block.index("TIDFLOW|ID|SID_ADV="))
-            self.assertNotIn("$EN_TARGET_TID", block)
-            self.assertEqual(re.sub(pattern, "", any_tid), normal)
-            first_read = enable_any_tid_handoff(normal, require_denoise=False)
-            first_block = re.findall(pattern, first_read)[0]
-            self.assertNotIn("$denoise_hit_count", first_block)
-            self.assertIn("$ID >= 0 and $ID <= 65535", first_block)
-            self.assertIn("$脚本固定延迟检查开关 == 0", first_block)
-            self.assertEqual(re.sub(pattern, "", first_read), normal)
+            for language, name, active, prefix in (("英文", "R", 1, "EN_"), ("日文", "レ", 2, "JP_")):
+                request = TidStarterFlowRequest(
+                    TidRngRequest(language=language, player_name=name, mode=0, sid_random=True,
+                                  target_tid=65535, same_id=True),
+                    "火红", "妙蛙种子", starter_max_advances=1600,
+                )
+                normal = None
+                for enabled, denoise in ((False, True), (False, False), (True, True), (True, False)):
+                    with self.subTest(language=language, enabled=enabled, denoise=denoise):
+                        output = root / f"{active}-{enabled}-{denoise}"
+                        plan = build_tid_starter_flow_plan(replace(
+                            request, accept_any_tid=enabled, any_tid_require_denoise=denoise,
+                        ))
+                        write_tid_starter_flow_bundle(DEFAULT_TID_SOURCE_PATH, output, plan, starter_source_dir=SOURCE_118)
+                        text = (output / "01_id" / "main.ecs").read_text(encoding="utf-8")
+                        self.assertEqual((output / "01_id" / "main_attempt_000.ecs").read_text(encoding="utf-8"), text)
+                        pattern = r"(?ms)^            # TIDFLOW_ANY_TID_BEGIN\n.*?^            # TIDFLOW_ANY_TID_END\n"
+                        blocks = re.findall(pattern, text)
+                        if not enabled:
+                            self.assertEqual(blocks, [])
+                            if normal is None:
+                                normal = text
+                            self.assertEqual(text, normal)
+                            continue
+                        self.assertEqual(len(blocks), 1)
+                        block = blocks[0]
+                        if is_starter_save_template(text):
+                            parts = split_tid_modules(text)
+                            self.assertIn(block, parts[active])
+                            self.assertNotIn(block, parts[3 - active])
+                            self.assertIn(f"CALL {prefix}打印参数", block)
+                        self.assertEqual("$denoise_hit_count >= $denoise_need_hit" in block, denoise)
+                        self.assertIn("$ID >= 0 and $ID <= 65535", block)
+                        self.assertIn("$脚本固定延迟检查开关 == 0", block)
+                        self.assertIn("PRINT TIDFLOW|ID|TID= & $ID", block)
+                        self.assertIn("PRINT TIDFLOW|ID|SID_ADV= & $adv", block)
+                        self.assertLess(block.index("打印参数"), block.index("TIDFLOW|ID|SID_ADV="))
+                        self.assertNotIn("TARGET_TID", block)
+                        self.assertEqual(re.sub(pattern, "", text), normal)
 
     def test_plan_uses_shared_target_search_and_first_sid_advance(self):
         request = TidStarterFlowRequest(

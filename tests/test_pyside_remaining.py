@@ -286,6 +286,29 @@ class RemainingQtTests(unittest.TestCase):
         self.assertEqual(values["tid_target_var"], "00123")
         self.assertEqual(values["tid_op_rng_range_var"], w.fields["tid_op_radius"].text())
 
+    def test_tid_flow_switches_reach_request_for_both_languages(self):
+        w = self.w
+        w.select_page("tid")
+        w.fields["tid_mode"].setCurrentIndex(1)
+        w.fields["tid_sid_mode"].setCurrentIndex(1)
+        for language, name in (("英文", "R"), ("日文", "レ")):
+            w.fields["tid_language"].setCurrentText(language)
+            w.fields["tid_name"].setText(name)
+            for master in (False, True):
+                for any_tid in (False, True):
+                    for denoise in (False, True):
+                        with self.subTest(language=language, master=master, any_tid=any_tid, denoise=denoise):
+                            w.tid_flow_check.setChecked(master)
+                            w.tid_any_check.setChecked(any_tid)
+                            w.tid_denoise_check.setChecked(denoise)
+                            inputs = w.collect_workflow()
+                            flow = inputs.extra["flow"]
+                            self.assertEqual(flow is not None, master)
+                            if flow is not None:
+                                self.assertEqual(flow.tid_request.language, language)
+                                self.assertEqual(flow.accept_any_tid, any_tid)
+                                self.assertEqual(flow.any_tid_require_denoise, denoise)
+
     def test_profile_switch_edit_and_restart_preserve_tid_target_draft(self):
         w = self.w
         w.select_page("tid")
