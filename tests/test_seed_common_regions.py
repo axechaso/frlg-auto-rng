@@ -14,7 +14,7 @@ from automation.seed_common_regions import ASSET, upgrade_entry, upgrade_library
 
 
 class CommonReplay:
-    def __init__(self, seed_span=100, adv_span=30, source=None):
+    def __init__(self, seed_span=100, adv_span=30, source=None, enabled=True):
         source = source if source is not None else ASSET.read_text(encoding="utf-8")
         self.v = {n: ast.literal_eval(value) for n, value in re.findall(r"(?m)^\$(\w+) = (\d+|\[[^\n]*\])$", source)}
         self.v.update(共同区Seed总跨度=seed_span, 共同区ADV总跨度=adv_span)
@@ -69,6 +69,8 @@ class CommonReplay:
                 else:
                     raise AssertionError(line)
             exec(compile("\n".join(lines), f"<actual ECS: {name}>", "exec"), self.env)
+        if enabled and "C_御三家启用" in self.v:
+            self.v["C_御三家启用"] = 1
 
     def call(self, name, *args):
         return self.env[name](*args)
@@ -98,6 +100,18 @@ def brute_force(rounds, seed_span, adv_span):
 
 
 class SeedCommonRegionsTests(unittest.TestCase):
+    def test_disabled_mode_cannot_collect_submit_or_score(self):
+        replay = CommonReplay(enabled=False)
+        replay.v.update(C_本数=3, C_本坏=1, C_本提交=1)
+        replay.call("共同区开始扫描")
+        self.assertEqual((replay.v["C_本数"], replay.v["C_本坏"], replay.v["C_本提交"]), (3, 1, 1))
+        self.assertEqual(replay.call("共同区收集配对", 40000, 1500, 20), 0)
+        self.assertEqual(replay.call("共同区提交"), 0)
+        self.assertEqual(replay.v["C_轮数"], 0)
+        replay.v["C_可用"] = 1
+        self.assertEqual(replay.call("共同区候选加权距离", 20, 1500, 100, 1), 0)
+        self.assertEqual(replay.call("共同区选择本轮配对"), -1)
+
     def test_random_pairs_match_exhaustive_one_per_round_search(self):
         rng = random.Random(118164)
         for case in range(120):
@@ -217,6 +231,38 @@ class SeedCommonRegionsTests(unittest.TestCase):
         first = upgrade_library(original)
         self.assertEqual(upgrade_library(first), first)
         self.assertIn(original.split("FUNC ")[1], first)
+
+    def test_entry_hooks_are_starter_only_and_v1_is_migrated(self):
+        fixture = """FUNC 重置本轮候选状态
+    CALL 共同区开始扫描
+ENDFUNC
+FUNC 处理匹配候选
+    $当前候选帧原始 = $当前消耗帧 - $目标消耗帧
+    $投票忽略 = 共同区收集($游戏版本, $种子索引, $Seed累计修正索引, $当前消耗帧, $消耗帧实际执行修正量, $NXSeed平台偏移MS)
+    $当前候选MSE = $当前候选MSE + 共同区候选加权距离($种子索引 + $Seed累计修正索引, $当前消耗帧 + $消耗帧实际执行修正量, $候选权重Seed, $候选权重帧)
+    # NPC离群过滤：原规则
+ENDFUNC
+FUNC 御三家刷新候选距离
+    $当前候选MSE = $当前候选MSE + 共同区候选加权距离($种子索引 + $Seed累计修正索引, $当前消耗帧 + $消耗帧实际执行修正量, $候选权重Seed, $候选权重帧)
+ENDFUNC
+        $反查细分成功 = 执行识图反查直到候选唯一()
+        IF $反查细分成功 == 1
+            $投票忽略 = 共同区提交()
+        ENDIF
+"""
+        migrated = upgrade_entry("# SEED_COMMON_REGION_HOOK_V1\n" + fixture)
+        self.assertIn("# SEED_COMMON_REGION_HOOK_V2_STARTER_ONLY", migrated)
+        self.assertNotIn("# SEED_COMMON_REGION_HOOK_V1\n", migrated)
+        self.assertEqual(migrated.count("IF $御三家严格筛选 == 1"), 4)
+        self.assertNotIn(
+            "IF $御三家严格筛选 == 1\n"
+            "        $当前候选MSE = $当前候选MSE + 共同区候选加权距离(",
+            re.search(r"(?ms)^FUNC 御三家刷新候选距离[^\n]*\n.*?^ENDFUNC", migrated)[0],
+        )
+        self.assertIn(
+            "IF $御三家严格筛选 == 1 and $反查细分成功 == 1",
+            migrated,
+        )
 
     def test_user_common_region_settings_survive_materialization(self):
         original = "$other = 1\nFUNC 保留函数(): INT\n    RETURN 7\nENDFUNC\n"

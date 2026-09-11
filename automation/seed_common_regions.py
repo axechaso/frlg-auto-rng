@@ -14,6 +14,8 @@ from .starter_calibration import upgrade_starter_calibration
 ASSET = RESOURCE_ROOT / "assets/easycon118_extensions/seed_common_regions.ecs"
 LIBRARY = "lib/25_校准_投票决策.ecs"
 ENTRIES = ("NS火叶全自动一键乱数2.0.ecs", "NS火叶全自动一键乱数2.0-时间轴.ecs")
+ENTRY_MARKER = "# SEED_COMMON_REGION_HOOK_V2_STARTER_ONLY"
+LEGACY_ENTRY_MARKER = "# SEED_COMMON_REGION_HOOK_V1"
 
 
 def _function(text: str, name: str) -> str:
@@ -64,33 +66,118 @@ def upgrade_entry(text: str) -> str:
     return upgrade_starter_calibration(_upgrade_legacy_entry(text))
 
 
+def _replace_entry_hook(text: str, old: str, new: str, error: str) -> str:
+    if new in text:
+        return text
+    if text.count(old) != 1:
+        raise ValueError(error)
+    return text.replace(old, new)
+
+
+def _replace_function_hook(text: str, name: str, old: str, new: str, error: str) -> str:
+    block = _function(text, name)
+    replaced = _replace_entry_hook(block, old, new, error)
+    return text.replace(block, replaced)
+
+
+def _isolate_existing_entry_hooks(text: str) -> str:
+    text = _replace_function_hook(
+        text,
+        "重置本轮候选状态",
+        "    CALL 共同区开始扫描\n",
+        "    IF $御三家严格筛选 == 1\n"
+        "        CALL 共同区开始扫描\n"
+        "    ENDIF\n",
+        "无法隔离共同区扫描入口",
+    )
+    text = _replace_function_hook(
+        text,
+        "处理匹配候选",
+        "    $投票忽略 = 共同区收集($游戏版本, $种子索引, $Seed累计修正索引, $当前消耗帧, $消耗帧实际执行修正量, $NXSeed平台偏移MS)\n",
+        "    IF $御三家严格筛选 == 1\n"
+        "        $投票忽略 = 共同区收集($游戏版本, $种子索引, $Seed累计修正索引, $当前消耗帧, $消耗帧实际执行修正量, $NXSeed平台偏移MS)\n"
+        "    ENDIF\n",
+        "无法隔离共同区候选收集入口",
+    )
+    text = _replace_function_hook(
+        text,
+        "处理匹配候选",
+        "    $当前候选MSE = $当前候选MSE + 共同区候选加权距离($种子索引 + $Seed累计修正索引, $当前消耗帧 + $消耗帧实际执行修正量, $候选权重Seed, $候选权重帧)\n",
+        "    IF $御三家严格筛选 == 1\n"
+        "        $当前候选MSE = $当前候选MSE + 共同区候选加权距离($种子索引 + $Seed累计修正索引, $当前消耗帧 + $消耗帧实际执行修正量, $候选权重Seed, $候选权重帧)\n"
+        "    ENDIF\n",
+        "无法隔离共同区候选排序入口",
+    )
+    text = _replace_entry_hook(
+        text,
+        "        IF $反查细分成功 == 1\n"
+        "            $投票忽略 = 共同区提交()\n"
+        "        ENDIF\n",
+        "        IF $御三家严格筛选 == 1 and $反查细分成功 == 1\n"
+        "            $投票忽略 = 共同区提交()\n"
+        "        ENDIF\n",
+        "无法隔离共同区候选提交入口",
+    )
+    return text
+
+
 def _upgrade_legacy_entry(text: str) -> str:
     text = text.replace("\r\n", "\n")
     if "FUNC 处理匹配候选" not in text:
         return text  # Minimal fixtures / unrelated standalone scripts.
-    if "# SEED_COMMON_REGION_HOOK_V1" in text:
+    if ENTRY_MARKER in text:
         return text
+    if LEGACY_ENTRY_MARKER in text:
+        text = _isolate_existing_entry_hooks(text)
+        return text.replace(LEGACY_ENTRY_MARKER, ENTRY_MARKER, 1)
     text = re.sub(r"(?m)^\s*\$投票忽略 = 投票(?:重置本轮Seed范围|提交本轮Seed范围)\(\)\n", "", text)
     text = re.sub(r"(?m)^(    \$投票忽略 = 投票投候选\([^\n]*), \$当前MS, \$当前消耗帧\)$", r"\1)", text)
     text, _ = re.subn(r"(?ms)^    \$当前候选交叉Seed绝对 = .*?^    ENDIF\n", "", text)
     # History reset is inside the library's existing 投票重置; no controller edits.
     old = _function(text, "重置本轮候选状态")
-    text = text.replace(old, old.replace("\n", "\n    CALL 共同区开始扫描\n", 1))
+    text = text.replace(
+        old,
+        old.replace(
+            "\n",
+            "\n    IF $御三家严格筛选 == 1\n"
+            "        CALL 共同区开始扫描\n"
+            "    ENDIF\n",
+            1,
+        ),
+    )
     old = _function(text, "处理匹配候选")
     anchor = "    $当前候选帧原始 = $当前消耗帧 - $目标消耗帧\n"
     if old.count(anchor) != 1:
         raise ValueError("无法定位候选收集入口")
-    new = old.replace(anchor, anchor + "    $投票忽略 = 共同区收集($游戏版本, $种子索引, $Seed累计修正索引, $当前消耗帧, $消耗帧实际执行修正量, $NXSeed平台偏移MS)\n")
+    new = old.replace(
+        anchor,
+        anchor
+        + "    IF $御三家严格筛选 == 1\n"
+        + "        $投票忽略 = 共同区收集($游戏版本, $种子索引, $Seed累计修正索引, $当前消耗帧, $消耗帧实际执行修正量, $NXSeed平台偏移MS)\n"
+        + "    ENDIF\n",
+    )
     anchor = "    # NPC离群过滤："
     pos = new.index(anchor)
-    new = new[:pos] + "    $当前候选MSE = $当前候选MSE + 共同区候选加权距离($种子索引 + $Seed累计修正索引, $当前消耗帧 + $消耗帧实际执行修正量, $候选权重Seed, $候选权重帧)\n" + new[pos:]
+    new = (
+        new[:pos]
+        + "    IF $御三家严格筛选 == 1\n"
+        + "        $当前候选MSE = $当前候选MSE + 共同区候选加权距离($种子索引 + $Seed累计修正索引, $当前消耗帧 + $消耗帧实际执行修正量, $候选权重Seed, $候选权重帧)\n"
+        + "    ENDIF\n"
+        + new[pos:]
+    )
     text = text.replace(old, new)
     # Exactly once per acquired Pokemon, after candy refinement, before calibration.
     anchor = "        $反查细分成功 = 执行识图反查直到候选唯一()\n"
     if text.count(anchor) != 1:
         raise ValueError("无法定位最终候选提交点")
-    text = text.replace(anchor, anchor + "        IF $反查细分成功 == 1\n            $投票忽略 = 共同区提交()\n        ENDIF\n")
-    return "# SEED_COMMON_REGION_HOOK_V1\n" + text
+    text = text.replace(
+        anchor,
+        anchor
+        + "        IF $御三家严格筛选 == 1 and $反查细分成功 == 1\n"
+        + "            $投票忽略 = 共同区提交()\n"
+        + "        ENDIF\n",
+    )
+    return ENTRY_MARKER + "\n" + text
 
 
 def apply_seed_common_regions(project_dir: str | Path, entries=ENTRIES) -> bool:

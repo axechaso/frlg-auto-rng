@@ -1,11 +1,12 @@
 # SEED_COMMON_REGION_V1_BEGIN
-# 严格二维共同区：仅影响候选排序，不写入 Seed 控制器或帧轴。
+# 御三家专用严格二维共同区：仅影响御三家候选排序，不写入 Seed 控制器或帧轴。
 # 跨轮坐标：Seed = 查表(实际索引 + 累计索引修正)，ADV = 实际ADV + 已执行帧修正。
 # 以下为实验默认值；总跨度，不是中心两侧半径。
 $共同区Seed总跨度 = 100
 $共同区ADV总跨度 = 30
 $共同区参与排序 = 1
 $共同区输出配对 = 0
+$C_御三家启用 = 0
 $C_严格 = 0
 $C_选择 = 0
 $C_选择末 = 0
@@ -116,26 +117,38 @@ FUNC 共同区重置
     $C_可用 = 0
     $C_坏轮 = 0
     $C_最近评分生效 = 0
+    $C_本数 = 0
+    $C_本坏 = 0
+    $C_本提交 = 0
     FOR $C_i = 0 TO 11
         $C_轮长度[$C_i] = 0
     NEXT
-    CALL 共同区开始扫描
 ENDFUNC
 
 FUNC 共同区开始扫描
+    IF $C_御三家启用 == 0
+        RETURN
+    ENDIF
     $C_本数 = 0
     $C_本坏 = 0
     $C_本提交 = 0
 ENDFUNC
 
 FUNC 共同区设置严格模式($启用: INT): INT
-    $C_严格 = $启用
+    IF $启用 == 1
+        $C_御三家启用 = 1
+        $C_严格 = 1
+        RETURN 1
+    ENDIF
+    $C_御三家启用 = 0
+    $C_严格 = 0
+    CALL 共同区重置
     RETURN 1
 ENDFUNC
 
 # 返回真实配对槽；共同区内仍有多个本轮候选时继续观察，不猜最近者。
 FUNC 共同区选择本轮配对(): INT
-    IF $C_本坏 == 1 or $C_本数 == 0
+    IF $C_御三家启用 == 0 or $C_本坏 == 1 or $C_本数 == 0
         RETURN -1
     ENDIF
     IF $C_本数 == 1
@@ -170,7 +183,7 @@ FUNC 共同区取本轮ADV($槽: INT): INT
 ENDFUNC
 
 FUNC 共同区预测ADV($默认ADV: INT, $累计修正: INT): INT
-    IF $C_可用 == 1 and $C_坏轮 == 0 and $C_超限 == 0
+    IF $C_御三家启用 == 1 and $C_可用 == 1 and $C_坏轮 == 0 and $C_超限 == 0
         $C_tmp = $C_最佳ADV低 + $C_最佳ADV高
         $C_tmp = ($C_tmp - $C_tmp % 2) / 2
         RETURN $C_tmp - $累计修正
@@ -180,6 +193,9 @@ ENDFUNC
 
 # 容量只限制诊断缓存，不限制原反查；越界整轮不参与，绝不截掉后冒充完整结果。
 FUNC 共同区收集($游戏: INT, $实际索引: INT, $Seed累计: INT, $实际ADV: INT, $帧累计: INT, $平台MS: INT): INT
+    IF $C_御三家启用 == 0
+        RETURN 0
+    ENDIF
     $C_tmp = $实际索引 + $Seed累计
     $C_end = 取Seed最大索引($游戏)
     IF $C_tmp < 0 or $C_tmp > $C_end
@@ -192,6 +208,9 @@ FUNC 共同区收集($游戏: INT, $实际索引: INT, $Seed累计: INT, $实际
 ENDFUNC
 
 FUNC 共同区收集配对($MS: INT, $ADV: INT, $索引: INT): INT
+    IF $C_御三家启用 == 0
+        RETURN 0
+    ENDIF
     $C_末 = $C_本数 - 1
     FOR $C_i = 0 TO $C_末
         IF $C_本Seed[$C_i] == $MS and $C_本ADV[$C_i] == $ADV and $C_本索引[$C_i] == $索引
@@ -232,6 +251,13 @@ ENDFUNC
 
 # 主脚本只在一只宝可梦的吃糖细分结束后提交最终扫描，扩窗/同只吃糖不是新一轮。
 FUNC 共同区提交(): INT
+    IF $C_御三家启用 == 0
+        $C_本数 = 0
+        $C_本坏 = 0
+        $C_本提交 = 0
+        $C_可用 = 0
+        RETURN 0
+    ENDIF
     IF $C_本提交 == 1
         RETURN 0
     ENDIF
@@ -299,6 +325,9 @@ FUNC 共同区重算
     $C_可用 = 0
     $C_工作量 = 0
     $C_超限 = 0
+    IF $C_御三家启用 == 0
+        RETURN
+    ENDIF
     IF $共同区Seed总跨度 < 0 or $共同区ADV总跨度 < 0
         RETURN
     ENDIF
@@ -631,7 +660,7 @@ ENDFUNC
 
 FUNC 共同区候选加权距离($基准索引: INT, $基准ADV: INT, $Seed权重: INT, $ADV权重: INT): INT
     $C_最近评分生效 = 0
-    IF $C_可用 == 0 or $C_坏轮 == 1
+    IF $C_御三家启用 == 0 or $C_可用 == 0 or $C_坏轮 == 1
         RETURN 0
     ENDIF
     $C_最近评分生效 = 1
