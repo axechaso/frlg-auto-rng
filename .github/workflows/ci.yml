@@ -77,6 +77,7 @@ jobs:
           updater_entry.py
           package_entry.py
           tools/create_update_manifest.py
+          tools/stage_release_assets.py
           tools/verify_windows_upgrade.py
           tools/verify_frozen_workers.py
           sid_traversal.py
@@ -155,4 +156,5 @@ jobs:
           tests.test_app_updater
           tests.test_update_installer
           tests.test_update_manifest_tool
+          tests.test_windows_release_scripts
           tests.test_pyside_release_upgrade

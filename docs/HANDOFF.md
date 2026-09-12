@@ -15,6 +15,7 @@
 - 本地完整回归663项：636通过、27按环境/资源条件跳过；30份原包/缓存/实际生成入口全部通过真实 `1.6.4-a+9c86137` format和绑定编译，覆盖英日TID开关、NS1/NS2、正式/时间轴、普通/御三家/孵蛋/游走。证据在 `.build/release-0-9-2-script-verification/verification.json`，完整测试日志为 `.build/release-0-9-2-tests-final.log`。
 - 原包40项检查中38通过；`check_easycon_frame_fix.py` 因本机缺少1.70实验源码不能运行，`check_pyeasycon_safari_164a_test.py` 仍要求独立测试稿中旧提交注释而失败。没有删断言或改实验稿来掩盖这两项；它们不属于发布入口。结果保存在 `.build/release-0-9-2-source-checks.log`。
 - 构建目录 `.build/windows-release-pyside6-0-9-2-20260912`。主程序和独立更新器已生成，真实冻结后台入口及日志/停止检查通过；本快照提交时ZIP与升级验收仍在进行，发布工具须等待当前提交CI成功后才能上传并公开Release。全程未操作单片机或游戏。
+- 首包检查发现原包内5份未使用的实验OCR模型额外增加约42MiB；构建新增独立资源暂存，只携带两份正式已审计模型，不删原包或本地实验模型。最终候选改在 `.build/windows-release-pyside6-0-9-2-20260912-r2` 构建，首包保留不发布。
 
 ## 2026-09-11 2.0 原包路径迁移
 

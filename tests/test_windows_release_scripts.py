@@ -1,5 +1,10 @@
 import unittest
+import hashlib
+import tempfile
 from pathlib import Path
+from unittest.mock import patch
+
+from tools.stage_release_assets import stage_assets
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +16,7 @@ class WindowsReleaseScriptTests(unittest.TestCase):
         for required in (
             "FRLG-Auto-RNG-Updater",
             "tools.create_update_manifest",
+            "tools.stage_release_assets $LocalAssets $StagedAssets",
             "tools.verify_frozen_workers --exe $frozenMain",
             "--notes-file",
             "--onefile",
@@ -59,3 +65,28 @@ class WindowsReleaseScriptTests(unittest.TestCase):
         self.assertNotIn("Remove-Item", source)
         self.assertNotIn("$BuildRoot\\*", source)
         self.assertNotIn("Authorization: token", source)
+
+    def test_staging_copies_only_audited_ocr_models_without_changing_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            models = source / "easycon118/Tessdata"
+            models.mkdir(parents=True)
+            (models / "required.traineddata").write_bytes(b"model")
+            (models / "experimental.traineddata").write_bytes(b"experiment")
+            (source / "tid.ecs").write_bytes(b"tid")
+            expected = {"required.traineddata": hashlib.sha256(b"model").hexdigest()}
+            with patch("tools.stage_release_assets.EXPECTED_TESSDATA_SHA256", expected):
+                staged = stage_assets(source, root / "staged")
+                self.assertEqual((staged / "tid.ecs").read_bytes(), b"tid")
+                self.assertEqual(list((staged / "easycon118/Tessdata").iterdir()),
+                                 [staged / "easycon118/Tessdata/required.traineddata"])
+                self.assertEqual((models / "experimental.traineddata").read_bytes(), b"experiment")
+                with self.assertRaises(FileExistsError):
+                    stage_assets(source, staged)
+                with self.assertRaises(ValueError):
+                    stage_assets(source, source / "nested")
+                (models / "required.traineddata").write_bytes(b"modified")
+                with self.assertRaisesRegex(ValueError, "fingerprint"):
+                    stage_assets(source, root / "bad")
+                self.assertFalse((root / "bad").exists())

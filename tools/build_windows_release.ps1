@@ -62,6 +62,16 @@ $UpdaterDist = Join-Path $BuildRoot "updater-dist"
 $ReleaseRoot = Join-Path $BuildRoot $OutputName
 New-Item -ItemType Directory -Path $BuildRoot | Out-Null
 
+$StagedAssets = Join-Path $BuildRoot "release-assets"
+Push-Location $Root
+try {
+    & $Python -m tools.stage_release_assets $LocalAssets $StagedAssets
+    if ($LASTEXITCODE -ne 0) { throw "正式发布资源准备失败" }
+} finally {
+    Pop-Location
+}
+$LocalAssets = $StagedAssets
+
 $args = @(
     "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed",
     "--name", "FRLG-Auto-RNG", "--distpath", $PyInstallerDist,
@@ -178,7 +188,7 @@ $ZipPath = Join-Path $BuildRoot "$OutputName.zip"
 # The release folder is self-contained. Remove PyInstaller's temporary copy
 # before compression so the archive does not require another full package's
 # worth of free disk space.
-foreach ($IntermediatePath in @($PyInstallerDist, $PyInstallerWork, $UpdaterDist, $UpdaterWork, (Join-Path $BuildRoot "FRLG-Auto-RNG.spec"), (Join-Path $BuildRoot "FRLG-Auto-RNG-Updater.spec"))) {
+foreach ($IntermediatePath in @($StagedAssets, $PyInstallerDist, $PyInstallerWork, $UpdaterDist, $UpdaterWork, (Join-Path $BuildRoot "FRLG-Auto-RNG.spec"), (Join-Path $BuildRoot "FRLG-Auto-RNG-Updater.spec"))) {
     if (Test-Path -LiteralPath $IntermediatePath) {
         Remove-Item -Force -Recurse -LiteralPath $IntermediatePath
     }
