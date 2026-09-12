@@ -198,7 +198,10 @@ PREVIOUS_SCRIPT_SHA256S += (
     # type and validated the complete four-type parent pairing rules.
     "208cbab1b9635c21873350a4891e90cc982fb59b26631f664eec6a8eed422b2f",
 )
-EXPECTED_SCRIPT_SHA256 = "d607e8a2702be9a7cacecb24cb0bdf59083188954c76b5196e2b7e23b62647db"
+PREVIOUS_SCRIPT_SHA256S += (
+    "d607e8a2702be9a7cacecb24cb0bdf59083188954c76b5196e2b7e23b62647db",
+)
+EXPECTED_SCRIPT_SHA256 = "1e0da82c8c4d9b64e9b8768079ac14ff98c84c0ead1b3d87486912940175a129"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
@@ -303,6 +306,9 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # Starter common-region scanning, collection, scoring and submission are
     # isolated from normal targets in both direct-run 2.0 entries.
     "5fb10f4c1e91756ac69ea51b190c3823c88947bfcc0773c250efe82bf304edab",
+    # September 12 source sync: NX-aware blackout/egg startup, counted roamer
+    # route, and upstream first-hit majority/logging preserved by overlays.
+    "f4b90d479dc4d5c02c5572580aa3321ffaa252d7f5b49c35ac814733624d5f65",
 )
 
 
@@ -662,6 +668,10 @@ EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE = EGG_FORMAL_PARITY_REAL_CALL_PICKUP_WAIT_
     "$孵蛋流程领取目标截止MS, $孵蛋流程生成菜单奇偶开关, $孵蛋流程Pickup菜单奇偶开关",
     1,
 )
+EGG_FORMAL_PARITY_REAL_CALL_NX_WAIT_MODE = EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE.replace(
+    "$Seed启动方案, $孵蛋使用绝对时间轴)",
+    "$NX机型, $Seed启动方案, $孵蛋使用绝对时间轴)",
+)
 EGG_GENERATION_PARITY_MENU_LEGACY_MARKER = "# GUI 孵蛋生成奇偶：生成前开关菜单增加7 advance"
 EGG_GENERATION_PARITY_MENU_MARKER = "# GUI 孵蛋生成奇偶：生成前保留菜单动作，计时截止不预扣物理advance"
 EGG_PICKUP_PARITY_MENU_MARKER = "# GUI 孵蛋领取奇偶：确认出蛋后开关菜单增加7 advance"
@@ -690,6 +700,10 @@ EGG_PICKUP_PARITY_SIGNATURE_WAIT_MODE = EGG_PICKUP_PARITY_SIGNATURE_PICKUP_WAIT_
     "$领蛋目标MS: INT, $Pickup菜单奇偶开关: INT",
     "$领蛋目标MS: INT, $生成菜单奇偶开关: INT, $Pickup菜单奇偶开关: INT",
     1,
+)
+EGG_PICKUP_PARITY_SIGNATURE_NX_WAIT_MODE = EGG_PICKUP_PARITY_SIGNATURE_WAIT_MODE.replace(
+    "$Seed启动方案: INT, $使用绝对时间轴: INT)",
+    "$NX机型: INT, $Seed启动方案: INT, $使用绝对时间轴: INT)",
 )
 EGG_PICKUP_PARITY_VALIDATION_OLD = """\
     IF $无蛋后复核Seed != 0 and $无蛋后复核Seed != 1
@@ -2980,6 +2994,10 @@ def _apply_egg_seed_controller_runtime_override_text(
 def _apply_seed_hold_observation_window_text(template_text: str) -> str:
     """Install the shared scheme-1/2 five-miss fixed-half controller."""
     configured = template_text
+    for declaration in ("$Seed曾命中目标 = 0", "$Seed锁定提前多数票数 = 3"):
+        name = declaration.split(" = ", 1)[0]
+        if not re.search(rf"(?m)^{re.escape(name)}[ \t]*=", configured):
+            configured = declaration + "\n" + configured
     if SEED_HOLD_OBSERVATION_OLD_GLOBAL in configured:
         if configured.count(SEED_HOLD_OBSERVATION_OLD_GLOBAL) != 1:
             raise ValueError("主脚本Seed命中保持样本数不唯一，拒绝升级连续未命中窗口")
@@ -3084,6 +3102,8 @@ def _apply_egg_formal_parity_runtime_override_text(
         if uses_explicit_wait_mode
         else EGG_FORMAL_PARITY_REAL_CALL_CURRENT
     )
+    if EGG_FORMAL_PARITY_REAL_CALL_NX_WAIT_MODE in configured:
+        desired_call = EGG_FORMAL_PARITY_REAL_CALL_NX_WAIT_MODE
     if desired_call not in configured:
         if configured.count(EGG_FORMAL_PARITY_REAL_CALL_PICKUP_WAIT_MODE) == 1:
             configured = configured.replace(
@@ -3133,6 +3153,7 @@ def _apply_egg_pickup_parity_menu_text(library_text: str) -> str:
         and (
             EGG_PICKUP_PARITY_SIGNATURE_CURRENT in section
             or EGG_PICKUP_PARITY_SIGNATURE_WAIT_MODE in section
+            or EGG_PICKUP_PARITY_SIGNATURE_NX_WAIT_MODE in section
         )
     ):
         return library_text
@@ -3140,6 +3161,7 @@ def _apply_egg_pickup_parity_menu_text(library_text: str) -> str:
     uses_explicit_wait_mode = (
         EGG_PICKUP_PARITY_SIGNATURE_WAIT_MODE in section
         or EGG_PICKUP_PARITY_SIGNATURE_PICKUP_WAIT_MODE in section
+        or EGG_PICKUP_PARITY_SIGNATURE_NX_WAIT_MODE in section
     )
     if EGG_PICKUP_PARITY_SIGNATURE_PICKUP_WAIT_MODE in section:
         section = section.replace(
@@ -3174,7 +3196,10 @@ def _apply_egg_pickup_parity_menu_text(library_text: str) -> str:
     elif EGG_PICKUP_PARITY_VALIDATION_CURRENT not in section:
         wait_mode_validation = (
             "IF $使用绝对时间轴 != 0 and $使用绝对时间轴 != 1" in section
-            and "孵蛋测试_启动并进入存档($Seed模式, $Seed等待MS, $精确尾段MS, $奇偶等待MS, $封面长按MS, $Seed启动方案, $使用绝对时间轴)" in section
+            and any(call in section for call in (
+                "孵蛋测试_启动并进入存档($Seed模式, $Seed等待MS, $精确尾段MS, $奇偶等待MS, $封面长按MS, $Seed启动方案, $使用绝对时间轴)",
+                "孵蛋测试_启动并进入存档($Seed模式, $Seed等待MS, $精确尾段MS, $奇偶等待MS, $封面长按MS, $NX机型, $Seed启动方案, $使用绝对时间轴)",
+            ))
         )
         if not wait_mode_validation:
             raise ValueError("孵蛋流程库缺少Pickup菜单奇偶开关校验位置")

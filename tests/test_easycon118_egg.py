@@ -13,6 +13,7 @@ from automation.easycon118 import (
     EGG_FORMAL_PARITY_OVERRIDE_PATH,
     EGG_FORMAL_PARITY_REAL_CALL_CURRENT,
     EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE,
+    EGG_FORMAL_PARITY_REAL_CALL_NX_WAIT_MODE,
     EGG_FORMAL_WAIT_MARKER,
     EGG_GENERATION_PARITY_MENU_MARKER,
     EGG_PARTY_SLOT_CANDY_OVERRIDE_PATH,
@@ -1573,7 +1574,7 @@ ENDFUNC
         self.assertIn("FUNC 准备Seed启动原点", template)
         self.assertIn("CALL 关闭游戏", template.split("FUNC 准备Seed启动原点", 1)[1].split("ENDFUNC", 1)[0])
         self.assertIn("PRINT Seed启动方案: 固定用户界面HOME", template)
-        self.assertIn(EGG_FORMAL_PARITY_REAL_CALL_WAIT_MODE, template)
+        self.assertIn(EGG_FORMAL_PARITY_REAL_CALL_NX_WAIT_MODE, template)
         self.assertIn("A#固定方案：恢复游戏后再建立Seed计时原点，与参考脚本一致", template)
         self.assertIn("抓捕失败，关闭游戏并继续下一轮", template)
         self.assertIn("RETURN 2", template)

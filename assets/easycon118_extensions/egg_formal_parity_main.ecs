@@ -56,13 +56,17 @@ FUNC 孵蛋流程_计算两次命中时间(): INT
         PRINT 孵蛋自动时间轴计算失败
         RETURN 0
     ENDIF
-    PRINT 孵蛋时间轴: Held请求 & $孵蛋流程请求Held帧 & "，Pickup请求 " & $孵蛋流程请求Pickup帧
-    PRINT 孵蛋生成奇偶校准: 生成菜单 & $孵蛋流程生成菜单奇偶开关 & "（动作保留，不预扣+7），Held计时执行 " & $孵蛋流程执行Held帧 & "，Held稳定 " & $孵蛋流程Held已稳定
-    PRINT 孵蛋领取奇偶校准: Pickup计时执行 & $孵蛋流程执行Pickup帧 & "，领取菜单 " & $孵蛋流程Pickup菜单奇偶开关 & "（时间轴净效果 " & $孵蛋流程Pickup菜单推进帧 & " advance），奇偶等待 " & $孵蛋流程本轮奇偶等待MS & " ms"
-    IF $孵蛋Held临时跳出偏移帧 != 0
-        PRINT 孵蛋时间轴: 本轮Held临时跳出偏移 & $孵蛋Held临时跳出偏移帧 & " 帧（不写入正式累计修正）"
+    IF $调试日志输出 == 1
+        PRINT 孵蛋时间轴: Held请求 & $孵蛋流程请求Held帧 & "，Pickup请求 " & $孵蛋流程请求Pickup帧
+        PRINT 孵蛋生成奇偶校准: 生成菜单 & $孵蛋流程生成菜单奇偶开关 & "（动作保留，不预扣+7），Held计时执行 " & $孵蛋流程执行Held帧 & "，Held稳定 " & $孵蛋流程Held已稳定
+        PRINT 孵蛋领取奇偶校准: Pickup计时执行 & $孵蛋流程执行Pickup帧 & "，领取菜单 " & $孵蛋流程Pickup菜单奇偶开关 & "（时间轴净效果 " & $孵蛋流程Pickup菜单推进帧 & " advance），奇偶等待 " & $孵蛋流程本轮奇偶等待MS & " ms"
+        IF $孵蛋Held临时跳出偏移帧 != 0
+            PRINT 孵蛋时间轴: 本轮Held临时跳出偏移 & $孵蛋Held临时跳出偏移帧 & " 帧（不写入正式累计修正）"
+        ENDIF
+        PRINT 孵蛋时间轴: TV周期 & $孵蛋流程TV周期数 & "×314，TV等待 " & $孵蛋流程TV等待MS & " ms"
+        PRINT 孵蛋时间轴: 生成截止 & $孵蛋流程生成目标截止MS & " ms，领取截止 " & $孵蛋流程领取目标截止MS & " ms"
+    ELSE
+        PRINT 本轮请求: Seed & $孵蛋Seed等待MS & " ms，Held " & $孵蛋流程请求Held帧 & "，Pickup " & $孵蛋流程请求Pickup帧 & "，生成菜单 " & $孵蛋流程生成菜单奇偶开关 & "，领取菜单 " & $孵蛋流程Pickup菜单奇偶开关
     ENDIF
-    PRINT 孵蛋时间轴: TV周期 & $孵蛋流程TV周期数 & "×314，TV等待 " & $孵蛋流程TV等待MS & " ms"
-    PRINT 孵蛋时间轴: 生成截止 & $孵蛋流程生成目标截止MS & " ms，领取截止 " & $孵蛋流程领取目标截止MS & " ms"
     RETURN 1
 ENDFUNC

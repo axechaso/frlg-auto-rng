@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import package_entry
+from app_version import APP_VERSION, APP_VERSION_CODE, version_payload
 
 
 class PackageEntryTests(unittest.TestCase):
@@ -17,12 +18,7 @@ class PackageEntryTests(unittest.TestCase):
             self.assertEqual(package_entry.main(["--version-json"]), 0)
         self.assertEqual(
             json.loads(output.getvalue()),
-            {
-                "version": "0.9.1",
-                "version_code": 2026090801,
-                "update_schema": 1,
-                "repository": "axechaso/frlg-auto-rng",
-            },
+            version_payload(),
         )
 
     def test_version_json_file(self):
@@ -31,7 +27,7 @@ class PackageEntryTests(unittest.TestCase):
             self.assertEqual(
                 package_entry.main(["--version-json-file", str(path)]), 0
             )
-            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], "0.9.1")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["version"], APP_VERSION)
 
     def test_normal_launch_uses_pyside6_entry(self):
         calls = []
@@ -69,7 +65,7 @@ class PackageEntryTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(
                 json.loads(path.read_text(encoding="utf-8")),
-                {"token": "a" * 32, "version_code": 2026090801},
+                {"token": "a" * 32, "version_code": APP_VERSION_CODE},
             )
             self.assertEqual(calls, [[]])
 
