@@ -5,22 +5,17 @@
 ```powershell
 .\tools\build_windows_release.ps1 `
   -BuildTag pyside6-0-9-3-20260920-consolefix-r2 `
-  -EasyConPublish 'C:\Users\axenx\Downloads\伊机控-EasyCon-v1.6.4alpha测试版-260518\publish' `
   -LocalAssets .\local_assets `
   -NotesFile .\docs\releases\v0.9.3.md
 ```
 
-脚本默认从现有 `dist\*\easycon\publish` 查找 EasyCon 1.6.4-a。也可以明确指定：
-
-```powershell
-.\tools\build_windows_release.ps1 -EasyConPublish 'D:\EasyCon\publish'
-```
+构建包直接包含 Python 原生 EasyCon ECS、串口和 OpenCV 采集后端，不需要准备或复制外部 `ezcon.exe`。
 
 输出位于 `.build\windows-release-pyside6-0-9-3-20260920-consolefix-r2\FRLG-Auto-RNG-0.9.3-windows-x64`，同时生成同名 ZIP、`update-manifest.json`、`.sha256` 文件和 `gitee-release-assets` 目录。构建末尾会执行冻结版本探针和隔离数据目录下的 PySide6 截图冒烟。发布包是绿色文件夹，不应把 `.venv`、源码或 Python 安装包一起复制给用户。配置、日志和运行时生成的 ECS 工程会写入 `%LOCALAPPDATA%\FRLG-Auto-RNG`。
 
-按当前源码构建的绿色版会内置 Seed 表更新器。用户在 GUI 点击“检查/更新 Seed 表”即可下载 Ten Lines 官方火红/叶绿 NX 二进制表、生成对应 EasyCon ECS 表并执行真实 1.6.4-a `format` 校验，不需要系统 Python，也不依赖外部 `Tools\update_*.py`。验证后的四个文件写入 `%LOCALAPPDATA%\FRLG-Auto-RNG\seed_tables\current`，上一版保留为 `previous`；生成运行工程时会自动覆盖两份 `lib` Seed 表。
+按当前源码构建的绿色版会内置 Seed 表更新器。用户在 GUI 点击“检查/更新 Seed 表”即可下载 Ten Lines 官方火红/叶绿 NX 二进制表、生成对应 ECS 表并执行原生编译校验，不需要系统 Python，也不依赖外部 `Tools\update_*.py`。验证后的四个文件写入 `%LOCALAPPDATA%\FRLG-Auto-RNG\seed_tables\current`，上一版保留为 `previous`；生成运行工程时会自动覆盖两份 `lib` Seed 表。
 
-当前使用 `onedir` 而不是单文件模式，因为 EasyCon、Tessdata、识图标签和兼容运行器体积较大，文件夹版启动更快、杀毒误报更少，也便于 EasyCon 运行时访问旁边的资源。
+当前使用 `onedir` 而不是单文件模式，因为 Tessdata、识图标签和 OpenCV 资源体积较大，文件夹版启动更快、杀毒误报更少。
 
 ## 程序整包更新
 
@@ -30,7 +25,7 @@ GitHub 仍发布完整 ZIP、`update-manifest.json` 和 SHA 文件。在自动�
 
 这三个更新源模式都只用于完整程序包，不提供标签、Seed 表或单个脚本的独立热更新。标签可通过“标签”页导入设备专用覆盖，Seed 表继续使用独立的 Seed 表更新器；两者都不是程序更新源的增量补丁。已发布的 `0.9.2` 二进制不含更新源选择逻辑；`0.9.3` 构建包含该功能。
 
-安装会在主程序退出后由独立更新器完成目录交换；交换失败或新版启动确认超时会自动恢复旧目录。`%LOCALAPPDATA%\FRLG-Auto-RNG` 下的配置、日志、TID/SID 进度、Seed 表和设备标签覆盖不参与替换。EasyCon 或搜索流程运行时禁止安装。
+安装会在主程序退出后由独立更新器完成目录交换；交换失败或新版启动确认超时会自动恢复旧目录。`%LOCALAPPDATA%\FRLG-Auto-RNG` 下的配置、日志、TID/SID 进度、Seed 表和设备标签覆盖不参与替换。搜索流程运行时禁止安装。
 
 现有 `0.2.2` 绿色包可通过原有整包更新器直接升级到 `0.9`，因为主程序、独立更新器、schema 1 清单和健康探针合同保持不变。`0.2.1` 或更早版本若受旧证书链问题影响，应手工安装 `0.2.2` 或 `0.9`，不得关闭 TLS 验证。源码运行模式不会联网自更新。
 

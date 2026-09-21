@@ -329,6 +329,7 @@ def run_traversal(
                 video_device=int(video),
                 video_type="DSHOW",
                 preview_port=preview_port,
+                fingerprint_warning_only=fingerprint_warnings,
             )
             code = run_logged(
                 command,
@@ -372,7 +373,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="野生 SID 遍历 worker")
     parser.add_argument("--request-json", required=True, type=Path)
     parser.add_argument("--source", required=True, type=Path)
-    parser.add_argument("--ezcon", required=True, type=Path)
+    parser.add_argument(
+        "--ezcon",
+        type=Path,
+        default=DEFAULT_EZCON_PATH,
+        help="已废弃的兼容参数；运行始终使用 Python 原生 EasyCon",
+    )
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--progress-dir", type=Path, default=DEFAULT_PROGRESS)
     parser.add_argument("--port", required=True)

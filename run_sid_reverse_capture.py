@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
-from process_control import StopFileWatcher, terminate_process_tree
+from process_control import StopFileWatcher, native_stop_command, stop_child_process
 import sys
 from typing import Callable
 
@@ -306,6 +306,7 @@ def _run_easycon(
 ) -> tuple[int, str, bool]:
     if stop_file is not None and stop_file.is_file():
         return 130, "[SID_DIAGNOSTIC] 用户已请求停止\n", False
+    command, child_stop = native_stop_command(command, cwd)
     process = subprocess.Popen(
         command,
         cwd=str(cwd),
@@ -319,7 +320,7 @@ def _run_easycon(
     lines: list[str] = []
     stopped_for_unique_pid = False
     assert process.stdout is not None
-    stop = StopFileWatcher(stop_file, lambda: terminate_process_tree(process))
+    stop = StopFileWatcher(stop_file, lambda: stop_child_process(process, child_stop))
     stop.__enter__()
     try:
         for line in process.stdout:
@@ -346,17 +347,24 @@ def _run_easycon(
             if output_callback is not None:
                 output_callback(marker)
             stopped_for_unique_pid = True
-            process.terminate()
+            stop_child_process(process, child_stop) if child_stop is not None else process.terminate()
             break
+        code = process.wait()
     except KeyboardInterrupt:
-        process.terminate()
+        stop_child_process(process, child_stop) if child_stop is not None else process.terminate()
         raise
     finally:
         stop.__exit__(None, None, None)
-        close_output = getattr(process.stdout, "close", None)
-        if close_output is not None:
-            close_output()
-    code = process.wait()
+        try:
+            if process.poll() is None:
+                stop_child_process(process, child_stop)
+                process.wait(timeout=5)
+        finally:
+            close_output = getattr(process.stdout, "close", None)
+            if close_output is not None:
+                close_output()
+            if child_stop is not None:
+                child_stop.unlink(missing_ok=True)
     return (130 if stop.requested else code), "".join(lines), stopped_for_unique_pid and not stop.requested
 
 
@@ -520,6 +528,7 @@ def main(argv: list[str] | None = None) -> int:
                     video_device=video,
                     video_type="DSHOW",
                     preview_port=args.preview_port,
+                    fingerprint_warning_only=args.fingerprint_warnings,
                 )
                 code, output, stopped_for_unique_pid = _run_easycon(
                     command,

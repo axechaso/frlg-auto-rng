@@ -77,6 +77,8 @@ class WindowsReleaseScriptTests(unittest.TestCase):
             (models / "required.traineddata").write_bytes(b"model")
             (models / "experimental.traineddata").write_bytes(b"experiment")
             (source / "tid.ecs").write_bytes(b"tid")
+            (source / "easycon118/ezcon.exe").write_bytes(b"old-cli")
+            (source / "easycon118/EasyCon2.CLI.compat.exe").write_bytes(b"old-compat")
             expected = {"required.traineddata": hashlib.sha256(b"model").hexdigest()}
             with patch("tools.stage_release_assets.EXPECTED_TESSDATA_SHA256", expected):
                 staged = stage_assets(source, root / "staged")
@@ -84,6 +86,8 @@ class WindowsReleaseScriptTests(unittest.TestCase):
                 self.assertEqual(list((staged / "easycon118/Tessdata").iterdir()),
                                  [staged / "easycon118/Tessdata/required.traineddata"])
                 self.assertEqual((models / "experimental.traineddata").read_bytes(), b"experiment")
+                self.assertFalse(list(staged.rglob("*.exe")))
+                self.assertEqual((source / "easycon118/ezcon.exe").read_bytes(), b"old-cli")
                 with self.assertRaises(FileExistsError):
                     stage_assets(source, staged)
                 with self.assertRaises(ValueError):

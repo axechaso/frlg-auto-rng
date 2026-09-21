@@ -167,10 +167,10 @@ class Accessories(QObject):
     def update_seeds(self):
         if self.w.job or self.w.running:
             return
-        if QMessageBox.question(self.w, "检查/更新 Seed 表", "将读取 Ten Lines 官方 Seed 表，生成 Python / EasyCon 表并执行 1.6.4-a 校验；全部通过后切换。继续？") != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self.w, "检查/更新 Seed 表", "将读取 Ten Lines 官方 Seed 表，生成 Python / ECS 表并使用原生引擎校验；全部通过后切换。继续？") != QMessageBox.StandardButton.Yes:
             return
         from tenlines_seed_updater import update_seed_tables
-        source, ezcon = (Path(self.w.fields[key].text()) for key in ("source", "ezcon"))
+        source, ezcon = Path(self.w.fields["source"].text()), self.w.paths.ezcon
         advanced = self.w.advanced_check.isChecked()
         def done(result):
             if result.updated:

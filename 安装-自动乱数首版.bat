@@ -63,15 +63,8 @@ if errorlevel 1 goto error
 
 :tid_assets_ready
 
-if not exist "runtime_backend\easycon164a-cli-gui-rounding-selfcontained\EasyCon2.CLI.PreviewV5.exe" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "tools\build_easycon164a_compat_runner.ps1"
-    if errorlevel 1 goto error
-)
-".venv\Scripts\python.exe" -c "from automation import DEFAULT_EZCON_PATH, prepare_compat_runner; print(prepare_compat_runner(DEFAULT_EZCON_PATH))"
-if errorlevel 1 goto error
-
 echo.
-echo Setup complete. EasyCon 1.6.4a, the GUI-rounding runner, 1.1.8 and TID/SID 1.3.7 are ready.
+echo Setup complete. Python native EasyCon, 1.1.8 and TID/SID 1.3.7 are ready.
 echo Double-click the launch BAT to start.
 pause
 exit /b 0

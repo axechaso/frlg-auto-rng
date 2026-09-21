@@ -508,9 +508,8 @@ ENDFUNC
 
         self.assertTrue(result.ok)
         self.assertIn("ID预检通过", result.warnings)
-        self.assertIn("研究所桥接脚本已通过EasyCon 1.6.4-a格式检查。", result.warnings)
         self.assertIn("1.1.8预检通过", result.warnings)
-        format_run.assert_called_once()
+        format_run.assert_not_called()
         validate_starter.assert_called_once_with(
             (root / "ezcon.exe").resolve(),
             starter_main.resolve(),

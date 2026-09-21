@@ -5,7 +5,7 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
-set "ENTRY_POINT=%~dp0run_auto_rng_gui.py"
+set "ENTRY_POINT=%~dp0run_pyside6_gui.py"
 set "LOG_DIR=%~dp0runtime"
 set "LOG_FILE=%LOG_DIR%\launcher.log"
 set "PYTHONUTF8=1"

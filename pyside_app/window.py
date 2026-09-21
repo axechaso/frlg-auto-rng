@@ -22,8 +22,10 @@ from assets.game_text import (
 )
 from automation import (
     AutoSearchRequest, EasyCon118Options, EGG_TEMPLATE_NAME, STANDARD_TEMPLATE_NAME,
-    PLANNER_STATIC_CATEGORIES, get_static_targets, probe_easycon_devices,
+    PLANNER_STATIC_CATEGORIES, get_static_targets,
 )
+from automation.native_runtime import probe_native_devices
+probe_easycon_devices = probe_native_devices
 from automation.precalibration import update_from_manifest
 from rng.tenlines_utils import (
     get_ability_name, get_personal, get_species_id, get_species_name,
@@ -80,7 +82,6 @@ class FrlgWindow(FrlgPreviewWindow):
         self.actions = {}
         self._bind("重新检测", self.detect_devices)
         self._bind("选择脚本包", lambda: self.choose_path("source"))
-        self._bind("选择 ezcon.exe", lambda: self.choose_path("ezcon", file=True))
         self._bind("管理存档", self.manage_profiles)
         self._bind("查询 / 刷新", self.refresh_records)
         self._bind("导出 CSV", self.export_records)
@@ -91,7 +92,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.profile_selector.currentIndexChanged.connect(self.select_profile)
         self.records_table.itemSelectionChanged.connect(self.record_details)
         self.fields["source"].setText(str(self.paths.source))
-        self.fields["ezcon"].setText(str(self.paths.ezcon))
+        self.fields["ezcon"].setText("Python 原生 EasyCon")
         self.fields["sid_source"].setText(str(self.paths.source))
         self.fields["tid_source"].setText(str(self.paths.tid_source))
         self.fields["wild_tid"].clear()
@@ -189,7 +190,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.result_panel.setPlainText("尚无方案。搜索完成后显示真实结果与正式预检详情。")
         self.log_view.setToolTip("原始运行日志保存在生成工程中；显示区隐藏完整的已知机器检查点，保留错误和未知记录。")
         self.traversal_check.setToolTip("按原有 SID 遍历运行器处理；停止后保留当前候选，同参数下次继续。")
-        for key in ("source", "ezcon", "port", "video"):
+        for key in ("source", "port", "video"):
             self.fields[key].setToolTip("选择正式脚本包或本次运行设备；启动前会重新核对设备与运行时。")
         for key in ("wild_seed_mode", "wild_direct_seed", "wild_direct_adv"):
             self.fields[key].setToolTip("与正式工具使用相同的搜索参数。指定 Seed / 帧数时必须明确选择 Seed 模式。")
@@ -331,7 +332,7 @@ class FrlgWindow(FrlgPreviewWindow):
         )
         video = f["video"].currentData()
         capture_name = self.devices[1].get(video, "")
-        return WildInputs(request, options, Path(f["source"].text()), Path(f["ezcon"].text()),
+        return WildInputs(request, options, Path(f["source"].text()), self.paths.ezcon,
                           EGG_TEMPLATE_NAME if f["script_entry"].currentIndex() == 1 else STANDARD_TEMPLATE_NAME,
                           advanced, capture_name)
 
@@ -523,7 +524,6 @@ class FrlgWindow(FrlgPreviewWindow):
             self.set_status("正在取消，请等待当前检查结束……")
 
     def detect_devices(self):
-        ezcon = Path(self.fields["ezcon"].text())
         def finish(result):
             ports, videos, output = result
             old_selection = (self.fields["port"].currentData(), self.fields["video"].currentData(),
@@ -546,11 +546,13 @@ class FrlgWindow(FrlgPreviewWindow):
                 self.invalidate()
             self.result_panel.setPlainText(output)
             self.set_status("设备检测完成。" if ports and videos else "设备检测完成，串口或采集卡尚未就绪。")
-        self.launch_job(lambda _cancel, _status: probe_easycon_devices(ezcon, include_video_names=True), finish, "正在检测端口与采集卡……")
+        self.launch_job(lambda _cancel, _status: probe_easycon_devices(include_video_names=True), finish, "正在检测端口与采集卡……")
 
     def choose_path(self, key, *, file=False):
         current = self.fields[key].text()
-        path = QFileDialog.getOpenFileName(self, "选择 ezcon.exe", current, "EasyCon (ezcon.exe)")[0] if file else QFileDialog.getExistingDirectory(self, "选择脚本包", current)
+        if file:
+            raise ValueError("原生 EasyCon 不需要选择外部可执行文件")
+        path = QFileDialog.getExistingDirectory(self, "选择脚本包", current)
         if path:
             self.fields[key].setText(path)
             if key == "source":
@@ -682,10 +684,9 @@ class FrlgWindow(FrlgPreviewWindow):
                 return
             for key, default, suffix in (
                 ("source", self.paths.source, "_internal/local_assets/easycon118"),
-                ("ezcon", self.paths.ezcon, "_internal/easycon/publish/ezcon.exe"),
             ):
                 self.fields[key].setText(restore_resource_path(
-                    values.get(key), default, bundled_suffix=suffix, file=key == "ezcon",
+                    values.get(key), default, bundled_suffix=suffix,
                 ))
             update_source = values.get("update_source", "auto")
             source_index = self.fields["update_source"].findData(update_source)
@@ -704,7 +705,7 @@ class FrlgWindow(FrlgPreviewWindow):
             return
         try:
             write_json_atomic(self.paths.user / "pyside6_settings.json", {
-                **{key: self.fields[key].text() for key in ("source", "ezcon")},
+                "source": self.fields["source"].text(),
                 "update_source": self.fields["update_source"].currentData() or "auto",
             })
         except (OSError, ValueError) as exc:

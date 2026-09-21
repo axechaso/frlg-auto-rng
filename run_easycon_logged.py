@@ -8,7 +8,7 @@ from pathlib import Path
 
 from console_output import write_console as _write_console
 from tid_records import recording_session
-from process_control import StopFileWatcher, terminate_process_tree
+from process_control import StopFileWatcher, native_stop_command, stop_child_process
 
 
 def run_logged(
@@ -29,6 +29,7 @@ def run_logged(
     with log_path.open("w", encoding="utf-8", newline="") as log_file, recording_session(
         tid_context, tid_records, log_path, warning=lambda message: log_file.write(message + "\n")
     ) as recording:
+        command, child_stop = native_stop_command(command, cwd)
         process = subprocess.Popen(
             command,
             cwd=str(cwd),
@@ -56,7 +57,7 @@ def run_logged(
             if recording is not None:
                 recording.feed(text)
 
-        stop = StopFileWatcher(stop_file, lambda: terminate_process_tree(process))
+        stop = StopFileWatcher(stop_file, lambda: stop_child_process(process, child_stop))
         stop.__enter__()
         try:
             # EasyCon terminates the previous log entry only when the next one
@@ -86,12 +87,19 @@ def run_logged(
                 "正在终止 EasyCon；本次不是脚本正常完成。\n"
             )
             if process.poll() is None:
-                terminate_process_tree(process)
+                stop_child_process(process, child_stop)
             process.wait()
             return 130
         finally:
             stop.__exit__(None, None, None)
-            process.stdout.close()
+            try:
+                if process.poll() is None:
+                    stop_child_process(process, child_stop)
+                    process.wait(timeout=5)
+            finally:
+                process.stdout.close()
+                if child_stop is not None:
+                    child_stop.unlink(missing_ok=True)
 
 
 def main(argv: list[str] | None = None) -> int:

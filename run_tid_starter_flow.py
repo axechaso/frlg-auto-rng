@@ -26,7 +26,7 @@ from device_label_overrides import (
     load_label_override_profile,
 )
 from tid_records import recording_session
-from process_control import StopFileWatcher, terminate_process_tree
+from process_control import StopFileWatcher, native_stop_command, stop_child_process
 from tid_session import TidProgressSession, progress_context, progress_lease, latest_progress
 from automation.tid_checkpoint import instrument_tid_checkpoint
 from automation.tid_search import progress_supported
@@ -38,7 +38,7 @@ from automation.tid_calibration import (
 )
 from automation.tid_rng137 import validate_tid_runtime, verify_tid_package, write_configured_tid_project
 
-from automation.easycon118 import build_run_command, prepare_compat_runner, validate_runtime
+from automation.easycon118 import DEFAULT_EZCON_PATH, build_run_command, prepare_compat_runner, validate_runtime
 from automation.precalibration import (
     DEFAULT_STORE_PATH as DEFAULT_PRECALIBRATION_STORE_PATH,
     update_from_manifest as update_precalibration_from_manifest,
@@ -94,7 +94,11 @@ def parse_args() -> argparse.Namespace:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--flow-dir")
     source.add_argument("--tid-dir")
-    parser.add_argument("--ezcon", required=True)
+    parser.add_argument(
+        "--ezcon",
+        default=str(DEFAULT_EZCON_PATH),
+        help="已废弃的兼容参数；运行始终使用 Python 原生 EasyCon",
+    )
     parser.add_argument("--port", required=True)
     parser.add_argument("--video", required=True, type=int)
     parser.add_argument("--log-path")
@@ -126,6 +130,7 @@ class FlowRunner:
         log: TextIO,
         recording=None,
         preview_port: int = 0,
+        fingerprint_warning_only: bool = False,
     ) -> None:
         self.runner_path = runner_path
         self.port = port
@@ -133,7 +138,9 @@ class FlowRunner:
         self.log = log
         self.recording = recording
         self.preview_port = preview_port
+        self.fingerprint_warning_only = fingerprint_warning_only
         self.current_process: subprocess.Popen[str] | None = None
+        self.child_stop: Path | None = None
         self.stop_requested = False
         self.stage_lines: list[str] = []
         self.progress = None
@@ -155,7 +162,7 @@ class FlowRunner:
         if process is None or process.poll() is not None:
             return
         try:
-            terminate_process_tree(process)
+            stop_child_process(process, self.child_stop)
         except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
             self.output(f"[停止警告] 子进程未退出，等待工具清理本次进程树：{exc}")
 
@@ -186,8 +193,10 @@ class FlowRunner:
             video_device=self.video_device,
             video_type="DSHOW",
             preview_port=self.preview_port,
+            fingerprint_warning_only=self.fingerprint_warning_only,
         )
         flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        command, self.child_stop = native_stop_command(command, main_path.parent)
         marker_seen = required_marker is None
         self.stage_lines = []
         try:
@@ -218,9 +227,17 @@ class FlowRunner:
             self.output(f"[流程错误] 第{number}阶段无法启动：{exc}")
             return 2
         finally:
-            if self.current_process is not None and self.current_process.stdout is not None:
-                self.current_process.stdout.close()
-            self.current_process = None
+            try:
+                if self.current_process is not None and self.current_process.poll() is None:
+                    stop_child_process(self.current_process, self.child_stop)
+                    self.current_process.wait(timeout=5)
+            finally:
+                if self.current_process is not None and self.current_process.stdout is not None:
+                    self.current_process.stdout.close()
+                self.current_process = None
+                if self.child_stop is not None:
+                    self.child_stop.unlink(missing_ok=True)
+                    self.child_stop = None
 
         if self.stop_requested:
             self.output("[流程停止] 已收到用户停止请求。")
@@ -685,7 +702,7 @@ def main() -> int:
             else prepare_compat_runner(Path(args.ezcon))
         )
     except (OSError, ValueError, RuntimeError) as exc:
-        write_console(f"[流程错误] EasyCon 1.6.4-a 兼容运行器检查失败：{exc}\n")
+        write_console(f"[流程错误] 原生 EasyCon 运行环境检查失败：{exc}\n")
         return 2
 
     with log_path.open("w", encoding="utf-8") as log, recording_session(
@@ -707,6 +724,7 @@ def main() -> int:
             log=log,
             recording=recording,
             preview_port=args.preview_port,
+            fingerprint_warning_only=args.fingerprint_warnings,
         )
         if hasattr(signal, "SIGBREAK"):
             signal.signal(signal.SIGBREAK, flow.request_stop)

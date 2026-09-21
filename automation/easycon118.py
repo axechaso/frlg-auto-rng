@@ -1,4 +1,4 @@
-"""Generate and launch a configured 2.0 project on pinned EasyCon 1.6.4a."""
+"""Generate and launch a configured 2.0 project on the native EasyCon engine."""
 
 import json
 import hashlib
@@ -35,7 +35,7 @@ from .seed_common_regions import apply_seed_common_regions
 EXPECTED_LABEL_COUNT = 1150
 EXPECTED_LABEL_METHODS = {1: 17, 3: 1, 5: 777, 11: 1, 14: 354}
 EXPECTED_LABEL_SHA256 = "00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e"
-EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
+EASYCON_BACKEND_NAME = "Python 原生 EasyCon"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
 EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
@@ -48,21 +48,9 @@ EXPECTED_COMPAT_OCR_NATIVE_SHA256 = {
     "x64/leptonica-1.82.0.dll": "dfcb3e6ed0b16bc55bfdbcf53543cfe42a354b87c3e35bd3a95eebf005d73e76",
     "x64/tesseract50.dll": "de4d04ec75095374d98f5dd7a60d14d7e2e0f76589db693eccf7ae658be8cb2b",
 }
-DEFAULT_EZCON_PATH = (
-    Path.home()
-    / "Downloads"
-    / "伊机控-EasyCon-v1.6.4alpha测试版-260518"
-    / "publish"
-    / "ezcon.exe"
-)
-if getattr(sys, "frozen", False):
-    DEFAULT_EZCON_PATH = RESOURCE_ROOT / "easycon" / "publish" / "ezcon.exe"
-DEFAULT_COMPAT_RUNNER_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "runtime_backend"
-    / "easycon164a-cli-gui-rounding-selfcontained"
-    / "EasyCon2.CLI.PreviewV5.exe"
-)
+# Retained for saved call signatures; these paths never launch an external CLI.
+DEFAULT_EZCON_PATH = RESOURCE_ROOT / "run_native_easycon.py"
+DEFAULT_COMPAT_RUNNER_PATH = DEFAULT_EZCON_PATH
 STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数2.0.ecs"
 EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数2.0-时间轴.ecs"
 EGG_FORMAL_WAIT_MARKER = "# FORMAL_EGG_WAIT_V1"
@@ -1258,34 +1246,8 @@ def probe_easycon_devices(
     Existing CLI callers receive a set of video indexes.  The GUI opts into a
     mapping so its dropdown can show both the EasyCon index and device name.
     """
-    ezcon_path = Path(ezcon_path).resolve()
-    if not ezcon_path.is_file():
-        raise FileNotFoundError(
-            f"设备检测找不到 EasyCon 程序：{ezcon_path}\n"
-            "请在共通设置中点击“选择 ezcon.exe”，选择当前解压目录下的 "
-            "_internal\\easycon\\publish\\ezcon.exe，然后重新检测。\n"
-            "如果该文件也不存在，请重新完整解压发布包。"
-        )
-    run_options = dict(
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    port = subprocess.run([str(ezcon_path), "port", "--list"], timeout=15, **run_options)
-    video = subprocess.run([str(ezcon_path), "video", "--list"], timeout=20, **run_options)
-    if port.returncode != 0 or video.returncode != 0:
-        details = "\n".join(filter(None, (port.stderr, video.stderr)))
-        raise RuntimeError(f"设备检测命令失败：{details or '未知错误'}")
-    ports = {item.upper() for item in re.findall(r"\bCOM\d+\b", port.stdout, re.IGNORECASE)}
-    video_devices = parse_easycon_video_devices(video.stdout)
-    videos = video_devices if include_video_names else set(video_devices)
-    output = "端口：\n" + port.stdout + "\n采集设备：\n" + video.stdout
-    if not ports:
-        output += "\n未检测到 EasyCon 单片机串口。"
-    if not videos:
-        output += "\n未检测到采集设备。"
-    return ports, videos, output
+    from .native_runtime import probe_native_devices
+    return probe_native_devices(include_video_names=include_video_names)
 
 
 def inspect_label_corpus(label_dir: str | Path) -> dict[str, Any]:
@@ -4069,8 +4031,8 @@ def write_configured_project(
         },
         "backend": {
             "name": EASYCON_BACKEND_NAME,
-            "expected_cli_version": EXPECTED_EZCON_VERSION,
-            "expected_cli_sha256": EXPECTED_EZCON_SHA256,
+            "implementation": "python-native",
+            "worker": "native-easycon",
         },
     }
     (output_dir / "plan.json").write_text(
@@ -4315,8 +4277,8 @@ def write_configured_egg_project(
         },
         "backend": {
             "name": EASYCON_BACKEND_NAME,
-            "expected_cli_version": EXPECTED_EZCON_VERSION,
-            "expected_cli_sha256": EXPECTED_EZCON_SHA256,
+            "implementation": "python-native",
+            "worker": "native-easycon",
         },
     }
     (output_dir / "plan.json").write_text(
@@ -4331,26 +4293,9 @@ def validate_runtime(
     *,
     fingerprint_warning_only: bool = False,
 ) -> EasyConRuntimeCheck:
-    ezcon_path = Path(ezcon_path).resolve()
     project_main = Path(project_main).resolve()
     errors: list[str] = []
     warnings: list[str] = []
-
-    if not ezcon_path.is_file():
-        errors.append(f"找不到 ezcon.exe: {ezcon_path}")
-    else:
-        try:
-            ezcon_sha256 = hashlib.sha256(ezcon_path.read_bytes()).hexdigest()
-        except OSError as exc:
-            errors.append(f"无法读取 ezcon.exe: {exc}")
-        else:
-            if ezcon_sha256 != EXPECTED_EZCON_SHA256:
-                record_fingerprint_mismatch(
-                    "EasyCon 1.6.4a ezcon.exe 指纹不一致: " + ezcon_sha256,
-                    warning_only=fingerprint_warning_only,
-                    errors=errors,
-                    warnings=warnings,
-                )
     if not project_main.is_file():
         errors.append(f"找不到生成脚本: {project_main}")
     project_dir = project_main.parent
@@ -4390,72 +4335,10 @@ def validate_runtime(
                     warnings=warnings,
                 )
 
-    tessdata_dir = ezcon_path.parent / "Tessdata"
-    for model, expected_sha256 in EXPECTED_TESSDATA_SHA256.items():
-        model_path = tessdata_dir / model
-        if not model_path.is_file():
-            errors.append(f"EasyCon Tessdata 缺少 {model}")
-            continue
-        try:
-            model_sha256 = hashlib.sha256(model_path.read_bytes()).hexdigest()
-        except OSError as exc:
-            errors.append(f"无法读取 EasyCon Tessdata/{model}: {exc}")
-            continue
-        if model_sha256 != expected_sha256:
-            record_fingerprint_mismatch(
-                f"EasyCon Tessdata/{model} 指纹不一致: {model_sha256}",
-                warning_only=fingerprint_warning_only,
-                errors=errors,
-                warnings=warnings,
-            )
-
-    if ezcon_path.is_file() and project_main.is_file() and not errors:
-        run_options = dict(
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        try:
-            version = subprocess.run(
-                [str(ezcon_path), "--version"], timeout=15, **run_options
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            errors.append(f"无法读取 EasyCon 版本: {exc}")
-        else:
-            version_text = (version.stdout + "\n" + version.stderr).strip()
-            version_line = version_text.splitlines()[-1] if version_text else "(无版本输出)"
-            if version.returncode != 0:
-                errors.append(f"EasyCon 版本检查失败，退出码 {version.returncode}")
-            elif version_line != EXPECTED_EZCON_VERSION:
-                errors.append(
-                    f"当前适配器只审计过 EasyCon {EXPECTED_EZCON_VERSION}；检测结果为: "
-                    + version_line
-                )
-            else:
-                warnings.append("EasyCon 版本: " + version_line)
-
-        if not errors:
-            try:
-                formatted = subprocess.run(
-                    [str(ezcon_path), "format", str(project_main)],
-                    cwd=str(project_main.parent),
-                    timeout=60,
-                    **run_options,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
-                errors.append(f"EasyCon 1.6.4a ECS 语法预检无法执行: {exc}")
-            else:
-                if formatted.returncode != 0:
-                    details = (formatted.stderr or formatted.stdout).strip()
-                    errors.append(
-                        "EasyCon 1.6.4a ECS 语法预检失败，退出码 "
-                        f"{formatted.returncode}: {details[-1000:]}"
-                    )
-
-    warnings.append(
-        "已固定使用 EasyCon 1.6.4a；正式长跑前仍需完成停止、重连和识别稳定性验收。"
-    )
+    from .native_runtime import validate_native_runtime
+    native = validate_native_runtime(project_main, fingerprint_warning_only=fingerprint_warning_only)
+    errors.extend(native.errors)
+    warnings.extend(native.warnings)
     return EasyConRuntimeCheck(not errors, tuple(errors), tuple(warnings))
 
 
@@ -4468,6 +4351,7 @@ def build_run_command(
     video_type: str = "DSHOW",
     verbose: bool = False,
     preview_port: int = 0,
+    fingerprint_warning_only: bool = False,
 ) -> list[str]:
     if video_device < 0:
         raise ValueError("采集卡序号不能为负数")
@@ -4477,24 +4361,16 @@ def build_run_command(
         raise ValueError(f"不支持的视频类型: {video_type}")
     if preview_port < 0 or preview_port > 65535:
         raise ValueError("预览端口必须为 0 或 1-65535")
-    ezcon_path = Path(ezcon_path).resolve()
-    project_main = Path(project_main).resolve()
-    command = [
-        str(ezcon_path),
-        "run",
-        str(project_main),
-        "--port",
-        port,
-        "--device",
-        str(video_device),
-        "--videotype",
-        video_type,
-    ]
+    from worker_commands import build_worker_command
+    arguments = ["--project", str(Path(project_main).resolve()), "--port", port,
+                 "--video", str(video_device), "--capture-api", str({"ANY": 0, "DSHOW": 700, "MSMF": 1400}[video_type])]
     if verbose:
-        command.append("--verbose")
+        arguments.append("--verbose")
+    if fingerprint_warning_only:
+        arguments.append("--fingerprint-warnings")
     if preview_port:
-        command.extend(["--preview-port", str(preview_port)])
-    return command
+        arguments.extend(["--preview-port", str(preview_port)])
+    return build_worker_command("native-easycon", arguments)
 
 
 def prepare_compat_runner(
@@ -4504,104 +4380,11 @@ def prepare_compat_runner(
     fingerprint_warning_only: bool = False,
     fingerprint_warnings: list[str] | None = None,
 ) -> Path:
-    """Validate the pinned latest-frame CLI and sync audited local-OCR assets.
+    """Legacy API slot: execution always uses the native worker.
 
-    EasyCon 1.6.4-a's GUI rounds image-label confidence upward with
-    ``Math.Ceiling`` and continuously drains the capture device.  Its bundled
-    ``ezcon.exe run`` truncates confidence and reads only when a label is
-    evaluated, which can return buffered DSHOW transition frames.  The
-    compatibility runner is built from the exact 1.6.4-a source commit and
-    adds latest-frame consumption plus the GUI's rounding behavior (and .NET 9
-    build-only compatibility).
+    Executable arguments from saved settings are ignored; there is no CLI fallback.
     """
-    ezcon_path = Path(ezcon_path).resolve()
-    runner_path = Path(runner_path).resolve()
-    if not ezcon_path.is_file():
-        raise FileNotFoundError(f"找不到原始 EasyCon 1.6.4-a ezcon.exe: {ezcon_path}")
-    warnings = fingerprint_warnings if fingerprint_warnings is not None else []
-    ezcon_sha256 = hashlib.sha256(ezcon_path.read_bytes()).hexdigest()
-    if ezcon_sha256 != EXPECTED_EZCON_SHA256:
-        record_fingerprint_mismatch(
-            f"原始 EasyCon 1.6.4-a ezcon.exe 指纹不一致: {ezcon_sha256}",
-            warning_only=fingerprint_warning_only,
-            warnings=warnings,
-        )
-    if not runner_path.is_file():
-        raise FileNotFoundError(
-            "缺少 EasyCon 1.6.4-a GUI 持续采帧兼容运行器；请先运行 "
-            "tools\\build_easycon164a_compat_runner.ps1"
-        )
-
-    manifest_path = runner_path.with_name("build-manifest.json")
-    if not manifest_path.is_file():
-        raise FileNotFoundError(f"兼容运行器缺少构建清单: {manifest_path}")
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"兼容运行器构建清单无法读取: {exc}") from exc
-    if manifest.get("source_commit") != EXPECTED_COMPAT_SOURCE_COMMIT:
-        raise ValueError("兼容运行器不是从已锁定的 EasyCon 1.6.4-a commit 构建")
-    if manifest.get("patch_id") != EXPECTED_COMPAT_PATCH_ID:
-        raise ValueError("兼容运行器补丁标识不一致")
-    runner_sha256 = hashlib.sha256(runner_path.read_bytes()).hexdigest()
-    if manifest.get("sha256") != runner_sha256:
-        record_fingerprint_mismatch(
-            f"兼容运行器指纹不一致: {runner_sha256}",
-            warning_only=fingerprint_warning_only,
-            warnings=warnings,
-        )
-
-    try:
-        version = subprocess.run(
-            [str(runner_path), "--version"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(f"兼容运行器版本检查失败: {exc}") from exc
-    version_text = (version.stdout + "\n" + version.stderr).strip()
-    version_line = version_text.splitlines()[-1] if version_text else ""
-    if version.returncode != 0 or version_line != EXPECTED_EZCON_VERSION:
-        raise ValueError(
-            "兼容运行器版本不一致；期望 "
-            f"{EXPECTED_EZCON_VERSION}，实际 {version_line or '(无输出)'}"
-        )
-
-    source_tessdata = ezcon_path.parent / "Tessdata"
-    target_tessdata = runner_path.parent / "Tessdata"
-    target_tessdata.mkdir(parents=True, exist_ok=True)
-    for model, expected_sha256 in EXPECTED_TESSDATA_SHA256.items():
-        source = source_tessdata / model
-        if not source.is_file():
-            raise FileNotFoundError(f"原始 EasyCon Tessdata 缺少 {model}")
-        source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
-        if source_sha256 != expected_sha256:
-            record_fingerprint_mismatch(
-                f"原始 EasyCon Tessdata/{model} 指纹不一致: {source_sha256}",
-                warning_only=fingerprint_warning_only,
-                warnings=warnings,
-            )
-        target = target_tessdata / model
-        if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha256:
-            shutil.copy2(source, target)
-    for relative_name, expected_sha256 in EXPECTED_COMPAT_OCR_NATIVE_SHA256.items():
-        relative_path = Path(relative_name)
-        native_path = runner_path.parent / relative_path
-        if not native_path.is_file():
-            raise FileNotFoundError(
-                f"兼容运行器缺少 OCR 原生依赖 {relative_name}；请重新构建 runner"
-            )
-        native_sha256 = hashlib.sha256(native_path.read_bytes()).hexdigest()
-        if native_sha256 != expected_sha256:
-            record_fingerprint_mismatch(
-                f"兼容运行器 OCR 原生依赖/{relative_name} 指纹不一致: {native_sha256}",
-                warning_only=fingerprint_warning_only,
-                warnings=warnings,
-            )
-    return runner_path
+    return RESOURCE_ROOT / "run_native_easycon.py"
 
 
 def launch_project(**kwargs) -> subprocess.Popen:

@@ -12,7 +12,7 @@ from pathlib import Path
 def verify(executable: Path) -> None:
     executable = executable.resolve(strict=True)
     environment = {**os.environ, "PYTHONIOENCODING": "utf-8"}
-    checks = {"sid-capture": "--request-json", "tid-flow": "--flow-dir",
+    checks = {"native-easycon": "--project", "sid-capture": "--request-json", "tid-flow": "--flow-dir",
               "sid-traversal": "--named-rival", "easycon-log": "--expected-marker"}
     for worker, option in checks.items():
         result = subprocess.run([str(executable), "--worker", worker, "--help"],

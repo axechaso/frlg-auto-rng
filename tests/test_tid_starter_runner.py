@@ -187,8 +187,8 @@ class TidStarterRunnerTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn(ID_MARKER, log.getvalue())
         command = popen.call_args.args[0]
-        self.assertIn("--videotype", command)
-        self.assertIn("DSHOW", command)
+        self.assertIn("--capture-api", command)
+        self.assertIn("700", command)
 
     def test_stage_rejects_clean_exit_without_marker(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -124,6 +124,9 @@ class SIDReverseCaptureTests(unittest.TestCase):
             def wait(self):
                 return 1 if self.terminated else 0
 
+            def poll(self):
+                return 1 if self.terminated else 0
+
         process = FakeProcess(
             [
                 "SIDREV|META|TID=17500|COUNT=1\n",
@@ -168,6 +171,9 @@ class SIDReverseCaptureTests(unittest.TestCase):
 
             def terminate(self):
                 self.terminated = True
+
+            def poll(self):
+                return 1 if self.terminated else None
 
         process = FakeProcess()
         popen.return_value = process

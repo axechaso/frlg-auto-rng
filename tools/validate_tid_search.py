@@ -1,14 +1,13 @@
-"""Generate and format TID search variants with the pinned real 164a CLI."""
+"""Generate and compile TID search variants with the native ECS engine."""
 from dataclasses import replace
 import json
 from pathlib import Path
 import shutil
-import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from automation.easycon118 import EXPECTED_EZCON_VERSION
+from easycon.native import EasyConScriptEngine, ScriptCompileError
 from automation.tid_checkpoint import instrument_tid_checkpoint
 from automation.tid_rng137 import TidRngRequest, configure_tid_template_text
 from automation.tid_starter_flow import enable_any_tid_handoff
@@ -18,12 +17,8 @@ from automation.tid_starter_save import DEFAULT_TID_STARTER_SAVE_SOURCE
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ezcon", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    version = subprocess.run([str(args.ezcon), "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
-    if EXPECTED_EZCON_VERSION not in version.stdout:
-        raise ValueError("Expected pinned EasyCon 1.6.4-a")
     args.output.mkdir(parents=True, exist_ok=True)
     shutil.copytree(DEFAULT_TID_STARTER_SAVE_SOURCE.parent / "ImgLabel", args.output / "ImgLabel", dirs_exist_ok=True)
     source = DEFAULT_TID_STARTER_SAVE_SOURCE.read_text(encoding="utf-8-sig")
@@ -46,10 +41,14 @@ def main():
                 configured = instrument_tid_checkpoint(configured, request)
             path = args.output / (("en" if language == "英文" else "jp") + "_" + name + ".ecs")
             path.write_text(configured, encoding="utf-8")
-            result = subprocess.run([str(args.ezcon), "format", str(path), "-o", str(path.with_suffix(".formatted.ecs"))], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90)
-            (path.with_suffix(".format.log")).write_text(result.stdout + result.stderr, encoding="utf-8")
-            results.append({"case":path.name,"exit_code":result.returncode,"output":result.stdout + result.stderr})
-            print(path.name, result.returncode, flush=True)
+            try:
+                EasyConScriptEngine().load_file(path)
+                code, output = 0, "原生 ECS 编译通过"
+            except ScriptCompileError as exc:
+                code, output = 2, str(exc)
+            path.with_suffix(".compile.log").write_text(output, encoding="utf-8")
+            results.append({"case": path.name, "exit_code": code, "output": output})
+            print(path.name, code, flush=True)
     (args.output / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     if any(item["exit_code"] != 0 for item in results):
         raise SystemExit(1)

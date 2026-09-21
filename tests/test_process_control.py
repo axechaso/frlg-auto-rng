@@ -1,4 +1,5 @@
 import io
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from process_control import StopFileWatcher, terminate_process_tree
+from process_control import StopFileWatcher, stop_child_process, terminate_process_tree
 from run_auto_rng_gui import AutoRngApp
 from run_easycon_logged import run_logged
 from run_sid_reverse_capture import _run_easycon
@@ -53,6 +54,63 @@ def pid_alive(pid):
 
 
 class ProcessControlTests(unittest.TestCase):
+    def test_failed_stop_file_write_still_terminates_owned_child(self):
+        process = Mock(poll=Mock(return_value=None))
+        with patch.object(Path, "write_text", side_effect=OSError("disk full")), \
+             patch("process_control.terminate_process_tree") as terminate:
+            stop_child_process(process, Path("private.stop"))
+        terminate.assert_called_once_with(process)
+
+    def test_callback_failure_stops_native_child_before_propagating(self):
+        for mode in ("logged", "tid", "sid"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                helper = root / "run_native_easycon.py"
+                released = root / "released"
+                helper.write_text(
+                    "import sys, time\nfrom pathlib import Path\n"
+                    "stop = Path(sys.argv[sys.argv.index('--stop-file') + 1])\n"
+                    "print('RUNNING', flush=True)\n"
+                    "while not stop.is_file():\n    time.sleep(0.01)\n"
+                    f"Path({str(released)!r}).touch()\n",
+                    encoding="utf-8",
+                )
+                command = [sys.executable, "-u", str(helper)]
+                processes = []
+                real_popen = subprocess.Popen
+
+                def spawn(*args, **kwargs):
+                    process = real_popen(*args, **kwargs)
+                    processes.append(process)
+                    return process
+
+                def fail_on_output(text):
+                    if "RUNNING" in text:
+                        raise RuntimeError("recording failed")
+
+                recording = SimpleNamespace(feed=fail_on_output)
+                try:
+                    with patch("subprocess.Popen", side_effect=spawn), \
+                         self.assertRaisesRegex(RuntimeError, "recording failed"):
+                        if mode == "logged":
+                            with patch("run_easycon_logged.recording_session", return_value=nullcontext(recording)):
+                                run_logged(command, root, root / "log")
+                        elif mode == "tid":
+                            flow = FlowRunner(Path("unused"), port="COM4", video_device=0,
+                                              log=io.StringIO(), recording=recording)
+                            with patch("run_tid_starter_flow.build_run_command", return_value=command):
+                                flow.run_stage(1, "test", helper)
+                        else:
+                            _run_easycon(command, root, pokemon_index=1, game="fr_nx",
+                                         output_callback=fail_on_output)
+                    self.assertTrue(released.is_file(), "child must observe cooperative stop")
+                    self.assertTrue(all(p.poll() == 0 for p in processes))
+                    self.assertFalse(list(root.glob(".native-*.stop")))
+                finally:
+                    for process in processes:
+                        terminate_process_tree(process)
+                        process.wait(timeout=5)
+
     def test_gui_writes_stop_file_instead_of_sending_cross_console_signal(self):
         with tempfile.TemporaryDirectory() as temp:
             process = Mock(poll=Mock(return_value=None))

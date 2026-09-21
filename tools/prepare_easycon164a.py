@@ -1,31 +1,29 @@
-"""Verify the pinned EasyCon 1.6.4a backend and install FRLG OCR models."""
+"""Prepare and verify the native EasyCon OCR runtime.
+
+The historical filename is kept so existing setup scripts remain usable. It
+no longer reads, launches, or validates ``ezcon.exe``.
+"""
+
+from __future__ import annotations
 
 import argparse
 import hashlib
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from automation import (  # noqa: E402
-    DEFAULT_EZCON_PATH,
-    EXPECTED_EZCON_SHA256,
-    EXPECTED_EZCON_VERSION,
-    EXPECTED_TESSDATA_SHA256,
-)
+from automation.easycon118 import EXPECTED_TESSDATA_SHA256, EXPECTED_COMPAT_OCR_NATIVE_SHA256
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PACKAGE = Path.home() / "Downloads" / "NS火叶全自动一键乱数1.1.8"
-DEFAULT_SOURCES = (
-    DEFAULT_PACKAGE / "Tessdata",
-    ROOT / "local_assets" / "easycon118" / "Tessdata",
-)
+DEFAULT_NATIVE_ROOT = ROOT / "assets" / "easycon_native"
+DEFAULT_SOURCES = (ROOT / "local_assets" / "easycon118", Path.home() / "Downloads" / "NS火叶全自动一键乱数1.1.8")
+NATIVE_DLLS = ("x64/tesseract50.dll", "x64/leptonica-1.82.0.dll")
 
 
-def sha256_file(path: Path) -> str:
+def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -33,102 +31,56 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def read_ezcon_version(ezcon_path: Path) -> str:
-    result = subprocess.run(
-        [str(ezcon_path), "--version"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=15,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"EasyCon 版本检查失败，退出码 {result.returncode}")
-    lines = [line.strip() for line in (result.stdout + "\n" + result.stderr).splitlines() if line.strip()]
-    if not lines:
-        raise RuntimeError("EasyCon 没有返回版本信息")
-    return lines[-1]
-
-
-def verify_ezcon(ezcon_path: Path) -> None:
-    if not ezcon_path.is_file():
-        raise FileNotFoundError(f"找不到 EasyCon 1.6.4a CLI: {ezcon_path}")
-    actual_sha256 = sha256_file(ezcon_path)
-    if actual_sha256 != EXPECTED_EZCON_SHA256:
-        raise RuntimeError(f"ezcon.exe 指纹不一致: {actual_sha256}")
-    actual_version = read_ezcon_version(ezcon_path)
-    if actual_version != EXPECTED_EZCON_VERSION:
-        raise RuntimeError(
-            f"需要 EasyCon {EXPECTED_EZCON_VERSION}，检测到 {actual_version}"
-        )
-
-
-def verify_tessdata(tessdata_dir: Path) -> tuple[str, ...]:
-    errors = []
-    for name, expected_sha256 in EXPECTED_TESSDATA_SHA256.items():
-        path = tessdata_dir / name
-        if not path.is_file():
-            errors.append(f"缺少 {name}")
-            continue
-        actual_sha256 = sha256_file(path)
-        if actual_sha256 != expected_sha256:
-            errors.append(f"{name} 指纹不一致: {actual_sha256}")
-    return tuple(errors)
-
-
-def find_source(explicit_source: Path | None) -> Path:
-    candidates = (explicit_source,) if explicit_source is not None else DEFAULT_SOURCES
-    diagnostics = []
-    for candidate in candidates:
-        if candidate is None:
-            continue
-        candidate = candidate.resolve()
-        if (candidate / "Tessdata").is_dir():
-            candidate = candidate / "Tessdata"
-        errors = verify_tessdata(candidate)
-        if not errors:
+def _find_models(source: Path) -> Path | None:
+    for candidate in (source / "Tessdata", source):
+        if all((candidate / name).is_file() for name in EXPECTED_TESSDATA_SHA256):
             return candidate
-        diagnostics.append(f"{candidate}: {', '.join(errors)}")
-    raise FileNotFoundError("找不到已审计的火叶 OCR 模型；" + "；".join(diagnostics))
+    return None
 
 
-def prepare_backend(
-    ezcon_path: Path,
-    source: Path | None = None,
-    *,
-    check_only: bool = False,
-) -> Path:
-    ezcon_path = ezcon_path.resolve()
-    verify_ezcon(ezcon_path)
-    target = ezcon_path.parent / "Tessdata"
-    current_errors = verify_tessdata(target)
-    if not current_errors:
-        return target
-    if check_only:
-        raise RuntimeError("EasyCon Tessdata 校验失败：" + "；".join(current_errors))
+def prepare_backend(native_root: str | Path = DEFAULT_NATIVE_ROOT, source: str | Path | None = None, *, check_only: bool = False) -> Path:
+    root = Path(native_root).resolve()
+    missing = [root / relative for relative in NATIVE_DLLS if not (root / relative).is_file()]
+    if missing:
+        raise FileNotFoundError("原生 OCR DLL 缺失：" + ", ".join(str(path) for path in missing))
 
-    source_dir = find_source(source)
-    target.mkdir(parents=True, exist_ok=True)
-    for name in EXPECTED_TESSDATA_SHA256:
-        shutil.copy2(source_dir / name, target / name)
-    final_errors = verify_tessdata(target)
-    if final_errors:
-        raise RuntimeError("复制后 Tessdata 校验仍失败：" + "；".join(final_errors))
-    return target
+    for relative, expected in EXPECTED_COMPAT_OCR_NATIVE_SHA256.items():
+        if _sha256(root / relative) != expected:
+            raise RuntimeError(f"原生 OCR DLL 指纹不一致: {relative}")
+
+    destination = root / "Tessdata"
+    candidates = (Path(source),) if source is not None else DEFAULT_SOURCES
+    model_root = next((found for item in candidates if item.exists()
+                       if (found := _find_models(item.resolve())) is not None), None)
+    if model_root is not None and not check_only:
+        destination.mkdir(parents=True, exist_ok=True)
+        for name, expected in EXPECTED_TESSDATA_SHA256.items():
+            source_path = model_root / name
+            if _sha256(source_path) != expected:
+                raise RuntimeError(f"OCR 模型指纹不一致: {source_path}")
+            if source_path.resolve() != (destination / name).resolve():
+                shutil.copy2(source_path, destination / name)
+    missing_models = [name for name in EXPECTED_TESSDATA_SHA256 if not (destination / name).is_file()]
+    if missing_models:
+        raise FileNotFoundError("原生 OCR 模型缺失：" + ", ".join(missing_models))
+    for name, expected in EXPECTED_TESSDATA_SHA256.items():
+        if _sha256(destination / name) != expected:
+            raise RuntimeError(f"OCR 模型指纹不一致: {destination / name}")
+    return root
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="准备 EasyCon 1.6.4a 火叶 OCR 运行环境")
-    parser.add_argument("--ezcon", type=Path, default=DEFAULT_EZCON_PATH)
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="准备 Python 原生 EasyCon OCR 运行环境")
+    parser.add_argument("--native-root", type=Path, default=DEFAULT_NATIVE_ROOT)
     parser.add_argument("--source", type=Path)
     parser.add_argument("--check-only", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
-        target = prepare_backend(args.ezcon, args.source, check_only=args.check_only)
+        root = prepare_backend(args.native_root, args.source, check_only=args.check_only)
     except Exception as exc:
-        print(f"EasyCon 1.6.4a 准备失败: {exc}", file=sys.stderr)
+        print(f"原生 EasyCon 准备失败: {exc}")
         return 1
-    print(f"EasyCon 1.6.4a 与火叶 OCR 模型校验通过: {target}")
+    print(f"Python 原生 EasyCon OCR 运行时校验通过: {root}")
     return 0
 
 

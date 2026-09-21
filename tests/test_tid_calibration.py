@@ -241,7 +241,7 @@ class TidCalibrationTests(unittest.TestCase):
             main = Path(directory) / "main.ecs"
             main.write_text("RETURN 0\n", encoding="utf-8")
             runner = FlowRunner(Path("runner.exe"), port="COM4", video_device=3, log=io.StringIO(), preview_port=43123)
-            processes = [SimpleNamespace(stdout=io.StringIO("done\n"), wait=lambda: 0) for _ in range(2)]
+            processes = [SimpleNamespace(stdout=io.StringIO("done\n"), wait=lambda: 0, poll=lambda: 0) for _ in range(2)]
             with patch("run_tid_starter_flow.subprocess.Popen", side_effect=processes) as popen, patch("run_tid_starter_flow.print"):
                 self.assertEqual(runner.run_stage(0, "calibration", main), 0)
                 self.assertEqual(runner.run_stage(1, "formal", main), 0)

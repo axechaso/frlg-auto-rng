@@ -1,0 +1,18 @@
+Bundled native OCR components
+
+Tesseract 5 (tesseract50.dll): Apache-2.0
+https://github.com/tesseract-ocr/tesseract
+Full license: LICENSE-TESSERACT-APACHE-2.0.txt
+
+Leptonica 1.82.0 (leptonica-1.82.0.dll): BSD-2-Clause
+https://github.com/DanBloomberg/leptonica
+Copyright and full license: LICENSE-LEPTONICA.txt
+
+chi_sim.traineddata: Tesseract language data, Apache-2.0
+https://github.com/tesseract-ocr/tessdata
+Full license: LICENSE-TESSERACT-APACHE-2.0.txt
+
+These binaries/data were taken from the local EasyCon distribution.
+The Python EasyCon implementation was ported from auto-bdsp-rng;
+see easycon/native/NOTICE.md and LICENSE-GPL-3.0.txt.
+FRLG-specific models are supplied by the user's script package.

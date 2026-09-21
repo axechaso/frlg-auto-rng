@@ -148,7 +148,7 @@ class CompleteWindow(FrlgWindow):
         else:
             raise ValueError("当前不是独立工作流")
         video = f["video"].currentData()
-        return WorkflowInputs(mode, request, source, Path(f["ezcon"].text()).resolve(),
+        return WorkflowInputs(mode, request, source, self.paths.ezcon,
             self.advanced_check.isChecked(), self.current_template(), self.devices[1].get(video, ""), extra)
 
     def is_workflow_mode(self):
@@ -422,7 +422,7 @@ class CompleteWindow(FrlgWindow):
                 self.accessories.timer.stop()
             try:
                 write_json_atomic(self.paths.user / "pyside6_settings.json", {
-                    **{key: self.fields[key].text() for key in ("source", "ezcon", "sid_source", "tid_source")},
+                    **{key: self.fields[key].text() for key in ("source", "sid_source", "tid_source")},
                     "update_source": self.fields["update_source"].currentData() or "auto",
                 })
             except OSError:

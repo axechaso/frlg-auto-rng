@@ -5,6 +5,31 @@ import os
 from pathlib import Path
 import subprocess
 import threading
+import uuid
+
+
+def native_stop_command(command: list[str], directory: Path) -> tuple[list[str], Path | None]:
+    """Give each native child its own cooperative stop channel."""
+    if not ("native-easycon" in command or any(Path(arg).name == "run_native_easycon.py" for arg in command)):
+        return command, None
+    if "--stop-file" in command:
+        return command, Path(command[command.index("--stop-file") + 1])
+    path = Path(directory).resolve() / f".native-{uuid.uuid4().hex}.stop"
+    return [*command, "--stop-file", str(path)], path
+
+
+def stop_child_process(process: subprocess.Popen, stop_path: Path | None) -> None:
+    """Allow native serial cleanup before the bounded process-tree fallback."""
+    if process.poll() is not None:
+        return
+    if stop_path is not None:
+        try:
+            stop_path.write_text("stop\n", encoding="utf-8")
+            process.wait(timeout=3)
+            return
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    terminate_process_tree(process)
 
 
 def terminate_process_tree(process: subprocess.Popen) -> None:
@@ -12,8 +37,7 @@ def terminate_process_tree(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
     if os.name == "nt":
-        # terminate()/CTRL_BREAK on the wrapper alone can leave ezcon alive.
-        # Pass argv, not a shell command; never kill by executable name.
+        # Pass the owned process ID, not a shell command or executable name.
         result = subprocess.run(
             ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

@@ -32,7 +32,7 @@ jobs:
             requirements-pyside-preview.txt
 
       - name: Install test dependencies
-        run: python -m pip install -r requirements-auto.txt -r requirements-pyside-preview.txt
+        run: python -m pip install -r requirements-auto.txt -r requirements-pyside-preview.txt pytest==8.4.2
 
       - name: Compile Python sources
         run: >-
@@ -44,6 +44,9 @@ jobs:
           process_control.py
           console_output.py
           worker_commands.py
+          capture_broker.py
+          capture_broker_process.py
+          run_native_easycon.py
           pyside_preview.py
           pyside_chrome.py
           run_pyside6_gui.py
@@ -84,6 +87,7 @@ jobs:
           sid_traversal.py
           tenlines_seed_updater.py
           automation/easycon118.py
+          automation/native_runtime.py
           automation/calibration_trust_gates.py
           automation/precalibration.py
           automation/seed_common_regions.py
@@ -102,6 +106,14 @@ jobs:
           rng/sid_reverse_workflow.py
           rng/starter_sid_verification.py
           rng/tenlines_utils.py
+          easycon/native/engine.py
+          easycon/native/parser.py
+          easycon/native/runtime.py
+          easycon/native/validation.py
+          easycon/native/device.py
+          easycon/native/image_labels.py
+          easycon/native/tesseract.py
+          easycon/native_backend.py
 
       - name: Run repository-independent unit tests
         run: >-
@@ -161,3 +173,14 @@ jobs:
           tests.test_update_manifest_tool
           tests.test_windows_release_scripts
           tests.test_pyside_release_upgrade
+
+      - name: Run native EasyCon protocol and integration tests
+        run: >-
+          python -m pytest -q
+          tests/test_easycon_native_engine.py
+          tests/test_easycon_native_device.py
+          tests/test_easycon_native_backend.py
+          tests/test_easycon_native_tesseract.py
+          tests/test_easycon_image_labels.py
+          tests/test_capture_broker_process.py
+          tests/test_native_runtime.py

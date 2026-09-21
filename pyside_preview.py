@@ -731,12 +731,12 @@ class FrlgPreviewWindow(QMainWindow):
         status_layout = QVBoxLayout(status)
         status_layout.setContentsMargins(13, 12, 13, 13)
         status_layout.setSpacing(5)
-        status_layout.addWidget(_label("●  EasyCon 1.6.4-a", name="sideStatusTitle"))
-        status_layout.addWidget(_label("运行时要求 · 尚未检测", name="sideStatusText"))
-        status_layout.addWidget(_label("设备与运行服务尚未接入", name="sideStatusText"))
+        status_layout.addWidget(_label("●  原生 EasyCon", name="sideStatusTitle"))
+        status_layout.addWidget(_label("Python ECS · 串口 · OpenCV", name="sideStatusText"))
+        status_layout.addWidget(_label("运行时会自动检测设备", name="sideStatusText"))
         layout.addWidget(status)
         layout.addSpacing(6)
-        layout.addWidget(_label("界面初版 · 不执行真实脚本", name="sideMuted"))
+        layout.addWidget(_label("PySide6 · 原生运行后端", name="sideMuted"))
         return sidebar
 
     def _build_workspace(self) -> QWidget:
@@ -1481,13 +1481,13 @@ class FrlgPreviewWindow(QMainWindow):
 
     def _build_script_test_page(self) -> QWidget:
         page, layout = self._page_canvas()
-        script = Card("直接运行 ECS 测试脚本", "所选脚本原地执行；兼容运行器与原始 CLI 用于同脚本 A/B 对照。")
+        script = Card("直接运行 ECS 测试脚本", "所选脚本原地执行；使用 Python 原生 EasyCon 引擎。")
         entry = _button("选择脚本入口（高级设置）", enabled=True)
         entry.clicked.connect(lambda: self.advanced_dialog.show())
         script.layout.addWidget(entry)
         self._form(script, [
             ("script_path", "ECS 文件", _line(placeholder="路径解析与文件选择尚未接入")),
-            ("script_backend", "运行后端", _combo("工具兼容运行器（正式工具）", "原始 EasyCon 1.6.4-a CLI（A/B 对照）")),
+            ("script_backend", "运行后端", _combo("Python 原生 EasyCon")),
         ], 1)
         self._actions(script, "选择脚本")
         script.layout.addWidget(QCheckBox("输出 EasyCon 详细日志"))
@@ -1510,18 +1510,22 @@ class FrlgPreviewWindow(QMainWindow):
         self._form(options, [
             ("output_log", "脚本输出日志", _combo("精简日志", "完整调试日志", current=1)),
         ], 1)
-        self.fields["output_log"].setToolTip("控制生成的 2.0 脚本（普通、孵蛋、御三家阶段）；不等同直接脚本页的 EasyCon 详细日志。")
+        self.fields["output_log"].setToolTip("控制生成脚本的日志详细程度。")
         layout.addWidget(options)
-        runtime = Card("EasyCon 1.6.4-a 与设备", "所有页面共用；设备、文件及更新服务尚未接入。")
+        runtime = Card("原生 EasyCon 与设备", "所有页面共用 Python 原生脚本引擎、串口和 OpenCV 采集卡。")
         self._form(runtime, [
             ("source", "2.0 自动乱数脚本包", _line(placeholder="路径选择尚未接入")),
-            ("ezcon", "ezcon.exe", _line(placeholder="要求 1.6.4-a+9c86137")),
+            ("native_backend", "控制后端", _line("Python 原生 EasyCon")),
         ], 2)
+        self.fields["native_backend"].setReadOnly(True)
+        # Compatibility alias for settings/migration code written before the
+        # native backend was introduced.  It is never interpreted as a path.
+        self.fields["ezcon"] = self.fields["native_backend"]
         update_source = _combo("自动（GitHub 优先）", "GitHub", "Gitee")
         for index, value in enumerate(("auto", "github", "gitee")):
             update_source.setItemData(index, value)
         self._form(runtime, [("update_source", "程序更新源", update_source)], 1)
-        self._actions(runtime, "选择脚本包", "选择 ezcon.exe", "检查/更新 Seed 表", "检查程序更新", "手柄键位", columns=2)
+        self._actions(runtime, "选择脚本包", "检查/更新 Seed 表", "检查程序更新", "手柄键位", columns=2)
         runtime.layout.addWidget(_label("源码模式不使用程序自更新。", role="muted"))
         layout.addWidget(runtime)
         layout.addWidget(self._path_card("SID 查找脚本", "2.0 自动乱数脚本包（SID 独立路径）", "sid_source"))

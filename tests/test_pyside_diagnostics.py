@@ -111,6 +111,12 @@ class QtDiagnosticTests(unittest.TestCase):
     def test_optional_traversal_start_still_inherits_but_invalid_value_names_field(self):
         w = self.w
         w.advanced_check.setChecked(True)
+        # No external script package is available in CI; supply unrelated
+        # advanced expansion inputs before checking the traversal field.
+        for i in range(1, 4):
+            w.fields[f"expansion_{i}_seed"].setText("0")
+            w.fields[f"expansion_{i}_adv"].setText("0")
+        w.fields["togepi_reverse_adv"].setText("0")
         w.named_rival = True
         w.traversal_check.setChecked(True)
         w.fields["wild_tid"].setText("12345")

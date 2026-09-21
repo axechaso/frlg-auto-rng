@@ -1,6 +1,5 @@
 param(
     [string]$Python = "",
-    [string]$EasyConPublish = "",
     [string]$OutputName = "",
     [string]$BuildTag = "",
     [string]$LocalAssets = "",
@@ -41,18 +40,7 @@ if (-not (Test-Path -LiteralPath $NotesFile -PathType Leaf)) {
     throw "找不到发布说明：$NotesFile"
 }
 
-if (-not $EasyConPublish) {
-    $candidate = Get-ChildItem -LiteralPath (Join-Path $Root "dist") -Directory -ErrorAction SilentlyContinue |
-        ForEach-Object { Join-Path $_.FullName "easycon\publish" } |
-        Where-Object { Test-Path -LiteralPath (Join-Path $_ "ezcon.exe") } |
-        Select-Object -First 1
-    if ($candidate) { $EasyConPublish = $candidate }
-}
-if (-not $EasyConPublish -or -not (Test-Path -LiteralPath (Join-Path $EasyConPublish "ezcon.exe"))) {
-    throw "找不到 EasyCon publish 目录。请用 -EasyConPublish 指定包含 ezcon.exe 的目录。"
-}
-
-& $Python -m pip install --disable-pip-version-check "pyinstaller==6.15.0" "PySide6==6.11.2" "truststore==0.10.4" "certifi==2026.7.22"
+& $Python -m pip install --disable-pip-version-check -r (Join-Path $Root "requirements-auto.txt") "pyinstaller==6.15.0" "PySide6==6.11.2" "truststore==0.10.4" "certifi==2026.7.22"
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller / PySide6 / truststore / certifi 安装失败" }
 
 $PyInstallerWork = Join-Path $BuildRoot "pyinstaller"
@@ -79,10 +67,13 @@ $args = @(
     "--hidden-import", "run_sid_reverse_capture",
     "--hidden-import", "run_sid_traversal",
     "--hidden-import", "run_tid_starter_flow",
-    "--hidden-import", "run_easycon_logged",
+    "--hidden-import", "run_native_easycon",
+    "--hidden-import", "capture_broker_process",
+    "--hidden-import", "capture_broker",
     "--hidden-import", "run_pyside6_gui",
     "--hidden-import", "calibration_bind",
     "--hidden-import", "cv2",
+    "--collect-submodules", "cv2_enumerate_cameras",
     # PyInstaller's PySide6 hook follows the Qt modules imported by the app and
     # collects their required plugins.  Collecting the whole PySide6 wheel also
     # ships unused QML/tooling plugins, adds hundreds of MiB, and can make Qt
@@ -92,9 +83,10 @@ $args = @(
     "--exclude-module", "tkinter",
     "--exclude-module", "tkinterdnd2",
     "--add-data", "$(Join-Path $Root 'assets');assets",
+    "--add-data", "$(Join-Path $Root 'easycon\native\NOTICE.md');easycon\native",
+    "--add-data", "$(Join-Path $Root 'easycon\native\LICENSE-GPL-3.0.txt');easycon\native",
     "--add-data", "$(Join-Path $Root 'rng\resources');rng\resources",
     "--add-data", "$LocalAssets;local_assets",
-    "--add-data", "$(Join-Path $Root 'runtime_backend');runtime_backend",
     "--add-data", "$(Join-Path $Root 'default.yaml');.",
     "--add-binary", "$(Join-Path $Root 'rng\src\pybind\calibration_bind.cp312-win_amd64.pyd');rng\src\pybind",
     (Join-Path $Root 'package_entry.py')
@@ -145,11 +137,6 @@ try {
     Pop-Location
 }
 
-New-Item -ItemType Directory -Path (Join-Path $PyInstallerDist "FRLG-Auto-RNG\easycon\publish") -Force | Out-Null
-$InternalRoot = Join-Path $PyInstallerDist "FRLG-Auto-RNG\_internal"
-New-Item -ItemType Directory -Path (Join-Path $InternalRoot "easycon\publish") -Force | Out-Null
-Copy-Item -Force -Recurse -Path (Join-Path $EasyConPublish "*") -Destination (Join-Path $InternalRoot "easycon\publish")
-
 New-Item -ItemType Directory -Path $ReleaseRoot | Out-Null
 Copy-Item -Force -Recurse -Path (Join-Path $PyInstallerDist "FRLG-Auto-RNG\*") -Destination $ReleaseRoot
 Copy-Item -Force -LiteralPath (Join-Path $UpdaterDist "FRLG-Auto-RNG-Updater.exe") -Destination (Join-Path $ReleaseRoot "FRLG-Auto-RNG-Updater.exe")
@@ -176,6 +163,18 @@ foreach ($RequiredLabel in @("闪公图标.IL", "冲浪.IL")) {
 }
 
 $frozenMain = Join-Path $ReleaseRoot "FRLG-Auto-RNG.exe"
+foreach ($NativeResource in @(
+    "assets\easycon_native\x64\tesseract50.dll",
+    "assets\easycon_native\x64\leptonica-1.82.0.dll",
+    "assets\easycon_native\Tessdata\chi_sim.traineddata",
+    "local_assets\easycon118\Tessdata\frlg_battle.traineddata",
+    "local_assets\easycon118\Tessdata\FRLG_EN_ALL.traineddata"
+)) {
+    $NativeResourcePath = Join-Path $ReleaseRoot "_internal\$NativeResource"
+    if (-not (Test-Path -LiteralPath $NativeResourcePath -PathType Leaf)) {
+        throw "发布包缺少原生 EasyCon 资源：$NativeResourcePath"
+    }
+}
 Push-Location $Root
 try {
     & $Python -m tools.verify_frozen_workers --exe $frozenMain

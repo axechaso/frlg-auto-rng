@@ -71,8 +71,8 @@ class WorkerCommandTests(unittest.TestCase):
             ("tid", "tid-flow", TidRngRequest(), {"game": "火红", "flow": True, "resume": True}),
             ("sid_traversal", "sid-traversal", None,
              {"max_advances": 10000, "named_rival": True, "start_advance": 1900}),
-            ("egg", "easycon-log", None, {}),
-            ("script_test", "easycon-log", None, {}),
+            ("egg", "native-easycon", None, {}),
+            ("script_test", "native-easycon", None, {}),
         )
         check = EasyConRuntimeCheck(True, (), ())
         with tempfile.TemporaryDirectory() as temp:
@@ -89,8 +89,7 @@ class WorkerCommandTests(unittest.TestCase):
                     with patch.object(sys, "frozen", True, create=True), \
                          patch.object(sys, "executable", str(root / "FRLG-Auto-RNG.exe")), \
                          patch("pyside_app.workflows.probe_easycon_devices", return_value=({"COM3"}, {1: "Capture"}, "")), \
-                         patch("pyside_app.workflows.check_workflow", return_value=check), \
-                         patch("pyside_app.workflows.prepare_compat_runner", return_value=root / "runner.exe"):
+                         patch("pyside_app.workflows.check_workflow", return_value=check):
                         command = prepare_workflow_run(prepared, AppPaths(user=root), "COM3", 1, "Capture")
                     self.assertEqual(command.program, str(root / "FRLG-Auto-RNG.exe"))
                     self.assertEqual(command.arguments[:2], ("--worker", worker))
@@ -124,7 +123,7 @@ class WorkerCommandTests(unittest.TestCase):
              patch("pyside_app.services.prepare_compat_runner", return_value=Path("runner.exe")):
             command = prepare_run(prepared, "COM3", 1, "Capture")
         self.assertEqual(command.program, "C:/Portable/FRLG-Auto-RNG.exe")
-        self.assertEqual(command.arguments[:2], ("--worker", "easycon-log"))
+        self.assertEqual(command.arguments[:2], ("--worker", "native-easycon"))
         self.assertNotIn("-u", command.arguments)
         self.assertIn(str(command.stop_path), command.arguments)
         self.assertIn(str(command.log_path), command.arguments)

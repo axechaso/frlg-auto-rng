@@ -60,17 +60,10 @@ class ResourcePathTests(unittest.TestCase):
                     str(saved), current, bundled_suffix="_internal/easycon/publish/ezcon.exe", file=True,
                 ), str(current))
 
-    def test_missing_executable_names_path_and_recovery_without_launch(self):
-        with tempfile.TemporaryDirectory() as temp, patch("automation.easycon118.subprocess.run") as run:
-            missing = Path(temp) / "removed" / "ezcon.exe"
-            with self.assertRaises(FileNotFoundError) as caught:
-                probe_easycon_devices(missing)
-            # Windows hosted runners may expose %TEMP% through an 8.3 alias
-            # (RUNNER~1) while Path.resolve() expands it to runneradmin.
-            self.assertIn(str(missing.resolve()), str(caught.exception))
-            self.assertIn("共通设置", str(caught.exception))
-            self.assertIn("完整解压", str(caught.exception))
-            run.assert_not_called()
+    def test_missing_legacy_executable_does_not_prevent_native_discovery(self):
+        with patch("automation.native_runtime.probe_native_devices", return_value=({"COM3"}, {0}, "native")) as probe:
+            self.assertEqual(probe_easycon_devices(Path("removed/ezcon.exe")), ({"COM3"}, {0}, "native"))
+        probe.assert_called_once_with(include_video_names=False)
 
 
 @unittest.skipUnless(importlib.util.find_spec("PySide6"), "PySide6 is optional")
@@ -111,7 +104,7 @@ class StartupPathTests(unittest.TestCase):
             errors = []
             response = subprocess.CompletedProcess([], 0, stdout="", stderr="")
             with patch("pyside_app.path_settings.sys", SimpleNamespace(frozen=True)), \
-                 patch("automation.easycon118.subprocess.run", return_value=response) as run:
+                 patch("pyside_app.window.probe_easycon_devices", return_value=(set(), {}, "native")) as run:
                 window = CompleteWindow(paths=paths, auto_detect=True)
                 window.show_error = errors.append
                 try:
@@ -123,18 +116,17 @@ class StartupPathTests(unittest.TestCase):
                     self.assertTrue(window.devices_checked)
                     self.assertEqual(settings.read_bytes(), original_settings)
                     for key, value in defaults.items():
+                        if key == "ezcon":
+                            continue
                         self.assertEqual(window.fields[key].text(), str(value), key)
-                    self.assertEqual([call.args[0] for call in run.call_args_list], [
-                        [str(defaults["ezcon"].resolve()), "port", "--list"],
-                        [str(defaults["ezcon"].resolve()), "video", "--list"],
-                    ])
+                    run.assert_called_once_with(include_video_names=True)
                 finally:
                     window.close()
                     window.deleteLater()
                     self.app.processEvents()
             restored = json.loads(settings.read_text(encoding="utf-8"))
             self.assertEqual(restored, {
-                **{key: str(value) for key, value in defaults.items()},
+                **{key: str(value) for key, value in defaults.items() if key != "ezcon"},
                 "update_source": "auto",
             })
 

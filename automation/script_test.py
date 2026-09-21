@@ -1,32 +1,25 @@
-"""Advanced direct-ECS test support for pinned EasyCon 1.6.4-a."""
+"""Advanced direct-ECS tests with the native EasyCon engine."""
 
 from __future__ import annotations
 
-import hashlib
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from fingerprint_policy import record_fingerprint_mismatch
 
 from .easycon118 import (
     EGG_TEMPLATE_NAME,
-    EXPECTED_EZCON_SHA256,
-    EXPECTED_EZCON_VERSION,
-    EXPECTED_TESSDATA_SHA256,
     EasyConRuntimeCheck,
     STANDARD_TEMPLATE_NAME,
     prepare_compat_runner,
 )
 
 
-SCRIPT_TEST_BACKEND_COMPAT = "工具兼容运行器（正式工具）"
+SCRIPT_TEST_BACKEND_NATIVE = "Python 原生 EasyCon"
+SCRIPT_TEST_BACKEND_COMPAT = SCRIPT_TEST_BACKEND_NATIVE
+# Kept only to identify old saved choices, never exposed as an execution option.
 SCRIPT_TEST_BACKEND_ORIGINAL = "原始 EasyCon 1.6.4-a CLI（A/B 对照）"
-SCRIPT_TEST_BACKENDS = (
-    SCRIPT_TEST_BACKEND_COMPAT,
-    SCRIPT_TEST_BACKEND_ORIGINAL,
-)
+SCRIPT_TEST_BACKENDS = (SCRIPT_TEST_BACKEND_NATIVE,)
 
 SCRIPT_TEST_ENTRY_FORMAL = "正式版脚本"
 SCRIPT_TEST_ENTRY_TIMELINE = "时间轴版脚本"
@@ -116,162 +109,16 @@ def prepare_script_test_runtime(
     *,
     fingerprint_warning_only: bool = False,
 ) -> ScriptTestPreparation:
-    """Validate an arbitrary ECS project without applying 2.0 rewrites.
-
-    The selected script stays in place.  The original pinned CLI is always
-    used for version and ``format`` checks.  At run time the caller uses either
-    that executable or the same compatibility runner used by normal GUI runs.
-    """
-    ezcon_path = Path(ezcon_path).resolve()
-    script_path = Path(script_path).resolve()
-    errors: list[str] = []
-    warnings: list[str] = []
-    label_references: tuple[str, ...] = ()
-    runner_path: Path | None = None
-
+    """Compile a selected ECS project in place with the native backend."""
+    from .native_runtime import validate_native_runtime
+    path = Path(script_path).resolve()
+    check = validate_native_runtime(path, fingerprint_warning_only=fingerprint_warning_only)
     if backend not in SCRIPT_TEST_BACKENDS:
-        errors.append(f"未知脚本测试后端: {backend}")
-
-    ezcon_is_pinned = False
-    if not ezcon_path.is_file():
-        errors.append(f"找不到 ezcon.exe: {ezcon_path}")
-    else:
-        try:
-            actual_sha256 = hashlib.sha256(ezcon_path.read_bytes()).hexdigest()
-        except OSError as exc:
-            errors.append(f"无法读取 ezcon.exe: {exc}")
-        else:
-            if actual_sha256 != EXPECTED_EZCON_SHA256:
-                record_fingerprint_mismatch(
-                    "EasyCon 1.6.4-a ezcon.exe 指纹不一致: " + actual_sha256,
-                    warning_only=fingerprint_warning_only,
-                    errors=errors,
-                    warnings=warnings,
-                )
-            ezcon_is_pinned = (
-                actual_sha256 == EXPECTED_EZCON_SHA256
-                or fingerprint_warning_only
-            )
-
-    if not script_path.is_file():
-        errors.append(f"找不到所选 ECS 脚本: {script_path}")
-    elif script_path.suffix.lower() != ".ecs":
-        errors.append(f"直接脚本测试只接受 .ecs 文件: {script_path.name}")
-    else:
-        try:
-            label_references = inspect_script_label_references(script_path)
-        except (OSError, UnicodeError) as exc:
-            errors.append(f"无法读取所选 ECS 或其 lib: {exc}")
-        if label_references:
-            label_dir = script_path.parent / "ImgLabel"
-            if not label_dir.is_dir():
-                errors.append(
-                    f"脚本引用了 {len(label_references)} 个标签，但同目录缺少 ImgLabel: "
-                    f"{label_dir}"
-                )
-            else:
-                missing = [
-                    name for name in label_references
-                    if not (label_dir / f"{name}.IL").is_file()
-                ]
-                if missing:
-                    preview = "、".join(missing[:12])
-                    suffix = "……" if len(missing) > 12 else ""
-                    errors.append(f"ImgLabel 缺少脚本引用的标签: {preview}{suffix}")
-
-    if ezcon_is_pinned:
-        tessdata_dir = ezcon_path.parent / "Tessdata"
-        for model, expected_sha256 in EXPECTED_TESSDATA_SHA256.items():
-            model_path = tessdata_dir / model
-            if not model_path.is_file():
-                errors.append(f"EasyCon Tessdata 缺少 {model}")
-                continue
-            try:
-                actual_sha256 = hashlib.sha256(model_path.read_bytes()).hexdigest()
-            except OSError as exc:
-                errors.append(f"无法读取 EasyCon Tessdata/{model}: {exc}")
-                continue
-            if actual_sha256 != expected_sha256:
-                record_fingerprint_mismatch(
-                    f"EasyCon Tessdata/{model} 指纹不一致: {actual_sha256}",
-                    warning_only=fingerprint_warning_only,
-                    errors=errors,
-                    warnings=warnings,
-                )
-
-    run_options = dict(
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if ezcon_is_pinned:
-        try:
-            version = subprocess.run(
-                [str(ezcon_path), "--version"], timeout=15, **run_options
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            errors.append(f"无法读取 EasyCon 版本: {exc}")
-        else:
-            version_text = (version.stdout + "\n" + version.stderr).strip()
-            version_line = version_text.splitlines()[-1] if version_text else ""
-            if version.returncode != 0 or version_line != EXPECTED_EZCON_VERSION:
-                errors.append(
-                    f"脚本测试只允许 EasyCon {EXPECTED_EZCON_VERSION}；"
-                    f"检测结果为: {version_line or '(无版本输出)'}"
-                )
-            else:
-                warnings.append("EasyCon 版本: " + version_line)
-
-    if ezcon_is_pinned and script_path.is_file() and script_path.suffix.lower() == ".ecs":
-        try:
-            formatted = subprocess.run(
-                [str(ezcon_path), "format", str(script_path)],
-                cwd=str(script_path.parent),
-                timeout=60,
-                **run_options,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            errors.append(f"EasyCon 1.6.4-a ECS 语法预检无法执行: {exc}")
-        else:
-            if formatted.returncode != 0:
-                details = (formatted.stderr or formatted.stdout).strip()
-                errors.append(
-                    "EasyCon 1.6.4-a ECS 语法预检失败，退出码 "
-                    f"{formatted.returncode}: {details[-1000:]}"
-                )
-
-    if backend == SCRIPT_TEST_BACKEND_ORIGINAL and ezcon_is_pinned:
-        runner_path = ezcon_path
-        warnings.append("运行后端：原始 1.6.4-a CLI（不含工具兼容补丁）")
-    elif backend == SCRIPT_TEST_BACKEND_COMPAT and ezcon_is_pinned and not errors:
-        try:
-            runner_path = prepare_compat_runner(
-                ezcon_path,
-                fingerprint_warning_only=fingerprint_warning_only,
-                fingerprint_warnings=warnings,
-            )
-        except (OSError, ValueError, RuntimeError) as exc:
-            errors.append(f"工具兼容运行器预检失败: {exc}")
-        else:
-            warnings.append("运行后端：与正式工具相同的持续采帧/向上取整兼容运行器")
-
-    if label_references:
-        warnings.append(f"已核对脚本及 lib 的 {len(label_references)} 个直接标签引用")
-    else:
-        warnings.append("脚本及 lib 未发现直接 @标签 引用")
-    warnings.extend(
-        (
-            "高级测试直接运行所选文件：不改参数、不复制脚本、不套用自动乱数脚本包完整语料指纹。",
-            "所选 ECS 拥有完整手柄控制权限，运行前必须人工确认游戏与存档状态。",
-        )
-    )
-    check = EasyConRuntimeCheck(not errors, tuple(errors), tuple(warnings))
-    return ScriptTestPreparation(
-        script_path=script_path,
-        project_dir=script_path.parent,
-        backend=backend,
-        runner_path=runner_path,
-        label_references=label_references,
-        check=check,
-    )
+        check = EasyConRuntimeCheck(False, (*check.errors, f"未知脚本测试后端: {backend}"), check.warnings)
+    try:
+        references = inspect_script_label_references(path) if path.is_file() else ()
+    except (OSError, UnicodeError):
+        references = ()
+    return ScriptTestPreparation(path, path.parent, SCRIPT_TEST_BACKEND_NATIVE,
+                                 prepare_compat_runner(ezcon_path) if check.ok else None,
+                                 references, check)

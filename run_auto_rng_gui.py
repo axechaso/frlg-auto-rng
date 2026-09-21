@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Simple end-to-end GUI: inputs -> best plan -> configured ECS -> ezcon."""
+"""Legacy Tk GUI: inputs -> best plan -> configured ECS -> native EasyCon."""
 
 import hashlib
 import json
@@ -2549,7 +2549,7 @@ class AutoRngApp:
             justify="left",
         ).grid(row=4, column=0, columnspan=7, sticky="w", padx=4, pady=(5, 0))
 
-        runtime = ttk.LabelFrame(container, text="EasyCon 1.6.4-a 与设备", padding=10)
+        runtime = ttk.LabelFrame(container, text="原生 EasyCon 与设备", padding=10)
         runtime.pack(fill="x", pady=(0, 10), before=self.mode_notebook)
         self.source_var = tk.StringVar(value=str(DEFAULT_SOURCE_118))
         self.ezcon_var = tk.StringVar(value=str(DEFAULT_EZCON))
@@ -2562,8 +2562,7 @@ class AutoRngApp:
             "野生/静态、孵蛋和高级页的正式版/时间轴版入口都从此目录读取。",
         )
         ttk.Button(runtime, text="选择", command=self.choose_source).grid(row=0, column=6, padx=4)
-        self.ezcon_entry = self._labeled_entry(runtime, "ezcon.exe", self.ezcon_var, 1, 0, width=68, span=5)
-        ttk.Button(runtime, text="选择", command=self.choose_ezcon).grid(row=1, column=6, padx=4)
+        ttk.Label(runtime, text="Python 原生 EasyCon").grid(row=1, column=0, columnspan=6, sticky="w")
         ttk.Label(runtime, text="串口").grid(row=2, column=0, sticky="e", padx=4, pady=4)
         self.port_combo = ttk.Combobox(
             runtime,
@@ -6145,7 +6144,7 @@ class AutoRngApp:
         self.project_main = None
         self.runtime_check = None
         self.set_busy(True, "正在生成 SID 采集脚本并执行 1.6.4-a 预检……")
-        self.set_result("正在校验 SID 采集模板、识图标签和 EasyCon 1.6.4-a。")
+        self.set_result("正在校验 SID 采集模板、识图标签和原生 EasyCon。")
 
         def worker():
             try:
@@ -6270,7 +6269,7 @@ class AutoRngApp:
                 )
             )
             if flow_request is not None
-            else "正在校验英文/日文模板、328 个标签和 EasyCon 1.6.4-a。"
+            else "正在校验英文/日文模板、328 个标签和原生 EasyCon。"
         )
 
         def worker():
@@ -6522,7 +6521,7 @@ class AutoRngApp:
         self.script_test_preparation = None
         self.project_main = None
         self.runtime_check = None
-        self.set_busy(True, "正在生成孵蛋脚本并执行 EasyCon 1.6.4-a 预检……")
+        self.set_busy(True, "正在生成孵蛋脚本并执行原生 EasyCon 预检……")
         self.set_result("孵蛋模式使用 Ten Lines 已选出的同 Seed / Held / Pickup，不重复搜索目标。")
 
         def worker():
@@ -6756,13 +6755,6 @@ class AutoRngApp:
             return
         self._close_manual_tools()
         ezcon = Path(self.ezcon_var.get())
-        if not ezcon.is_file():
-            self._device_check_in_progress = False
-            if initial:
-                self.fail_device_check(FileNotFoundError(f"找不到 {ezcon}"))
-            else:
-                messagebox.showerror("找不到程序", f"找不到 {ezcon}")
-            return
         current_port = self.port_var.get()
         current_video = self.video_var.get()
         self._device_check_in_progress = True
@@ -7069,6 +7061,7 @@ class AutoRngApp:
                 video_type="DSHOW",
                 verbose=self.script_test_verbose_var.get(),
                 preview_port=preview_port,
+                fingerprint_warning_only=fingerprint_warning_only,
             )
             metadata_path = self.script_test_log_path.with_suffix(".json")
             try:
@@ -7287,6 +7280,7 @@ class AutoRngApp:
                 video_device=video_device,
                 video_type="DSHOW",
                 preview_port=preview_port,
+                fingerprint_warning_only=fingerprint_warning_only,
             )
             if self.egg_request is not None:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -7619,14 +7613,6 @@ class AutoRngApp:
         path = filedialog.askdirectory(initialdir=self.source_var.get() or str(DEFAULT_SOURCE_118))
         if path:
             self.source_var.set(path)
-
-    def choose_ezcon(self):
-        path = filedialog.askopenfilename(
-            initialdir=str(Path(self.ezcon_var.get()).parent),
-            filetypes=(("EasyCon CLI", "ezcon.exe"), ("Executable", "*.exe")),
-        )
-        if path:
-            self.ezcon_var.set(path)
 
     def choose_script_test(self):
         current = Path(self.script_test_path_var.get().strip())

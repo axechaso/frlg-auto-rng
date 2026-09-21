@@ -551,8 +551,8 @@ def write_configured_tid_project(
                 "tid_starter_flow_marker": include_flow_marker,
                 "backend": {
                     "name": EASYCON_BACKEND_NAME,
-                    "expected_cli_version": EXPECTED_EZCON_VERSION,
-                    "expected_cli_sha256": EXPECTED_EZCON_SHA256,
+                    "implementation": "python-native",
+                    "worker": "native-easycon",
                 },
             },
             ensure_ascii=False,
@@ -574,15 +574,6 @@ def validate_tid_runtime(
     errors: list[str] = []
     warnings: list[str] = []
 
-    if not ezcon_path.is_file():
-        errors.append(f"找不到 ezcon.exe: {ezcon_path}")
-    elif _sha256_file(ezcon_path) != EXPECTED_EZCON_SHA256:
-        record_fingerprint_mismatch(
-            "EasyCon 1.6.4-a ezcon.exe 指纹不一致",
-            warning_only=fingerprint_warning_only,
-            errors=errors,
-            warnings=warnings,
-        )
     if not project_main.is_file():
         errors.append(f"找不到生成脚本: {project_main}")
     label_dir = project_main.parent / "ImgLabel"
@@ -616,44 +607,10 @@ def validate_tid_runtime(
                     warnings=warnings,
                 )
 
-    run_options = dict(
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if ezcon_path.is_file() and not errors:
-        try:
-            version = subprocess.run(
-                [str(ezcon_path), "--version"], timeout=15, **run_options
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            errors.append(f"无法读取 EasyCon 版本: {exc}")
-        else:
-            output = (version.stdout + "\n" + version.stderr).strip()
-            version_line = output.splitlines()[-1] if output else "(无版本输出)"
-            if version.returncode != 0 or version_line != EXPECTED_EZCON_VERSION:
-                errors.append(
-                    f"TID 正式运行只支持 EasyCon {EXPECTED_EZCON_VERSION}；检测到 {version_line}"
-                )
-            else:
-                warnings.append("EasyCon 版本: " + version_line)
-        if not errors:
-            try:
-                formatted = subprocess.run(
-                    [str(ezcon_path), "format", str(project_main)],
-                    cwd=str(project_main.parent),
-                    timeout=90,
-                    **run_options,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
-                errors.append(f"TID ECS 语法预检无法执行: {exc}")
-            else:
-                if formatted.returncode != 0:
-                    details = (formatted.stderr or formatted.stdout).strip()
-                    errors.append(
-                        f"EasyCon 1.6.4-a TID ECS 语法预检失败: {details[-1000:]}"
-                    )
+    from .native_runtime import validate_native_runtime
+    native = validate_native_runtime(project_main, fingerprint_warning_only=fingerprint_warning_only)
+    errors.extend(native.errors)
+    warnings.extend(native.warnings)
     warnings.append(
         "TID/SID 1.3.7 参数生成已接通；名称、性别或操作流程变化后必须重新校准固定延迟。"
     )

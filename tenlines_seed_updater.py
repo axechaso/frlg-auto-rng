@@ -24,6 +24,7 @@ from typing import Callable, Mapping, Sequence
 
 from app_paths import DATA_ROOT, RESOURCE_ROOT
 from fingerprint_policy import record_fingerprint_mismatch
+from easycon.native import EasyConScriptEngine
 
 
 SEED_BASE_URL = "https://lincoln-lm.github.io/ten-lines/generated"
@@ -509,34 +510,7 @@ def _validate_easycon_candidate(
     fingerprint_warning_only: bool = False,
     fingerprint_warnings: list[str] | None = None,
 ) -> None:
-    if not ezcon_path.is_file():
-        raise FileNotFoundError(f"找不到 ezcon.exe：{ezcon_path}")
-    actual_sha256 = _sha256(ezcon_path.read_bytes())
-    if actual_sha256 != EXPECTED_EZCON_SHA256:
-        record_fingerprint_mismatch(
-            "Seed 表校验使用的 EasyCon 1.6.4-a ezcon.exe 指纹不一致: "
-            + actual_sha256,
-            warning_only=fingerprint_warning_only,
-            warnings=fingerprint_warnings,
-            exception_type=SeedTableUpdateError,
-        )
-    try:
-        version = subprocess.run(
-            [str(ezcon_path), "--version"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=15,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SeedTableUpdateError(f"无法读取 EasyCon 版本：{exc}") from exc
-    version_text = (version.stdout + "\n" + version.stderr).strip()
-    version_line = version_text.splitlines()[-1] if version_text else ""
-    if version.returncode != 0 or version_line != EXPECTED_EZCON_VERSION:
-        raise SeedTableUpdateError(
-            f"Seed 表校验要求 EasyCon {EXPECTED_EZCON_VERSION}，检测到 {version_line or '无输出'}"
-        )
+    del ezcon_path, fingerprint_warning_only, fingerprint_warnings
     if not source_directory.is_dir():
         raise FileNotFoundError(f"找不到 1.1.8 包：{source_directory}")
     lib_source = source_directory / "lib"
@@ -561,24 +535,11 @@ def _validate_easycon_candidate(
             shutil.copytree(label_source, project / "ImgLabel")
             for filename in (FR_ECS_NAME, LG_ECS_NAME):
                 shutil.copy2(candidate / filename, project / "lib" / filename)
-            _notify(progress, f"使用 EasyCon 1.6.4-a format 校验{label}……")
+            _notify(progress, f"使用 Python 原生 EasyCon 引擎校验{label}……")
             try:
-                checked = subprocess.run(
-                    [str(ezcon_path), "format", str(project / "main.ecs")],
-                    cwd=str(project),
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=90,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
-                raise SeedTableUpdateError(f"EasyCon format 无法执行：{exc}") from exc
-            if checked.returncode != 0:
-                detail = (checked.stderr or checked.stdout).strip()
-                raise SeedTableUpdateError(
-                    f"{label}未通过 EasyCon 1.6.4-a format：{detail[-1500:]}"
-                )
+                EasyConScriptEngine().load_file(project / "main.ecs")
+            except Exception as exc:
+                raise SeedTableUpdateError(f"{label}未通过原生 ECS 预检：{exc}") from exc
     finally:
         if validation_root.exists():
             shutil.rmtree(validation_root, ignore_errors=True)

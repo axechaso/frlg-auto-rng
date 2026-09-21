@@ -8,6 +8,7 @@ from app_paths import RESOURCE_ROOT
 
 
 WORKER_SCRIPTS = {
+    "native-easycon": "run_native_easycon.py",
     "sid-capture": "run_sid_reverse_capture.py",
     "sid-traversal": "run_sid_traversal.py",
     "tid-flow": "run_tid_starter_flow.py",

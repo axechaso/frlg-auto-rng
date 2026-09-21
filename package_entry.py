@@ -36,6 +36,26 @@ def _write_stdout(text: str) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["--capture-broker-child"]:
+        import argparse
+        from capture_broker import CaptureBroker
+
+        parser = argparse.ArgumentParser(prog="capture-broker-child")
+        parser.add_argument("--device-index", required=True, type=int)
+        parser.add_argument("--capture-api", required=True, type=int)
+        parser.add_argument("--manifest", required=True, type=Path)
+        parser.add_argument("--first-frame-timeout", type=float, default=5.0)
+        parser.add_argument("--open-timeout", type=float, default=5.0)
+        parser.add_argument("--frame-timeout", type=float, default=5.0)
+        parser.add_argument("--parent-pid", type=int, default=0)
+        args = parser.parse_args(argv[1:])
+        broker = CaptureBroker(
+            args.device_index, args.capture_api, manifest_path=args.manifest,
+            first_frame_timeout=args.first_frame_timeout,
+            open_timeout=args.open_timeout, frame_timeout=args.frame_timeout,
+            parent_pid=args.parent_pid,
+        )
+        return 0 if broker.serve_forever() else 1
     if argv == ["--version-json"]:
         return 0 if _write_stdout(json.dumps(version_payload(), sort_keys=True) + "\n") else 1
     if argv[:1] == ["--version-json-file"]:
@@ -82,6 +102,10 @@ def main(argv: list[str] | None = None) -> int:
             return int(worker_main() or 0)
         if worker == "easycon-log":
             from run_easycon_logged import main as worker_main
+
+            return int(worker_main(worker_argv) or 0)
+        if worker == "native-easycon":
+            from run_native_easycon import main as worker_main
 
             return int(worker_main(worker_argv) or 0)
         print(f"未知后台工作模式: {worker}", file=sys.stderr)

@@ -803,7 +803,7 @@ def validate_tid_starter_flow_runtime(
     *,
     fingerprint_warning_only: bool = False,
 ) -> EasyConRuntimeCheck:
-    """Validate available flow stages with pinned EasyCon 1.6.4-a."""
+    """Validate every available stage with the native ECS engine."""
     base = (
         validate_tid_runtime(
             ezcon_path,
@@ -819,27 +819,11 @@ def validate_tid_starter_flow_runtime(
     bridge_main = Path(bridge_main).resolve()
     if not bridge_main.is_file():
         errors.append(f"找不到研究所桥接脚本: {bridge_main}")
-    elif not errors:
-        try:
-            formatted = subprocess.run(
-                [str(ezcon_path), "format", str(bridge_main)],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=60,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            errors.append(f"研究所桥接脚本无法执行1.6.4-a语法预检: {exc}")
-        else:
-            if formatted.returncode != 0:
-                details = (formatted.stdout + "\n" + formatted.stderr).strip()
-                errors.append(
-                    "研究所桥接脚本未通过EasyCon 1.6.4-a格式检查: "
-                    + details[-1000:]
-                )
-    if not errors:
-        warnings.append("研究所桥接脚本已通过EasyCon 1.6.4-a格式检查。")
+    else:
+        from .native_runtime import validate_native_runtime
+        bridge = validate_native_runtime(bridge_main, fingerprint_warning_only=fingerprint_warning_only)
+        errors.extend(bridge.errors)
+        warnings.extend(bridge.warnings)
     if starter_main is None:
         warnings.append(
             "穷举模式将在取得实际TID和SID ADV后生成御三家工程，并在运行前立即预检。"

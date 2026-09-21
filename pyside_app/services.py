@@ -16,8 +16,12 @@ from automation import (
     DEFAULT_EZCON_PATH, DEFAULT_TID_SOURCE_PATH, STANDARD_TEMPLATE_NAME,
     EGG_TEMPLATE_NAME, SearchCancelledError, search_best_plan,
     write_configured_project, validate_runtime, validate_generated_project_consistency,
-    prepare_compat_runner, build_run_command, probe_easycon_devices,
+    prepare_compat_runner, build_run_command,
 )
+from automation.native_runtime import probe_native_devices
+# Compatibility name for callers that used the old CLI discovery helper. It
+# now resolves through the native serial/OpenCV implementation.
+probe_easycon_devices = probe_native_devices
 from device_label_overrides import LabelOverrideStore, apply_profile_to_projects
 from worker_commands import build_worker_command
 
@@ -228,7 +232,7 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
     inputs = prepared.inputs
     if inputs.capture_name != capture_name:
         raise ValueError("采集卡与生成时不一致，请重新生成以应用正确的设备标签")
-    ports, videos, _output = probe_easycon_devices(inputs.ezcon, include_video_names=True)
+    ports, videos, _output = probe_easycon_devices(include_video_names=True)
     if port not in ports:
         raise ValueError(f"未检测到串口 {port}，请重新检测设备")
     if video not in videos or videos[video] != capture_name:
@@ -239,20 +243,17 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
     if not check.ok:
         raise ValueError("\n".join(check.errors))
     warnings = list(check.warnings)
-    runner = prepare_compat_runner(inputs.ezcon, fingerprint_warning_only=inputs.advanced,
-                                   fingerprint_warnings=warnings)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         preview_port = sock.getsockname()[1]
     run_id = uuid.uuid4().hex
     log_path = prepared.project.parent / f"easycon-{run_id}.log"
     stop_path = log_path.with_suffix(".stop")
-    command = build_run_command(runner, prepared.project, port=port, video_device=video,
-                                video_type="DSHOW", preview_port=preview_port)
-    worker_command = build_worker_command("easycon-log", (
-                 "--log-path", str(log_path), "--cwd", str(prepared.project.parent),
-                 "--stop-file", str(stop_path), "--", *command))
-    return RunCommand(worker_command[0], tuple(worker_command[1:]), log_path, stop_path,
+    command = build_run_command(inputs.ezcon, prepared.project, port=port, video_device=video,
+                                video_type="DSHOW", preview_port=preview_port,
+                                fingerprint_warning_only=inputs.advanced)
+    command.extend(("--log-path", str(log_path), "--stop-file", str(stop_path)))
+    return RunCommand(command[0], tuple(command[1:]), log_path, stop_path,
                       f"http://127.0.0.1:{preview_port}/mjpeg",
                       EasyConRuntimeCheck(True, (), tuple(warnings)))
 

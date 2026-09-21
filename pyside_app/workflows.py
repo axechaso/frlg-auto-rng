@@ -12,8 +12,8 @@ from pathlib import Path
 from app_paths import DATA_ROOT, RESOURCE_ROOT
 from automation import (
     EasyConRuntimeCheck, STANDARD_TEMPLATE_NAME, SCRIPT_TEST_BACKEND_COMPAT,
-    SCRIPT_TEST_BACKEND_ORIGINAL, build_run_command, prepare_compat_runner,
-    probe_easycon_devices, prepare_script_test_runtime, validate_runtime,
+    SCRIPT_TEST_BACKEND_ORIGINAL, build_run_command,
+    prepare_script_test_runtime, validate_runtime,
     validate_generated_egg_project_consistency, write_configured_egg_project,
     write_sid_reverse_project, write_sid_reverse_plan, write_configured_tid_project,
     build_tid_starter_flow_plan, write_tid_starter_flow_bundle, inspect_script_corpus,
@@ -26,6 +26,8 @@ from sid_traversal import traversal_context, DEFAULT_TARGET_MAX_ADVANCES
 from tid_records import TidRecordContext
 from tid_session import write_json_atomic
 from worker_commands import build_worker_command
+from automation.native_runtime import probe_native_devices
+probe_easycon_devices = probe_native_devices
 from .services import AppPaths, RunCommand, cleanup_generated_plan_directories
 
 
@@ -159,7 +161,7 @@ def _prepare_workflow_in_directory(
         details += "\n运行器负责恢复同参数的进度与记录实测 TID。"
     elif inputs.mode == "script_test":
         project = Path(inputs.extra["script"]).resolve()
-        metrics = ("原地执行", "1.6.4-a", "待预检")
+        metrics = ("原地执行", "Python 原生", "待预检")
         details = f"脚本测试：{project}\n后端：{inputs.extra['backend']}\n原地执行所选脚本，不替换参数。"
     elif inputs.mode == "sid_traversal":
         request.validate()
@@ -194,7 +196,7 @@ def _prepare_workflow_in_directory(
     check = check_workflow(inputs, project, directory)
     check = replace(check, warnings=tuple(dict.fromkeys((*warnings, *check.warnings))))
     if inputs.mode == "script_test":
-        metrics = ("原地执行", "1.6.4-a", "通过" if check.ok else "未通过")
+        metrics = ("原地执行", "Python 原生", "通过" if check.ok else "未通过")
     details += f"\n工程：{project}\n" + "\n".join((*check.errors, *check.warnings))
     if cancel():
         raise SearchCancelledError("已取消预检")
@@ -218,7 +220,7 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
         raise ValueError("请先通过预检")
     if capture_name != inputs.capture_name:
         raise ValueError("采集设备已变化，请重新生成")
-    ports, videos, _ = probe_easycon_devices(inputs.ezcon, include_video_names=True)
+    ports, videos, _ = probe_easycon_devices(include_video_names=True)
     if port not in ports or videos.get(video) != capture_name:
         raise ValueError("设备编号或名称已变化，请重新检测")
     _check_snapshot(prepared)
@@ -231,7 +233,10 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
     tag = uuid.uuid4().hex
     log = prepared.directory / f"run-{tag}.log"
     stop = log.with_suffix(".stop")
-    common = ["--ezcon", str(inputs.ezcon), "--port", port, "--video", str(video),
+    # The worker parsers keep ``--ezcon`` as a deprecated API-compatible
+    # option, but the GUI never passes an executable path.  The native worker
+    # owns ECS, serial and capture handling in one Python process.
+    common = ["--port", port, "--video", str(video),
               "--log-path", str(log), "--stop-file", str(stop), "--preview-port", str(preview_port)]
     if inputs.advanced:
         common.append("--fingerprint-warnings")
@@ -271,23 +276,18 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
         if prepared.profile:
             args += ["--label-override-profile", str(prepared.profile)]
     else:
-        worker = "easycon-log"
+        worker = "native-easycon"
         backend = inputs.extra.get("backend", SCRIPT_TEST_BACKEND_COMPAT)
-        if backend == SCRIPT_TEST_BACKEND_ORIGINAL:
-            runner, preview_port = inputs.ezcon, 0
-        else:
-            runner = prepare_compat_runner(inputs.ezcon, fingerprint_warning_only=inputs.advanced)
-        command = build_run_command(runner, prepared.project, port=port, video_device=video,
-                                   video_type="DSHOW", preview_port=preview_port, verbose=inputs.extra.get("verbose", False))
-        args = ["--log-path", str(log), "--cwd", str(prepared.project.parent), "--stop-file", str(stop)]
+        args = ["--project", str(prepared.project), *common]
         if inputs.mode == "egg":
             for marker in ("孵蛋流程完成", "孵蛋流程失败", "孵蛋流程测试完成", "孵蛋流程测试失败"):
                 args += ["--expected-marker", marker]
-        args += ["--", *command]
+        if inputs.extra.get("verbose"):
+            args.append("--verbose")
         if inputs.mode == "script_test":
             write_json_atomic(log.with_suffix(".json"), {"script": str(prepared.project),
                 "script_sha256": hashlib.sha256(prepared.project.read_bytes()).hexdigest(),
-                "backend": backend, "runner": str(runner), "port": port, "video": video, "command": command})
+                "backend": backend, "runner": "Python 原生 EasyCon", "port": port, "video": video})
     command = build_worker_command(worker, args)
     return RunCommand(command[0], tuple(command[1:]), log, stop,
                       f"http://127.0.0.1:{preview_port}/mjpeg" if preview_port else "", check)

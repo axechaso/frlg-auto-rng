@@ -1,4 +1,4 @@
-"""Stage release assets without unrelated upstream OCR experiments."""
+"""Stage native runtime assets without old EasyCon CLIs or OCR experiments."""
 import argparse
 import hashlib
 import shutil
@@ -20,7 +20,8 @@ def stage_assets(source: Path, destination: Path) -> Path:
     def ignore(directory: str, names: list[str]) -> list[str]:
         if Path(directory).resolve() == models:
             return [name for name in names if name not in EXPECTED_TESSDATA_SHA256]
-        return []
+        return [name for name in names if name.lower() == "ezcon.exe"
+                or (name.lower().startswith("easycon2.cli") and name.lower().endswith(".exe"))]
 
     shutil.copytree(source, destination, ignore=ignore)
     return destination
