@@ -14,6 +14,7 @@ from automation.tid_rng137 import (
     EXPECTED_TID_SCRIPT_SHA256,
     SUPPORTED_TID_SCRIPT_SHA256,
     TID_LEGACY_SCRIPT_NAMES,
+    TID_REFERENCE_SCRIPT_NAMES,
     TID_SCRIPT_NAMES,
     TidRngRequest,
     _TID_HOME_BUFFER_ORIGINAL,
@@ -24,7 +25,11 @@ from automation.tid_rng137 import (
     verify_tid_package,
     write_configured_tid_project,
 )
-from automation.tid_starter_save import is_starter_save_template, split_tid_modules
+from automation.tid_starter_save import (
+    TID_STARTER_SAVE_NAME,
+    is_starter_save_template,
+    split_tid_modules,
+)
 
 
 class TidTemplateRevisionTests(unittest.TestCase):
@@ -47,15 +52,19 @@ class TidTemplateRevisionTests(unittest.TestCase):
             + '    IF $char == "R"\n        RETURN 111\n    ENDIF\nENDFUNC\n'
         )
 
-    def test_new_filename_wins_even_if_old_template_is_also_present(self):
+    def test_only_unified_tool_mother_is_selected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             legacy = root / TID_LEGACY_SCRIPT_NAMES["英文"]
             legacy.write_text("legacy", encoding="utf-8")
-            self.assertEqual(resolve_tid_template(root, "英文"), legacy.resolve())
-            updated = root / TID_SCRIPT_NAMES["英文"]
-            updated.write_text("updated", encoding="utf-8")
-            self.assertEqual(resolve_tid_template(root, "英文"), updated.resolve())
+            updated = root / TID_REFERENCE_SCRIPT_NAMES["英文"]
+            updated.write_text("reference", encoding="utf-8")
+            with self.assertRaises(FileNotFoundError):
+                resolve_tid_template(root, "英文")
+            unified = root / TID_STARTER_SAVE_NAME
+            unified.write_text("unified", encoding="utf-8")
+            self.assertEqual(resolve_tid_template(root, "英文"), unified.resolve())
+            self.assertEqual(resolve_tid_template(root, "日文"), unified.resolve())
 
     def test_unknown_new_fingerprint_does_not_silently_fall_back(self):
         manifest = {"scripts": {
@@ -96,15 +105,14 @@ class TidTemplateRevisionTests(unittest.TestCase):
             (source / "ImgLabel").mkdir(parents=True)
             (destination / "ImgLabel").mkdir(parents=True)
             (source / "ImgLabel" / "sample.IL").write_bytes(b"label")
-            for filename in TID_SCRIPT_NAMES.values():
-                (source / filename).write_text("selected", encoding="utf-8")
+            (source / TID_STARTER_SAVE_NAME).write_text("IF @sample >= 95\nENDIF\n", encoding="utf-8")
             note = destination / "notes.txt"
             note.write_text("keep", encoding="utf-8")
             legacy = destination / TID_LEGACY_SCRIPT_NAMES["英文"]
             legacy.write_text("legacy", encoding="utf-8")
             manifest = {"scripts": {
-                language: {"filename": filename}
-                for language, filename in TID_SCRIPT_NAMES.items()
+                language: {"filename": TID_STARTER_SAVE_NAME}
+                for language in TID_SCRIPT_NAMES
             }}
             with (
                 patch("tools.import_tid_rng137.ROOT", root),
@@ -115,10 +123,10 @@ class TidTemplateRevisionTests(unittest.TestCase):
                 import_package(destination, destination)
             self.assertEqual(note.read_text(encoding="utf-8"), "keep")
             self.assertEqual(legacy.read_text(encoding="utf-8"), "legacy")
-            self.assertEqual(resolve_tid_template(destination, "英文").name, TID_SCRIPT_NAMES["英文"])
+            self.assertEqual(resolve_tid_template(destination, "英文").name, TID_STARTER_SAVE_NAME)
             self.assertEqual((destination / "ImgLabel" / "sample.IL").read_bytes(), b"label")
 
-    def test_legacy_and_rewrite_fingerprints_are_both_supported(self):
+    def test_only_current_unified_mother_fingerprint_is_supported(self):
         for digest in SUPPORTED_TID_SCRIPT_SHA256["英文"]:
             manifest = {"scripts": {
                 "英文": {"sha256": digest},

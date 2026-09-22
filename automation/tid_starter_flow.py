@@ -59,8 +59,10 @@ from .tid_rng137 import (
     write_configured_tid_project,
 )
 from .tid_starter_save import (
+    TID_STARTER_SAVE_NAME,
     is_starter_save_template,
     render_starter_save_bridge,
+    resolve_tid_starter_save_template,
     set_starter_save_sid_correction,
     split_tid_modules,
 )
@@ -305,7 +307,7 @@ class TidStarterFlowPlan:
         return {
             "mode": "tid_sid_starter_verification",
             "architecture": (
-                "language-specific audited ID template -> shared lab route -> "
+                "unified audited ID mother (selected language branch) -> shared lab route -> "
                 "configured EasyCon 2.0 Starter flow"
             ),
             "request": {
@@ -689,7 +691,11 @@ def write_tid_starter_flow_bundle(
         plan.request.validate()
         id_template = enable_any_tid_handoff(id_template, require_denoise=plan.request.any_tid_require_denoise)
         (id_dir / "main.ecs").write_text(id_template, encoding="utf-8")
+    # The ID and bridge stages are selected from the same unified mother. The
+    # bridge is still emitted as a separate runtime stage.
     starter_save_template = is_starter_save_template(id_template)
+    bridge_source_path = resolve_tid_starter_save_template(source_dir)
+    bridge_source_text = bridge_source_path.read_text(encoding="utf-8-sig")
     correction_pattern = re.compile(r"(?m)^\$SID_ADV修正\s*=\s*[^\r\n]*$")
     for stale_attempt in id_dir.glob("main_attempt_*.ecs"):
         stale_attempt.unlink()
@@ -713,10 +719,7 @@ def write_tid_starter_flow_bundle(
     bridge_dir.mkdir(parents=True, exist_ok=True)
     bridge_path = bridge_dir / "main.ecs"
     bridge_path.write_text(
-        (
-            render_starter_save_bridge(id_template, plan.request.starter)
-            if starter_save_template else render_lab_bridge_ecs(plan.request.starter)
-        ),
+        render_starter_save_bridge(bridge_source_text, plan.request.starter),
         encoding="utf-8",
     )
     if plan.starter_run_plan is not None:
@@ -748,9 +751,7 @@ def write_tid_starter_flow_bundle(
     payload["starter_source_dir"] = str(starter_source_dir)
     id_manifest = json.loads((id_dir / "plan.json").read_text(encoding="utf-8"))
     payload["tid_source_template"] = id_manifest["template"]
-    payload["lab_bridge_source"] = (
-        id_manifest["template"] if starter_save_template else "legacy_shared_lab_bridge"
-    )
+    payload["lab_bridge_source"] = TID_STARTER_SAVE_NAME
     plan_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",

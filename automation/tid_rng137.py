@@ -16,7 +16,7 @@ from fingerprint_policy import record_fingerprint_mismatch
 
 from .tid_starter_save import (
     TID_STARTER_SAVE_NAME,
-    TID_STARTER_SAVE_SUPPORTED_SHA256,
+    TID_STARTER_SAVE_SHA256,
     configure_starter_save_id,
     is_starter_save_template,
 )
@@ -34,38 +34,44 @@ ROOT = Path(__file__).resolve().parents[1]
 TID_HOME_BUFFER_ADAPTIVE_PATH = (
     ROOT / "assets" / "tid_rng137_extensions" / "home_buffer_adaptive.ecs"
 )
+TID_EXTENSION_LABEL_DIR = ROOT / "assets" / "tid_rng137_extensions"
+TID_EXTENSION_LABEL_NAMES = ("正在关闭_暗.IL",)
 DOWNLOADED_TID_SOURCE = (
-    Path.home() / "Downloads" / "自定义TID SID 御三家乱数多功能包1.3"
+    Path.home() / "Downloads" / "NS火叶全自动一键乱数1.1.8"
 )
 IMPORTED_TID_SOURCE = ROOT / "local_assets" / "tid_rng137"
 DEFAULT_TID_SOURCE_PATH = (
     IMPORTED_TID_SOURCE if IMPORTED_TID_SOURCE.is_dir() else DOWNLOADED_TID_SOURCE
 )
 
-TID_SCRIPT_NAMES = {
-    "英文": "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7-164a重写版_v2_全局变量修正版.txt",
+TID_REFERENCE_SCRIPT_NAMES = {
+    # Direct-run references shipped beside the unified tool mother.
+    "英文": "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7-164a同步按键测试.ecs",
     "日文": "【TID+SID乱数&穷举】日文版-火红叶绿1.3.7.txt",
+}
+TID_SCRIPT_NAMES = {
+    "英文": TID_STARTER_SAVE_NAME,
+    "日文": TID_STARTER_SAVE_NAME,
 }
 TID_LEGACY_SCRIPT_NAMES = {
     "英文": "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7.txt",
 }
 EXPECTED_TID_SCRIPT_SHA256 = {
-    "英文": "f8d88b87e012737746334f629dda881fd6f211c8649630b142643bb16016dfdb",
-    "日文": "77072be5e6c4fdbb7723e0df7f36f10c2df5e62394c5e5f07b08b105e836cfe7",
+    "英文": TID_STARTER_SAVE_SHA256,
+    "日文": TID_STARTER_SAVE_SHA256,
 }
 SUPPORTED_TID_SCRIPT_SHA256 = {
-    "英文": {
-        *TID_STARTER_SAVE_SUPPORTED_SHA256,
-        EXPECTED_TID_SCRIPT_SHA256["英文"],
-        "8438b473f2032efe4b013fd6ac5976c62c7013c4bb983be543181ab6457c55d9",
-        # 原 1.3.7 仅把固定延迟检查默认值从 0 改为 1 的下载包。
-        "9b0941bf848e2b5fbeaf823274e6b07f78fccf7fc95744f7914a22a6dec913bc",
-    },
-    "日文": {EXPECTED_TID_SCRIPT_SHA256["日文"], *TID_STARTER_SAVE_SUPPORTED_SHA256},
+    "英文": {EXPECTED_TID_SCRIPT_SHA256["英文"]},
+    "日文": {EXPECTED_TID_SCRIPT_SHA256["日文"]},
 }
-EXPECTED_TID_LABEL_COUNT = 328
-EXPECTED_TID_LABEL_METHODS = {1: 4, 3: 1, 5: 322, 11: 1}
+EXPECTED_TID_LABEL_COUNT = 119
+EXPECTED_TID_LABEL_METHODS = {1: 3, 5: 116}
 EXPECTED_TID_LABEL_SHA256 = (
+    "d5b78e7b593ba184b25a315068d8038680080a3cda6c0760517680a8762817ea"
+)
+LEGACY_TID_LABEL_COUNT = 328
+LEGACY_TID_LABEL_METHODS = {1: 4, 3: 1, 5: 322, 11: 1}
+LEGACY_TID_LABEL_SHA256 = (
     "9b4ca9049371d0e4bd60ecfd039ba3e397c82e3da1db2c53f7cf7248568bbc93"
 )
 
@@ -354,11 +360,16 @@ class TidRngRequest:
 
 
 def resolve_tid_template(source_dir: str | Path, language: str) -> Path:
-    """Prefer the confirmed combined update, then audited standalone versions."""
+    """Resolve the single audited English/Japanese tool mother.
+
+    Standalone files remain direct-run references. Tool generation uses the
+    unified file exclusively so HOME_BUFFER, close-game and NS timing fixes
+    cannot drift or silently fall back to an old English rewrite.
+    """
     source_dir = Path(source_dir).resolve()
-    filenames = [TID_STARTER_SAVE_NAME, TID_SCRIPT_NAMES[language]]
-    if language in TID_LEGACY_SCRIPT_NAMES:
-        filenames.append(TID_LEGACY_SCRIPT_NAMES[language])
+    if language not in TID_SCRIPT_NAMES:
+        raise ValueError("ROM 语言必须是英文或日文")
+    filenames = [TID_STARTER_SAVE_NAME]
     for filename in filenames:
         path = source_dir / filename
         if path.is_file():
@@ -379,6 +390,17 @@ def inspect_tid_package(source_dir: str | Path) -> dict[str, Any]:
     label_dir = source_dir / "ImgLabel"
     if not label_dir.is_dir():
         raise FileNotFoundError("TID 1.3.7 包缺少 ImgLabel 目录")
+    for script in {item["filename"] for item in scripts.values()}:
+        text = (source_dir / script).read_text(encoding="utf-8-sig")
+        missing = [
+            name for name in referenced_image_labels(text)
+            if not (label_dir / f"{name}.IL").is_file()
+            and not (TID_EXTENSION_LABEL_DIR / f"{name}.IL").is_file()
+        ]
+        if missing:
+            raise FileNotFoundError(
+                f"TID统一母本 {script} 缺少同包标签: " + ", ".join(missing)
+            )
     return {"scripts": scripts, "labels": inspect_label_corpus(label_dir)}
 
 
@@ -387,6 +409,8 @@ def verify_tid_package(
     *,
     fingerprint_warning_only: bool = False,
     fingerprint_warnings: list[str] | None = None,
+    allow_legacy_labels: bool = False,
+    allow_label_superset: bool = False,
 ) -> dict[str, Any]:
     source_dir = Path(source_dir).resolve()
     manifest = inspect_tid_package(source_dir)
@@ -399,6 +423,15 @@ def verify_tid_package(
                 warnings=fingerprint_warnings,
             )
     labels = manifest["labels"]
+    if allow_label_superset:
+        return manifest
+    legacy_labels = allow_legacy_labels and (
+        labels["count"] == LEGACY_TID_LABEL_COUNT
+        and labels["methods"] == LEGACY_TID_LABEL_METHODS
+        and labels["sha256"] == LEGACY_TID_LABEL_SHA256
+    )
+    if legacy_labels:
+        return manifest
     if labels["count"] != EXPECTED_TID_LABEL_COUNT:
         raise ValueError(
             f"TID 标签数量应为 {EXPECTED_TID_LABEL_COUNT}，当前为 {labels['count']}"
@@ -412,6 +445,20 @@ def verify_tid_package(
             warnings=fingerprint_warnings,
         )
     return manifest
+
+
+def copy_tid_extension_labels(label_dir: str | Path) -> None:
+    """Install labels added by audited combined TID/starter scripts."""
+    label_dir = Path(label_dir)
+    if not label_dir.is_dir():
+        raise FileNotFoundError(f"TID 1.3.7 包缺少 ImgLabel 目录: {label_dir}")
+    for name in TID_EXTENSION_LABEL_NAMES:
+        source = TID_EXTENSION_LABEL_DIR / name
+        if not source.is_file():
+            raise FileNotFoundError(f"仓库缺少 TID 扩展标签: {name}")
+        target = label_dir / name
+        if not target.is_file():
+            target.write_bytes(source.read_bytes().rstrip(b"\r\n"))
 
 
 def configure_tid_template_text(
@@ -473,17 +520,41 @@ def _apply_tid_home_buffer_adaptive(template_text: str) -> str:
         return template_text
     if template_text.count(_TID_HOME_BUFFER_GLOBAL_ANCHOR) != 1:
         raise ValueError("TID 1.3.7模板缺少唯一的识图阈值锚点")
-    # v2 只给原辅助函数添加 EN_ 前缀；不能把它换回旧的函数名。
+    # 旧 v2 可能给辅助函数添加 EN_ 前缀；当前正式母本使用无前缀函数。
     prefix = "EN_" if re.search(r"(?m)^FUNC EN_HOME_BUFFER\s*$", template_text) else ""
-    original = _TID_HOME_BUFFER_ORIGINAL.replace(
-        "FUNC HOME_BUFFER", f"FUNC {prefix}HOME_BUFFER"
-    ).replace("CALL 关闭游戏", f"CALL {prefix}关闭游戏")
-    if template_text.count(original) != 1:
+
+    def blocking_buttons(text: str) -> str:
+        pattern = re.compile(
+            r"(?m)^([ \t]*)(A|B|HOME)(?:[ \t]+(\d+))?([ \t]*(?:#[^\n]*)?)$"
+        )
+        return pattern.sub(
+            lambda match: (
+                f"{match[1]}{match[2]} DOWN{match[4]}\n"
+                f"{match[1]}WAIT {match[3] or 50}\n"
+                f"{match[1]}{match[2]} UP"
+            ),
+            text,
+        )
+
+    def qualify(text: str) -> str:
+        return text.replace(
+            "FUNC HOME_BUFFER", f"FUNC {prefix}HOME_BUFFER"
+        ).replace("CALL 关闭游戏", f"CALL {prefix}关闭游戏")
+
+    candidates = (
+        qualify(blocking_buttons(_TID_HOME_BUFFER_ORIGINAL)),
+        qualify(_TID_HOME_BUFFER_ORIGINAL),
+    )
+    matches = [candidate for candidate in candidates if template_text.count(candidate) == 1]
+    if len(matches) != 1:
         raise ValueError("TID 1.3.7模板的HOME_BUFFER函数与已审计版本不一致")
-    extension = TID_HOME_BUFFER_ADAPTIVE_PATH.read_text(encoding="utf-8").rstrip()
-    extension = extension.replace(
-        "FUNC HOME_BUFFER", f"FUNC {prefix}HOME_BUFFER"
-    ).replace("CALL 关闭游戏", f"CALL {prefix}关闭游戏")
+    original = matches[0]
+    extension_source = TID_HOME_BUFFER_ADAPTIVE_PATH.read_text(encoding="utf-8").rstrip()
+    extension = qualify(
+        blocking_buttons(extension_source)
+        if original == candidates[0]
+        else extension_source
+    )
     template_text = template_text.replace(
         _TID_HOME_BUFFER_GLOBAL_ANCHOR,
         _TID_HOME_BUFFER_GLOBAL_ANCHOR + _TID_HOME_BUFFER_ADAPTIVE_GLOBALS,

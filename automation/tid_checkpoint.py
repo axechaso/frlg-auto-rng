@@ -231,8 +231,15 @@ def instrument_tid_checkpoint(text: str, request: TidRngRequest, state: dict | N
     parts = [f'"{name}=" & {variable}' for name, variable in variables.items()]
     output = '    PRINT ' + (CHECKPOINT_V3_PREFIX if v2 else CHECKPOINT_PREFIX) + ' & ' + ' & "|" & '.join(parts) + ' & "|END=1"\n'
     module = module.replace(anchor, restore + anchor + "    # TID_CHECKPOINT_BEGIN\n" + output + "    # TID_CHECKPOINT_END\n", 1)
-    end = f"    NEXT\nNEXT\n\nENDIF\n\nFUNC {prefix}_识图"
+    # English OCR-first adds helper functions before EN_识图; anchor to the
+    # unique end of the active top-level loop instead of a specific next
+    # function name. Japanese keeps the old layout and matches this as well.
+    end = "    NEXT\nNEXT\n\nENDIF\n\n"
     if module.count(end) != 1:
         raise ValueError("TID穷举成功出口与已审计结构不一致")
-    module = module.replace(end, f"    NEXT\nNEXT\n\n# TID_CHECKPOINT_BEGIN\nPRINT {DONE_MARKER}\n# TID_CHECKPOINT_END\nENDIF\n\nFUNC {prefix}_识图", 1)
+    module = module.replace(
+        end,
+        f"    NEXT\nNEXT\n\n# TID_CHECKPOINT_BEGIN\nPRINT {DONE_MARKER}\n# TID_CHECKPOINT_END\nENDIF\n\n",
+        1,
+    )
     return head + (module if prefix == "EN" else english) + (module if prefix == "JP" else japanese) + tail
