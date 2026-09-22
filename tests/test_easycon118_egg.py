@@ -1585,7 +1585,10 @@ ENDFUNC
         self.assertIn(EGG_FORMAL_WAIT_MARKER, template)
         self.assertIn("$孵蛋使用绝对时间轴 = 0", template)
         self.assertIn("$调试日志输出 = 1", template)
-        self.assertIn("$帧奇偶修正方案 = 1", template)
+        # The 2.0 mother keeps the ordinary-flow default here. Egg plans are
+        # required to override it to the menu scheme; that generated contract
+        # is covered by test_egg_template_configuration.
+        self.assertIn("$帧奇偶修正方案 = 0", template)
         self.assertIn("$扩窗层数上限 = 3", template)
         self.assertIn("$扩窗第1层Seed容差 = 25", template)
         self.assertIn("$扩窗第3层帧半宽 = 30000", template)

@@ -23,6 +23,9 @@ from .tid_starter_save import (
 
 from .easycon118 import (
     EASYCON_BACKEND_NAME,
+    EXPECTED_LABEL_COUNT as EXPECTED_MOTHER_LABEL_COUNT,
+    EXPECTED_LABEL_METHODS as EXPECTED_MOTHER_LABEL_METHODS,
+    EXPECTED_LABEL_SHA256 as EXPECTED_MOTHER_LABEL_SHA256,
     EXPECTED_EZCON_SHA256,
     EXPECTED_EZCON_VERSION,
     EasyConRuntimeCheck,
@@ -34,8 +37,6 @@ ROOT = Path(__file__).resolve().parents[1]
 TID_HOME_BUFFER_ADAPTIVE_PATH = (
     ROOT / "assets" / "tid_rng137_extensions" / "home_buffer_adaptive.ecs"
 )
-TID_EXTENSION_LABEL_DIR = ROOT / "assets" / "tid_rng137_extensions"
-TID_EXTENSION_LABEL_NAMES = ("正在关闭_暗.IL",)
 DOWNLOADED_TID_SOURCE = (
     Path.home() / "Downloads" / "NS火叶全自动一键乱数1.1.8"
 )
@@ -64,16 +65,12 @@ SUPPORTED_TID_SCRIPT_SHA256 = {
     "英文": {EXPECTED_TID_SCRIPT_SHA256["英文"]},
     "日文": {EXPECTED_TID_SCRIPT_SHA256["日文"]},
 }
-EXPECTED_TID_LABEL_COUNT = 119
-EXPECTED_TID_LABEL_METHODS = {1: 3, 5: 116}
-EXPECTED_TID_LABEL_SHA256 = (
-    "d5b78e7b593ba184b25a315068d8038680080a3cda6c0760517680a8762817ea"
-)
-LEGACY_TID_LABEL_COUNT = 328
-LEGACY_TID_LABEL_METHODS = {1: 4, 3: 1, 5: 322, 11: 1}
-LEGACY_TID_LABEL_SHA256 = (
-    "9b4ca9049371d0e4bd60ecfd039ba3e397c82e3da1db2c53f7cf7248568bbc93"
-)
+# The package ImgLabel directory is the common mother for every workflow.
+# TID projects deliberately retain the complete corpus instead of trimming it
+# to labels directly referenced by the current TID script.
+EXPECTED_TID_LABEL_COUNT = EXPECTED_MOTHER_LABEL_COUNT
+EXPECTED_TID_LABEL_METHODS = EXPECTED_MOTHER_LABEL_METHODS
+EXPECTED_TID_LABEL_SHA256 = EXPECTED_MOTHER_LABEL_SHA256
 
 _USER_SECTION_END = "# ======================== 用户自定义区结束"
 _TID_HOME_BUFFER_GLOBAL_ANCHOR = "$识图判断阈值 = 95\n"
@@ -395,7 +392,6 @@ def inspect_tid_package(source_dir: str | Path) -> dict[str, Any]:
         missing = [
             name for name in referenced_image_labels(text)
             if not (label_dir / f"{name}.IL").is_file()
-            and not (TID_EXTENSION_LABEL_DIR / f"{name}.IL").is_file()
         ]
         if missing:
             raise FileNotFoundError(
@@ -409,8 +405,6 @@ def verify_tid_package(
     *,
     fingerprint_warning_only: bool = False,
     fingerprint_warnings: list[str] | None = None,
-    allow_legacy_labels: bool = False,
-    allow_label_superset: bool = False,
 ) -> dict[str, Any]:
     source_dir = Path(source_dir).resolve()
     manifest = inspect_tid_package(source_dir)
@@ -423,15 +417,6 @@ def verify_tid_package(
                 warnings=fingerprint_warnings,
             )
     labels = manifest["labels"]
-    if allow_label_superset:
-        return manifest
-    legacy_labels = allow_legacy_labels and (
-        labels["count"] == LEGACY_TID_LABEL_COUNT
-        and labels["methods"] == LEGACY_TID_LABEL_METHODS
-        and labels["sha256"] == LEGACY_TID_LABEL_SHA256
-    )
-    if legacy_labels:
-        return manifest
     if labels["count"] != EXPECTED_TID_LABEL_COUNT:
         raise ValueError(
             f"TID 标签数量应为 {EXPECTED_TID_LABEL_COUNT}，当前为 {labels['count']}"
@@ -445,20 +430,6 @@ def verify_tid_package(
             warnings=fingerprint_warnings,
         )
     return manifest
-
-
-def copy_tid_extension_labels(label_dir: str | Path) -> None:
-    """Install labels added by audited combined TID/starter scripts."""
-    label_dir = Path(label_dir)
-    if not label_dir.is_dir():
-        raise FileNotFoundError(f"TID 1.3.7 包缺少 ImgLabel 目录: {label_dir}")
-    for name in TID_EXTENSION_LABEL_NAMES:
-        source = TID_EXTENSION_LABEL_DIR / name
-        if not source.is_file():
-            raise FileNotFoundError(f"仓库缺少 TID 扩展标签: {name}")
-        target = label_dir / name
-        if not target.is_file():
-            target.write_bytes(source.read_bytes().rstrip(b"\r\n"))
 
 
 def configure_tid_template_text(

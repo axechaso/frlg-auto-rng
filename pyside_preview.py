@@ -1327,17 +1327,34 @@ class FrlgPreviewWindow(QMainWindow):
 
         capture = Card("出闪后处理")
         self.capture_checks = []
-        row = QHBoxLayout()
-        for title, width in (("出闪后自动抓捕", 150), ("麻痹", 78), ("点到为止", 104)):
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
+        for index, (title, checked) in enumerate((
+            ("出闪后自动抓捕", False),
+            ("麻痹", False),
+            ("点到为止", False),
+            ("出闪录像", False),
+            ("非目标闪光停止", True),
+        )):
             button = _button(title, "quickToggle", enabled=True)
             button.setCheckable(True)
             button.setAccessibleName(title)
-            button.setFixedSize(width, 36)
+            button.setMinimumWidth(0)
+            button.setFixedHeight(36)
+            button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
             button.toggled.connect(lambda checked, b=button, text=title: b.setText(f"✓ {text}" if checked else text))
+            button.setChecked(checked)
             self.capture_checks.append(button)
-            row.addWidget(button)
-        row.addStretch(1)
-        capture.layout.addLayout(row)
+            if index < 3:
+                grid.addWidget(button, 0, index)
+            elif index == 3:
+                grid.addWidget(button, 1, 0)
+            else:
+                grid.addWidget(button, 1, 1, 1, 2)
+        for column in range(3):
+            grid.setColumnStretch(column, 1)
+        capture.layout.addLayout(grid)
         layout.addWidget(capture)
 
         self.item_options = Card("道具乱数", "仅野生可用，与 SID 遍历互斥。", collapsible=True)
@@ -1399,6 +1416,7 @@ class FrlgPreviewWindow(QMainWindow):
         self.fields["wild_slots"].setEnabled(wild and item)
         self.fields["wild_traversal_max"].setEnabled(wild and traversal)
         self.fields["wild_traversal_start"].setEnabled(wild and traversal and self.advanced_check.isChecked())
+        self.capture_checks[4].setEnabled(wild)
         direct = self.fields["wild_search_mode"].currentIndex() == 1
         self.fields["wild_direct_seed"].setEnabled(direct)
         self.fields["wild_direct_adv"].setEnabled(direct)

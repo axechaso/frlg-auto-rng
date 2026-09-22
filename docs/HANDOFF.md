@@ -2,7 +2,16 @@
 
 本文是当前火红/叶绿全自动乱数初步实现的开发快照。换设备或新建 Codex 对话时，先让新对话完整阅读本文件、根目录 `README.md` 和 `docs/INITIAL_AUTO_RNG.md`，再检查工作区实际状态。
 
-快照日期：2026-09-20。
+快照日期：2026-09-22。
+
+## 2026-09-22 最新 2.0/TID 母本同步与出闪后处理开关
+
+- 采用下载目录 `D:\Download\NS火叶全自动一键乱数1.1.8` 的最新 2.0 语料。当前原包 33 文件输入指纹为 `6a0afe3ff17890c9387f53efa6cd364f052b342a7a916a5efe8e1213a406a750`，本地物化指纹为 `2f47da7a92a1a2e2de7842e3b663512fbddaacd97c8cb78ac1e70f8756c243fa`；新增野生入口钓鱼按格路线，保留原包其余更新。
+- 完整 `ImgLabel` 是所有流程的共同母本：TID、SID、野生、定点、游走、孵蛋和御三家生成均复制完整 1151 项，不按当前 ECS 的直接引用裁剪。当前方法分布为 1/3/5/11/14 = 17/1/778/1/354，规范化后的共同标签指纹为 `6d2eca22d8fb525e9ef142e4b65e11c6a0f0121d8ccd154d09ba63a7b629e850`；最新版原包更新了 47 个日版数字位置标签。
+- 统一 TID 母本为 `NS火叶TID-SID到御三家球前存档-测试.ecs`，当前指纹 `143fcdcf816e5754abcc6acac68eb9e2e8ffd9b2c2dd4705dd08ac1c4381cb36`；英文和日文工具计划都从这一个母本选择语言分支，旁边的独立脚本只作直跑参考。缓存 `local_assets/tid_rng137` 与 `local_assets/easycon118` 使用同一完整标签母本。
+- PySide6 野生/定点的“出闪后处理”新增“出闪录像”和“非目标闪光停止”两个开关。前者写入 `$出闪录像`，后者仅在野生流程写入 `$非目标闪光停止`，定点自动写 0；孵蛋继续沿用脚本默认的录像策略，不误开野生非目标停止。
+- 2.0 生成器把这两个字段按模板所在的进阶设置区替换，避免与普通用户输入区混淆；TID 导入器对同包完整标签母本做规范化审计后再复制。旧 119/328/329 项 TID 子集缓存不再作为当前母本，需从最新原包重新导入。
+- 本轮工具完整回归 707 项通过；最新 TID 原包 `--check-only` 通过，正式版、时间轴版和统一 TID 母本均通过真实 EasyCon `1.6.4-a+9c86137` `format`。原包自带 40 个 `check_*.py` 中 35 个通过；其余 5 个不是本轮工具回归失败：`check_easycon_frame_fix.py` 缺原包未附带的 1.70 实验源码目录，另外 4 个仍写死 8 月旧母本的默认奇偶值、御三家调用文本、TID 保护摘要或旧全局变量规则，与 9 月最新母本不一致。没有修改下载原包的这些历史检查脚本来掩盖结果，也没有连接单片机或操作游戏。
 
 ## 2026-09-20 QQ 通知接入 PySide6 正式界面
 
@@ -10,7 +19,7 @@
 - 工具配置使用 `%LOCALAPPDATA%\FRLG-Auto-RNG\QQNotifyTest`，仅保存 AppID、OpenID 和目标；AppSecret/Token 保留在内存。支持双击 `run.bat`、直接脚本及包入口；PySide6 固定为主项目的 `6.11.2`。
 - 新增 `notifications/qq_client.py`、`notifications/qq_service.py` 和 `pyside_app/qq_notifications.py`；顶部“QQ 通知”入口提供原生设置、规则、发送记录和 12 步图文教学。配置写入 `%LOCALAPPDATA%\FRLG-Auto-RNG\qq-notifications.json`，AppSecret 默认不落盘。
 - 主程序在运行结束、失败、手动停止和启动失败路径统一生成一次通知事件；服务提供队列、逐目标投递记录、关闭取消和运行 ID 去重。退出码 0 不直接解释为目标命中，通知失败不影响运行器结果。
-- 13 项客户端 HTTP/WebSocket 离线测试与 4 项服务层测试通过，主窗口和设置/教学窗口在 offscreen 环境创建并截图；真实 QQ 收发仍需用户填写自己的凭据后人工验证。
+- 13 项客户端 HTTP/WebSocket 离线测试与 4 项服务层测试通过，主窗口和设置/教学窗口在 offscreen 环境创建并截图；用户随后已确认真实 QQ 连接与收发正常，通知功能可与本轮统一母本和脚本同步一起提交。
 
 ## 2026-09-20 孵蛋 Held 跨轮归一候选消歧
 
@@ -628,11 +637,11 @@ D:\Codex\火叶乱数\frlg-auto-rng
 当前工作与本轮 Action 分支：
 
 ```text
-branch: experiment/shared-capture
-release point: 以 origin/experiment/shared-capture 最新提交和 git log -1 为准
+branch: local/qq-notify-test
+release point: 以 origin/local/qq-notify-test 最新提交和 git log -1 为准
 ```
 
-私有网络远端为 `https://github.com/axechaso/frlg-auto-rng.git`。本轮按用户约定把已验证改动提交并推送当前 `experiment/shared-capture` 分支触发 GitHub Actions，不创建 PR、不切换或合并到 `main`。新设备若继续本轮工作，须取得该分支，不能只取旧的 `main`。
+私有网络远端为 `https://github.com/axechaso/frlg-auto-rng.git`。本轮把已验证的 QQ 通知、统一 TID 母本、完整公共标签和最新 2.0 同步改动合在当前 `local/qq-notify-test` 分支，提交并推送该分支触发 GitHub Actions；不创建或更新 PR，不切换或合并到 `main`。新设备若继续本轮工作，须取得该分支，不能只取旧的 `main`。
 
 以下是早期 main 快照的两个历史功能提交，并非本轮最新落点：
 
@@ -644,7 +653,7 @@ release point: 以 origin/experiment/shared-capture 最新提交和 git log -1 �
 因此：
 
 - 直接换设备时，复制整个项目工作区最稳妥；
-- 若走 Git，克隆私有 `origin` 后使用最新 `experiment/shared-capture` 继续本轮工作；
+- 若走 Git，克隆私有 `origin` 后使用最新 `local/qq-notify-test` 继续本轮工作；
 - 新对话不得执行 `git reset --hard`、`git clean` 或用旧提交覆盖工作区；
 - `local_assets/`、`runtime/`、`rng_logs/` 和 `.venv/` 被 Git 忽略，不会随普通提交迁移；
 - 外部 1.1.8 和 EasyCon 安装包也必须单独复制或重新取得。
@@ -813,7 +822,7 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 - 英文连续流程开关，以及游戏版本、御三家和 ADV 上下限。目标 TID/SID 模式继续使用 SID ADV 重试半径；穷举和“不乱数 SID”模式在运行时使用实际 TID/SID ADV 计算实际 SID，不要求预先命中目标 TID/SID；御三家 Seed 时间直接使用 Ten Lines 对应设置的 Seed 表，不接受人为时间下限；“6V闪SID”按钮按默认 PID `7942EF72`（高级模式可自定义），以 F3 固定延迟帧为硬下限并叠加语言脚本补偿后选择最低可执行 SID ADV；
 - 脚本包路径默认是 `%USERPROFILE%\Downloads\NS火叶全自动一键乱数1.1.8`；工具只选择其中的英日合并母本，独立英/日脚本用于直接运行和对照。
 
-适配器位于 `automation/tid_rng137.py`。它锁定统一母本指纹，并从母本同目录的完整 1.1.8 标签包中精确物化其引用的 119 个标签；旧 TID 缓存的 329 个标签和完整原包的 1151 个标签都不再直接复用。日文原脚本 `FOR $InputLen` 在 1.6.4-a 会报三次只读 `_tmpL$0`；统一母本已使用兼容结构，生成过程不改用户原包。
+适配器位于 `automation/tid_rng137.py`。它锁定统一母本指纹，并从同一 1.1.8 原包复制所有流程共用的完整 1151 个标签；不再建立 119/328/329 项 TID 专用子集，避免 TID、SID、野生和孵蛋之间出现标签来源漂移。日文原脚本 `FOR $InputLen` 在 1.6.4-a 会报三次只读 `_tmpL$0`；统一母本已使用兼容结构，生成过程不改用户原包。
 
 连续流程采用分阶段编排；统一母本内共同维护启动/关闭/HOME_BUFFER，并在运行时只选择一个语言分支：
 
@@ -904,16 +913,16 @@ default path: %USERPROFILE%\Downloads\伊机控-EasyCon-v1.6.4alpha测试版-260
 ### 标签
 
 ```text
-总数: 1150
+总数: 1151
 方法 1: 17
 方法 3: 1
-方法 5: 777
+方法 5: 778
 方法 11: 1
 方法 14: 354
-标签语料 SHA-256: 00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e
+标签语料 SHA-256: 6d2eca22d8fb525e9ef142e4b65e11c6a0f0121d8ccd154d09ba63a7b629e850
 ```
 
-SID 入口、`闪公图标.IL` 和孵蛋池塘用的 `冲浪.IL` 作为仓库内置扩展保存在 `assets/easycon118_extensions/`。导入器会把两份标签以规范的一行格式覆盖到快照，再校验 1150 标签的新指纹，因此旧包不要求预先带有这些扩展。SID 六项能力合法范围分别代入各项努力值，不能回退成 EV=0。Python 根据图鉴编号和火红/叶绿版本把完整第三世代六项种族值与性别阈值写入 ECS；不能调用 2.0 原有的不完整目标表。用户手填每只初始等级，后续等级按成功喂糖次数 `+1`。
+SID 入口、`闪公图标.IL`、孵蛋池塘用的 `冲浪.IL` 和新版关闭画面用的 `正在关闭_暗.IL` 作为仓库内置扩展保存在 `assets/easycon118_extensions/`。导入器会把这些标签以规范的一行格式覆盖到快照，再校验 1151 标签的新指纹。SID 六项能力合法范围分别代入各项努力值，不能回退成 EV=0。Python 根据图鉴编号和火红/叶绿版本把完整第三世代六项种族值与性别阈值写入 ECS；不能调用 2.0 原有的不完整目标表。用户手填每只初始等级，后续等级按成功喂糖次数 `+1`。
 
 方法 14 必须保留原 Alpha 通道作为 `TM_SQDIFF_NORMED` 的 mask。
 

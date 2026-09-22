@@ -32,9 +32,9 @@ from .precalibration import (
 from .seed_common_regions import apply_seed_common_regions
 
 
-EXPECTED_LABEL_COUNT = 1150
-EXPECTED_LABEL_METHODS = {1: 17, 3: 1, 5: 777, 11: 1, 14: 354}
-EXPECTED_LABEL_SHA256 = "00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e"
+EXPECTED_LABEL_COUNT = 1151
+EXPECTED_LABEL_METHODS = {1: 17, 3: 1, 5: 778, 11: 1, 14: 354}
+EXPECTED_LABEL_SHA256 = "6d2eca22d8fb525e9ef142e4b65e11c6a0f0121d8ccd154d09ba63a7b629e850"
 EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
@@ -204,8 +204,14 @@ PREVIOUS_SCRIPT_SHA256S += (
 PREVIOUS_SCRIPT_SHA256S += (
     "d607e8a2702be9a7cacecb24cb0bdf59083188954c76b5196e2b7e23b62647db",
     "1e0da82c8c4d9b64e9b8768079ac14ff98c84c0ead1b3d87486912940175a129",
+    # September 20 package before shiny recording/non-target shiny handling
+    # and the dark HOME-closing label were added upstream.
+    "a7789ecb4a89d57234ae69bd9dd877fad847861153a40d5b3a23a1a3439e56df",
+    # September 21 package before the Safari fishing route adopted the
+    # per-tile PyEasyCon movement model.
+    "331abc02c477bc018b7fe2d4c9bc7ff71206ed8fd666d5809589b06549446d79",
 )
-EXPECTED_SCRIPT_SHA256 = "a7789ecb4a89d57234ae69bd9dd877fad847861153a40d5b3a23a1a3439e56df"
+EXPECTED_SCRIPT_SHA256 = "6a0afe3ff17890c9387f53efa6cd364f052b342a7a916a5efe8e1213a406a750"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
@@ -319,6 +325,12 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # Egg Held candidates from all four methods are normalized by the actual
     # per-round correction and intersected before consuming another anchor.
     "1fb41159f4b585c1a3e6a355a867f0b62c8660d5ce06b23c6a987c7098525209",
+    # September 21 materialization adds optional shiny video capture,
+    # non-target wild shiny stopping and the dark HOME-closing label.
+    "6ea987719a9837b42bb1008a353abd3e1516031445e588272a110b77c1d02473",
+    # Current materialization additionally uses the per-tile Safari fishing
+    # entry route from the latest upstream wild-target library.
+    "2f47da7a92a1a2e2de7842e3b663512fbddaacd97c8cb78ac1e70f8756c243fa",
 )
 
 
@@ -351,7 +363,7 @@ EASYCON118_EXTENSION_LABEL_DIR = (
 EASYCON118_LOCAL_LABEL_DIR = (
     RESOURCE_ROOT / "local_assets" / "easycon118" / "ImgLabel"
 )
-EASYCON118_EXTENSION_LABEL_NAMES = ("闪公图标.IL", "冲浪.IL")
+EASYCON118_EXTENSION_LABEL_NAMES = ("闪公图标.IL", "冲浪.IL", "正在关闭_暗.IL")
 EGG_SETTINGS_OVERRIDE_PATH = (
     EASYCON118_EXTENSION_LABEL_DIR
     / "egg_settings_retry.ecs"
@@ -1103,6 +1115,11 @@ class EasyCon118Options:
     # the Seed.  Its one-shot frame window must not share the ordinary layered
     # reverse-search controls.
     togepi_seed_reverse_frame_half_width: int | None = None
+    # Upstream 2.0 can save the Switch's recent video after any detected
+    # shiny.  Wild encounters may additionally stop immediately when the
+    # shiny species differs from the requested target.
+    record_shiny_video: bool = False
+    stop_on_non_target_shiny: bool = True
 
 
 EGG_PARENT_GENDERS = frozenset({"雄", "雌", "无性别", "百变怪"})
@@ -1852,6 +1869,10 @@ def plan_to_user_values(
     is_wild = _is_wild(plan)
     if not isinstance(options.item_rng_mode, bool):
         raise ValueError("道具乱数模式必须是布尔值")
+    if not isinstance(options.record_shiny_video, bool):
+        raise ValueError("出闪录像开关必须是布尔值")
+    if not isinstance(options.stop_on_non_target_shiny, bool):
+        raise ValueError("非目标闪光停止开关必须是布尔值")
     if options.item_rng_mode and not is_wild:
         raise ValueError("道具乱数模式当前仅支持野生目标")
     item_rng_enabled = options.item_rng_mode and is_wild
@@ -1895,6 +1916,8 @@ def plan_to_user_values(
         "麻痹": int(options.paralysis),
         "点到为止": int(options.false_swipe),
         "出闪后继续抓捕": int(options.continue_capture_after_shiny),
+        "出闪录像": int(options.record_shiny_video),
+        "非目标闪光停止": int(is_wild and options.stop_on_non_target_shiny),
         # Static and ordinary wild runs always materialize the safe defaults;
         # item mode is only meaningful for wild encounters.
         "道具乱数模式": int(item_rng_enabled),
@@ -2072,6 +2095,27 @@ def _configure_all_values(template_text: str, values: dict[str, Any]) -> str:
     return configured
 
 
+def _shiny_strategy_to_ecs_values(
+    options: EasyCon118Options,
+    *,
+    is_wild: bool,
+) -> dict[str, int]:
+    """Return advanced shiny post-processing assignments.
+
+    These assignments live below the 2.0 advanced-settings marker in the
+    upstream mother template, so they must not be sent through the ordinary
+    user-section replacement pass.
+    """
+    if not isinstance(options.record_shiny_video, bool):
+        raise ValueError("出闪录像开关必须是布尔值")
+    if not isinstance(options.stop_on_non_target_shiny, bool):
+        raise ValueError("非目标闪光停止开关必须是布尔值")
+    return {
+        "出闪录像": int(options.record_shiny_video),
+        "非目标闪光停止": int(is_wild and options.stop_on_non_target_shiny),
+    }
+
+
 def configure_template_text(
     template_text: str,
     plan: RunPlan,
@@ -2086,14 +2130,22 @@ def configure_template_text(
             + plan.route_support.summary
         )
 
+    options = options or EasyCon118Options()
+    user_values = plan_to_user_values(plan, options)
+    is_wild = _is_wild(plan)
+    shiny_values = _shiny_strategy_to_ecs_values(options, is_wild=is_wild)
+    for name in shiny_values:
+        user_values.pop(name, None)
     configured = _configure_user_values(
         template_text,
-        plan_to_user_values(plan, options),
+        user_values,
         optional_names={"Seed校准方案", "调试日志输出", "帧奇偶修正方案"},
     )
+    all_values = reverse_expansion_to_ecs_values(options)
+    all_values.update(shiny_values)
     return _configure_all_values(
         configured,
-        reverse_expansion_to_ecs_values(options or EasyCon118Options()),
+        all_values,
     )
 
 
@@ -2229,10 +2281,16 @@ def validate_generated_project_consistency(
             "生成项目 HOME_BUFFER 控制器与脚本入口不一致: "
             f"应为 {expected_controller}"
         )
-    _assert_configured_user_values(project_main, plan_to_user_values(plan, options))
+    user_values = plan_to_user_values(plan, options)
+    shiny_values = _shiny_strategy_to_ecs_values(options, is_wild=_is_wild(plan))
+    for name in shiny_values:
+        user_values.pop(name, None)
+    _assert_configured_user_values(project_main, user_values)
+    all_values = reverse_expansion_to_ecs_values(options)
+    all_values.update(shiny_values)
     _assert_configured_all_values(
         project_main,
-        reverse_expansion_to_ecs_values(options),
+        all_values,
     )
 
 

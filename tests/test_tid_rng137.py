@@ -116,6 +116,8 @@ class TidTemplateRevisionTests(unittest.TestCase):
             }}
             with (
                 patch("tools.import_tid_rng137.ROOT", root),
+                patch("tools.import_tid_rng137.audit_common_label_mother", return_value={}),
+                patch("tools.import_tid_rng137.copy_easycon118_extension_labels"),
                 patch("tools.import_tid_rng137.verify_tid_package", return_value=manifest),
             ):
                 import_package(source, destination)

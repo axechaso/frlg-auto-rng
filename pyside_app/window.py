@@ -328,6 +328,7 @@ class FrlgWindow(FrlgPreviewWindow):
         options = EasyCon118Options(
             nx_model=f["wild_nx"].currentIndex() + 1,
             continue_capture_after_shiny=self.capture_checks[0].isChecked(), paralysis=self.capture_checks[1].isChecked(), false_swipe=self.capture_checks[2].isChecked(),
+            record_shiny_video=self.capture_checks[3].isChecked(), stop_on_non_target_shiny=self.capture_checks[4].isChecked(),
             home_buffer_adaptive_threshold=self.home_buffer_check.isChecked(), update_precalibration=self.precalibration_check.isChecked(),
             seed_calibration_scheme=f["seed_calibration"].currentIndex() if advanced else 0,
             seed_startup_scheme=f["seed_startup"].currentIndex() if advanced else 0,

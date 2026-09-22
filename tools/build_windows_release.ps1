@@ -169,7 +169,7 @@ Set-Content -LiteralPath (Join-Path $ReleaseRoot "使用说明.txt") -Encoding U
 # release invariant so a package can never ship without the exact EasyCon
 # label names required by the generated ECS project.
 $BundledLabelDir = Join-Path $ReleaseRoot "_internal\local_assets\easycon118\ImgLabel"
-foreach ($RequiredLabel in @("闪公图标.IL", "冲浪.IL")) {
+foreach ($RequiredLabel in @("闪公图标.IL", "冲浪.IL", "正在关闭_暗.IL")) {
     $RequiredLabelPath = Join-Path $BundledLabelDir $RequiredLabel
     if (-not (Test-Path -LiteralPath $RequiredLabelPath -PathType Leaf)) {
         throw "发布包缺少 EasyCon 扩展标签：$RequiredLabelPath"

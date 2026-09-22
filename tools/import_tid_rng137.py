@@ -5,6 +5,7 @@ import hashlib
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -12,10 +13,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from automation.tid_rng137 import (  # noqa: E402
     DOWNLOADED_TID_SOURCE,
     IMPORTED_TID_SOURCE,
-    TID_EXTENSION_LABEL_DIR,
-    copy_tid_extension_labels,
     referenced_image_labels,
     verify_tid_package,
+)
+from automation.easycon118 import (  # noqa: E402
+    EXPECTED_LABEL_COUNT,
+    EXPECTED_LABEL_METHODS,
+    EXPECTED_LABEL_SHA256,
+    copy_easycon118_extension_labels,
+    inspect_label_corpus,
 )
 from automation.tid_starter_save import (  # noqa: E402
     TID_STARTER_SAVE_NAME,
@@ -26,6 +32,33 @@ from automation.tid_starter_save import (  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def audit_common_label_mother(source: Path, audit_parent: Path) -> dict:
+    """Verify the source package after installing canonical shared labels."""
+    source_labels = source / "ImgLabel"
+    audit_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".tid-label-audit-", dir=audit_parent
+    ) as audit_root:
+        audit_labels = Path(audit_root) / "ImgLabel"
+        shutil.copytree(source_labels, audit_labels)
+        copy_easycon118_extension_labels(audit_labels)
+        label_manifest = inspect_label_corpus(audit_labels)
+    if label_manifest["count"] != EXPECTED_LABEL_COUNT:
+        raise ValueError(
+            f"全流程母本标签数量应为 {EXPECTED_LABEL_COUNT}，"
+            f"当前为 {label_manifest['count']}"
+        )
+    if label_manifest["methods"] != EXPECTED_LABEL_METHODS:
+        raise ValueError(
+            f"全流程母本标签方法分布不一致: {label_manifest['methods']}"
+        )
+    if label_manifest["sha256"] != EXPECTED_LABEL_SHA256:
+        raise ValueError(
+            f"全流程母本标签指纹不一致: {label_manifest['sha256']}"
+        )
+    return label_manifest
+
+
 def import_package(
     source: Path, destination: Path, *, starter_save_source: Path | None = None
 ) -> Path:
@@ -33,13 +66,16 @@ def import_package(
     destination = destination.resolve()
     if ROOT.resolve() not in destination.parents:
         raise ValueError("TID 1.3.7 导入目标必须位于当前项目目录内")
-    # The previous 328-label cache remains a recognizable upgrade input. The
-    # generated cache below is rebuilt as the strict 119-label mother corpus.
-    # The full 1.1.8 package contains labels for every workflow. Accept the
-    # superset here, then materialize only labels referenced by this mother.
-    manifest = verify_tid_package(
-        source, allow_legacy_labels=True, allow_label_superset=True
-    )
+    # ImgLabel is the common mother for every workflow, not a TID-only subset.
+    # Audit the canonicalized full corpus before replacing the local cache.
+    source_labels = source / "ImgLabel"
+    audit_common_label_mother(source, destination.parent)
+
+    # Script and label fingerprints are verified together after the staged
+    # full corpus has been copied and normalized below.
+    mother_path = source / TID_STARTER_SAVE_NAME
+    if not mother_path.is_file():
+        raise FileNotFoundError(f"TID统一母本不存在：{mother_path}")
     if starter_save_source is not None:
         starter_save_source = starter_save_source.resolve()
         expected_mother = (source / TID_STARTER_SAVE_NAME).resolve()
@@ -53,17 +89,8 @@ def import_package(
         text = starter_save_source.read_text(encoding="utf-8-sig")
         for name in referenced_image_labels(text):
             original_label = source / "ImgLabel" / f"{name}.IL"
-            extension_label = TID_EXTENSION_LABEL_DIR / f"{name}.IL"
-            updated_label = starter_save_source.parent / "ImgLabel" / f"{name}.IL"
-            canonical_label = original_label if original_label.is_file() else extension_label
-            if not canonical_label.is_file():
+            if not original_label.is_file():
                 raise FileNotFoundError("TID球前存档脚本缺少标签：" + name)
-            if (
-                updated_label.is_file()
-                and canonical_label.read_bytes().rstrip(b"\r\n")
-                != updated_label.read_bytes().rstrip(b"\r\n")
-            ):
-                raise ValueError("TID新脚本与导入标签内容不一致：" + name)
     if source == destination and starter_save_source is None:
         return destination
     destination.mkdir(parents=True, exist_ok=True)
@@ -73,24 +100,11 @@ def import_package(
     if source != destination:
         if target_labels.exists():
             shutil.rmtree(target_labels)
-        target_labels.mkdir(parents=True)
-        mother_text = (source / TID_STARTER_SAVE_NAME).read_text(encoding="utf-8-sig")
-        for name in referenced_image_labels(mother_text):
-            source_label = source / "ImgLabel" / f"{name}.IL"
-            if source_label.is_file():
-                shutil.copy2(source_label, target_labels / source_label.name)
-                continue
-            extension_label = TID_EXTENSION_LABEL_DIR / f"{name}.IL"
-            if not extension_label.is_file():
-                raise FileNotFoundError("TID统一母本缺少标签：" + name)
-            (target_labels / extension_label.name).write_bytes(
-                extension_label.read_bytes().rstrip(b"\r\n")
-            )
-    copy_tid_extension_labels(target_labels)
+        shutil.copytree(source_labels, target_labels)
+    copy_easycon118_extension_labels(target_labels)
     # 同步工具实际选中的统一母本；独立英/日脚本只作为原包直跑参考。
     if source != destination:
-        for filename in {script["filename"] for script in manifest["scripts"].values()}:
-            shutil.copy2(source / filename, destination / filename)
+        shutil.copy2(mother_path, destination / TID_STARTER_SAVE_NAME)
     if starter_save_source is not None:
         target = destination / TID_STARTER_SAVE_NAME
         if starter_save_source != target:
@@ -129,7 +143,11 @@ def main() -> int:
         starter_save_source = same_package_mother if same_package_mother.is_file() else None
     try:
         if args.check_only:
-            verify_tid_package(args.source, allow_label_superset=True)
+            source = args.source.resolve()
+            audit_common_label_mother(source, IMPORTED_TID_SOURCE.parent)
+            mother = source / TID_STARTER_SAVE_NAME
+            if hashlib.sha256(mother.read_bytes()).hexdigest() != TID_STARTER_SAVE_SHA256:
+                raise ValueError("TID球前存档脚本指纹与本次确认版本不一致")
             result = args.source.resolve()
         else:
             result = import_package(
@@ -139,7 +157,12 @@ def main() -> int:
         print(f"TID/SID 1.3.7 导入失败: {exc}", file=sys.stderr)
         return 1
     print(f"TID/SID 1.3.7 英文/日文脚本与标签校验通过: {result}")
-    manifest = verify_tid_package(result, allow_label_superset=args.check_only)
+    manifest = (
+        {"scripts": {language: {"filename": TID_STARTER_SAVE_NAME}
+                     for language in ("英文", "日文")}}
+        if args.check_only
+        else verify_tid_package(result)
+    )
     for language, script in manifest["scripts"].items():
         print(f"{language}模板：{script['filename']}")
     return 0

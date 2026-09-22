@@ -356,6 +356,7 @@ class CompatibilityTests(unittest.TestCase):
             "帧奇偶修正方案", "目标Seed", "目标消耗帧",
             "目标宝可梦名称", "目标全国图鉴编号", "静态或野生", "宝可梦遭遇方法",
             "宝可梦遭遇地点", "麻痹", "点到为止", "出闪后继续抓捕",
+            "出闪录像", "非目标闪光停止",
             "道具乱数模式", "队伍空位数量",
         )
         template = "\n".join(f'${name} = "old"' for name in names)
@@ -375,6 +376,8 @@ class CompatibilityTests(unittest.TestCase):
                 seed_startup_scheme=1,
                 debug_log_output=0,
                 frame_parity_scheme=0,
+                record_shiny_video=True,
+                stop_on_non_target_shiny=False,
                 reverse_expansion_layers=2,
                 reverse_expansion_seed_tolerances=(11, 22, 33),
                 reverse_expansion_frame_half_widths=(1000, 2000, 3000),
@@ -383,6 +386,8 @@ class CompatibilityTests(unittest.TestCase):
         )
         self.assertIn('$Seed模式 = 6', configured)
         self.assertIn('$Seed启动方案 = 1', configured)
+        self.assertIn('$出闪录像 = 1', configured)
+        self.assertIn('$非目标闪光停止 = 0', configured)
         self.assertIn('$目标Seed = "9C76"', configured)
         self.assertIn('$目标消耗帧 = 100020', configured)
         self.assertIn('$目标宝可梦名称 = ""', configured)
@@ -479,11 +484,11 @@ class CompatibilityTests(unittest.TestCase):
     @unittest.skipUnless(LABEL_DIR.is_dir(), "local 1.1.8 label package is not present")
     def test_real_118_label_manifest(self):
         manifest = inspect_label_corpus(self.LABEL_DIR)
-        self.assertEqual(manifest["count"], 1150)
-        self.assertEqual(manifest["methods"], {1: 17, 3: 1, 5: 777, 11: 1, 14: 354})
+        self.assertEqual(manifest["count"], 1151)
+        self.assertEqual(manifest["methods"], {1: 17, 3: 1, 5: 778, 11: 1, 14: 354})
         self.assertEqual(
             manifest["sha256"],
-            "00d2fbfa9a3638f3cea64553e94b777ed8c5c63f813125617b50aaeed7c9d10e",
+            "6d2eca22d8fb525e9ef142e4b65e11c6a0f0121d8ccd154d09ba63a7b629e850",
         )
 
     @unittest.skipUnless(LABEL_DIR.is_dir(), "local 1.1.8 package is not present")
