@@ -74,7 +74,7 @@ ENDFUNC
 
 
 class StarterCalibrationTests(unittest.TestCase):
-    def test_only_starters_enable_common_regions_for_all_seed_schemes(self):
+    def test_non_egg_targets_collect_common_regions_but_only_starters_are_strict(self):
         replay = CommonReplay(source=STARTER_ASSET.read_text(encoding="utf-8"))
         requested = []
         replay.env["共同区设置严格模式"] = lambda enabled: requested.append(enabled) or 1
@@ -82,15 +82,18 @@ class StarterCalibrationTests(unittest.TestCase):
             replay.v.update(静态或野生="静态", 目标全国图鉴编号=115, Seed校准方案=scheme)
             replay.call("御三家准备共同筛选")
             self.assertEqual(replay.v["御三家严格筛选"], 0)
-            self.assertEqual(requested[-1], 0)
+            self.assertEqual(replay.v["跨组筛选收集启用"], 1)
+            self.assertEqual(requested[-1], 1)
         for dex in (1, 4, 7):
             replay.v.update(静态或野生="静态", 目标全国图鉴编号=dex)
             replay.call("御三家准备共同筛选")
             self.assertEqual(replay.v["御三家严格筛选"], 1)
+            self.assertEqual(replay.v["跨组筛选收集启用"], 1)
             self.assertEqual(requested[-1], 1)
         replay.v.update(静态或野生="孵蛋", 目标全国图鉴编号=1)
         replay.call("御三家准备共同筛选")
         self.assertEqual(replay.v["御三家严格筛选"], 0)
+        self.assertEqual(replay.v["跨组筛选收集启用"], 0)
         self.assertEqual(requested[-1], 0)
 
     def test_strict_tighter_adv_beats_same_coverage_separate_cluster(self):
@@ -198,12 +201,12 @@ class StarterCalibrationTests(unittest.TestCase):
         self.assertLess(text.index("共同区提交()"), text.index("$御三家筛选结果 ="))
         self.assertLess(text.index("$御三家筛选结果 ="), text.index("$校准成功 ="))
         self.assertIn(
-            "IF $御三家严格筛选 == 1 and $反查细分成功 == 1\n"
+            "IF ($御三家严格筛选 == 1 or $跨组筛选回退启用 == 1) and $反查细分成功 == 1\n"
             "            $投票忽略 = 共同区提交()",
             text,
         )
         self.assertIn(
-            "IF $御三家严格筛选 == 1\n"
+            "IF $跨组筛选收集启用 == 1\n"
             "        $投票忽略 = 共同区收集(",
             function(text, "处理匹配候选"),
         )

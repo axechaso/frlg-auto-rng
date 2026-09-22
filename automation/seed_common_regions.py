@@ -85,7 +85,7 @@ def _isolate_existing_entry_hooks(text: str) -> str:
         text,
         "重置本轮候选状态",
         "    CALL 共同区开始扫描\n",
-        "    IF $御三家严格筛选 == 1\n"
+        "    IF $跨组筛选收集启用 == 1\n"
         "        CALL 共同区开始扫描\n"
         "    ENDIF\n",
         "无法隔离共同区扫描入口",
@@ -94,7 +94,7 @@ def _isolate_existing_entry_hooks(text: str) -> str:
         text,
         "处理匹配候选",
         "    $投票忽略 = 共同区收集($游戏版本, $种子索引, $Seed累计修正索引, $当前消耗帧, $消耗帧实际执行修正量, $NXSeed平台偏移MS)\n",
-        "    IF $御三家严格筛选 == 1\n"
+        "    IF $跨组筛选收集启用 == 1\n"
         "        $投票忽略 = 共同区收集($游戏版本, $种子索引, $Seed累计修正索引, $当前消耗帧, $消耗帧实际执行修正量, $NXSeed平台偏移MS)\n"
         "    ENDIF\n",
         "无法隔离共同区候选收集入口",
@@ -113,7 +113,7 @@ def _isolate_existing_entry_hooks(text: str) -> str:
         "        IF $反查细分成功 == 1\n"
         "            $投票忽略 = 共同区提交()\n"
         "        ENDIF\n",
-        "        IF $御三家严格筛选 == 1 and $反查细分成功 == 1\n"
+        "        IF ($御三家严格筛选 == 1 or $跨组筛选回退启用 == 1) and $反查细分成功 == 1\n"
         "            $投票忽略 = 共同区提交()\n"
         "        ENDIF\n",
         "无法隔离共同区候选提交入口",
@@ -139,7 +139,7 @@ def _upgrade_legacy_entry(text: str) -> str:
         old,
         old.replace(
             "\n",
-            "\n    IF $御三家严格筛选 == 1\n"
+            "\n    IF $跨组筛选收集启用 == 1\n"
             "        CALL 共同区开始扫描\n"
             "    ENDIF\n",
             1,
@@ -152,7 +152,7 @@ def _upgrade_legacy_entry(text: str) -> str:
     new = old.replace(
         anchor,
         anchor
-        + "    IF $御三家严格筛选 == 1\n"
+        + "    IF $跨组筛选收集启用 == 1\n"
         + "        $投票忽略 = 共同区收集($游戏版本, $种子索引, $Seed累计修正索引, $当前消耗帧, $消耗帧实际执行修正量, $NXSeed平台偏移MS)\n"
         + "    ENDIF\n",
     )
@@ -173,7 +173,7 @@ def _upgrade_legacy_entry(text: str) -> str:
     text = text.replace(
         anchor,
         anchor
-        + "        IF $御三家严格筛选 == 1 and $反查细分成功 == 1\n"
+        + "        IF ($御三家严格筛选 == 1 or $跨组筛选回退启用 == 1) and $反查细分成功 == 1\n"
         + "            $投票忽略 = 共同区提交()\n"
         + "        ENDIF\n",
     )

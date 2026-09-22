@@ -1573,6 +1573,27 @@ ENDFUNC
         self.assertIn("FUNC 获取波克比_执行专用骑车", override)
         self.assertNotIn("FUNC 孵蛋测试_执行周期骑车与孵化收尾", override)
 
+    def test_bundled_scheme0_non_target_seed_preserves_parity_counter(self):
+        source_dir = Path(__file__).resolve().parents[1] / "local_assets" / "easycon118"
+        for filename in (
+            "NS火叶全自动一键乱数2.0.ecs",
+            "NS火叶全自动一键乱数2.0-时间轴.ecs",
+        ):
+            template = (source_dir / filename).read_text(encoding="utf-8")
+            function = template.split("FUNC 更新方案0奇偶状态", 1)[1].split(
+                "ENDFUNC", 1
+            )[0]
+            non_target = function.split("IF $命中差索引 != 0", 1)[1].split(
+                "RETURN", 1
+            )[0]
+            self.assertIn("保留已有连续计数", non_target)
+            self.assertIn("累计不一致仍为", non_target)
+            self.assertNotIn("$方案0奇偶失败次数 = 0", non_target)
+            self.assertIn(
+                "目标Seed累计3次帧奇偶不一致后升级，非目标Seed不打断计数",
+                template,
+            )
+
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]
         source_dir = root / "local_assets" / "easycon118"

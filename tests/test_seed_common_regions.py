@@ -232,7 +232,7 @@ class SeedCommonRegionsTests(unittest.TestCase):
         self.assertEqual(upgrade_library(first), first)
         self.assertIn(original.split("FUNC ")[1], first)
 
-    def test_entry_hooks_are_starter_only_and_v1_is_migrated(self):
+    def test_entry_hooks_collect_all_non_egg_targets_and_v1_is_migrated(self):
         fixture = """FUNC 重置本轮候选状态
     CALL 共同区开始扫描
 ENDFUNC
@@ -253,14 +253,15 @@ ENDFUNC
         migrated = upgrade_entry("# SEED_COMMON_REGION_HOOK_V1\n" + fixture)
         self.assertIn("# SEED_COMMON_REGION_HOOK_V2_STARTER_ONLY", migrated)
         self.assertNotIn("# SEED_COMMON_REGION_HOOK_V1\n", migrated)
-        self.assertEqual(migrated.count("IF $御三家严格筛选 == 1"), 4)
+        self.assertEqual(migrated.count("IF $跨组筛选收集启用 == 1"), 2)
+        self.assertEqual(migrated.count("IF $御三家严格筛选 == 1"), 1)
         self.assertNotIn(
             "IF $御三家严格筛选 == 1\n"
             "        $当前候选MSE = $当前候选MSE + 共同区候选加权距离(",
             re.search(r"(?ms)^FUNC 御三家刷新候选距离[^\n]*\n.*?^ENDFUNC", migrated)[0],
         )
         self.assertIn(
-            "IF $御三家严格筛选 == 1 and $反查细分成功 == 1",
+            "IF ($御三家严格筛选 == 1 or $跨组筛选回退启用 == 1) and $反查细分成功 == 1",
             migrated,
         )
 

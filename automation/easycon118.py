@@ -336,6 +336,10 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "2f47da7a92a1a2e2de7842e3b663512fbddaacd97c8cb78ac1e70f8756c243fa",
     # September 22 materialization with adaptive frame-parity scheme 0.
     "2427104527607ab470756b8a2fdf75d02537580177b3dac0887c8f17680555b1",
+    # Ordinary menu parity pre-deducts the measured 128 advances, while
+    # starters keep their independent timing model; 5+ ambiguous candidates
+    # can use the paired cross-round common-region fallback.
+    "38d1e97107d9f5a67d44dbed176538d49b6709fb35ac0c22c75e797d30a16e69",
 )
 
 
