@@ -348,7 +348,6 @@ class PySideBackendTests(unittest.TestCase):
 
     def test_start_button_uses_checked_command_and_locks_inputs_until_finished(self):
         from automation import EasyConRuntimeCheck
-        from PySide6.QtWidgets import QMessageBox
         from pyside_app.services import RunCommand
         w = self.window
         w.devices = ({"COM4"}, {3: "Capture"})
@@ -361,7 +360,7 @@ class PySideBackendTests(unittest.TestCase):
         w.refresh_state()
         self.assertTrue(w.start_button.isEnabled())
         with patch("pyside_app.window.prepare_run", return_value=command) as prepare, \
-             patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+             patch.object(w, "_confirm_wild_start", return_value=True) as confirm:
             w.start_button.click()
             self.wait_until(lambda: w.running)
             self.assertFalse(w.fields["wild_game"].isEnabled())
@@ -369,6 +368,12 @@ class PySideBackendTests(unittest.TestCase):
             self.assertTrue(w.stop_button.isEnabled())
             self.wait_until(lambda: not w.running)
         prepare.assert_called_once_with(checked, "COM4", 3, "Capture")
+        prompt = confirm.call_args.args[0]
+        self.assertIn("运行前必须确认", prompt)
+        self.assertIn("队伍放五只宝可梦，第六位留空", prompt)
+        self.assertIn("背包第一页第一格放神奇糖果", prompt)
+        self.assertIn("目标 Seed", prompt)
+        self.assertIn("目标 Advance", prompt)
         self.assertIn("checked command", w.log_view.toPlainText())
         self.assertTrue(w.fields["wild_game"].isEnabled())
         self.assertTrue(w.start_button.isEnabled())

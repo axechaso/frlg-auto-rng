@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import codecs
+import html
 import json
 import re
 import uuid
@@ -41,6 +42,90 @@ from .profiles import ProfileManager
 from .services import AppPaths, WildInputs, prepare_wild, prepare_run, display_log_line
 from notifications.qq_service import QQNotificationService, QQSettingsStore
 from .qq_notifications import QQNotificationDialog
+
+
+_CAPTURE_REQUIREMENT_SPECIES = frozenset({97, 101, 143, 150, 175, 243, 244, 245, 249, 250, 386})
+_ROAMING_SPECIES = frozenset({243, 244, 245})
+
+
+def wild_run_requirements(plan, options) -> tuple[str, ...]:
+    """Mirror the visible 2.0 setup requirements for a generated wild/static run."""
+    request = plan.request
+    species = plan.species_id
+    is_wild = "Wild" in request.method
+    requirements = ["第 0 轮会自动检查文字速度、战斗动画、声音和按键模式。"]
+
+    if options.item_rng_mode and is_wild:
+        requirements.append(
+            f"队伍预留 {options.party_empty_slots} 个空位；脚本会保存同样数量的携带道具目标。"
+        )
+    elif species == 175:
+        requirements.append("队伍放四只宝可梦：第五位留给波克比蛋，第六位留给 Seed 复核野生。")
+    else:
+        requirements.append("队伍放五只宝可梦，第六位留空。")
+
+    if (is_wild and request.category in {"Grass", "Surf"}) or species == 175:
+        requirements.append("队伍第一位放会使用甜甜香气的宝可梦。")
+    if species in _ROAMING_SPECIES:
+        requirements.extend(("队首宝可梦低于 50 级。", "队伍第三位放飞翔宝可梦，飞翔位于技能栏第一位。"))
+    if (is_wild or species in _CAPTURE_REQUIREMENT_SPECIES) and options.paralysis:
+        requirements.append("队伍第一位放麻痹宝可梦，麻痹招式位于技能栏第一位。")
+    if (is_wild or species in _CAPTURE_REQUIREMENT_SPECIES) and options.false_swipe:
+        requirements.append("队伍第二位放点到为止宝可梦，点到为止位于技能栏第一位。")
+
+    requirements.append("背包第一页第一格放神奇糖果，数量不限。")
+    if is_wild or species in _CAPTURE_REQUIREMENT_SPECIES:
+        requirements.extend(("背包第一页第二格放血药。", "背包第三页第一格放大师球。"))
+        if options.continue_capture_after_shiny:
+            requirements.append("背包第三页第二格放出闪后抓捕使用的球种。")
+    if species in _ROAMING_SPECIES:
+        requirements.append("背包第一页第三格放黄金喷雾。")
+
+    if plan.initial_seed.advances > 14400:
+        requirements.append("目标 Advance 超过 14400：按当前路线准备 Teachy TV 与所需钓竿/自行车位置。")
+    elif is_wild and request.category in {"OldRod", "GoodRod", "SuperRod"}:
+        rod = {"OldRod": "破旧钓竿", "GoodRod": "好钓竿", "SuperRod": "厉害钓竿"}[request.category]
+        requirements.append(f"将{rod}登录到快捷键。")
+    elif species == 175 or species in _ROAMING_SPECIES:
+        requirements.append("将自行车登录到快捷键。")
+
+    requirements.append("确认游戏位于方案要求的存档位置，并保持 NS 主页/游戏启动状态符合脚本要求。")
+    return tuple(requirements)
+
+
+def wild_start_confirmation_html(plan, options, port: str, capture_name: str, warnings=()) -> str:
+    """Render a scannable, rich-text run confirmation for QMessageBox."""
+    esc = lambda value: html.escape(str(value))
+    target = SPECIES_EN_TO_ZH.get(plan.request.pokemon, plan.request.pokemon)
+    rom = "日版（日文）" if "_jpn_" in plan.request.game else "美版（英文）"
+    seed_mode = "10（日版 mono_h_a）" if options.japanese_starter else str(plan.seed_mode)
+    requirements = "".join(f"<li>{esc(item)}</li>" for item in wild_run_requirements(plan, options))
+    warning_items = tuple(line for warning in warnings for line in str(warning).splitlines() if line.strip())
+    warning_html = "".join(f"<li>{esc(line)}</li>" for line in warning_items)
+    if not warning_html:
+        warning_html = "<li>EasyCon 1.6.4-a 启动预检已通过。</li>"
+    return f"""
+<table width="620" cellspacing="0" cellpadding="0">
+  <tr><td style="font-size:18px; font-weight:600; color:#102a56; padding-bottom:8px;">即将运行：{esc(target)}</td></tr>
+  <tr><td>
+    <table width="100%" cellspacing="0" cellpadding="8" style="background-color:#edf3ff; border:1px solid #b8c9f5;">
+      <tr><td><b>ROM</b><br>{esc(rom)}</td><td><b>设备</b><br>{esc(port)} / {esc(capture_name)}</td></tr>
+      <tr><td><b>目标 Seed</b><br><span style="font-size:17px; color:#3157d5; font-weight:600;">{esc(plan.initial_seed.seed)}</span></td>
+          <td><b>目标 Advance</b><br><span style="font-size:17px; color:#3157d5; font-weight:600;">{plan.initial_seed.advances:,}</span></td></tr>
+      <tr><td colspan="2"><b>Seed 模式</b>：{esc(seed_mode)}　<span style="color:#53657d;">{esc(plan.initial_seed.settings)}</span></td></tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding-top:10px;">
+    <table width="100%" cellspacing="0" cellpadding="9" style="background-color:#fff4d6; border:1px solid #e0ae43;">
+      <tr><td><span style="font-size:15px; font-weight:600; color:#9a5200;">⚠ 运行前必须确认</span>
+        <ol style="margin-top:6px; margin-bottom:4px;">{requirements}</ol>
+      </td></tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding-top:10px;"><b>路线</b>：{esc(plan.route_support.summary)}</td></tr>
+  <tr><td style="padding-top:8px; color:#66758a;"><b>预检信息</b><ul style="margin-top:3px; margin-bottom:0;">{warning_html}</ul></td></tr>
+</table>
+""".strip()
 
 
 class FrlgWindow(FrlgPreviewWindow):
@@ -607,18 +692,15 @@ class FrlgWindow(FrlgPreviewWindow):
             if self.prepared is not prepared or self.collect_inputs().fingerprint() != prepared.inputs.fingerprint():
                 self.set_status("启动检查期间条件已变化，请重新生成。")
                 return
-            warnings = "\n".join(command.check.warnings)
             plan = prepared.result.plan
-            rom_language = "日版（日文）" if "_jpn_" in plan.request.game else "美版（英文）"
-            prompt = (f"即将运行 {SPECIES_EN_TO_ZH.get(plan.request.pokemon, plan.request.pokemon)} 的已生成方案。\n"
-                      f"ROM：{rom_language}\n"
-                      f"设备：{port} / {self.devices[1][video]}\n"
-                      f"Seed 模式 {plan.seed_mode}：{plan.initial_seed.settings}\n"
-                      f"路线：{plan.route_support.summary}\n"
-                      "请确认游戏设置、存档位置和 NS 主页状态符合 2.0 脚本要求。")
-            if warnings:
-                prompt += "\n\n" + warnings
-            if QMessageBox.question(self, "开始运行", prompt) != QMessageBox.StandardButton.Yes:
+            prompt = wild_start_confirmation_html(
+                plan,
+                prepared.inputs.options,
+                port,
+                self.devices[1][video],
+                command.check.warnings,
+            )
+            if not self._confirm_wild_start(prompt):
                 self.set_status("预检通过，等待开始运行。")
                 return
             self.run_command = command
@@ -633,6 +715,28 @@ class FrlgWindow(FrlgPreviewWindow):
             self.refresh_state()
             self.process.start(command.program, list(command.arguments))
         self.launch_job(lambda _cancel, _status: prepare_run(prepared, port, video, self.devices[1][video]), ready, "正在重新核对设备、脚本与正式运行器……")
+
+    def _confirm_wild_start(self, prompt: str) -> bool:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("开始运行")
+        dialog.setIcon(QMessageBox.Icon.Question)
+        dialog.setTextFormat(Qt.TextFormat.RichText)
+        dialog.setText(prompt)
+        dialog.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Yes)
+        dialog.setEscapeButton(QMessageBox.StandardButton.No)
+        yes_button = dialog.button(QMessageBox.StandardButton.Yes)
+        no_button = dialog.button(QMessageBox.StandardButton.No)
+        if yes_button is not None:
+            yes_button.setText("开始运行")
+        if no_button is not None:
+            no_button.setText("返回检查")
+        label = dialog.findChild(QLabel, "qt_msgbox_label")
+        if label is not None:
+            label.setMinimumWidth(620)
+            label.setWordWrap(True)
+        return dialog.exec() == QMessageBox.StandardButton.Yes
 
     def _begin_run_notification(self):
         """Start a new notification event for each accepted run."""
