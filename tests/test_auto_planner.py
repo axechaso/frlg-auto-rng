@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from automation.easycon118 import (
     EasyCon118Options,
@@ -347,9 +348,56 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(result.plan.initial_seed.seed, "11C7")
         self.assertEqual(result.plan.initial_seed.advances, 4321)
 
-    def test_direct_seed_mode_requires_explicit_seed_mode(self):
-        with self.assertRaisesRegex(ValueError, "必须选择 Seed 模式"):
-            request(direct_mode=True, direct_seed="9E2E", direct_advances=1).validate()
+    def test_direct_seed_mode_auto_selects_shortest_start_wait_even_with_blackout(self):
+        def seeds(_data, setting_key, _game, extra_button):
+            routes = {
+                ("mono_h_a", "none"): 31000,
+                ("stereo_h_a", "none"): 30000,
+                ("mono_h_a", "blackout_r"): 29000,
+            }
+            seed_time = routes.get((setting_key, extra_button))
+            return [] if seed_time is None else [{"initial_seed": 0x1234, "seed_time": seed_time}]
+
+        with patch("automation.planner.load_frlg_seed_data", return_value=({}, {})), \
+             patch("automation.planner.get_contiguous_seed_list", side_effect=seeds):
+            result = search_best_plan(request(
+                direct_mode=True,
+                direct_seed="1234",
+                direct_advances=4321,
+            ))
+
+        self.assertEqual(result.plan.seed_mode, 4)
+        self.assertEqual(result.plan.initial_seed.seed_time, 29000)
+        self.assertIn("启动等待最短", "\n".join(result.plan.warnings))
+
+    def test_direct_seed_mode_auto_tie_prefers_no_extra_button(self):
+        def seeds(_data, setting_key, _game, extra_button):
+            if (setting_key, extra_button) in {
+                ("stereo_h_a", "none"),
+                ("mono_h_a", "blackout_r"),
+            }:
+                return [{"initial_seed": 0x1234, "seed_time": 30000}]
+            return []
+
+        with patch("automation.planner.load_frlg_seed_data", return_value=({}, {})), \
+             patch("automation.planner.get_contiguous_seed_list", side_effect=seeds):
+            result = search_best_plan(request(
+                direct_mode=True,
+                direct_seed="1234",
+                direct_advances=4321,
+            ))
+
+        self.assertEqual(result.plan.seed_mode, 1)
+
+    def test_direct_seed_mode_auto_rejects_seed_unreachable_in_every_mode(self):
+        with patch("automation.planner.load_frlg_seed_data", return_value=({}, {})), \
+             patch("automation.planner.get_contiguous_seed_list", return_value=[]):
+            with self.assertRaisesRegex(ValueError, "所有可用 Seed 模式中均不可达"):
+                search_best_plan(request(
+                    direct_mode=True,
+                    direct_seed="1234",
+                    direct_advances=4321,
+                ))
 
     def test_118_static_whitelist_has_version_specific_thirty_targets(self):
         for game in ("fr", "lg"):

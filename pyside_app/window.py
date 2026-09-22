@@ -287,7 +287,10 @@ class FrlgWindow(FrlgPreviewWindow):
         for key in ("source", "ezcon", "port", "video"):
             self.fields[key].setToolTip("选择正式脚本包或本次运行设备；启动前会重新核对设备与运行时。")
         for key in ("wild_seed_mode", "wild_direct_seed", "wild_direct_adv"):
-            self.fields[key].setToolTip("与正式工具使用相同的搜索参数。指定 Seed / 帧数时必须明确选择 Seed 模式。")
+            self.fields[key].setToolTip(
+                "指定 Seed / 帧数时可自动遍历当前版本的 Seed 表，"
+                "优先选择启动等待时间最短的可达模式；也可手动强制指定模式。"
+            )
 
     def _connect_inputs(self):
         self.input_keys = [k for k in self.fields if k.startswith("wild_") or k.startswith("expansion_")]
@@ -514,7 +517,11 @@ class FrlgWindow(FrlgPreviewWindow):
             self.summary_note.setText(f"IV {ivs.hp} / {ivs.attack} / {ivs.defense} / {ivs.sp_attack} / {ivs.sp_defense} / {ivs.speed}\n{nature} · {ABILITY_EN_TO_ZH.get(plan.target.ability, plan.target.ability)} · {gender}{rare_form}")
             if plan.request.direct_mode:
                 self.metric_values[2].setText("—")
-                self.summary_note.setText("指定模式未计算个体与闪光结果；使用所填 Seed 和消耗帧。")
+                display_mode = "10（日版）" if self.prepared.inputs.options.japanese_starter else str(plan.seed_mode)
+                self.summary_note.setText(
+                    "指定模式未计算个体与闪光结果；"
+                    f"Seed 模式 {display_mode}，启动等待 {plan.initial_seed.seed_time:,} ms。"
+                )
             self.summary_badge.setText("预检通过" if valid else "查看预检详情")
         elif wild:
             self.summary_name.setText("暂无方案")
@@ -625,9 +632,10 @@ class FrlgWindow(FrlgPreviewWindow):
         self.prepared = prepared
         plan = prepared.result.plan
         rom_language = "日版（日文）" if "_jpn_" in plan.request.game else "美版（英文）"
+        display_mode = "10（日版 mono_h_a）" if prepared.inputs.options.japanese_starter else str(plan.seed_mode)
         text = [f"目标：{SPECIES_EN_TO_ZH.get(plan.request.pokemon, plan.request.pokemon)}",
                 f"ROM：{rom_language}",
-                f"初始 Seed：{plan.initial_seed.seed}；Advance：{plan.initial_seed.advances}；Seed 模式：{plan.seed_mode}",
+                f"初始 Seed：{plan.initial_seed.seed}；Advance：{plan.initial_seed.advances}；Seed 模式：{display_mode}",
                 ("指定模式不计算个体 / 闪光；" if plan.request.direct_mode else f"IV 合计：{plan.iv_total}；") + f"路线：{plan.route_support.summary}",
                 f"计划：{prepared.plan_path}", f"脚本：{prepared.project or '未生成'}"]
         text.extend(f"提示：{x}" for x in (*plan.warnings, *prepared.check.warnings))

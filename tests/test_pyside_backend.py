@@ -88,6 +88,19 @@ class PySideBackendTests(unittest.TestCase):
         self.assertFalse(w.dunsparce_three_segment_check.isChecked())
         self.assertFalse(w.dunsparce_three_segment_check.isEnabled())
 
+    def test_direct_mode_keeps_auto_seed_mode_for_planner_selection(self):
+        w = self.window
+        w.fields["wild_search_mode"].setCurrentIndex(1)
+        w.fields["wild_direct_seed"].setText("11C7")
+        w.fields["wild_direct_adv"].setText("4321")
+        w.fields["wild_seed_mode"].setCurrentIndex(0)
+
+        inputs = w.collect_inputs()
+
+        self.assertTrue(inputs.request.direct_mode)
+        self.assertIsNone(inputs.request.seed_mode)
+        inputs.request.validate()
+
     def test_no_placeholder_device_is_treated_as_connected(self):
         w = self.window
         w.prepared = self.prepared()

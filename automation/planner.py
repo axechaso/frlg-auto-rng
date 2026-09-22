@@ -14,10 +14,11 @@ from rng.tenlines_utils import (
     SearchWorkLimitError,
     TYPES,
     frame_to_ms,
+    get_contiguous_seed_list,
     get_species_id,
     get_species_name,
-    get_seed_time,
     initial_seed,
+    load_frlg_seed_data,
     ms_to_time_str,
     search_target_tiers,
 )
@@ -121,8 +122,6 @@ class AutoSearchRequest:
         if self.hidden_type not in ("Any", *TYPES):
             raise ValueError(f"不支持的隐藏属性筛选: {self.hidden_type}")
         if self.direct_mode:
-            if self.seed_mode is None:
-                raise ValueError("指定 Seed/帧数模式必须选择 Seed 模式")
             raw_seed = (self.direct_seed or "").strip().upper()
             if raw_seed.startswith("0X"):
                 raw_seed = raw_seed[2:]
@@ -300,13 +299,45 @@ def _direct_plan(request: AutoSearchRequest) -> PlanSearchResult:
     if raw_seed.startswith("0X"):
         raw_seed = raw_seed[2:]
     seed = f"{int(raw_seed, 16):04X}"
-    settings = seed_mode_to_settings(request.seed_mode)  # validated above
-    try:
-        seed_time = get_seed_time(seed, request.game, settings)
-    except (KeyError, ValueError) as exc:
+    seed_value = int(seed, 16)
+    seed_data = load_frlg_seed_data(request.game)
+    modes = (
+        (request.seed_mode,)
+        if request.seed_mode is not None
+        else ((0,) if "_jpn_" in request.game else tuple(range(10)))
+    )
+    candidates = []
+    for seed_mode in modes:
+        settings = seed_mode_to_settings(seed_mode)
+        matching_times = [
+            entry["seed_time"]
+            for entry in get_contiguous_seed_list(
+                seed_data,
+                settings.setting_key,
+                request.game,
+                settings.extra_button,
+            )
+            if entry["initial_seed"] == seed_value
+        ]
+        if matching_times:
+            candidates.append((
+                min(matching_times),
+                settings.extra_button != "none",
+                seed_mode,
+                settings,
+            ))
+    if not candidates:
+        if request.seed_mode is None:
+            raise ValueError(
+                f"指定 Seed {seed} 在 {request.game} 的所有可用 Seed 模式中均不可达"
+            )
         raise ValueError(
             f"指定 Seed {seed} 不在 {request.game} 的 Seed 表/模式 {request.seed_mode} 中"
-        ) from exc
+        )
+    # The user's primary cost is waiting for the game to reach the initial
+    # Seed.  Prefer the shortest exact table time first.  Only break equal-time
+    # ties in favor of a mode without an extra/blackout button, then by mode id.
+    seed_time, _, selected_mode, settings = min(candidates)
     advances = int(request.direct_advances)
     console = "NX2" if request.game.endswith("nx2") else "NX"
     total_frames = (seed_time / 16) + advances
@@ -338,6 +369,16 @@ def _direct_plan(request: AutoSearchRequest) -> PlanSearchResult:
         pokemon=get_species_name(get_species_id(request.pokemon)),
     )
     warnings = ["指定 Seed/帧数模式未执行筛选搜索，直接使用用户输入的目标参数。"]
+    if request.seed_mode is None:
+        display_mode = (
+            "10（日版 mono_h_a）"
+            if "_jpn_" in request.game
+            else str(selected_mode)
+        )
+        warnings.append(
+            f"指定 Seed 在 {len(candidates)} 个模式中可达；"
+            f"已按启动等待最短选择 Seed 模式 {display_mode}（{seed_time} ms）。"
+        )
     if not support.can_start:
         warnings.append(support.summary)
     return PlanSearchResult(
