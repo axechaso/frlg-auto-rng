@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QSpinBox, QTableWidgetItem,
 )
 
-from pyside_preview import FrlgPreviewWindow, Card
+from pyside_preview import FrlgPreviewWindow, Card, SEED_MODE_LABELS
 from app_paths import RESOURCE_ROOT
 from assets.game_text import (
     ABILITY_EN_TO_ZH, CATEGORY_EN_TO_ZH, SPECIES_EN_TO_ZH, WILD_CATEGORIES,
@@ -122,6 +122,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self._connect_inputs()
         self.fields["wild_game"].currentIndexChanged.connect(self._populate_locations)
         self.fields["wild_nx"].currentIndexChanged.connect(self._populate_species)
+        self.fields["profile_language"].currentIndexChanged.connect(self._populate_categories)
         self.fields["wild_category"].currentIndexChanged.connect(self._populate_locations)
         self.fields["wild_location"].currentIndexChanged.connect(self._populate_species)
         self.fields["wild_species"].currentIndexChanged.connect(self._populate_abilities)
@@ -231,8 +232,11 @@ class FrlgWindow(FrlgPreviewWindow):
                 index = combo.findData(preferred)
             combo.setCurrentIndex(max(0, index) if combo.count() else -1)
 
-    def game_code(self):
-        return ("fr" if self.fields["wild_game"].currentIndex() == 0 else "lg") + ("_nx2" if self.fields["wild_nx"].currentIndex() else "_nx")
+    def game_code(self, *, include_profile_language=True):
+        family = "fr" if self.fields["wild_game"].currentIndex() == 0 else "lg"
+        language = "_jpn" if include_profile_language and self.fields["profile_language"].currentIndex() == 1 else ""
+        console = "_nx2" if self.fields["wild_nx"].currentIndex() else "_nx"
+        return family + language + console
 
     def _refresh_wild_type(self):
         if not getattr(self, "live_ready", False):
@@ -247,8 +251,24 @@ class FrlgWindow(FrlgPreviewWindow):
             self.traversal_check.setEnabled(False)
 
     def _populate_categories(self):
+        japanese = self.fields["profile_language"].currentIndex() == 1
+        if japanese and self.fields["wild_method"].currentIndex() != 1:
+            with QSignalBlocker(self.fields["wild_method"]):
+                self.fields["wild_method"].setCurrentIndex(1)
         wild = self.fields["wild_method"].currentIndex() == 0
         categories = WILD_CATEGORIES if wild else PLANNER_STATIC_CATEGORIES
+        if japanese:
+            categories = ("Starter",)
+            self.fields["wild_method"].setToolTip("日版当前只支持静态御三家；使用日版 mono_h_a Seed 表与专用识图。")
+        else:
+            self.fields["wild_method"].setToolTip("")
+        seed_modes = self.fields["wild_seed_mode"]
+        seed_mode_items = ("自动选择", SEED_MODE_LABELS[0]) if japanese else ("自动选择", *SEED_MODE_LABELS)
+        if tuple(seed_modes.itemText(i) for i in range(seed_modes.count())) != seed_mode_items:
+            with QSignalBlocker(seed_modes):
+                seed_modes.clear()
+                seed_modes.addItems(seed_mode_items)
+                seed_modes.setCurrentIndex(0)
         self._fill(self.fields["wild_category"], [(CATEGORY_EN_TO_ZH.get(x, x), x) for x in categories], "Grass")
         self._populate_locations()
 
@@ -327,6 +347,7 @@ class FrlgWindow(FrlgPreviewWindow):
         advanced = self.advanced_check.isChecked()
         options = EasyCon118Options(
             nx_model=f["wild_nx"].currentIndex() + 1,
+            japanese_starter="_jpn_" in request.game,
             continue_capture_after_shiny=self.capture_checks[0].isChecked(), paralysis=self.capture_checks[1].isChecked(), false_swipe=self.capture_checks[2].isChecked(),
             record_shiny_video=self.capture_checks[3].isChecked(), stop_on_non_target_shiny=self.capture_checks[4].isChecked(),
             home_buffer_adaptive_threshold=self.home_buffer_check.isChecked(), update_precalibration=self.precalibration_check.isChecked(),
@@ -518,7 +539,9 @@ class FrlgWindow(FrlgPreviewWindow):
             return
         self.prepared = prepared
         plan = prepared.result.plan
+        rom_language = "日版（日文）" if "_jpn_" in plan.request.game else "美版（英文）"
         text = [f"目标：{SPECIES_EN_TO_ZH.get(plan.request.pokemon, plan.request.pokemon)}",
+                f"ROM：{rom_language}",
                 f"初始 Seed：{plan.initial_seed.seed}；Advance：{plan.initial_seed.advances}；Seed 模式：{plan.seed_mode}",
                 ("指定模式不计算个体 / 闪光；" if plan.request.direct_mode else f"IV 合计：{plan.iv_total}；") + f"路线：{plan.route_support.summary}",
                 f"计划：{prepared.plan_path}", f"脚本：{prepared.project or '未生成'}"]
@@ -586,7 +609,9 @@ class FrlgWindow(FrlgPreviewWindow):
                 return
             warnings = "\n".join(command.check.warnings)
             plan = prepared.result.plan
+            rom_language = "日版（日文）" if "_jpn_" in plan.request.game else "美版（英文）"
             prompt = (f"即将运行 {SPECIES_EN_TO_ZH.get(plan.request.pokemon, plan.request.pokemon)} 的已生成方案。\n"
+                      f"ROM：{rom_language}\n"
                       f"设备：{port} / {self.devices[1][video]}\n"
                       f"Seed 模式 {plan.seed_mode}：{plan.initial_seed.settings}\n"
                       f"路线：{plan.route_support.summary}\n"

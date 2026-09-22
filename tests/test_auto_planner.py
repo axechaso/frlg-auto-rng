@@ -245,6 +245,28 @@ class CompatibilityTests(unittest.TestCase):
     def test_leaf_green_accepts_seed_mode_three(self):
         request(game="lg_nx", seed_mode=3).validate()
 
+    def test_japanese_rom_is_limited_to_supported_starter_route_and_seed_mode(self):
+        supported = request(
+            game="lg_jpn_nx",
+            method="Static 1",
+            category="Starter",
+            location="Starter",
+            pokemon="Squirtle",
+            seed_mode=0,
+        )
+        supported.validate()
+        with self.assertRaisesRegex(ValueError, "日版当前只支持静态御三家"):
+            request(game="lg_jpn_nx").validate()
+        with self.assertRaisesRegex(ValueError, "mono_h_a"):
+            request(
+                game="lg_jpn_nx",
+                method="Static 1",
+                category="Starter",
+                location="Starter",
+                pokemon="Squirtle",
+                seed_mode=8,
+            ).validate()
+
     def test_static_whitelist_accepts_national_dex_input(self):
         AutoSearchRequest(
             game="fr_nx",

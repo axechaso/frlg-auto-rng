@@ -77,6 +77,13 @@ class AutoSearchRequest:
             raise ValueError("TID 必须在 0-65535 之间")
         if not (0 <= self.sid <= 65535):
             raise ValueError("SID 必须在 0-65535 之间")
+        if "_jpn_" in self.game:
+            if self.method != "Static 1" or self.category != "Starter" or self.pokemon not in {
+                "Bulbasaur", "Charmander", "Squirtle",
+            }:
+                raise ValueError("日版当前只支持静态御三家（妙蛙种子/小火龙/杰尼龟）")
+            if self.seed_mode not in {None, 0}:
+                raise ValueError("日版御三家当前只有 mono_h_a Seed 表，请选择自动或模式 0")
         if self.min_advances < 0:
             raise ValueError("最小 Advance 不能为负数")
         if self.max_advances < 0:

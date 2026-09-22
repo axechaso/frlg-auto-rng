@@ -61,7 +61,7 @@ class FormReader:
         if require_ack and not self.w.egg_ack.isChecked():
             raise ValueError("请先确认孵蛋前置条件")
         parents = self.w.egg_parent_widgets
-        request = EggRunRequest(game=self.w.game_code(), seed_mode=self.index("egg_seed_mode") - 1,
+        request = EggRunRequest(game=self.w.game_code(include_profile_language=False), seed_mode=self.index("egg_seed_mode") - 1,
             target_seed=self.text("egg_seed"), held_advances=self.integer("egg_held"),
             pickup_advances=self.integer("egg_pickup"), species_id=species_id(self.text("egg_species")),
             compatibility=self.selected_integer("egg_compatibility"), parent_a_gender=parents[0][0].currentText(),

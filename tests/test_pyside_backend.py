@@ -141,6 +141,26 @@ class PySideBackendTests(unittest.TestCase):
         self.assertEqual(w.fields["egg_nx"].currentText(), "Switch 2")
         self.assertEqual(w.profile_store.get(profile.profile_id).tid, 7)
 
+    def test_japanese_profile_drives_wild_static_starter_request_and_runtime(self):
+        w = self.window
+        w.profile_store.add("Japanese", "叶绿", 12345, 54321, 1, language="日文")
+        w.reload_profiles(apply=True)
+        self.assertEqual(w.fields["profile_language"].currentIndex(), 1)
+        self.assertEqual(w.fields["wild_method"].currentText(), "静态")
+        self.assertEqual(w.fields["wild_category"].currentData(), "Starter")
+        self.assertEqual(w.fields["wild_seed_mode"].count(), 2)
+        species = w.fields["wild_species"]
+        species.setCurrentIndex(species.findData("Squirtle"))
+
+        inputs = w.collect_inputs()
+        self.assertEqual(inputs.request.game, "lg_jpn_nx")
+        self.assertEqual(inputs.request.seed_mode, None)
+        self.assertTrue(inputs.options.japanese_starter)
+
+        w.fields["profile_language"].setCurrentIndex(0)
+        self.assertEqual(w.fields["wild_seed_mode"].count(), 11)
+        self.assertEqual(w.game_code(), "lg_nx")
+
     def test_profile_selection_does_not_fill_empty_or_default_tid_targets(self):
         w = self.window
         first = w.profile_store.add("English", "火红", 12345, 54321, 1)

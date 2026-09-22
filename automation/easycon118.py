@@ -1859,6 +1859,12 @@ def plan_to_user_values(
             f"不能写入 {nx_model}"
         )
 
+    request_uses_japanese_rom = "_jpn_" in plan.request.game
+    if request_uses_japanese_rom != options.japanese_starter:
+        raise ValueError(
+            "日版御三家生成标志与搜索使用的 ROM 语言不一致；拒绝生成可能调用英文 Seed 表或英文标签的脚本"
+        )
+
     if options.seed_startup_scheme not in {0, 1}:
         raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
     if options.seed_calibration_scheme not in {0, 1}:
@@ -2401,6 +2407,7 @@ _JAPANESE_STAT_LABELS = (
 )
 _JAPANESE_STARTER_MARKER = "# ===== 日版御三家临时识图分支 ====="
 _JAPANESE_STARTER_GUARD_MARKER = "日版御三家临时模式10仅支持静态图鉴1/4/7"
+_JAPANESE_STARTER_PAGE_SYNC_MARKER = "# JAPANESE_STARTER_PAGE_SYNC_V1"
 
 
 def _render_japanese_starter_ocr_helper() -> str:
@@ -2429,6 +2436,23 @@ def _render_japanese_starter_ocr_helper() -> str:
         "        PRINT 已识别到出闪，脚本停止",
         "        RETURN 0",
         "    ENDIF",
+        "",
+        f"    {_JAPANESE_STARTER_PAGE_SYNC_MARKER}",
+        "    # 旧日版御三家脚本会先确认性格页，再右切并确认能力值页。",
+        "    $日版页面等待次数 = 0",
+        "    FOR",
+        "        $日版性格页分数 = @日版性格界面",
+        "        $日版能力页分数 = @日版能力值界面",
+        "        IF $日版性格页分数 > $识图阈值",
+        "            BREAK",
+        "        ENDIF",
+        "        WAIT 100",
+        "        $日版页面等待次数 += 1",
+        "        IF $日版页面等待次数 >= 30",
+        "            PRINT 日版性格页确认失败: 性格页 & $日版性格页分数 & \" 能力值页 \" & $日版能力页分数",
+        "            RETURN 0",
+        "        ENDIF",
+        "    NEXT",
         "",
         "    $日版公图标分数 = @火红公图标",
         "    $日版母图标分数 = @火红母图标",
@@ -2466,8 +2490,23 @@ def _render_japanese_starter_ocr_helper() -> str:
             "    $当前性格 = $识图性格",
             "",
             "    $等级 = 5",
-            "    RIGHT",
-            "    1000",
+            "    LS RIGHT",
+            "    WAIT 50",
+            "    LS RESET",
+            "    WAIT 1000",
+            "    $日版页面等待次数 = 0",
+            "    FOR",
+            "        $日版能力页分数 = @日版能力值界面",
+            "        IF $日版能力页分数 > $识图阈值",
+            "            BREAK",
+            "        ENDIF",
+            "        WAIT 100",
+            "        $日版页面等待次数 += 1",
+            "        IF $日版页面等待次数 >= 30",
+            "            PRINT 日版能力值页确认失败: & $日版能力页分数",
+            "            RETURN 0",
+            "        ENDIF",
+            "    NEXT",
             "",
         )
     )
@@ -2539,23 +2578,24 @@ def _apply_japanese_starter_guard_text(text: str) -> str:
 
 def _apply_japanese_starter_runtime_text(text: str) -> str:
     """Inject Japanese starter recognition into one generated main script."""
-    text = _apply_japanese_starter_guard_text(text)
-    if _JAPANESE_STARTER_MARKER in text:
-        return text
+    configured = _apply_japanese_starter_guard_text(text)
     anchor = "FUNC 读取并输出识图结果(): INT\n"
-    if text.count(anchor) != 1:
-        raise ValueError("2.0 主脚本缺少唯一的识图结果入口")
     branch = (
         "    IF $Seed模式 == 10\n"
         "        RETURN 读取并输出日版御三家识图结果()\n"
         "    ENDIF\n"
     )
-    configured = text.replace(anchor, anchor + branch, 1)
-    configured = configured.replace(
-        "#   9 = mono_h_start_blackout_l",
-        "#   9 = mono_h_start_blackout_l\n#   10 = japanese_mono_h_a（临时日版御三家，仅MONO/HELP/A）",
-        1,
-    )
+    if branch not in configured and configured.count(anchor) != 1:
+        raise ValueError("2.0 主脚本缺少唯一的识图结果入口")
+    if branch not in configured:
+        configured = configured.replace(anchor, anchor + branch, 1)
+    mode10_comment = "#   10 = japanese_mono_h_a（临时日版御三家，仅MONO/HELP/A）"
+    if mode10_comment not in configured:
+        configured = configured.replace(
+            "#   9 = mono_h_start_blackout_l",
+            "#   9 = mono_h_start_blackout_l\n" + mode10_comment,
+            1,
+        )
     configured = configured.replace(
         "# 模式0-9均使用HELP；mono/stereo决定Sound，模式3为STEREO/HELP/START。",
         "# 模式0-9均使用HELP；模式3为STEREO/HELP/START；模式10为日版MONO/HELP/A。",
@@ -2572,7 +2612,16 @@ def _apply_japanese_starter_runtime_text(text: str) -> str:
         configured,
         count=1,
     )
-    return configured + "\n" + _render_japanese_starter_ocr_helper()
+    helper = _render_japanese_starter_ocr_helper()
+    if _JAPANESE_STARTER_MARKER not in configured:
+        return configured + "\n" + helper
+    if _JAPANESE_STARTER_PAGE_SYNC_MARKER in configured:
+        return configured
+
+    marker_at = configured.index(_JAPANESE_STARTER_MARKER)
+    function_at = configured.index("FUNC 读取并输出日版御三家识图结果(): INT", marker_at)
+    function_end = configured.index("\nENDFUNC", function_at) + len("\nENDFUNC")
+    return configured[:marker_at] + helper.rstrip() + configured[function_end:]
 
 
 def _japanese_seed_values(game: str) -> tuple[str, ...]:

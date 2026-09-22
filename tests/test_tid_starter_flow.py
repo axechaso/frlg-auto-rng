@@ -7,7 +7,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from automation.easycon118 import EGG_TEMPLATE_NAME, STANDARD_TEMPLATE_NAME, EasyConRuntimeCheck
+from automation.easycon118 import (
+    EGG_TEMPLATE_NAME,
+    STANDARD_TEMPLATE_NAME,
+    EasyCon118Options,
+    EasyConRuntimeCheck,
+    plan_to_user_values,
+)
 from automation.tid_rng137 import (
     DEFAULT_TID_SOURCE_PATH, TID_LEGACY_SCRIPT_NAMES, TID_SCRIPT_NAMES, TidRngRequest,
 )
@@ -261,6 +267,11 @@ ENDFUNC
         plan = build_tid_starter_flow_plan(request)
         self.assertEqual(plan.starter_target.game_code, "fr_jpn_nx")
         self.assertEqual(plan.starter_target.setting_key, "mono_h_a")
+        with self.assertRaisesRegex(ValueError, "ROM 语言不一致"):
+            plan_to_user_values(
+                plan.starter_run_plan,
+                EasyCon118Options(japanese_starter=False),
+            )
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -275,6 +286,37 @@ ENDFUNC
 
         self.assertIn("$Seed模式 = 10", starter)
         self.assertIn("FUNC 读取并输出日版御三家识图结果(): INT", starter)
+        self.assertIn("# JAPANESE_STARTER_PAGE_SYNC_V1", starter)
+        self.assertIn("$日版性格页分数 = @日版性格界面", starter)
+        self.assertIn("$日版能力页分数 = @日版能力值界面", starter)
+        japanese_helper = starter.split("# ===== 日版御三家临时识图分支 =====", 1)[1]
+        japanese_helper = japanese_helper.split("\nENDFUNC", 1)[0]
+        self.assertIn("LS RIGHT", japanese_helper)
+        self.assertIn("WAIT 50", japanese_helper)
+        self.assertIn("LS RESET", japanese_helper)
+        self.assertIn("WAIT 1000", japanese_helper)
+        self.assertNotIn("LS LEFT", japanese_helper)
+        self.assertLess(
+            japanese_helper.index("$日版性格页分数 = @日版性格界面"),
+            japanese_helper.index("@性格日版天真 > $识图阈值"),
+        )
+        self.assertLess(
+            japanese_helper.index("@性格日版天真 > $识图阈值"),
+            japanese_helper.index("LS RIGHT"),
+        )
+        right_index = japanese_helper.index("LS RIGHT")
+        ability_page_index = japanese_helper.index(
+            "$日版能力页分数 = @日版能力值界面",
+            right_index + 1,
+        )
+        self.assertLess(
+            right_index,
+            ability_page_index,
+        )
+        self.assertLess(
+            ability_page_index,
+            japanese_helper.index("@日版SP_DEF_12 > $识图阈值"),
+        )
         self.assertIn("@性格日版天真 > $识图阈值", starter)
         self.assertIn("$识图性格 = 24", starter)
         self.assertIn("# mode 10 = japanese_mono_h_a（临时日版御三家）", fire_red)
