@@ -15,9 +15,13 @@ if TYPE_CHECKING:
 
 
 TID_STARTER_SAVE_NAME = "NS火叶TID-SID到御三家球前存档-测试.ecs"
-TID_STARTER_SAVE_SHA256 = "ca12bdc6ad08db2f2fe9473c9990bea105e523863067f0de8413ceeb0ab814b8"
+TID_STARTER_SAVE_SHA256 = "143fcdcf816e5754abcc6acac68eb9e2e8ffd9b2c2dd4705dd08ac1c4381cb36"
 TID_STARTER_SAVE_SUPPORTED_SHA256 = {
     TID_STARTER_SAVE_SHA256,
+    # Previous unified mother before English OCR-first recognition was merged.
+    "b20057d7f79ac1f8a7fc0d5f8eaa983333ea4adc66fe1b2cf40b38e757682633",
+    # Previous combined source before the dark HOME-closing recognition path.
+    "ca12bdc6ad08db2f2fe9473c9990bea105e523863067f0de8413ceeb0ab814b8",
     # Previous combined source before NX-specific, bounded startup retries.
     "c2e6f316e2ef66d4968fb26327761d7be29fcb593d15b72c017a2d356b454504",
     # Previous combined source before the English naming page wait became 600 ms.
@@ -32,9 +36,26 @@ TID_STARTER_SAVE_SUPPORTED_SHA256 = {
     # 同一执行代码，仅英文用户区的 $ID_RNG 初值为 0。
     "711f6ceb6fd08309a92b98caa853db235ab5b25070f3813baa5011e9af89cd58",
 }
-DEFAULT_TID_STARTER_SAVE_SOURCE = (
+_LOCAL_TID_STARTER_SAVE_SOURCE = (
+    Path(__file__).resolve().parents[1]
+    / "local_assets" / "tid_rng137" / TID_STARTER_SAVE_NAME
+)
+_DOWNLOADED_TID_STARTER_SAVE_SOURCE = (
     Path.home() / "Downloads" / "NS火叶全自动一键乱数1.1.8" / TID_STARTER_SAVE_NAME
 )
+DEFAULT_TID_STARTER_SAVE_SOURCE = (
+    _LOCAL_TID_STARTER_SAVE_SOURCE
+    if _LOCAL_TID_STARTER_SAVE_SOURCE.is_file()
+    else _DOWNLOADED_TID_STARTER_SAVE_SOURCE
+)
+
+
+def resolve_tid_starter_save_template(source_dir: str | Path) -> Path:
+    """Resolve the unified mother for extracting its starter-route bridge."""
+    path = Path(source_dir).resolve() / TID_STARTER_SAVE_NAME
+    if not path.is_file():
+        raise FileNotFoundError(f"TID连续流程缺少球前路线资源：{TID_STARTER_SAVE_NAME}")
+    return path
 _EN_MARKER = "# ===== 英文版 TID/SID 主体（顶层全局分支） ====="
 _JP_MARKER = "# ===== 日文版 TID/SID 主体（顶层全局分支） ====="
 _TAIL_MARKER = (

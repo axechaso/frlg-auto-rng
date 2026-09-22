@@ -269,7 +269,7 @@ WAIT 550
         with self.assertRaisesRegex(ValueError, "用户自定义区结束"):
             configure_starter_save_id(source, TidRngRequest(player_name="R"))
 
-    def test_confirmed_file_has_priority_for_both_languages(self):
+    def test_unified_tool_mother_has_priority_for_both_languages(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / TID_STARTER_SAVE_NAME

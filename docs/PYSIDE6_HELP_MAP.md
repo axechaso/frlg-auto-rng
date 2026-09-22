@@ -59,7 +59,7 @@
 | `local_assets/easycon118/NS火叶SID反查-采集测试.ecs` 参数区 | SID 确认与糖果：先存档、逐只读档、糖果消耗不保存；六槽各自的物种、初始等级、来源、相遇地点与 EV 分开提示；页面识别与糖果阈值区分 |
 | `local_assets/easycon118/NS火叶全自动一键乱数2.0.ecs` 及时间轴版参数区 | 十六进制 Seed、目标 ADV 单位、Seed 校准逐项含义、固定 HOME 启动顺序、两种帧奇偶方案 |
 | 同脚本孵蛋参数区与 `local_assets/easycon118/lib/27_孵蛋测试流程.ecs` | 蛋种、同 Seed 的 Held / Pickup、至少 1800 ADV 间隔、20 / 50 / 70 相性、亲本 A / B 类型与实际 IV |
-| `local_assets/tid_rng137/【TID+SID乱数&穷举】英文版-火红叶绿1.3.7.txt` 及日文版参数区 | 主角名与性别变更需重测、日文浊音拆写、Sound / Button Mode / Seed Button、旧数据的取名进入键、SELECT 次数、HOME / 关闭等待、去噪命中与窗口、候选阈值及场景 OCR |
+| `local_assets/tid_rng137/NS火叶TID-SID到御三家球前存档-测试.ecs` 的英文/日文参数区 | 主角名与性别变更需重测、日文浊音拆写、Sound / Button Mode / Seed Button、旧数据的取名进入键、SELECT 次数、HOME / 关闭等待、去噪命中与窗口、候选阈值及场景 OCR |
 
 复核边界：
 
