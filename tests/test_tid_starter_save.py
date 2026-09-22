@@ -340,6 +340,21 @@ WAIT 550
 
 @unittest.skipUnless(DEFAULT_TID_STARTER_SAVE_SOURCE.is_file(), "requires the confirmed external TID/save source")
 class TidStarterSaveSourceTests(unittest.TestCase):
+    def test_real_source_uses_bounded_label_fallback_and_english_only_ocr(self):
+        source = DEFAULT_TID_STARTER_SAVE_SOURCE.read_text(encoding="utf-8-sig")
+        source_functions = functions(source)
+        for name, label_prefix in (
+            ("EN_标签识图", "@位置1图标"),
+            ("JP_识图", "@位置1日版图标"),
+        ):
+            block = source_functions[name]
+            for digit in (7, 8, 9):
+                self.assertNotIn(f"{label_prefix}{digit}", block)
+            self.assertIn("$ID < 0 or $ID > 65535", block)
+            self.assertIn("$digits_ok = 0", block)
+        self.assertIn("EN_TID_OCR_优先识别()", source_functions["EN_识图"])
+        self.assertNotIn("OCR(", source_functions["JP_识图"])
+
     def test_real_source_preserves_entire_language_execution_body(self):
         source = DEFAULT_TID_STARTER_SAVE_SOURCE.read_text(encoding="utf-8-sig")
         for language, index, name in (("英文", 1, "Alxe"), ("日文", 2, "レット゛")):

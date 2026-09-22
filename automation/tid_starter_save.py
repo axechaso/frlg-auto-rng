@@ -15,9 +15,12 @@ if TYPE_CHECKING:
 
 
 TID_STARTER_SAVE_NAME = "NS火叶TID-SID到御三家球前存档-测试.ecs"
-TID_STARTER_SAVE_SHA256 = "143fcdcf816e5754abcc6acac68eb9e2e8ffd9b2c2dd4705dd08ac1c4381cb36"
+TID_STARTER_SAVE_SHA256 = "a732fbaa2726a67ce584f4cddf9bc2b5f82cf94f188b59dea760e29d77211b00"
 TID_STARTER_SAVE_SUPPORTED_SHA256 = {
     TID_STARTER_SAVE_SHA256,
+    # Previous unified mother before both label paths rejected >65535 and
+    # first-position 7/8/9 were removed consistently.
+    "143fcdcf816e5754abcc6acac68eb9e2e8ffd9b2c2dd4705dd08ac1c4381cb36",
     # Previous unified mother before English OCR-first recognition was merged.
     "b20057d7f79ac1f8a7fc0d5f8eaa983333ea4adc66fe1b2cf40b38e757682633",
     # Previous combined source before the dark HOME-closing recognition path.
