@@ -210,6 +210,9 @@ PREVIOUS_SCRIPT_SHA256S += (
     # September 21 package before the Safari fishing route adopted the
     # per-tile PyEasyCon movement model.
     "331abc02c477bc018b7fe2d4c9bc7ff71206ed8fd666d5809589b06549446d79",
+    # September 22 package with adaptive frame-parity scheme 0; the
+    # ordinary F1/F2 parity offset advances after three target-Seed misses.
+    "bedcd4a3d33fab526a9fcc715cd6ab2325ef46272d0ab3f52167c4eae7b36bc1",
 )
 EXPECTED_SCRIPT_SHA256 = "6a0afe3ff17890c9387f53efa6cd364f052b342a7a916a5efe8e1213a406a750"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -331,6 +334,8 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # Current materialization additionally uses the per-tile Safari fishing
     # entry route from the latest upstream wild-target library.
     "2f47da7a92a1a2e2de7842e3b663512fbddaacd97c8cb78ac1e70f8756c243fa",
+    # September 22 materialization with adaptive frame-parity scheme 0.
+    "2427104527607ab470756b8a2fdf75d02537580177b3dac0887c8f17680555b1",
 )
 
 
