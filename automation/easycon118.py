@@ -107,6 +107,9 @@ LEGACY_SCRIPT_SHA256 = "7d5e13e4391d5bcc9045044544f409919a6f95c602e2ad0308313470
 # upgrade inputs. Keep them separate from the current fingerprint so existing
 # installations can be upgraded in place without accepting arbitrary changes.
 PREVIOUS_SCRIPT_SHA256S = (
+    # September 23 package: a roaming Pokemon that flees during an ordinary
+    # wild run invalidates only that round and triggers an automatic restart.
+    "3416e3867227ad7c022770140f4e7c000747882dd0949258a5f49f14470665c0",
     "aea14e79615bfda89e1f7428014adc2dcc848005bd7ebad0bd170eac67703aef",
     "fe0ae41be3fe035cbefec9afd525b968a070c8781a73595e1ae16b4cd1e2e839",
     "43c3944bad75a1cb424203237b6aad51b351aa5c9bb81bfc6aa2c93ce96932cf",
@@ -340,6 +343,8 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # starters keep their independent timing model; 5+ ambiguous candidates
     # can use the paired cross-round common-region fallback.
     "38d1e97107d9f5a67d44dbed176538d49b6709fb35ac0c22c75e797d30a16e69",
+    # Materialized counterpart of the roaming-encounter retry policy.
+    "744de89df74600a604c8b8a0fa27b909ce1a6e470af8d7ec54809f751ad0e9c9",
 )
 
 
