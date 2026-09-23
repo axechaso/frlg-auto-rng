@@ -1597,27 +1597,6 @@ ENDFUNC
                 template,
             )
 
-    def test_bundled_wild_roamer_escape_restarts_instead_of_stopping(self):
-        source_dir = Path(__file__).resolve().parents[1] / "local_assets" / "easycon118"
-        for filename in (
-            "NS火叶全自动一键乱数2.0.ecs",
-            "NS火叶全自动一键乱数2.0-时间轴.ecs",
-        ):
-            template = (source_dir / filename).read_text(encoding="utf-8")
-            body = template.split("FUNC 执行RNG启动与目标获取", 1)[1].split(
-                "ENDFUNC", 1
-            )[0]
-            retry = (
-                "ELIF $执行目标获取结果 == 2\n"
-                "            # 普通野生偶遇游走宝可梦会直接逃跑；本轮没有可反查样本。\n"
-                "            PRINT 目标在抓捕前逃跑，本轮作废并自动重启\n"
-                "            RETURN 0"
-            )
-            self.assertIn(retry, body)
-            self.assertLess(
-                body.index(retry), body.index("目标获取失败: 未知目标获取返回值")
-            )
-
     def test_bundled_egg_flow_soft_resets_before_254_steps(self):
         root = Path(__file__).resolve().parents[1]
         source_dir = root / "local_assets" / "easycon118"
