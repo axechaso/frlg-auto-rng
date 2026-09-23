@@ -48,6 +48,7 @@ jobs:
           pyside_chrome.py
           run_pyside6_gui.py
           pyside_app/services.py
+          pyside_app/log_history.py
           pyside_app/path_settings.py
           pyside_app/jobs.py
           pyside_app/profiles.py
