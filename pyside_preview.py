@@ -63,6 +63,7 @@ NAV_ITEMS = (
     ("egg", "孵蛋", "同 Seed 生成与领取"),
     ("script_test", "脚本测试（高级）", "原地 ECS 预检与后端对照"),
     ("logs", "运行日志", "实时状态与历史输出"),
+    ("history_logs", "历史日志", "查看过往运行记录"),
 )
 
 EGG_COMPATIBILITY_LABELS = {
@@ -714,6 +715,7 @@ class FrlgPreviewWindow(QMainWindow):
                 "egg": "○",
                 "script_test": "◇",
                 "logs": "▤",
+                "history_logs": "▧",
             }[key]
             button = QPushButton(f"  {prefix}    {title}")
             button.setObjectName("navButton")
@@ -884,6 +886,7 @@ class FrlgPreviewWindow(QMainWindow):
         self._add_page("tid", self._build_tid_page())
         self._add_page("egg", self._build_egg_page())
         self._add_page("logs", self._build_logs_page())
+        self._add_page("history_logs", self._build_history_logs_page())
         self._add_page("tid_records", self._build_tid_records_page())
         self._add_page("script_test", self._build_script_test_page())
         body = QWidget()
@@ -1013,7 +1016,7 @@ class FrlgPreviewWindow(QMainWindow):
             self.qq_notification_button.setVisible(self.width() >= 980)
         if not hasattr(self, "overview_scroll") or not hasattr(self, "overview_button"):
             return
-        wide = self.width() >= 1180 and getattr(self, "current_page", "sid") != "tid_records"
+        wide = self.width() >= 1180 and getattr(self, "current_page", "sid") not in {"tid_records", "history_logs"}
         self.overview_scroll.setVisible(wide)
         self.overview_button.setVisible(not wide)
         self.footer_status.setVisible(self.width() >= 1180)
@@ -2050,6 +2053,44 @@ class FrlgPreviewWindow(QMainWindow):
         layout.addWidget(labels)
         return page
 
+    def _build_history_logs_page(self) -> QWidget:
+        page, layout = self._page_canvas()
+        history = Card(
+            "历史运行日志",
+            "读取当前运行工程与用户日志归档；选择一项即可查看，不会修改或删除原文件。",
+        )
+        self._form(history, [
+            ("history_workflow", "流程", _combo(
+                "全部", "野生 / 静态", "孵蛋", "SID 查找", "TID 乱数",
+                "SID 遍历", "脚本测试", "其他",
+            )),
+            ("history_search", "搜索", _line(placeholder="文件名或完整路径")),
+        ])
+        self._actions(history, "刷新历史日志", "打开日志文件", "打开所在文件夹")
+        self.history_table = self._table(
+            ("时间", "流程", "文件", "大小", "位置"), height=250,
+        )
+        self.history_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        for column, width in enumerate((155, 100, 330, 80, 85)):
+            self.history_table.setColumnWidth(column, width)
+        history.layout.addWidget(self.history_table)
+        layout.addWidget(history)
+
+        preview = Card(
+            "日志内容",
+            "默认显示完整日志；超大文件显示末尾 4 MiB，原文件仍可直接打开。",
+        )
+        preview.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.history_log_view = QPlainTextEdit()
+        self.history_log_view.setObjectName("historyLogView")
+        self.history_log_view.setReadOnly(True)
+        self.history_log_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.history_log_view.setMinimumHeight(220)
+        self.history_log_view.setPlainText("点击“刷新历史日志”读取过往记录。")
+        preview.layout.addWidget(self.history_log_view, 1)
+        layout.addWidget(preview, 1)
+        return page
+
     def _build_footer(self) -> QWidget:
         footer = QFrame()
         footer.setObjectName("footerBar")
@@ -2083,7 +2124,7 @@ class FrlgPreviewWindow(QMainWindow):
         self.current_page = key
         if key == "script_test" and not self.advanced_check.isChecked():
             self.advanced_check.setChecked(True)
-        if key not in {"tid_records", "logs"}:
+        if key not in {"tid_records", "logs", "history_logs"}:
             self.input_mode = key
         self.stack.setCurrentIndex(self.page_indices[key])
         for name, button in self.nav_buttons.items():

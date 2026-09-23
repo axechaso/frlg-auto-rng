@@ -52,6 +52,34 @@ class PySideBackendTests(unittest.TestCase):
         inputs = self.window.collect_inputs()
         return PreparedWild(inputs, sample_result(), self.root / "main.ecs", self.root / "plan.json", EasyConRuntimeCheck(True, (), ()))
 
+    def test_history_page_lists_filters_and_previews_saved_logs(self):
+        run_dir = self.root / "runtime" / ("egg-" + "a" * 32)
+        run_dir.mkdir(parents=True)
+        log = run_dir / "run-test.log"
+        log.write_text("\x1b[32m孵蛋历史日志\x1b[0m\n", encoding="utf-8")
+
+        self.window.select_page("history_logs")
+
+        self.assertEqual(self.window.current_page, "history_logs")
+        self.assertEqual(self.window.history_table.rowCount(), 1)
+        self.assertEqual(self.window.history_table.item(0, 1).text(), "孵蛋")
+        self.assertIn("孵蛋历史日志", self.window.history_log_view.toPlainText())
+        self.assertNotIn("\x1b[", self.window.history_log_view.toPlainText())
+        self.window.fields["history_workflow"].setCurrentText("TID 乱数")
+        self.assertEqual(self.window.history_table.rowCount(), 0)
+
+    def test_history_page_stays_available_while_easycon_is_running(self):
+        self.window.running = True
+        self.window.refresh_state()
+
+        self.assertTrue(self.window.nav_buttons["history_logs"].isEnabled())
+        self.assertTrue(self.window.fields["history_workflow"].isEnabled())
+        self.assertTrue(self.window.fields["history_search"].isEnabled())
+        self.assertTrue(self.window.actions["刷新历史日志"].isEnabled())
+
+        self.window.running = False
+        self.window.refresh_state()
+
     def test_real_catalog_and_form_keep_bounds_and_post_capture_options(self):
         w = self.window
         self.assertEqual(w.fields["wild_species"].currentData(), "Pikachu")

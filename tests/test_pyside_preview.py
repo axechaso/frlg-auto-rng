@@ -93,7 +93,7 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         window.fields["tid_target"].setText("00007")
         window.result_panel.setPlainText("Preserved result")
         action = window.search_button.text()
-        for page in ("tid_records", "logs"):
+        for page in ("tid_records", "logs", "history_logs"):
             window.select_page(page)
             self.assertEqual(window.input_mode, "tid")
             self.assertEqual(window.search_button.text(), action)
@@ -101,6 +101,7 @@ class PySidePreviewInteractionTests(unittest.TestCase):
             self.assertEqual(window.result_panel.toPlainText(), "Preserved result")
         self.assertEqual(window.records_table.rowCount(), 0)
         self.assertEqual(window.records_table.columnCount(), 14)
+        self.assertEqual(window.history_table.columnCount(), 5)
         self.assertEqual(
             [window.records_table.horizontalHeaderItem(i).text() for i in range(14)],
             ["TID", "游戏", "机型", "语言", "声音", "按键模式", "Seed 启动键", "OP", "F1", "F2", "出现次数", "主角名称", "OP 修正（ms）", "最近记录时间"],
@@ -314,7 +315,7 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         from PySide6.QtCore import QSize
         from pyside_preview import NAV_ITEMS, Card
         window = self.window
-        self.assertEqual([k for k, _, _ in NAV_ITEMS], ["sid", "tid", "tid_records", "wild", "egg", "script_test", "logs"])
+        self.assertEqual([k for k, _, _ in NAV_ITEMS], ["sid", "tid", "tid_records", "wild", "egg", "script_test", "logs", "history_logs"])
         window.resize(900, 620)
         window.show()
         window.advanced_check.setChecked(True)

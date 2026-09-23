@@ -2403,8 +2403,8 @@ def _apply_seed_mode3_library_mapping(library_path: Path) -> None:
 
 _JAPANESE_NATURE_LABELS = (
     "勤奋", "怕寂寞", "勇敢", "固执", "顽皮", "大胆", "坦率", "悠闲",
-    "淘气", "乐天", "胆小", "急躁", "认真", "爽朗", "内敛", "慢吞吞",
-    "冷静", "害羞", "马虎", "温和", "温顺", "自大", "慎重", "浮躁", "天真",
+    "淘气", "乐天", "胆小", "急躁", "认真", "爽朗", "天真", "内敛",
+    "慢吞吞", "冷静", "害羞", "马虎", "温和", "温顺", "自大", "慎重", "浮躁",
 )
 _JAPANESE_STAT_LABELS = (
     ("HP", "实HP", "日版HP_", (18, 19, 20, 21)),
@@ -2416,7 +2416,7 @@ _JAPANESE_STAT_LABELS = (
 )
 _JAPANESE_STARTER_MARKER = "# ===== 日版御三家临时识图分支 ====="
 _JAPANESE_STARTER_GUARD_MARKER = "日版御三家临时模式10仅支持静态图鉴1/4/7"
-_JAPANESE_STARTER_PAGE_SYNC_MARKER = "# JAPANESE_STARTER_PAGE_SYNC_V1"
+_JAPANESE_STARTER_PAGE_SYNC_MARKER = "# JAPANESE_STARTER_PAGE_SYNC_V2"
 
 
 def _render_japanese_starter_ocr_helper() -> str:
@@ -2462,6 +2462,7 @@ def _render_japanese_starter_ocr_helper() -> str:
         "            RETURN 0",
         "        ENDIF",
         "    NEXT",
+        "    WAIT 200",
         "",
         "    $日版公图标分数 = @火红公图标",
         "    $日版母图标分数 = @火红母图标",
@@ -2481,21 +2482,26 @@ def _render_japanese_starter_ocr_helper() -> str:
         "    ENDIF",
         "",
         "    $识图性格 = -1",
+        "    $日版性格最高分 = -1",
     ]
     for index, label in enumerate(_JAPANESE_NATURE_LABELS):
-        keyword = "IF" if index == 0 else "ELIF"
         lines.extend(
             (
-                f"    {keyword} @性格日版{label} > $识图阈值",
+                f"    $日版性格候选分数 = @性格日版{label}",
+                "    IF $日版性格候选分数 > $日版性格最高分",
+                "        $日版性格最高分 = $日版性格候选分数",
                 f"        $识图性格 = {index}",
+                "    ENDIF",
             )
         )
     lines.extend(
         (
-            "    ELSE",
+            "    IF $日版性格最高分 <= $识图阈值",
+            "        $识图性格 = -1",
             "        $性格识图失败 = 1",
             "        PRINT 日版性格识图失败，日版性格标签均低于阈值",
             "    ENDIF",
+            "    PRINT 日版性格最高匹配度: & $日版性格最高分",
             "    $当前性格 = $识图性格",
             "",
             "    $等级 = 5",
@@ -2516,25 +2522,31 @@ def _render_japanese_starter_ocr_helper() -> str:
             "            RETURN 0",
             "        ENDIF",
             "    NEXT",
+            "    WAIT 200",
             "",
         )
     )
     for stat_name, target_name, prefix, values in _JAPANESE_STAT_LABELS:
         lines.append(f"    ${target_name} = -1")
-        for index, value in enumerate(values):
-            keyword = "IF" if index == 0 else "ELIF"
+        lines.append(f"    $日版{stat_name}最高分 = -1")
+        for value in values:
             lines.extend(
                 (
-                    f"    {keyword} @{prefix}{value:02d} > $识图阈值",
+                    f"    $日版{stat_name}候选分数 = @{prefix}{value:02d}",
+                    f"    IF $日版{stat_name}候选分数 > $日版{stat_name}最高分",
+                    f"        $日版{stat_name}最高分 = $日版{stat_name}候选分数",
                     f"        ${target_name} = {value}",
+                    "    ENDIF",
                 )
             )
         lines.extend(
             (
-                "    ELSE",
+                f"    IF $日版{stat_name}最高分 <= $识图阈值",
+                f"        ${target_name} = -1",
                 f"        ${stat_name}识图失败 = 1",
                 f"        PRINT 日版{stat_name}识图失败，标签均低于阈值",
                 "    ENDIF",
+                f"    PRINT 日版{stat_name}最高匹配度: & $日版{stat_name}最高分",
                 "",
             )
         )

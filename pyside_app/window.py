@@ -8,8 +8,8 @@ import re
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QProcessEnvironment, QSignalBlocker, QTimer, Qt
-from PySide6.QtGui import QPixmap, QTextCursor
+from PySide6.QtCore import QProcess, QProcessEnvironment, QSignalBlocker, QTimer, Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QLabel, QMessageBox, QPushButton,
     QSpinBox, QTableWidgetItem,
@@ -36,6 +36,7 @@ from tid_records import TidRecordStore
 from tid_session import write_json_atomic
 
 from .jobs import Job
+from .log_history import discover_logs, format_log_size, read_log_preview
 from .path_settings import restore_resource_path
 from .diagnostics import explain_error, parse_integer
 from .profiles import ProfileManager
@@ -149,6 +150,8 @@ class FrlgWindow(FrlgPreviewWindow):
         self.run_input_states = None
         self.record_rows = []
         self.record_store_signature = None
+        self.all_history_rows = []
+        self.history_rows = []
         self.profile_store = SaveProfileStore(self.paths.user / "save_profiles.json")
         self.profiles_available = True
         self.record_store = TidRecordStore(self.paths.user / "tid_records.sqlite3")
@@ -174,6 +177,9 @@ class FrlgWindow(FrlgPreviewWindow):
         self._bind("管理存档", self.manage_profiles)
         self._bind("查询 / 刷新", self.refresh_records)
         self._bind("导出 CSV", self.export_records)
+        self._bind("刷新历史日志", self.refresh_history_logs)
+        self._bind("打开日志文件", lambda: self.open_history_log(directory=False))
+        self._bind("打开所在文件夹", lambda: self.open_history_log(directory=True))
         self._bind_button(self.search_button, self.search)
         self._bind_button(self.cancel_button, self.cancel)
         self._bind_button(self.start_button, self.request_start)
@@ -181,6 +187,9 @@ class FrlgWindow(FrlgPreviewWindow):
         self.qq_notification_button.clicked.connect(self.show_qq_notifications)
         self.profile_selector.currentIndexChanged.connect(self.select_profile)
         self.records_table.itemSelectionChanged.connect(self.record_details)
+        self.history_table.itemSelectionChanged.connect(self.history_log_details)
+        self.fields["history_workflow"].currentIndexChanged.connect(self.filter_history_logs)
+        self.fields["history_search"].textChanged.connect(self.filter_history_logs)
         self.fields["source"].setText(str(self.paths.source))
         self.fields["ezcon"].setText(str(self.paths.ezcon))
         self.fields["sid_source"].setText(str(self.paths.source))
@@ -467,6 +476,8 @@ class FrlgWindow(FrlgPreviewWindow):
         if getattr(self, "live_ready", False):
             if key == "tid_records":
                 self.refresh_records()
+            elif key == "history_logs":
+                self.refresh_history_logs()
             self.refresh_state()
 
     def _refresh_common_settings(self):
@@ -480,8 +491,9 @@ class FrlgWindow(FrlgPreviewWindow):
             return
         busy = self.job is not None or self.running
         wild = self.input_mode == "wild"
+        history_actions = {"刷新历史日志", "打开日志文件", "打开所在文件夹"}
         for title, button in self.actions.items():
-            button.setEnabled(not busy)
+            button.setEnabled(not busy or title in history_actions)
         self.actions["管理存档"].setEnabled(not busy and self.profiles_available)
         self.search_button.setEnabled(wild and not busy)
         self.cancel_button.setEnabled(self.job is not None and not self.running)
@@ -548,10 +560,14 @@ class FrlgWindow(FrlgPreviewWindow):
     def _lock_run_inputs(self):
         if self.running:
             if self.run_input_states is None:
-                widgets = list(self.fields.values()) + [self.profile_selector, self.advanced_check, self.home_buffer_check,
+                widgets = [
+                    widget for key, widget in self.fields.items()
+                    if key not in {"history_workflow", "history_search"}
+                ] + [self.profile_selector, self.advanced_check, self.home_buffer_check,
                     self.precalibration_check, self.item_check, self.dunsparce_three_segment_check, *self.capture_checks,
                     *(widget for pair in self.iv_ranges for widget in pair),
-                    *(button for key, button in self.nav_buttons.items() if key not in ("wild", "logs", "tid_records"))]
+                    *(button for key, button in self.nav_buttons.items()
+                      if key not in ("wild", "logs", "history_logs", "tid_records"))]
                 self.run_input_states = {widget: widget.isEnabled() for widget in widgets}
             for widget in self.run_input_states:
                 widget.setEnabled(False)
@@ -819,6 +835,8 @@ class FrlgWindow(FrlgPreviewWindow):
         else:
             self.set_status(f"运行进程已结束（退出码 {code}）；请查看日志中的实际结果。")
         self._notify_run_finished(code)
+        if self.current_page == "history_logs":
+            self.refresh_history_logs()
         if self.current_page == "tid_records" and not self.closing:
             QTimer.singleShot(0, self.refresh_records)
         if self.closing:
@@ -1072,3 +1090,85 @@ class FrlgWindow(FrlgPreviewWindow):
         if path:
             self.launch_job(lambda _cancel, _status: self.record_store.export_csv(Path(path), **filters),
                             lambda count: self.set_status(f"已导出 {count} 项实测记录。"), "正在导出记录……")
+
+    def refresh_history_logs(self, *_):
+        if not hasattr(self, "paths"):
+            return
+        try:
+            self.all_history_rows = list(discover_logs(self.paths.output, self.paths.user))
+        except OSError as exc:
+            self.history_log_view.setPlainText(f"历史日志读取失败：{exc}")
+            return
+        self.filter_history_logs()
+
+    def filter_history_logs(self, *_):
+        if not hasattr(self, "paths"):
+            return
+        workflow = self.fields["history_workflow"].currentText()
+        query = self.fields["history_search"].text().strip().casefold()
+        selected_path = None
+        index = self.history_table.currentRow()
+        if 0 <= index < len(self.history_rows):
+            selected_path = self.history_rows[index].path
+        rows = list(self.all_history_rows)
+        if workflow != "全部":
+            rows = [row for row in rows if row.workflow == workflow]
+        if query:
+            rows = [
+                row for row in rows
+                if query in row.workflow.casefold()
+                or query in row.path.name.casefold()
+                or query in str(row.path).casefold()
+            ]
+        self.history_rows = rows
+        self.history_table.setRowCount(len(rows))
+        selected_index = None
+        for i, row in enumerate(rows):
+            values = (
+                row.modified_text,
+                row.workflow,
+                row.path.name,
+                format_log_size(row.size),
+                row.location_text,
+            )
+            for j, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setToolTip(str(row.path))
+                self.history_table.setItem(i, j, item)
+            if selected_path == row.path:
+                selected_index = i
+        if selected_index is not None:
+            self.history_table.selectRow(selected_index)
+        elif rows:
+            self.history_table.selectRow(0)
+        else:
+            self.history_log_view.setPlainText("没有找到符合条件的历史日志。")
+        self.set_status(f"已读取 {len(rows)} 份历史日志；原文件保持不变。")
+
+    def _selected_history_log(self):
+        index = self.history_table.currentRow()
+        return self.history_rows[index] if 0 <= index < len(self.history_rows) else None
+
+    def history_log_details(self):
+        entry = self._selected_history_log()
+        if entry is None:
+            return
+        try:
+            text = read_log_preview(entry.path)
+        except OSError as exc:
+            text = f"日志读取失败：{exc}\n\n{entry.path}"
+        self.history_log_view.setPlainText(text)
+        self.history_log_view.moveCursor(QTextCursor.MoveOperation.End)
+
+    def open_history_log(self, *, directory: bool):
+        entry = self._selected_history_log()
+        if entry is None:
+            self.show_error("请先选择一份历史日志")
+            return
+        target = entry.path.parent if directory else entry.path
+        if not target.exists():
+            self.show_error(f"日志已经不存在：{target}")
+            self.refresh_history_logs()
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))):
+            self.show_error(f"无法打开：{target}")

@@ -53,7 +53,7 @@ class CompleteWindow(FrlgWindow):
             self.actions[key] = button
         self.reader = FormReader(self)
         for key, widget in self.fields.items():
-            if key not in self.input_keys and key != "update_source":
+            if key not in self.input_keys and key not in {"update_source", "history_workflow", "history_search"}:
                 signal = widget.currentIndexChanged if isinstance(widget, QComboBox) else widget.valueChanged if isinstance(widget, QSpinBox) else widget.textChanged
                 signal.connect(self.invalidate)
         for widget in self.extra_checks():
@@ -229,7 +229,7 @@ class CompleteWindow(FrlgWindow):
                     self.run_input_states[widget] = widget.isEnabled()
                 widget.setEnabled(False)
             for key, button in self.nav_buttons.items():
-                if key not in ("logs", "tid_records"):
+                if key not in ("logs", "history_logs", "tid_records"):
                     if button not in self.run_input_states:
                         self.run_input_states[button] = button.isEnabled()
                     button.setEnabled(key == self.input_mode)
@@ -449,6 +449,7 @@ class CompleteWindow(FrlgWindow):
             ):
                 self.fields[key].setText(restore_resource_path(
                     values.get(key), default, bundled_suffix=suffix,
+                    legacy_label_counts=(119, 328, 329) if key == "tid_source" else (),
                 ))
         except (OSError, ValueError, TypeError, AttributeError):
             pass

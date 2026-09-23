@@ -60,6 +60,45 @@ class ResourcePathTests(unittest.TestCase):
                     str(saved), current, bundled_suffix="_internal/easycon/publish/ezcon.exe", file=True,
                 ), str(current))
 
+    def test_legacy_tid_subset_path_migrates_to_current_full_corpus(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            legacy = root / "old-tid"
+            current = root / "current-tid"
+            for directory, count in ((legacy, 328), (current, 1151)):
+                labels = directory / "ImgLabel"
+                labels.mkdir(parents=True)
+                for index in range(count):
+                    (labels / f"label-{index}.IL").touch()
+            with patch("pyside_app.path_settings.sys", SimpleNamespace(frozen=False)):
+                self.assertEqual(
+                    restore_resource_path(
+                        str(legacy), current,
+                        bundled_suffix="_internal/local_assets/tid_rng137",
+                        legacy_label_counts=(119, 328, 329),
+                    ),
+                    str(current),
+                )
+
+    def test_unknown_custom_label_corpus_is_not_silently_replaced(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            custom = root / "custom-tid"
+            current = root / "current-tid"
+            for directory, count in ((custom, 500), (current, 1151)):
+                labels = directory / "ImgLabel"
+                labels.mkdir(parents=True)
+                for index in range(count):
+                    (labels / f"label-{index}.IL").touch()
+            self.assertEqual(
+                restore_resource_path(
+                    str(custom), current,
+                    bundled_suffix="_internal/local_assets/tid_rng137",
+                    legacy_label_counts=(119, 328, 329),
+                ),
+                str(custom),
+            )
+
     def test_missing_executable_names_path_and_recovery_without_launch(self):
         with tempfile.TemporaryDirectory() as temp, patch("automation.easycon118.subprocess.run") as run:
             missing = Path(temp) / "removed" / "ezcon.exe"

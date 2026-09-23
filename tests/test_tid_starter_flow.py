@@ -286,7 +286,7 @@ ENDFUNC
 
         self.assertIn("$Seed模式 = 10", starter)
         self.assertIn("FUNC 读取并输出日版御三家识图结果(): INT", starter)
-        self.assertIn("# JAPANESE_STARTER_PAGE_SYNC_V1", starter)
+        self.assertIn("# JAPANESE_STARTER_PAGE_SYNC_V2", starter)
         self.assertIn("$日版性格页分数 = @日版性格界面", starter)
         self.assertIn("$日版能力页分数 = @日版能力值界面", starter)
         japanese_helper = starter.split("# ===== 日版御三家临时识图分支 =====", 1)[1]
@@ -298,10 +298,10 @@ ENDFUNC
         self.assertNotIn("LS LEFT", japanese_helper)
         self.assertLess(
             japanese_helper.index("$日版性格页分数 = @日版性格界面"),
-            japanese_helper.index("@性格日版天真 > $识图阈值"),
+            japanese_helper.index("$日版性格候选分数 = @性格日版天真"),
         )
         self.assertLess(
-            japanese_helper.index("@性格日版天真 > $识图阈值"),
+            japanese_helper.index("$日版性格候选分数 = @性格日版天真"),
             japanese_helper.index("LS RIGHT"),
         )
         right_index = japanese_helper.index("LS RIGHT")
@@ -315,10 +315,27 @@ ENDFUNC
         )
         self.assertLess(
             ability_page_index,
-            japanese_helper.index("@日版SP_DEF_12 > $识图阈值"),
+            japanese_helper.index("$日版SPD候选分数 = @日版SP_DEF_12"),
         )
-        self.assertIn("@性格日版天真 > $识图阈值", starter)
-        self.assertIn("$识图性格 = 24", starter)
+        self.assertIn("$日版性格候选分数 = @性格日版天真", starter)
+        self.assertRegex(
+            starter,
+            r"\$日版性格候选分数 = @性格日版天真\n"
+            r"    IF \$日版性格候选分数 > \$日版性格最高分\n"
+            r"        \$日版性格最高分 = \$日版性格候选分数\n"
+            r"        \$识图性格 = 14",
+        )
+        self.assertRegex(
+            starter,
+            r"\$日版性格候选分数 = @性格日版马虎\n"
+            r"    IF \$日版性格候选分数 > \$日版性格最高分\n"
+            r"        \$日版性格最高分 = \$日版性格候选分数\n"
+            r"        \$识图性格 = 19",
+        )
+        self.assertIn("$日版HP候选分数 = @日版HP_18", starter)
+        self.assertIn("$日版HP候选分数 = @日版HP_19", starter)
+        self.assertIn("IF $日版HP候选分数 > $日版HP最高分", starter)
+        self.assertNotIn("IF @日版HP_18 > $识图阈值", starter)
         self.assertIn("# mode 10 = japanese_mono_h_a（临时日版御三家）", fire_red)
         self.assertIn("ELIF $mode == 10", fire_red)
 

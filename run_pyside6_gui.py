@@ -14,7 +14,7 @@ from pyside_app.startup_notice import StartupNoticeDialog, should_show_startup_n
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="FRLG Auto RNG · PySide6")
-    parser.add_argument("--page", default="wild", choices=("sid", "tid", "tid_records", "wild", "egg", "script_test", "logs"))
+    parser.add_argument("--page", default="wild", choices=("sid", "tid", "tid_records", "wild", "egg", "script_test", "logs", "history_logs"))
     parser.add_argument("--size", default="1360x840")
     parser.add_argument("--no-device-check", action="store_true")
     parser.add_argument("--data-dir", type=Path, help="Isolated user-data directory for testing")
