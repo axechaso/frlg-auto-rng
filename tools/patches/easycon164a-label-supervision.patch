@@ -1,0 +1,1007 @@
+diff --git a/src/EasyCon2.CLI/Program.cs b/src/EasyCon2.CLI/Program.cs
+--- a/src/EasyCon2.CLI/Program.cs
++++ b/src/EasyCon2.CLI/Program.cs
+@@ -9,21 +9,24 @@
+ using EasyScript;
+ using OpenCvSharp;
+ using System.Collections.Immutable;
++using System.Diagnostics;
+ using System.CommandLine;
+ using System.Text;
++using System.Text.Json;
+ 
+ // 设置控制台输出编码为 UTF-8，解决中文乱码问题
+ Console.OutputEncoding = Encoding.UTF8;
+ 
+ bool isFormatCommand = args.Length > 0 && args[0] == "format";
+ bool isLspCommand = args.Length > 0 && args[0] == "lsp";
++bool isVerifyLabelCommand = args.Length > 0 && args[0] == "verify-label";
+ 
+ string defaultCOMPort = "COM22";
+ 
+ NintendoSwitch NS = new();
+ EasyRunner runner = new();
+ 
+-if (!isFormatCommand && !isLspCommand)
++if (!isFormatCommand && !isLspCommand && !isVerifyLabelCommand)
+ {
+     Console.WriteLine("------------------------------------------");
+     Console.WriteLine("----    EasyCon CLI Runner v0.0.1     ----");
+@@ -38,6 +41,7 @@
+ var portDevCommand = new Command("port", "单片机端口功能");
+ var videoCommand = new Command("video", "视频采集设备功能");
+ var formatCommand = new Command("format", "格式化脚本");
++var verifyLabelCommand = new Command("verify-label", "使用 EasyCon 1.6.4-a 原生匹配器测试标签");
+ 
+ #region 命令行参数解析
+ var scriptOption = new Argument<string>("file")
+@@ -76,6 +80,31 @@
+ {
+     Description = "本机回环 MJPEG 预览端口（0 表示关闭）",
+     DefaultValueFactory = _ => 0
++};
++var incidentDirectoryOption = new Option<string>("--incident-dir")
++{
++    Description = "标签故障资料目录",
++    DefaultValueFactory = _ => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FRLG-Auto-RNG", "label_incidents")
++};
++var runIdOption = new Option<string>("--run-id")
++{
++    Description = "本次工作流运行 ID",
++    DefaultValueFactory = _ => Guid.NewGuid().ToString("N")
++};
++var workflowOption = new Option<string>("--workflow")
++{
++    Description = "本次运行所属工作流",
++    DefaultValueFactory = _ => "unknown"
++};
++var captureDeviceNameOption = new Option<string>("--capture-device-name")
++{
++    Description = "采集设备名称",
++    DefaultValueFactory = _ => ""
++};
++var captureStaleMsOption = new Option<int>("--capture-stale-ms")
++{
++    Description = "阶段监督器允许的最大采集帧龄",
++    DefaultValueFactory = _ => 3000
+ };
+ 
+ deviceIdOption.Validators.Add(result =>
+@@ -98,7 +127,15 @@
+ runScriptCommand.Options.Add(portOption);
+ runScriptCommand.Options.Add(verboseOption);
+ runScriptCommand.Options.Add(previewPortOption);
++runScriptCommand.Options.Add(incidentDirectoryOption);
++runScriptCommand.Options.Add(runIdOption);
++runScriptCommand.Options.Add(workflowOption);
++runScriptCommand.Options.Add(captureDeviceNameOption);
++runScriptCommand.Options.Add(captureStaleMsOption);
+ #endregion
++
++int labelFaultExitCode = 0;
++int nativeVerifyExitCode = 0;
+ 
+ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+ {
+@@ -108,9 +145,16 @@
+     string COM = parseResult.GetValue(portOption) ?? defaultCOMPort;
+     bool verbose = parseResult.GetValue(verboseOption);
+     int previewPort = parseResult.GetValue(previewPortOption);
++    string incidentDirectory = parseResult.GetValue(incidentDirectoryOption)!;
++    string runId = parseResult.GetValue(runIdOption)!;
++    string workflow = parseResult.GetValue(workflowOption)!;
++    string captureDeviceName = parseResult.GetValue(captureDeviceNameOption)!;
++    int captureStaleMs = parseResult.GetValue(captureStaleMsOption);
+ 
+     // 输出接口
+     var outdap = new ConsoleOutAdapter();
++    LabelFaultSupervisor? supervisor = null;
++    outdap.LineWritten += line => supervisor?.OnLogLine(line);
+ 
+     Console.WriteLine($"准备执行脚本...  环境信息=>采集设备：{vId}[{refs}]  单片机端口：{COM}");
+ 
+@@ -130,6 +174,7 @@
+     Task? captureTask = null;
+     MjpegPreviewServer? previewServer = null;
+     long latestFrameSequence = 0;
++    long latestFrameCapturedTicks = 0;
+     long previewSequence = 0;
+     byte[]? previewJpeg = null;
+     outdap.Log("正在解析脚本...");
+@@ -222,6 +267,7 @@
+                             latestFrame?.Dispose();
+                             latestFrame = frame.Clone();
+                             latestFrameSequence++;
++                            latestFrameCapturedTicks = Stopwatch.GetTimestamp();
+                         }
+                         firstFrame.TrySetResult((frame.Width, frame.Height));
+                     }
+@@ -302,14 +348,6 @@
+             }
+         }
+ 
+-        var externalGetters = label.ToDictionary(il => il.name, il => (Func<int>)(() =>
+-        {
+-            if (cvcap == null) throw new Exception("采集卡初始化异常");
+-            using var snapshot = CloneLatestFrame();
+-            il.Search(snapshot, out var md);
+-            return (int)Math.Ceiling(md);
+-        }));
+-
+         Mat CloneLatestFrame()
+         {
+             lock (latestFrameLock)
+@@ -323,10 +361,84 @@
+         }
+         outdap.Info($"==>开始执行脚本：{file}");
+ 
+-        ICGamePad pad = isMock ? new MockGamePad() : new GamePadAdapter(NS);
++        using var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
++        var actualDeviceName = string.IsNullOrWhiteSpace(captureDeviceName) ? $"采集设备 {vId}" : captureDeviceName;
++        var gamePad = new GuardedGamePad(isMock ? new MockGamePad() : new GamePadAdapter(NS));
++        supervisor = new LabelFaultSupervisor(
++            incidentDirectory,
++            runId,
++            workflow,
++            actualDeviceName,
++            file,
++            vId,
++            refs.ToString(),
++            label.ToDictionary(il => il.name, StringComparer.Ordinal),
++            gamePad,
++            runCancellation,
++            CloneLatestFrame,
++            () =>
++            {
++                lock (latestFrameLock)
++                    return (captureFailure is not null, captureFailure?.GetBaseException().Message,
++                        latestFrameSequence, latestFrameCapturedTicks);
++            },
++            outdap.GetTail,
++            message => outdap.Log(message),
++            captureStaleMs);
++        var externalGetters = label.ToDictionary(il => il.name, il => (Func<int>)(() =>
++        {
++            if (cvcap == null) throw new Exception("采集卡初始化异常");
++            using var snapshot = CloneLatestFrame();
++            try
++            {
++                il.Search(snapshot, out var md);
++                var score = (int)Math.Ceiling(md);
++                var capture = CaptureState();
++                supervisor.ObserveMatch(il.name, md, score, snapshot, capture.Sequence, capture.CapturedTicks);
++                return score;
++            }
++            catch (Exception ex)
++            {
++                supervisor.ObserveLabelError(il.name, ex);
++                throw;
++            }
++        }));
++
++        (bool Failed, string? Error, long Sequence, long CapturedTicks) CaptureState()
++        {
++            lock (latestFrameLock)
++                return (captureFailure is not null, captureFailure?.GetBaseException().Message,
++                    latestFrameSequence, latestFrameCapturedTicks);
++        }
++
+         var ocr = cvcap == null ? null : OcrDelegateFactory.Create(CloneLatestFrame);
+-        runner.Run(outdap, pad, ocr, externalGetters, cancellationToken);
+-        outdap.Info("脚本运行完成");
++        using var monitorCancellation = new CancellationTokenSource();
++        var monitorTask = Task.Run(() => supervisor.MonitorAsync(monitorCancellation.Token));
++        try
++        {
++            runner.Run(outdap, gamePad, ocr, externalGetters, runCancellation.Token);
++        }
++        catch (Exception) when (supervisor.HasIncident && runCancellation.IsCancellationRequested)
++        {
++            // Fault supervision already captured the stop reason and is
++            // writing the incident bundle; preserve the dedicated exit code.
++        }
++        finally
++        {
++            monitorCancellation.Cancel();
++            await monitorTask;
++        }
++        if (supervisor.HasIncident)
++        {
++            if (supervisor.IncidentTask is not null)
++                await supervisor.IncidentTask;
++            labelFaultExitCode = 20;
++            outdap.Warn($"标签故障保护已停止脚本，事件 {supervisor.IncidentId}");
++        }
++        else
++        {
++            outdap.Info("脚本运行完成");
++        }
+     }
+     catch (ScriptException ex)
+     {
+@@ -340,6 +452,7 @@
+     }
+     finally
+     {
++        supervisor?.Dispose();
+         if (previewServer is not null)
+         {
+             try
+@@ -521,4 +634,134 @@
+ });
+ rootCommand.Subcommands.Add(lspCommand);
+ 
+-return rootCommand.Parse(args).Invoke();
++var verifyLabelPathArgument = new Argument<string>("label") { Description = "待测试的 .IL 标签文件" };
++var verifyFrameOption = new Option<string?>("--frame") { Description = "离线测试用原始图像；省略时使用采集设备" };
++var verifyDeviceOption = new Option<int>("--device", "-d") { DefaultValueFactory = _ => 0 };
++var verifyVideoTypeOption = new Option<VideoCaptureAPIs>("--videotype", "-vt") { DefaultValueFactory = _ => VideoCaptureAPIs.DSHOW };
++var verifyFramesOption = new Option<int>("--frames") { DefaultValueFactory = _ => 3 };
++var verifyIntervalOption = new Option<int>("--interval-ms") { DefaultValueFactory = _ => 250 };
++var verifyOperatorOption = new Option<string>("--operator") { DefaultValueFactory = _ => ">" };
++var verifyThresholdOption = new Option<int>("--threshold") { DefaultValueFactory = _ => 95 };
++var verifySaveFrameOption = new Option<string?>("--save-frame") { Description = "可选：保存第一张原始采集帧 PNG" };
++var verifySaveFramesDirectoryOption = new Option<string?>("--save-frames-dir") { Description = "可选：保存每张原始采集帧 PNG 的目录" };
++verifyLabelCommand.Arguments.Add(verifyLabelPathArgument);
++verifyLabelCommand.Options.Add(verifyFrameOption);
++verifyLabelCommand.Options.Add(verifyDeviceOption);
++verifyLabelCommand.Options.Add(verifyVideoTypeOption);
++verifyLabelCommand.Options.Add(verifyFramesOption);
++verifyLabelCommand.Options.Add(verifyIntervalOption);
++verifyLabelCommand.Options.Add(verifyOperatorOption);
++verifyLabelCommand.Options.Add(verifyThresholdOption);
++verifyLabelCommand.Options.Add(verifySaveFrameOption);
++verifyLabelCommand.Options.Add(verifySaveFramesDirectoryOption);
++verifyLabelCommand.SetAction(async (parseResult, cancellationToken) =>
++{
++    var labelPath = parseResult.GetValue(verifyLabelPathArgument)!;
++    var framePath = parseResult.GetValue(verifyFrameOption);
++    var deviceId = parseResult.GetValue(verifyDeviceOption);
++    var videoType = parseResult.GetValue(verifyVideoTypeOption);
++    var frameCount = parseResult.GetValue(verifyFramesOption);
++    var intervalMs = parseResult.GetValue(verifyIntervalOption);
++    var predicate = parseResult.GetValue(verifyOperatorOption)!;
++    var threshold = parseResult.GetValue(verifyThresholdOption);
++    var saveFrame = parseResult.GetValue(verifySaveFrameOption);
++    var saveFramesDirectory = parseResult.GetValue(verifySaveFramesDirectoryOption);
++    if (!File.Exists(labelPath))
++    {
++        Console.WriteLine(JsonSerializer.Serialize(new { error = $"找不到标签文件: {labelPath}" }));
++        nativeVerifyExitCode = 2;
++        return;
++    }
++    if (frameCount is < 1 or > 100 || intervalMs is < 0 or > 10000 || deviceId < 0 || predicate is not (">" or ">=" or "<" or "<="))
++    {
++        Console.WriteLine(JsonSerializer.Serialize(new { error = "测试帧数、间隔、设备编号或条件无效" }));
++        nativeVerifyExitCode = 2;
++        return;
++    }
++    OpenCVCapture? verificationCapture = null;
++    try
++    {
++        var imageLabel = ImgLabel.Load(Path.GetFullPath(labelPath));
++        if (framePath is null)
++        {
++            verificationCapture = new OpenCVCapture();
++            if (!verificationCapture.Open(deviceId, (int)videoType))
++                throw new IOException($"无法打开采集设备 {deviceId}[{videoType}]");
++            verificationCapture.SetProperties(1920, 1080);
++        }
++        var count = framePath is null ? frameCount : 1;
++        for (var index = 0; index < count; index++)
++        {
++            cancellationToken.ThrowIfCancellationRequested();
++            if (index > 0 && intervalMs > 0)
++                await Task.Delay(intervalMs, cancellationToken);
++            using var frame = framePath is null
++                ? verificationCapture!.GetMatFrame()
++                : Cv2.ImRead(framePath, ImreadModes.Color);
++            if (frame.Empty())
++                throw new IOException(framePath is null ? "采集设备没有返回有效画面" : $"无法读取原始图像: {framePath}");
++            var started = Stopwatch.GetTimestamp();
++            var locations = imageLabel.Search(frame, out var rawScore);
++            var elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
++            var score = (int)Math.Ceiling(rawScore);
++            var passed = predicate switch
++            {
++                ">" => score > threshold,
++                ">=" => score >= threshold,
++                "<" => score < threshold,
++                "<=" => score <= threshold,
++                _ => false,
++            };
++            var location = locations.Count == 0 ? null : new
++            {
++                x = imageLabel.RangeX + locations[0].X,
++                y = imageLabel.RangeY + locations[0].Y,
++            };
++            string? savedFrame = null;
++            if (framePath is null && saveFramesDirectory is not null)
++            {
++                Directory.CreateDirectory(Path.GetFullPath(saveFramesDirectory));
++                savedFrame = Path.Combine(Path.GetFullPath(saveFramesDirectory), $"frame-{index + 1:000}.png");
++                Cv2.ImWrite(savedFrame, frame);
++            }
++            else if (index == 0 && saveFrame is not null && framePath is null)
++            {
++                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(saveFrame))!);
++                Cv2.ImWrite(saveFrame, frame);
++                savedFrame = Path.GetFullPath(saveFrame);
++            }
++            Console.WriteLine(JsonSerializer.Serialize(new
++            {
++                label = imageLabel.name + ".IL",
++                frame_index = index,
++                width = frame.Width,
++                height = frame.Height,
++                raw_score = rawScore,
++                integer_score = score,
++                @operator = predicate,
++                threshold,
++                passed,
++                position = location,
++                elapsed_ms = elapsed,
++                source = framePath is null ? "live_capture" : "offline_frame",
++                saved_frame = savedFrame,
++            }));
++        }
++    }
++    catch (Exception ex)
++    {
++        Console.WriteLine(JsonSerializer.Serialize(new { error = ex.GetBaseException().Message }));
++        nativeVerifyExitCode = 1;
++    }
++    finally
++    {
++        verificationCapture?.Release();
++        verificationCapture?.Dispose();
++    }
++});
++rootCommand.Subcommands.Add(verifyLabelCommand);
++
++var commandExitCode = rootCommand.Parse(args).Invoke();
++if (commandExitCode == 0)
++    return labelFaultExitCode != 0 ? labelFaultExitCode : nativeVerifyExitCode;
++return commandExitCode;
+diff --git a/src/EasyCon2.CLI/ConsoleOutAdapter.cs b/src/EasyCon2.CLI/ConsoleOutAdapter.cs
+--- a/src/EasyCon2.CLI/ConsoleOutAdapter.cs
++++ b/src/EasyCon2.CLI/ConsoleOutAdapter.cs
+@@ -1,10 +1,21 @@
+ using EasyCon.Core.Config;
+ using EasyScript;
+ using System.Drawing;
++using System.Text;
+ 
+ class ConsoleOutAdapter() : IOutputAdapter
+ {
+     private readonly AlertDispatcher _dispatcher = new(ConfigManager.LoadAlert());
++    private readonly StringBuilder _tail = new();
++    private readonly object _tailLock = new();
++
++    public event Action<string>? LineWritten;
++
++    public string GetTail()
++    {
++        lock (_tailLock)
++            return _tail.ToString();
++    }
+ 
+     private bool _msgNewLine = true;
+     private bool _msgFirstLine = true;
+@@ -34,6 +45,13 @@
+ 
+     private void Print(string message, Color? color, bool timestamp = true)
+     {
++        LineWritten?.Invoke(message);
++        lock (_tailLock)
++        {
++            _tail.Append(message);
++            if (_tail.Length > 40000)
++                _tail.Remove(0, _tail.Length - 40000);
++        }
+         if (_msgNewLine)
+         {
+             if (!_msgFirstLine)
+diff --git a/src/EasyCon2.CLI/LabelFaultSupervisor.cs b/src/EasyCon2.CLI/LabelFaultSupervisor.cs
+new file mode 100644
+--- /dev/null
++++ b/src/EasyCon2.CLI/LabelFaultSupervisor.cs
+@@ -0,0 +1,598 @@
++using EasyCon.Capture;
++using EasyScript;
++using OpenCvSharp;
++using System.Diagnostics;
++using System.Text;
++using System.Text.Json;
++
++internal sealed class GuardedGamePad(ICGamePad inner) : ICGamePad
++{
++    private readonly object _gate = new();
++    private int _blocked;
++    public DelayType DelayMethod => inner.DelayMethod;
++    public bool IsBlocked => Volatile.Read(ref _blocked) != 0;
++
++    private void Send(Action action)
++    {
++        lock (_gate)
++        {
++            if (!IsBlocked)
++                action();
++        }
++    }
++
++    public void ClickButtons(GamePadKey key, int duration, CancellationToken token) =>
++        Send(() => inner.ClickButtons(key, duration, token));
++    public void PressButtons(GamePadKey key) => Send(() => inner.PressButtons(key));
++    public void ReleaseButtons(GamePadKey key) => Send(() => inner.ReleaseButtons(key));
++    public void ClickStick(GamePadKey key, byte x, byte y, int duration, CancellationToken token) =>
++        Send(() => inner.ClickStick(key, x, y, duration, token));
++    public void SetStick(GamePadKey key, byte x, byte y) => Send(() => inner.SetStick(key, x, y));
++    public void ChangeAmiibo(uint index) => Send(() => inner.ChangeAmiibo(index));
++    public void Reset() => Send(inner.Reset);
++
++    public bool BlockAndReset(TimeSpan timeout, out string? error)
++    {
++        Interlocked.Exchange(ref _blocked, 1);
++        error = null;
++        if (!Monitor.TryEnter(_gate, timeout))
++        {
++            error = "手柄操作尚未返回，未能在停止时限内发送 Reset";
++            return false;
++        }
++        try
++        {
++            inner.Reset();
++            return true;
++        }
++        catch (Exception ex)
++        {
++            error = ex.GetBaseException().Message;
++            return false;
++        }
++        finally
++        {
++            Monitor.Exit(_gate);
++        }
++    }
++}
++
++internal sealed record StageLabelExpectation(string Name, string Operator, int Threshold);
++internal sealed record StageMarker(
++    string StageId,
++    string RetryGroupId,
++    int TimeoutMs,
++    string SourceFile,
++    string Function,
++    string CallSiteId,
++    string RecoveryPolicy,
++    string GroupOperator,
++    IReadOnlyList<StageLabelExpectation> Labels);
++
++internal sealed class LabelFaultSupervisor : IDisposable
++{
++    private sealed record ScoreState(int Latest, int Highest, int Lowest, double RawLatest, int Count);
++    private sealed record MatchedFrame(Mat Frame, long Sequence, long CapturedTicks);
++    private sealed class ActiveStage(StageMarker marker, int instance, long enteredTicks, DateTimeOffset enteredAtUtc)
++    {
++        public StageMarker Marker { get; } = marker;
++        public int Instance { get; } = instance;
++        public long EnteredTicks { get; } = enteredTicks;
++        public DateTimeOffset EnteredAtUtc { get; } = enteredAtUtc;
++        public Dictionary<string, ScoreState> Scores { get; } = new(StringComparer.Ordinal);
++        public Queue<MatchedFrame> Frames { get; } = new();
++    }
++
++    private readonly object _gate = new();
++    private readonly string _incidentRoot;
++    private readonly string _runId;
++    private readonly string _workflow;
++    private readonly string _deviceName;
++    private readonly string _scriptPath;
++    private readonly int _deviceId;
++    private readonly string _videoType;
++    private readonly IReadOnlyDictionary<string, ImgLabel> _labels;
++    private readonly GuardedGamePad _gamePad;
++    private readonly CancellationTokenSource _runCancellation;
++    private readonly Func<Mat?> _cloneLatestFrame;
++    private readonly Func<(bool Failed, string? Error, long Sequence, long CapturedTicks)> _captureState;
++    private readonly Func<string> _logTail;
++    private readonly Action<string> _log;
++    private readonly int _captureStaleMs;
++    private readonly Dictionary<string, int> _stageInstances = new(StringComparer.Ordinal);
++    private readonly Dictionary<string, long> _retryGroupStarts = new(StringComparer.Ordinal);
++    private readonly Dictionary<string, DateTimeOffset> _retryGroupStartUtc = new(StringComparer.Ordinal);
++    private readonly object _markerGate = new();
++    private readonly StringBuilder _markerBuffer = new();
++    private ActiveStage? _active;
++    private int _incidentStarted;
++    private string? _incidentId;
++    private Task? _incidentTask;
++
++    public LabelFaultSupervisor(
++        string incidentRoot,
++        string runId,
++        string workflow,
++        string deviceName,
++        string scriptPath,
++        int deviceId,
++        string videoType,
++        IReadOnlyDictionary<string, ImgLabel> labels,
++        GuardedGamePad gamePad,
++        CancellationTokenSource runCancellation,
++        Func<Mat?> cloneLatestFrame,
++        Func<(bool Failed, string? Error, long Sequence, long CapturedTicks)> captureState,
++        Func<string> logTail,
++        Action<string> log,
++        int captureStaleMs = 3000)
++    {
++        _incidentRoot = string.IsNullOrWhiteSpace(incidentRoot) ? DefaultIncidentRoot() : Path.GetFullPath(incidentRoot);
++        _runId = string.IsNullOrWhiteSpace(runId) ? Guid.NewGuid().ToString("N") : runId;
++        _workflow = string.IsNullOrWhiteSpace(workflow) ? "unknown" : workflow;
++        _deviceName = deviceName;
++        _scriptPath = Path.GetFullPath(scriptPath);
++        _deviceId = deviceId;
++        _videoType = videoType;
++        _labels = labels;
++        _gamePad = gamePad;
++        _runCancellation = runCancellation;
++        _cloneLatestFrame = cloneLatestFrame;
++        _captureState = captureState;
++        _logTail = logTail;
++        _log = log;
++        _captureStaleMs = Math.Clamp(captureStaleMs, 500, 30000);
++    }
++
++    public bool HasIncident => Volatile.Read(ref _incidentStarted) != 0;
++    public string? IncidentId => _incidentId;
++    public Task? IncidentTask => _incidentTask;
++
++    private static string DefaultIncidentRoot()
++    {
++        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
++        return Path.Combine(local, "FRLG-Auto-RNG", "label_incidents");
++    }
++
++    public void OnLogLine(string line)
++    {
++        const string prefix = "FRLG_STAGE|";
++        var completeMarkers = new List<string>();
++        lock (_markerGate)
++        {
++            _markerBuffer.Append(line);
++            while (true)
++            {
++                var start = _markerBuffer.ToString().IndexOf(prefix, StringComparison.Ordinal);
++                if (start < 0)
++                {
++                    if (_markerBuffer.Length > prefix.Length)
++                        _markerBuffer.Remove(0, _markerBuffer.Length - prefix.Length);
++                    break;
++                }
++                if (start > 0)
++                    _markerBuffer.Remove(0, start);
++                var terminator = _markerBuffer.ToString().IndexOf("|!", prefix.Length, StringComparison.Ordinal);
++                if (terminator < 0)
++                    break;
++                completeMarkers.Add(_markerBuffer.ToString(prefix.Length, terminator - prefix.Length));
++                _markerBuffer.Remove(0, terminator + 2);
++            }
++        }
++        foreach (var markerText in completeMarkers)
++            ParseMarker(markerText);
++    }
++
++    private void ParseMarker(string markerText)
++    {
++        var parts = markerText.Split('|');
++        if (parts.Length < 2)
++            return;
++        if (parts[0] == "END" && parts.Length >= 2)
++        {
++            lock (_gate)
++            {
++                if (_active?.Marker.StageId == parts[1])
++                {
++                    foreach (var frame in _active.Frames)
++                        frame.Frame.Dispose();
++                    _retryGroupStarts.Remove(_active.Marker.RetryGroupId);
++                    _retryGroupStartUtc.Remove(_active.Marker.RetryGroupId);
++                    _active = null;
++                }
++            }
++            return;
++        }
++        if (parts[0] == "PROGRESS" && parts.Length >= 2)
++        {
++            lock (_gate)
++            {
++                _retryGroupStarts.Remove(parts[1]);
++                _retryGroupStartUtc.Remove(parts[1]);
++            }
++            return;
++        }
++        if (parts[0] != "BEGIN" || parts.Length < 9)
++            return;
++        try
++        {
++            var groupParts = parts[8].Split(';', 2);
++            var groupOperator = groupParts.Length == 2 && groupParts[0] is "OR" or "AND" ? groupParts[0] : "OR";
++            var labelsText = groupParts.Length == 2 && groupParts[0] is "OR" or "AND" ? groupParts[1] : parts[8];
++            var labels = labelsText.Split(',', StringSplitOptions.RemoveEmptyEntries)
++                .Select(ParseExpectation).ToArray();
++            var marker = new StageMarker(
++                parts[1], parts[2], int.Parse(parts[3]), parts[4], parts[5], parts[6],
++                parts[7], groupOperator, labels);
++            if (marker.TimeoutMs < 100 || marker.TimeoutMs > 24 * 60 * 60 * 1000 || labels.Length == 0)
++                throw new FormatException("阶段标记的预算或标签组无效");
++            lock (_gate)
++            {
++                if (_incidentStarted != 0)
++                    return;
++                var next = _stageInstances.TryGetValue(marker.StageId, out var current) ? current + 1 : 1;
++                _stageInstances[marker.StageId] = next;
++                if (_active is not null)
++                {
++                    foreach (var frame in _active.Frames)
++                        frame.Frame.Dispose();
++                }
++                var enteredTicks = Stopwatch.GetTimestamp();
++                if (!_retryGroupStarts.TryGetValue(marker.RetryGroupId, out var groupStart))
++                {
++                    _retryGroupStarts[marker.RetryGroupId] = groupStart = enteredTicks;
++                    _retryGroupStartUtc[marker.RetryGroupId] = DateTimeOffset.UtcNow;
++                }
++                _active = new ActiveStage(marker, next, groupStart, _retryGroupStartUtc[marker.RetryGroupId]);
++            }
++            _log($"[故障监督] 已登记阶段 {marker.StageId}，预算 {marker.TimeoutMs} ms。\n");
++        }
++        catch (Exception ex)
++        {
++            _log($"[故障监督] 阶段登记无效：{ex.GetBaseException().Message}\n");
++        }
++    }
++
++    private static StageLabelExpectation ParseExpectation(string text)
++    {
++        var bits = text.Split(':');
++        if (bits.Length != 3 || string.IsNullOrWhiteSpace(bits[0]) || bits[1] is not (">" or ">=" or "<" or "<="))
++            throw new FormatException($"标签判定格式无效: {text}");
++        return new StageLabelExpectation(bits[0], bits[1], int.Parse(bits[2]));
++    }
++
++    public void ObserveMatch(string name, double rawScore, int integerScore, Mat frame, long sequence, long capturedTicks)
++    {
++        lock (_gate)
++        {
++            if (_active is null || _incidentStarted != 0)
++                return;
++            var current = _active.Scores.TryGetValue(name, out var prior)
++                ? new ScoreState(integerScore, Math.Max(prior.Highest, integerScore), Math.Min(prior.Lowest, integerScore), rawScore, prior.Count + 1)
++                : new ScoreState(integerScore, integerScore, integerScore, rawScore, 1);
++            _active.Scores[name] = current;
++            if (_active.Frames.Count > 0 && _active.Frames.Last().Sequence == sequence)
++                return;
++            _active.Frames.Enqueue(new MatchedFrame(frame.Clone(), sequence, capturedTicks));
++            while (_active.Frames.Count > 3)
++                _active.Frames.Dequeue().Frame.Dispose();
++        }
++    }
++
++    public void ObserveLabelError(string name, Exception error)
++    {
++        var message = $"标签 {name}.IL 执行失败：{error.GetBaseException().Message}";
++        Trigger("label_invalid", message, name + ".IL");
++    }
++
++    public async Task MonitorAsync(CancellationToken token)
++    {
++        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
++        try
++        {
++            while (await timer.WaitForNextTickAsync(token))
++            {
++                ActiveStage? stage;
++                lock (_gate)
++                    stage = _active;
++                if (stage is null || _incidentStarted != 0)
++                    continue;
++
++                var capture = _captureState();
++                if (capture.Failed)
++                {
++                    Trigger("capture_unavailable", capture.Error ?? "采集线程发生异常");
++                    return;
++                }
++                var frameAge = ElapsedMs(capture.CapturedTicks);
++                if (capture.CapturedTicks == 0 || frameAge > _captureStaleMs)
++                {
++                    Trigger("capture_unavailable", $"采集画面 {frameAge} ms 未更新");
++                    return;
++                }
++                if (ElapsedMs(stage.EnteredTicks) >= stage.Marker.TimeoutMs)
++                {
++                    var stalled = HasSatisfiedPredicate(stage);
++                    var failureKind = stalled ? "state_stalled" : "stage_timeout";
++                    var reason = stalled
++                        ? $"阶段 {stage.Marker.StageId} 在标签条件成立后仍超过 {stage.Marker.TimeoutMs} ms 未推进"
++                        : $"阶段 {stage.Marker.StageId} 超过 {stage.Marker.TimeoutMs} ms 未达到标签条件";
++                    Trigger(failureKind, reason);
++                    return;
++                }
++            }
++        }
++        catch (OperationCanceledException) when (token.IsCancellationRequested)
++        {
++        }
++    }
++
++    private static long ElapsedMs(long timestamp)
++    {
++        if (timestamp == 0)
++            return long.MaxValue;
++        return (long)Stopwatch.GetElapsedTime(timestamp).TotalMilliseconds;
++    }
++
++    private static bool HasSatisfiedPredicate(ActiveStage stage)
++    {
++        var results = stage.Marker.Labels.Select(expected =>
++        {
++            var key = expected.Name.EndsWith(".IL", StringComparison.Ordinal) ? expected.Name[..^3] : expected.Name;
++            if (!stage.Scores.TryGetValue(key, out var score))
++                return false;
++            return expected.Operator switch
++            {
++                ">" => score.Highest > expected.Threshold,
++                ">=" => score.Highest >= expected.Threshold,
++                "<" => score.Lowest < expected.Threshold,
++                "<=" => score.Lowest <= expected.Threshold,
++                _ => false,
++            };
++        }).ToArray();
++        return stage.Marker.GroupOperator == "AND" ? results.All(value => value) : results.Any(value => value);
++    }
++
++    private void Trigger(string failureKind, string reason, string? failureLabel = null)
++    {
++        if (Interlocked.Exchange(ref _incidentStarted, 1) != 0)
++            return;
++        _incidentId = Guid.NewGuid().ToString("N");
++        var inputReleased = _gamePad.BlockAndReset(TimeSpan.FromMilliseconds(500), out var releaseError);
++        ActiveStage? stage;
++        Mat? matchFrame = null;
++        lock (_gate)
++        {
++            stage = _active;
++            if (stage?.Frames.Count > 0)
++                matchFrame = stage.Frames.Last().Frame.Clone();
++        }
++        Mat? stopFrame = null;
++        try
++        {
++            stopFrame = _cloneLatestFrame();
++        }
++        catch (Exception ex)
++        {
++            releaseError = string.Join("; ", new[] { releaseError, "停止截图读取失败: " + ex.GetBaseException().Message }.Where(value => !string.IsNullOrWhiteSpace(value)));
++        }
++        _runCancellation.Cancel();
++        _log($"[故障事件 {_incidentId}] {reason}；后续手柄输入已锁定。\n");
++        _incidentTask = Task.Run(() => WriteIncident(failureKind, reason, failureLabel, stage, matchFrame, stopFrame, inputReleased, releaseError));
++    }
++
++    private void WriteIncident(
++        string failureKind,
++        string reason,
++        string? failureLabel,
++        ActiveStage? stage,
++        Mat? matchFrame,
++        Mat? stopFrame,
++        bool inputReleased,
++        string? releaseError)
++    {
++        var errors = new List<string>();
++        var assets = new Dictionary<string, byte[]>(StringComparer.Ordinal);
++        (int Width, int Height, long Sequence, long CapturedTicks)? matchInfo = null;
++        (int Width, int Height, long Sequence, long CapturedTicks)? stopInfo = null;
++        try
++        {
++            if (matchFrame is not null && !matchFrame.Empty())
++            {
++                matchInfo = (matchFrame.Width, matchFrame.Height,
++                    stage?.Frames.LastOrDefault()?.Sequence ?? 0,
++                    stage?.Frames.LastOrDefault()?.CapturedTicks ?? 0);
++                if (Cv2.ImEncode(".png", matchFrame, out var encoded))
++                    assets["match-frame.png"] = encoded.ToArray();
++                else
++                    errors.Add("匹配画面PNG编码失败");
++            }
++            if (stopFrame is not null && !stopFrame.Empty())
++            {
++                var capture = _captureState();
++                stopInfo = (stopFrame.Width, stopFrame.Height, capture.Sequence, capture.CapturedTicks);
++                if (Cv2.ImEncode(".png", stopFrame, out var encoded))
++                    assets["stop-frame.png"] = encoded.ToArray();
++                else
++                    errors.Add("停止画面PNG编码失败");
++            }
++        }
++        catch (Exception ex)
++        {
++            errors.Add("PNG编码失败: " + ex.GetBaseException().Message);
++        }
++        finally
++        {
++            matchFrame?.Dispose();
++            stopFrame?.Dispose();
++        }
++
++        var expected = stage?.Marker.Labels ?? Array.Empty<StageLabelExpectation>();
++        var labels = expected.Select(item =>
++        {
++            ScoreState? score = null;
++            var key = item.Name.EndsWith(".IL", StringComparison.Ordinal) ? item.Name[..^3] : item.Name;
++            if (stage is not null && stage.Scores.TryGetValue(key, out var found))
++                score = found;
++            return new Dictionary<string, object?>
++            {
++                ["name"] = item.Name,
++                ["score"] = score?.Latest,
++                ["raw_score"] = score?.RawLatest,
++                ["window_max_score"] = score?.Highest,
++                ["window_min_score"] = score?.Lowest,
++                ["evaluations"] = score?.Count ?? 0,
++                ["operator"] = item.Operator,
++                ["threshold"] = item.Threshold,
++                ["evaluated"] = score is not null,
++            };
++        }).ToArray();
++        var snapshotUtc = DateTimeOffset.UtcNow;
++        var record = new Dictionary<string, object?>
++        {
++            ["schema"] = "frlg-label-incident/v1",
++            ["incident_id"] = _incidentId,
++            ["run_id"] = _runId,
++            ["workflow"] = _workflow,
++            ["stage_id"] = stage?.Marker.StageId ?? "label.invalid",
++            ["stage_instance_id"] = stage is null ? "1" : $"{stage.Marker.StageId}:{stage.Instance}",
++            ["retry_group_id"] = stage?.Marker.RetryGroupId ?? "label.invalid",
++            ["failure_kind"] = failureKind,
++            ["runtime_version"] = "1.6.4-a+9c86137",
++            ["source"] = new Dictionary<string, object?>
++            {
++                ["file"] = stage?.Marker.SourceFile,
++                ["function"] = stage?.Marker.Function,
++                ["call_site_id"] = stage?.Marker.CallSiteId,
++            },
++            ["reason"] = reason,
++            ["failure_label"] = failureLabel,
++            ["elapsed_ms"] = stage is null ? null : ElapsedMs(stage.EnteredTicks),
++            ["timeout_ms"] = stage?.Marker.TimeoutMs,
++            ["predicate"] = new Dictionary<string, object?>
++            {
++                ["group_operator"] = stage?.Marker.GroupOperator ?? "OR",
++                ["terms"] = expected.Select(item => new Dictionary<string, object?>
++                {
++                    ["name"] = item.Name, ["operator"] = item.Operator, ["threshold"] = item.Threshold,
++                }).ToArray(),
++            },
++            ["labels"] = labels,
++            ["capture_device"] = new Dictionary<string, object?>
++            {
++                ["name"] = _deviceName, ["index"] = _deviceId, ["backend"] = _videoType,
++            },
++            ["capture"] = new Dictionary<string, object?>
++            {
++                ["width"] = stopInfo?.Width ?? matchInfo?.Width,
++                ["height"] = stopInfo?.Height ?? matchInfo?.Height,
++                ["match_frame_sequence"] = matchInfo?.Sequence,
++                ["stop_frame_sequence"] = stopInfo?.Sequence,
++                ["match_frame_age_ms"] = matchInfo is null ? null : ElapsedMs(matchInfo.Value.CapturedTicks),
++                ["stop_frame_age_ms"] = stopInfo is null ? null : ElapsedMs(stopInfo.Value.CapturedTicks),
++                ["snapshot_at_utc"] = snapshotUtc,
++            },
++            ["screenshot"] = new Dictionary<string, object?>
++            {
++                ["match"] = assets.ContainsKey("match-frame.png") ? "match-frame.png" : null,
++                ["stop"] = assets.ContainsKey("stop-frame.png") ? "stop-frame.png" : null,
++                ["errors"] = errors,
++            },
++            ["input_released"] = inputReleased,
++            ["input_release_error"] = releaseError,
++            ["restart_policy"] = stage?.Marker.RecoveryPolicy ?? "manual_prepare_then_restart",
++            ["script_path"] = _scriptPath,
++            ["log_tail"] = "log-tail.txt",
++            ["started_at_utc"] = stage?.EnteredAtUtc ?? snapshotUtc,
++        };
++        assets["log-tail.txt"] = Encoding.UTF8.GetBytes(_logTail());
++        foreach (var item in expected)
++        {
++            var labelKey = item.Name.EndsWith(".IL", StringComparison.Ordinal) ? item.Name[..^3] : item.Name;
++            if (!_labels.TryGetValue(labelKey, out var label))
++            {
++                errors.Add($"当前运行器未加载 {item.Name}");
++                continue;
++            }
++            var path = Path.Combine(label.path, label.name + ".IL");
++            try
++            {
++                if (File.Exists(path))
++                    assets[$"original-labels/{label.name}.IL"] = File.ReadAllBytes(path);
++                else
++                    errors.Add($"实际加载标签文件缺失: {path}");
++            }
++            catch (Exception ex)
++            {
++                errors.Add($"备份标签 {label.name}.IL 失败: {ex.GetBaseException().Message}");
++            }
++        }
++        if (record["screenshot"] is Dictionary<string, object?> screenshot)
++            screenshot["errors"] = errors;
++        try
++        {
++            var now = DateTimeOffset.UtcNow;
++            var directoryName = now.ToString("yyyyMMdd'T'HHmmssfff'Z'") + "-" + _incidentId;
++            var bundle = Path.Combine(_incidentRoot, directoryName);
++            Directory.CreateDirectory(bundle);
++            foreach (var (name, data) in assets)
++            {
++                var destination = Path.Combine(bundle, name.Replace('/', Path.DirectorySeparatorChar));
++                WriteAtomic(destination, data);
++            }
++            record["complete"] = true;
++            record["created_at_utc"] = now;
++            record["asset_errors"] = errors;
++            record["assets"] = assets.ToDictionary(
++                item => item.Key,
++                item => (object)new { sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(item.Value)).ToLowerInvariant(), size = item.Value.Length },
++                StringComparer.Ordinal);
++            WriteAtomic(Path.Combine(bundle, "incident.json"), JsonSerializer.SerializeToUtf8Bytes(record, new JsonSerializerOptions { WriteIndented = true }));
++            WriteAtomic(Path.Combine(bundle, "status.json"), JsonSerializer.SerializeToUtf8Bytes(new { status = "pending", updated_at_utc = DateTimeOffset.UtcNow }, new JsonSerializerOptions { WriteIndented = true }));
++            Directory.CreateDirectory(_incidentRoot);
++            var eventLine = JsonSerializer.SerializeToUtf8Bytes(new { @event = "incident_complete", incident_id = _incidentId, run_id = _runId, path = directoryName, published_at_utc = DateTimeOffset.UtcNow });
++            using var eventStream = new FileStream(Path.Combine(_incidentRoot, "events.jsonl"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
++            eventStream.Write(eventLine);
++            eventStream.WriteByte((byte)'\n');
++            eventStream.Flush(true);
++            _log($"[故障事件 {_incidentId}] 故障资料已保存：{bundle}\n");
++        }
++        catch (Exception ex)
++        {
++            _log($"[故障事件 {_incidentId}] 故障记录写入失败：{ex.GetBaseException().Message}\n");
++        }
++    }
++
++    private static void WriteAtomic(string path, byte[] bytes)
++    {
++        var full = Path.GetFullPath(path);
++        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
++        var temp = full + "." + Guid.NewGuid().ToString("N") + ".tmp";
++        try
++        {
++            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
++            {
++                stream.Write(bytes);
++                stream.Flush(true);
++            }
++            File.Move(temp, full, true);
++        }
++        finally
++        {
++            if (File.Exists(temp))
++                File.Delete(temp);
++        }
++    }
++
++    public void Dispose()
++    {
++        lock (_gate)
++        {
++            if (_active is null)
++                return;
++            foreach (var frame in _active.Frames)
++                frame.Frame.Dispose();
++            _active.Frames.Clear();
++            _active = null;
++        }
++    }
++}

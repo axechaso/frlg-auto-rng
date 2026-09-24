@@ -110,6 +110,19 @@ class WorkerCommandTests(unittest.TestCase):
                             self.assertIn("--fresh-exhaustive", command.arguments)
                     if mode == "egg":
                         self.assertIn("--expected-marker", command.arguments)
+                    self.assertNotIn("--incident-dir", command.arguments)
+
+                    with patch.object(sys, "frozen", True, create=True), \
+                         patch.object(sys, "executable", str(root / "FRLG-Auto-RNG.exe")), \
+                         patch("pyside_app.workflows.probe_easycon_devices", return_value=({"COM3"}, {1: "Capture"}, "")), \
+                         patch("pyside_app.workflows.check_workflow", return_value=check), \
+                         patch("pyside_app.workflows.prepare_compat_runner", return_value=root / "runner.exe"):
+                        supervised = prepare_workflow_run(
+                            prepared, AppPaths(user=root), "COM3", 1, "Capture",
+                            label_supervision=True,
+                        )
+                    self.assertIn("--incident-dir", supervised.arguments)
+                    self.assertEqual(supervised.incident_root, root / "label_incidents")
 
     def test_wild_and_static_commands_use_frozen_log_worker(self):
         result = sample_result()
@@ -128,6 +141,19 @@ class WorkerCommandTests(unittest.TestCase):
         self.assertNotIn("-u", command.arguments)
         self.assertIn(str(command.stop_path), command.arguments)
         self.assertIn(str(command.log_path), command.arguments)
+        self.assertNotIn("--label-supervision", command.arguments)
+
+        with patch.object(sys, "frozen", True, create=True), \
+             patch.object(sys, "executable", "C:/Portable/FRLG-Auto-RNG.exe"), \
+             patch("pyside_app.services.probe_easycon_devices", return_value=({"COM3"}, {1: "Capture"}, "")), \
+             patch("pyside_app.services.validate_generated_project_consistency"), \
+             patch("pyside_app.services.validate_runtime", return_value=check), \
+             patch("pyside_app.services.prepare_compat_runner", return_value=Path("runner.exe")):
+            supervised = prepare_run(
+                prepared, "COM3", 1, "Capture", label_supervision=True,
+            )
+        self.assertIn("--label-supervision", supervised.arguments)
+        self.assertEqual(supervised.incident_root.name, "label_incidents")
 
 
 if __name__ == "__main__":

@@ -8,15 +8,20 @@ after the base corpus has been verified.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
+import os
 import re
 import shutil
 import struct
+import threading
+import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 
 LABEL_OVERRIDE_SCHEMA = 1
@@ -24,6 +29,7 @@ PROJECT_OVERRIDE_SCHEMA = 1
 PROJECT_OVERRIDE_FILENAME = "label-overrides.json"
 SUPPORTED_SEARCH_METHODS = {1, 3, 5, 11, 14}
 _DEVICE_INDEX_RE = re.compile(r"^\s*\[\d+\]\s*")
+_STORE_LOCK = threading.RLock()
 
 
 def _sha256(data: bytes) -> str:
@@ -32,11 +38,28 @@ def _sha256(data: bytes) -> str:
 
 def _write_json_atomic(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    temporary.replace(path)
+    temporary = path.with_name(path.name + f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _write_bytes_atomic(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def capture_device_identity(choice: str) -> str:
@@ -80,15 +103,46 @@ def inspect_label_file(path: str | Path) -> dict[str, object]:
         raise ValueError(f"{path.name} 的 ImgBase64 无效") from exc
     if len(image) < 16:
         raise ValueError(f"{path.name} 的标签图像为空或损坏")
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as exc:
+        raise RuntimeError("当前环境缺少 OpenCV，无法强校验标签图像") from exc
+    decoded = cv2.imdecode(np.frombuffer(image, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+    if decoded is None or decoded.size == 0 or decoded.ndim not in (2, 3):
+        raise ValueError(f"{path.name} 的 ImgBase64 不能解码为有效图像")
+    image_height, image_width = decoded.shape[:2]
+    coordinates: dict[str, int] = {}
     for key in (
         "RangeX", "RangeY", "RangeWidth", "RangeHeight",
         "TargetX", "TargetY", "TargetWidth", "TargetHeight",
     ):
         value = payload.get(key)
-        if not isinstance(value, int):
+        if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"{path.name} 缺少整数坐标 {key}")
+        if value < 0 or value > 32768:
+            raise ValueError(f"{path.name} 的 {key} 超出合法坐标范围")
         if key.endswith(("Width", "Height")) and value <= 0:
             raise ValueError(f"{path.name} 的 {key} 必须大于0")
+        coordinates[key] = value
+    if coordinates["TargetWidth"] > coordinates["RangeWidth"] or coordinates["TargetHeight"] > coordinates["RangeHeight"]:
+        raise ValueError(f"{path.name} 的模板尺寸大于搜索范围")
+    if coordinates["TargetX"] < coordinates["RangeX"] or coordinates["TargetY"] < coordinates["RangeY"]:
+        raise ValueError(f"{path.name} 的模板位置超出搜索范围")
+    if coordinates["TargetX"] + coordinates["TargetWidth"] > coordinates["RangeX"] + coordinates["RangeWidth"]:
+        raise ValueError(f"{path.name} 的模板右边界超出搜索范围")
+    if coordinates["TargetY"] + coordinates["TargetHeight"] > coordinates["RangeY"] + coordinates["RangeHeight"]:
+        raise ValueError(f"{path.name} 的模板下边界超出搜索范围")
+    if image_width != coordinates["TargetWidth"] or image_height != coordinates["TargetHeight"]:
+        raise ValueError(
+            f"{path.name} 的模板图像为 {image_width}x{image_height}，"
+            f"坐标声明为 {coordinates['TargetWidth']}x{coordinates['TargetHeight']}"
+        )
+    if method == 14:
+        if decoded.ndim != 3 or decoded.shape[2] != 4:
+            raise ValueError(f"{path.name} 的方法14需要保留RGBA透明掩膜")
+        if not np.any(decoded[:, :, 3]):
+            raise ValueError(f"{path.name} 的方法14透明掩膜没有有效像素")
     return {
         "name": path.name,
         "sha256": _sha256(data),
@@ -152,7 +206,8 @@ class LabelOverrideStore:
     """Persistent device profiles containing validated replacement labels."""
 
     def __init__(self, root: str | Path):
-        self.root = Path(root)
+        self.root = Path(root).expanduser().resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
 
     def profile(self, capture_device: str) -> LabelOverrideProfile:
         identity = capture_device_identity(capture_device)
@@ -188,7 +243,120 @@ class LabelOverrideStore:
                 targets.append(path)
         return tuple(targets)
 
-    def load_manifest(self, profile: LabelOverrideProfile) -> dict[str, object]:
+    @contextlib.contextmanager
+    def _locked(self, profile: LabelOverrideProfile):
+        lock_path = self.root / ".locks" / f"{profile.key}.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with _STORE_LOCK:
+            with lock_path.open("a+b") as stream:
+                stream.seek(0, os.SEEK_END)
+                if stream.tell() == 0:
+                    stream.write(b"\0")
+                    stream.flush()
+                stream.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    while True:
+                        try:
+                            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                            break
+                        except OSError:
+                            time.sleep(0.05)
+                    try:
+                        yield
+                    finally:
+                        stream.seek(0)
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+                    try:
+                        yield
+                    finally:
+                        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+    @staticmethod
+    def _label_leaf(name: str) -> str:
+        if Path(name).name != name or Path(name).suffix.lower() != ".il":
+            raise ValueError(f"标签名无效: {name}")
+        return name
+
+    @staticmethod
+    def _transaction_root(root: Path, profile: LabelOverrideProfile) -> Path:
+        return root / ".transactions" / profile.key
+
+    @staticmethod
+    def _revision_name() -> str:
+        return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + "-" + uuid.uuid4().hex
+
+    def _archive_transaction(self, profile: LabelOverrideProfile, folder: Path) -> None:
+        try:
+            revisions = profile.directory / "revisions"
+            revisions.mkdir(parents=True, exist_ok=True)
+            destination = revisions / folder.name
+            if not destination.exists():
+                os.replace(folder, destination)
+        except OSError:
+            # A committed journal remains recoverable in .transactions and is
+            # archived the next time this profile is opened.
+            return
+
+    def _restore_journal(self, profile: LabelOverrideProfile, folder: Path, journal: dict[str, object]) -> None:
+        before_files = journal.get("before_files")
+        if not isinstance(before_files, dict):
+            raise ValueError(f"标签事务缺少回滚文件清单: {folder}")
+        for raw_name, existed in before_files.items():
+            name = self._label_leaf(str(raw_name))
+            target = profile.label_dir / name
+            backup = folder / "before" / name
+            if existed:
+                if not backup.is_file():
+                    raise ValueError(f"标签事务缺少回滚副本: {name}")
+                _write_bytes_atomic(target, backup.read_bytes())
+            else:
+                target.unlink(missing_ok=True)
+        manifest_path = profile.manifest_path
+        if journal.get("before_manifest_exists"):
+            backup_manifest = folder / "before" / "manifest.json"
+            if not backup_manifest.is_file():
+                raise ValueError(f"标签事务缺少清单回滚副本: {folder}")
+            _write_bytes_atomic(manifest_path, backup_manifest.read_bytes())
+        else:
+            manifest_path.unlink(missing_ok=True)
+
+    def _recover(self, profile: LabelOverrideProfile) -> None:
+        transaction_root = self._transaction_root(self.root, profile)
+        if not transaction_root.is_dir():
+            return
+        for folder in sorted(transaction_root.iterdir()):
+            if not folder.is_dir():
+                continue
+            journal_path = folder / "transaction.json"
+            if not journal_path.is_file():
+                # No mutation starts before the durable journal exists.
+                shutil.rmtree(folder, ignore_errors=True)
+                continue
+            try:
+                journal = json.loads(journal_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"标签事务日志损坏，停止自动修改: {journal_path}: {exc}") from exc
+            if not isinstance(journal, dict) or journal.get("profile_key") != profile.key:
+                raise ValueError(f"标签事务身份无效，停止自动修改: {journal_path}")
+            state = journal.get("status")
+            if state == "prepared":
+                self._restore_journal(profile, folder, journal)
+                journal["status"] = "rolled_back_after_interruption"
+                journal["recovered_at_utc"] = datetime.now(timezone.utc).isoformat()
+                _write_json_atomic(journal_path, journal)
+                state = journal["status"]
+            if state in {"committed", "rolled_back_after_interruption", "rolled_back"}:
+                self._archive_transaction(profile, folder)
+            else:
+                raise ValueError(f"未知标签事务状态 {state!r}: {journal_path}")
+
+    def _load_manifest_unlocked(self, profile: LabelOverrideProfile) -> dict[str, object]:
         if not profile.manifest_path.is_file():
             return {
                 "schema": LABEL_OVERRIDE_SCHEMA,
@@ -205,38 +373,50 @@ class LabelOverrideStore:
         files = payload.get("files")
         if not isinstance(files, dict):
             raise ValueError("设备标签清单缺少 files")
+        if payload.get("profile_key", profile.key) != profile.key:
+            raise ValueError("设备标签清单属于另一采集设备")
         return payload
+
+    def load_manifest(self, profile: LabelOverrideProfile) -> dict[str, object]:
+        with self._locked(profile):
+            self._recover(profile)
+            return self._load_manifest_unlocked(profile)
 
     def list_overrides(self, capture_device: str) -> tuple[dict[str, object], ...]:
         profile = self.profile(capture_device)
-        manifest = self.load_manifest(profile)
-        result = []
-        for name, metadata in sorted(manifest["files"].items()):
-            path = profile.label_dir / name
-            current = inspect_label_file(path)
-            if not isinstance(metadata, dict) or current["sha256"] != metadata.get("sha256"):
-                raise ValueError(f"设备标签文件与清单不一致: {name}")
-            result.append(current)
-        return tuple(result)
+        with self._locked(profile):
+            self._recover(profile)
+            manifest = self._load_manifest_unlocked(profile)
+            result = []
+            for name, metadata in sorted(manifest["files"].items()):
+                self._label_leaf(name)
+                path = profile.label_dir / name
+                current = inspect_label_file(path)
+                if not isinstance(metadata, dict) or current["sha256"] != metadata.get("sha256"):
+                    raise ValueError(f"设备标签文件与清单不一致: {name}")
+                result.append(current)
+            return tuple(result)
 
     def import_paths(
         self,
         capture_device: str,
         paths: Iterable[str | Path],
         known_label_dirs: Sequence[str | Path],
+        *,
+        provenance: Mapping[str, Mapping[str, object]] | None = None,
     ) -> LabelImportResult:
         profile = self.profile(capture_device)
         candidates = self._expand_inputs(paths)
         if not candidates:
             raise ValueError("所选路径中没有 .IL 标签文件")
 
-        prepared: dict[str, tuple[Path, dict[str, object]]] = {}
+        prepared: dict[str, tuple[Path, bytes, dict[str, object], tuple[Path, ...]]] = {}
         for path in candidates:
             metadata = inspect_label_file(path)
             name = str(metadata["name"])
             previous = prepared.get(name)
             if previous is not None:
-                if previous[1]["sha256"] != metadata["sha256"]:
+                if previous[2]["sha256"] != metadata["sha256"]:
                     raise ValueError(f"同一批次存在两个内容不同的同名标签: {name}")
                 continue
             targets = self._known_targets(name, known_label_dirs)
@@ -251,35 +431,198 @@ class LabelOverrideStore:
                     f"{name} 的 searchMethod={metadata['search_method']} 与原标签"
                     f" {sorted(base_methods)} 不一致"
                 )
-            prepared[name] = (path, metadata)
+            source_bytes = path.read_bytes()
+            if _sha256(source_bytes) != metadata["sha256"]:
+                raise ValueError(f"标签在校验后发生变化: {path}")
+            prepared[name] = (path, source_bytes, metadata, targets)
 
-        manifest = self.load_manifest(profile)
-        files_payload = dict(manifest["files"])
-        profile.label_dir.mkdir(parents=True, exist_ok=True)
-        for name, (source, metadata) in prepared.items():
-            destination = profile.label_dir / name
-            temporary = destination.with_name(destination.name + ".tmp")
-            temporary.write_bytes(source.read_bytes())
-            temporary.replace(destination)
-            files_payload[name] = {
-                **metadata,
-                "source": str(source.resolve()),
-                "imported_at_utc": datetime.now(timezone.utc).isoformat(),
+        with self._locked(profile):
+            self._recover(profile)
+            manifest = self._load_manifest_unlocked(profile)
+            files_payload = dict(manifest["files"])
+            changes: dict[str, bytes | None] = {}
+            revision_metadata: dict[str, object] = {"labels": {}}
+            for name, (source, data, metadata, targets) in prepared.items():
+                original_hashes = {
+                    str(target.resolve()): _sha256(target.read_bytes()) for target in targets
+                }
+                details = dict((provenance or {}).get(name, {}))
+                entry = {
+                    **metadata,
+                    "source": str(details.get("source") or source.resolve()),
+                    "imported_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "original_sha256": next(iter(original_hashes.values())),
+                    "original_sha256_by_source": original_hashes,
+                }
+                for key in ("incident_id", "verification", "operation"):
+                    if key in details:
+                        entry[key] = details[key]
+                files_payload[name] = entry
+                changes[name] = data
+                revision_metadata["labels"][name] = {
+                    "original_sha256_by_source": original_hashes,
+                    "new_sha256": metadata["sha256"],
+                    "incident_id": details.get("incident_id"),
+                    "verification": details.get("verification"),
+                }
+            updated = {
+                "schema": LABEL_OVERRIDE_SCHEMA,
+                "profile_key": profile.key,
+                "capture_device": profile.capture_device,
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "files": files_payload,
             }
-        updated = {
-            "schema": LABEL_OVERRIDE_SCHEMA,
+            self._commit_profile(profile, changes, updated, operation="import", metadata=revision_metadata)
+            return LabelImportResult(profile, tuple(sorted(prepared)), len(files_payload))
+
+    def _commit_profile(
+        self,
+        profile: LabelOverrideProfile,
+        changes: Mapping[str, bytes | None],
+        updated_manifest: dict[str, object],
+        *,
+        operation: str,
+        metadata: Mapping[str, object],
+    ) -> Path:
+        names = tuple(sorted(self._label_leaf(name) for name in changes))
+        profile.label_dir.mkdir(parents=True, exist_ok=True)
+        old_manifest_exists = profile.manifest_path.is_file()
+        old_manifest = profile.manifest_path.read_bytes() if old_manifest_exists else b""
+        before_files = {
+            name: (profile.label_dir / name).is_file() for name in names
+        }
+        transaction_root = self._transaction_root(self.root, profile)
+        transaction_root.mkdir(parents=True, exist_ok=True)
+        folder = transaction_root / self._revision_name()
+        folder.mkdir()
+        before_dir = folder / "before"
+        after_dir = folder / "after"
+        before_dir.mkdir()
+        after_dir.mkdir()
+        if old_manifest_exists:
+            _write_bytes_atomic(before_dir / "manifest.json", old_manifest)
+        for name, existed in before_files.items():
+            if existed:
+                _write_bytes_atomic(before_dir / name, (profile.label_dir / name).read_bytes())
+        for name, data in changes.items():
+            if data is not None:
+                _write_bytes_atomic(after_dir / name, bytes(data))
+        encoded_manifest = json.dumps(updated_manifest, ensure_ascii=False, indent=2).encode("utf-8")
+        _write_bytes_atomic(after_dir / "manifest.json", encoded_manifest)
+        journal: dict[str, object] = {
+            "schema": "frlg-label-override-transaction/v1",
+            "transaction_id": folder.name,
             "profile_key": profile.key,
             "capture_device": profile.capture_device,
-            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "files": files_payload,
+            "operation": operation,
+            "status": "prepared",
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "labels": list(names),
+            "before_files": before_files,
+            "before_manifest_exists": old_manifest_exists,
+            "metadata": dict(metadata),
         }
-        _write_json_atomic(profile.manifest_path, updated)
-        return LabelImportResult(profile, tuple(sorted(prepared)), len(files_payload))
+        journal_path = folder / "transaction.json"
+        _write_json_atomic(journal_path, journal)
+        try:
+            for name, data in changes.items():
+                destination = profile.label_dir / name
+                if data is None:
+                    destination.unlink(missing_ok=True)
+                else:
+                    _write_bytes_atomic(destination, bytes(data))
+            _write_json_atomic(profile.manifest_path, updated_manifest)
+            journal["status"] = "committed"
+            journal["committed_at_utc"] = datetime.now(timezone.utc).isoformat()
+            _write_json_atomic(journal_path, journal)
+        except BaseException:
+            try:
+                self._restore_journal(profile, folder, journal)
+                journal["status"] = "rolled_back"
+                _write_json_atomic(journal_path, journal)
+            except Exception as recovery_error:
+                raise RuntimeError(
+                    f"标签事务失败，且自动回滚未完成；下次打开会继续恢复: {recovery_error}"
+                ) from recovery_error
+            self._archive_transaction(profile, folder)
+            raise
+        self._archive_transaction(profile, folder)
+        return profile.manifest_path
+
+    def restore_previous(self, capture_device: str, label_name: str) -> str:
+        profile = self.profile(capture_device)
+        name = self._label_leaf(label_name)
+        with self._locked(profile):
+            self._recover(profile)
+            revisions = profile.directory / "revisions"
+            candidates = sorted((path for path in revisions.iterdir() if path.is_dir()), reverse=True) if revisions.is_dir() else []
+            selected = None
+            journal = None
+            for revision in candidates:
+                journal_path = revision / "transaction.json"
+                if not journal_path.is_file():
+                    continue
+                try:
+                    payload = json.loads(journal_path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError):
+                    continue
+                if (isinstance(payload, dict) and payload.get("status") == "committed"
+                        and payload.get("operation") != "restore_previous"
+                        and name in payload.get("labels", [])):
+                    selected, journal = revision, payload
+                    break
+            if selected is None or journal is None:
+                raise ValueError(f"没有可恢复的上一版设备标签: {name}")
+            before_files = journal.get("before_files", {})
+            restore_bytes = None
+            if isinstance(before_files, dict) and before_files.get(name):
+                backup = selected / "before" / name
+                if not backup.is_file():
+                    raise ValueError(f"上一版标签备份缺失: {name}")
+                restore_bytes = backup.read_bytes()
+            previous_entry = None
+            previous_manifest = selected / "before" / "manifest.json"
+            if previous_manifest.is_file():
+                prior = json.loads(previous_manifest.read_text(encoding="utf-8"))
+                prior_files = prior.get("files", {}) if isinstance(prior, dict) else {}
+                if isinstance(prior_files, dict):
+                    previous_entry = prior_files.get(name)
+            manifest = self._load_manifest_unlocked(profile)
+            files_payload = dict(manifest["files"])
+            if restore_bytes is None or previous_entry is None:
+                files_payload.pop(name, None)
+                restore_bytes = None
+            else:
+                files_payload[name] = previous_entry
+            updated = {
+                "schema": LABEL_OVERRIDE_SCHEMA,
+                "profile_key": profile.key,
+                "capture_device": profile.capture_device,
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "files": files_payload,
+            }
+            self._commit_profile(profile, {name: restore_bytes}, updated,
+                                 operation="restore_previous",
+                                 metadata={"label": name, "rollback_of": selected.name})
+            return "已恢复上一版设备标签" if restore_bytes is not None else "已移除设备覆盖，改用原始标签"
 
     def clear(self, capture_device: str) -> None:
         profile = self.profile(capture_device)
-        if profile.directory.is_dir():
-            shutil.rmtree(profile.directory)
+        with self._locked(profile):
+            self._recover(profile)
+            manifest = self._load_manifest_unlocked(profile)
+            names = tuple(sorted(manifest["files"]))
+            if not names:
+                return
+            updated = {
+                "schema": LABEL_OVERRIDE_SCHEMA,
+                "profile_key": profile.key,
+                "capture_device": profile.capture_device,
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "files": {},
+            }
+            self._commit_profile(profile, {name: None for name in names}, updated,
+                                 operation="clear", metadata={"labels": list(names)})
 
 
 @dataclass(frozen=True)
@@ -358,6 +701,11 @@ def apply_profile_to_projects(
         label_dirs.update(path for path in project_root.rglob("ImgLabel") if path.is_dir())
 
     results = []
+    try:
+        profile_manifest = json.loads(profile.manifest_path.read_text(encoding="utf-8"))
+        profile_files = profile_manifest.get("files", {}) if isinstance(profile_manifest, dict) else {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"设备标签清单无法读取: {profile.manifest_path}: {exc}") from exc
     for label_dir in sorted(label_dirs):
         installable = [item for item in files if (label_dir / str(item["name"])).is_file()]
         if not installable:
@@ -430,6 +778,15 @@ def apply_profile_to_projects(
                     "original_sha256": original["sha256"],
                     "override_sha256": item["sha256"],
                     "search_method": item["search_method"],
+                    "incident_id": (profile_files.get(name, {}).get("incident_id")
+                                    if isinstance(profile_files.get(name), dict) else None),
+                    "verification_sha256": (
+                        _sha256(json.dumps(profile_files[name]["verification"], ensure_ascii=False,
+                                           sort_keys=True).encode("utf-8"))
+                        if isinstance(profile_files.get(name), dict)
+                        and isinstance(profile_files[name].get("verification"), dict)
+                        else None
+                    ),
                 }
             )
         effective = inspect_label_directory(label_dir)

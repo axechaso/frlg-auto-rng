@@ -1,0 +1,124 @@
+--- a/src/EasyCon2.CLI/Program.cs
++++ b/src/EasyCon2.CLI/Program.cs
+@@ -80,7 +80,12 @@
+ {
+     Description = "本机回环 MJPEG 预览端口（0 表示关闭）",
+     DefaultValueFactory = _ => 0
+ };
++var labelSupervisionOption = new Option<bool>("--label-supervision")
++{
++    Description = "启用 FRLG 标签阶段故障保护",
++    DefaultValueFactory = _ => false
++};
+ var incidentDirectoryOption = new Option<string>("--incident-dir")
+ {
+     Description = "标签故障资料目录",
+@@ -124,6 +129,7 @@
+ runScriptCommand.Options.Add(portOption);
+ runScriptCommand.Options.Add(verboseOption);
+ runScriptCommand.Options.Add(previewPortOption);
++runScriptCommand.Options.Add(labelSupervisionOption);
+ runScriptCommand.Options.Add(incidentDirectoryOption);
+ runScriptCommand.Options.Add(runIdOption);
+ runScriptCommand.Options.Add(workflowOption);
+@@ -139,6 +145,7 @@
+     string COM = parseResult.GetValue(portOption) ?? defaultCOMPort;
+     bool verbose = parseResult.GetValue(verboseOption);
+     int previewPort = parseResult.GetValue(previewPortOption);
++    bool labelSupervision = parseResult.GetValue(labelSupervisionOption);
+     string incidentDirectory = parseResult.GetValue(incidentDirectoryOption)!;
+     string runId = parseResult.GetValue(runIdOption)!;
+     string workflow = parseResult.GetValue(workflowOption)!;
+@@ -355,27 +362,30 @@
+         using var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+         var actualDeviceName = string.IsNullOrWhiteSpace(captureDeviceName) ? $"采集设备 {vId}" : captureDeviceName;
+         var gamePad = new GuardedGamePad(isMock ? new MockGamePad() : new GamePadAdapter(NS));
+-        supervisor = new LabelFaultSupervisor(
+-            incidentDirectory,
+-            runId,
+-            workflow,
+-            actualDeviceName,
+-            file,
+-            vId,
+-            refs.ToString(),
+-            label.ToDictionary(il => il.name, StringComparer.Ordinal),
+-            gamePad,
+-            runCancellation,
+-            CloneLatestFrame,
+-            () =>
+-            {
+-                lock (latestFrameLock)
+-                    return (captureFailure is not null, captureFailure?.GetBaseException().Message,
+-                        latestFrameSequence, latestFrameCapturedTicks);
+-            },
+-            outdap.GetTail,
+-            message => outdap.Log(message),
+-            captureStaleMs);
++        if (labelSupervision)
++        {
++            supervisor = new LabelFaultSupervisor(
++                incidentDirectory,
++                runId,
++                workflow,
++                actualDeviceName,
++                file,
++                vId,
++                refs.ToString(),
++                label.ToDictionary(il => il.name, StringComparer.Ordinal),
++                gamePad,
++                runCancellation,
++                CloneLatestFrame,
++                () =>
++                {
++                    lock (latestFrameLock)
++                        return (captureFailure is not null, captureFailure?.GetBaseException().Message,
++                            latestFrameSequence, latestFrameCapturedTicks);
++                },
++                outdap.GetTail,
++                message => outdap.Log(message),
++                captureStaleMs);
++        }
+         var externalGetters = label.ToDictionary(il => il.name, il => (Func<int>)(() =>
+         {
+             if (cvcap == null) throw new Exception("采集卡初始化异常");
+@@ -392,12 +402,12 @@
+                 il.Search(snapshot, out var md);
+                 var score = (int)Math.Ceiling(md);
+                 var capture = CaptureState();
+-                supervisor.ObserveMatch(il.name, md, score, snapshot, capture.Sequence, capture.CapturedTicks);
++                supervisor?.ObserveMatch(il.name, md, score, snapshot, capture.Sequence, capture.CapturedTicks);
+                 return score;
+             }
+             catch (Exception ex)
+             {
+-                supervisor.ObserveLabelError(il.name, ex);
++                supervisor?.ObserveLabelError(il.name, ex);
+                 throw;
+             }
+         }));
+@@ -411,12 +421,14 @@
+ 
+         var ocr = cvcap == null ? null : OcrDelegateFactory.Create(CloneLatestFrame);
+         using var monitorCancellation = new CancellationTokenSource();
+-        var monitorTask = Task.Run(() => supervisor.MonitorAsync(monitorCancellation.Token));
++        var monitorTask = supervisor is null
++            ? Task.CompletedTask
++            : Task.Run(() => supervisor.MonitorAsync(monitorCancellation.Token));
+         try
+         {
+             runner.Run(outdap, gamePad, ocr, externalGetters, runCancellation.Token);
+         }
+-        catch (Exception) when (supervisor.HasIncident && runCancellation.IsCancellationRequested)
++        catch (Exception) when (supervisor?.HasIncident == true && runCancellation.IsCancellationRequested)
+         {
+             // Fault supervision already captured the stop reason and is
+             // writing the incident bundle; preserve the dedicated exit code.
+@@ -426,7 +438,7 @@
+             monitorCancellation.Cancel();
+             await monitorTask;
+         }
+-        if (supervisor.HasIncident)
++        if (supervisor?.HasIncident == true)
+         {
+             if (supervisor.IncidentTask is not null)
+                 await supervisor.IncidentTask;

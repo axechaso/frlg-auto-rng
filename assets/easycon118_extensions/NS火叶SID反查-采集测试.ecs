@@ -253,6 +253,7 @@ FOR $SID反查当前队伍位置 = $SID反查队伍起始位置 TO $SID反查循
                 CONTINUE
             ENDIF
             PRINT "SIDREV|ERROR|MON=" & $SID反查当前队伍位置 & "|STAGE=INITIAL_RECOGNITION"
+            PRINT "FRLG_STAGE|FAIL|sid.observation.read|队伍位置初始身份识别在现有重试后仍未完成|!"
             CALL SID反查关闭游戏
             RETURN
         ENDIF
@@ -286,6 +287,7 @@ FOR $SID反查当前队伍位置 = $SID反查队伍起始位置 TO $SID反查循
                 CONTINUE
             ENDIF
             PRINT "SIDREV|ERROR|MON=" & $SID反查当前队伍位置 & "|STAGE=CANDY_RECOGNITION|OBS=" & $SID反查当前观测序号
+            PRINT "FRLG_STAGE|FAIL|sid.observation.read|队伍位置能力值识别在现有重试后仍未完成|!"
             CALL SID反查关闭游戏
             RETURN
         ENDIF
@@ -308,6 +310,7 @@ PRINT "SIDREV|DONE|COUNT=" & $SID反查队内闪光数量
 PRINT SID反查观测采集完成；请把本次日志交给frlg-auto-rng的run_sid_reverse.py
 
 FUNC SID反查关闭游戏
+    PRINT "FRLG_STAGE|BEGIN|sid.close|sid.close|60000|NS火叶SID反查-采集测试.ecs|SID反查关闭游戏|sid.close.classify|manual_prepare_then_restart|OR;主页.IL:>=:95,主页_NS2.IL:>=:95,正确退出.IL:>=:95,HOME_BUFFER正确退出.IL:>=:95,正确退出_NS2.IL:>=:95,HOME_BUFFER正确退出_NS2.IL:>=:95,错误退出.IL:>=:95,错误退出_NS2.IL:>=:95,正在关闭.IL:>=:95|!"
     FOR
         IF @主页 < 95 and @主页_NS2 < 95
             HOME 100
@@ -325,11 +328,13 @@ FUNC SID反查关闭游戏
                     BREAK
                 ENDIF
             NEXT
+            PRINT "FRLG_STAGE|END|sid.close|!"
             RETURN
         ELIF @错误退出 >= 95 or @错误退出_NS2 >= 95
             B
             WAIT 1500
         ELSE
+            PRINT "FRLG_STAGE|END|sid.close|!"
             RETURN
         ENDIF
     NEXT
@@ -422,6 +427,7 @@ FUNC SID反查读取并输出观测($队伍位置: INT, $观测序号: INT, $识
     $SID反查覆盖索引 = $队伍位置 - 1
     $SID反查当前图鉴编号 = $SID反查图鉴编号覆盖[$SID反查覆盖索引]
     $SID反查当前名称 = 目标英文名称($SID反查当前图鉴编号)
+    PRINT "FRLG_STAGE|BEGIN|sid.observation.read|sid.observation.read|30000|NS火叶SID反查-采集测试.ecs|SID反查读取并输出观测|sid.observation.identity|manual_prepare_then_restart|OR;性格Hardy.IL:>=:" & $识图阈值 & ",性格Lonely.IL:>=:" & $识图阈值 & ",性格Brave.IL:>=:" & $识图阈值 & ",性格Adamant.IL:>=:" & $识图阈值 & ",性格Naughty.IL:>=:" & $识图阈值 & ",性格Bold.IL:>=:" & $识图阈值 & ",性格Docile.IL:>=:" & $识图阈值 & ",性格Relaxed.IL:>=:" & $识图阈值 & ",性格Impish.IL:>=:" & $识图阈值 & ",性格Lax.IL:>=:" & $识图阈值 & ",性格Timid.IL:>=:" & $识图阈值 & ",性格Hasty.IL:>=:" & $识图阈值 & ",性格Serious.IL:>=:" & $识图阈值 & ",性格Jolly.IL:>=:" & $识图阈值 & ",性格Naive.IL:>=:" & $识图阈值 & ",性格Modest.IL:>=:" & $识图阈值 & ",性格Mild.IL:>=:" & $识图阈值 & ",性格Quiet.IL:>=:" & $识图阈值 & ",性格Bashful.IL:>=:" & $识图阈值 & ",性格Rash.IL:>=:" & $识图阈值 & ",性格Calm.IL:>=:" & $识图阈值 & ",性格Gentle.IL:>=:" & $识图阈值 & ",性格Sassy.IL:>=:" & $识图阈值 & ",性格Careful.IL:>=:" & $识图阈值 & ",性格Quirky.IL:>=:" & $识图阈值 & ",闪公图标.IL:>=:" & $识图阈值 & ",母图标.IL:>=:" & $识图阈值 & "|!"
     $SID反查当前性格 = 识别性格($识图阈值)
     # 初始等级由用户输入；每成功使用一次神奇糖果，观测序号自然增加1。
     # 不再让闪光摘要页底色导致等级数字误识别。
@@ -436,6 +442,8 @@ FUNC SID反查读取并输出观测($队伍位置: INT, $观测序号: INT, $识
         RETURN 0
     ENDIF
 
+    PRINT "FRLG_STAGE|END|sid.observation.read|!"
+    PRINT "FRLG_STAGE|BEGIN|sid.observation.read|sid.observation.read|30000|NS火叶SID反查-采集测试.ecs|SID反查读取并输出观测|sid.observation.stats|manual_prepare_then_restart|OR;HP_个位_0.IL:>=:" & $识图阈值 & ",HP_个位_1.IL:>=:" & $识图阈值 & ",HP_个位_2.IL:>=:" & $识图阈值 & ",HP_个位_3.IL:>=:" & $识图阈值 & ",HP_个位_4.IL:>=:" & $识图阈值 & ",HP_个位_5.IL:>=:" & $识图阈值 & ",HP_个位_6.IL:>=:" & $识图阈值 & ",HP_个位_7.IL:>=:" & $识图阈值 & ",HP_个位_8.IL:>=:" & $识图阈值 & ",HP_个位_9.IL:>=:" & $识图阈值 & ",HP_十位_0.IL:>=:" & $识图阈值 & ",HP_十位_1.IL:>=:" & $识图阈值 & ",HP_十位_2.IL:>=:" & $识图阈值 & ",HP_十位_3.IL:>=:" & $识图阈值 & ",HP_十位_4.IL:>=:" & $识图阈值 & ",HP_十位_5.IL:>=:" & $识图阈值 & ",HP_十位_6.IL:>=:" & $识图阈值 & ",HP_十位_7.IL:>=:" & $识图阈值 & ",HP_十位_8.IL:>=:" & $识图阈值 & ",HP_十位_9.IL:>=:" & $识图阈值 & ",HP_百位_1.IL:>=:" & $识图阈值 & ",HP_百位_2.IL:>=:" & $识图阈值 & ",HP_百位_3.IL:>=:" & $识图阈值 & ",HP_百位_4.IL:>=:" & $识图阈值 & ",ATK_个位_0.IL:>=:" & $识图阈值 & ",ATK_个位_1.IL:>=:" & $识图阈值 & ",ATK_个位_2.IL:>=:" & $识图阈值 & ",ATK_个位_3.IL:>=:" & $识图阈值 & ",ATK_个位_4.IL:>=:" & $识图阈值 & ",ATK_个位_5.IL:>=:" & $识图阈值 & ",ATK_个位_6.IL:>=:" & $识图阈值 & ",ATK_个位_7.IL:>=:" & $识图阈值 & ",ATK_个位_8.IL:>=:" & $识图阈值 & ",ATK_个位_9.IL:>=:" & $识图阈值 & ",ATK_十位_0.IL:>=:" & $识图阈值 & ",ATK_十位_1.IL:>=:" & $识图阈值 & ",ATK_十位_2.IL:>=:" & $识图阈值 & ",ATK_十位_3.IL:>=:" & $识图阈值 & ",ATK_十位_4.IL:>=:" & $识图阈值 & ",ATK_十位_5.IL:>=:" & $识图阈值 & ",ATK_十位_6.IL:>=:" & $识图阈值 & ",ATK_十位_7.IL:>=:" & $识图阈值 & ",ATK_十位_8.IL:>=:" & $识图阈值 & ",ATK_十位_9.IL:>=:" & $识图阈值 & ",ATK_百位_1.IL:>=:" & $识图阈值 & ",ATK_百位_2.IL:>=:" & $识图阈值 & ",ATK_百位_3.IL:>=:" & $识图阈值 & ",DEF_个位_0.IL:>=:" & $识图阈值 & ",DEF_个位_1.IL:>=:" & $识图阈值 & ",DEF_个位_2.IL:>=:" & $识图阈值 & ",DEF_个位_3.IL:>=:" & $识图阈值 & ",DEF_个位_4.IL:>=:" & $识图阈值 & ",DEF_个位_5.IL:>=:" & $识图阈值 & ",DEF_个位_6.IL:>=:" & $识图阈值 & ",DEF_个位_7.IL:>=:" & $识图阈值 & ",DEF_个位_8.IL:>=:" & $识图阈值 & ",DEF_个位_9.IL:>=:" & $识图阈值 & ",DEF_十位_0.IL:>=:" & $识图阈值 & ",DEF_十位_1.IL:>=:" & $识图阈值 & ",DEF_十位_2.IL:>=:" & $识图阈值 & ",DEF_十位_3.IL:>=:" & $识图阈值 & ",DEF_十位_4.IL:>=:" & $识图阈值 & ",DEF_十位_5.IL:>=:" & $识图阈值 & ",DEF_十位_6.IL:>=:" & $识图阈值 & ",DEF_十位_7.IL:>=:" & $识图阈值 & ",DEF_十位_8.IL:>=:" & $识图阈值 & ",DEF_十位_9.IL:>=:" & $识图阈值 & ",DEF_百位_1.IL:>=:" & $识图阈值 & ",DEF_百位_2.IL:>=:" & $识图阈值 & ",DEF_百位_3.IL:>=:" & $识图阈值 & ",SPA_个位_0.IL:>=:" & $识图阈值 & ",SPA_个位_1.IL:>=:" & $识图阈值 & ",SPA_个位_2.IL:>=:" & $识图阈值 & ",SPA_个位_3.IL:>=:" & $识图阈值 & ",SPA_个位_4.IL:>=:" & $识图阈值 & ",SPA_个位_5.IL:>=:" & $识图阈值 & ",SPA_个位_6.IL:>=:" & $识图阈值 & ",SPA_个位_7.IL:>=:" & $识图阈值 & ",SPA_个位_8.IL:>=:" & $识图阈值 & ",SPA_个位_9.IL:>=:" & $识图阈值 & ",SPA_十位_0.IL:>=:" & $识图阈值 & ",SPA_十位_1.IL:>=:" & $识图阈值 & ",SPA_十位_2.IL:>=:" & $识图阈值 & ",SPA_十位_3.IL:>=:" & $识图阈值 & ",SPA_十位_4.IL:>=:" & $识图阈值 & ",SPA_十位_5.IL:>=:" & $识图阈值 & ",SPA_十位_6.IL:>=:" & $识图阈值 & ",SPA_十位_7.IL:>=:" & $识图阈值 & ",SPA_十位_8.IL:>=:" & $识图阈值 & ",SPA_十位_9.IL:>=:" & $识图阈值 & ",SPA_百位_1.IL:>=:" & $识图阈值 & ",SPA_百位_2.IL:>=:" & $识图阈值 & ",SPA_百位_3.IL:>=:" & $识图阈值 & ",SPD_个位_0.IL:>=:" & $识图阈值 & ",SPD_个位_1.IL:>=:" & $识图阈值 & ",SPD_个位_2.IL:>=:" & $识图阈值 & ",SPD_个位_3.IL:>=:" & $识图阈值 & ",SPD_个位_4.IL:>=:" & $识图阈值 & ",SPD_个位_5.IL:>=:" & $识图阈值 & ",SPD_个位_6.IL:>=:" & $识图阈值 & ",SPD_个位_7.IL:>=:" & $识图阈值 & ",SPD_个位_8.IL:>=:" & $识图阈值 & ",SPD_个位_9.IL:>=:" & $识图阈值 & ",SPD_十位_0.IL:>=:" & $识图阈值 & ",SPD_十位_1.IL:>=:" & $识图阈值 & ",SPD_十位_2.IL:>=:" & $识图阈值 & ",SPD_十位_3.IL:>=:" & $识图阈值 & ",SPD_十位_4.IL:>=:" & $识图阈值 & ",SPD_十位_5.IL:>=:" & $识图阈值 & ",SPD_十位_6.IL:>=:" & $识图阈值 & ",SPD_十位_7.IL:>=:" & $识图阈值 & ",SPD_十位_8.IL:>=:" & $识图阈值 & ",SPD_十位_9.IL:>=:" & $识图阈值 & ",SPD_百位_1.IL:>=:" & $识图阈值 & ",SPD_百位_2.IL:>=:" & $识图阈值 & ",SPD_百位_3.IL:>=:" & $识图阈值 & ",SPE_个位_0.IL:>=:" & $识图阈值 & ",SPE_个位_1.IL:>=:" & $识图阈值 & ",SPE_个位_2.IL:>=:" & $识图阈值 & ",SPE_个位_3.IL:>=:" & $识图阈值 & ",SPE_个位_4.IL:>=:" & $识图阈值 & ",SPE_个位_5.IL:>=:" & $识图阈值 & ",SPE_个位_6.IL:>=:" & $识图阈值 & ",SPE_个位_7.IL:>=:" & $识图阈值 & ",SPE_个位_8.IL:>=:" & $识图阈值 & ",SPE_个位_9.IL:>=:" & $识图阈值 & ",SPE_十位_0.IL:>=:" & $识图阈值 & ",SPE_十位_1.IL:>=:" & $识图阈值 & ",SPE_十位_2.IL:>=:" & $识图阈值 & ",SPE_十位_3.IL:>=:" & $识图阈值 & ",SPE_十位_4.IL:>=:" & $识图阈值 & ",SPE_十位_5.IL:>=:" & $识图阈值 & ",SPE_十位_6.IL:>=:" & $识图阈值 & ",SPE_十位_7.IL:>=:" & $识图阈值 & ",SPE_十位_8.IL:>=:" & $识图阈值 & ",SPE_十位_9.IL:>=:" & $识图阈值 & ",SPE_百位_1.IL:>=:" & $识图阈值 & ",SPE_百位_2.IL:>=:" & $识图阈值 & ",SPE_百位_3.IL:>=:" & $识图阈值 & "|!"
     RIGHT
     WAIT 1000
 
@@ -497,6 +505,7 @@ FUNC SID反查读取并输出观测($队伍位置: INT, $观测序号: INT, $识
     ELSE
         PRINT "SIDREV|OBS|MON=" & $队伍位置 & "|OBS=" & $观测序号 & "|SOURCE=WILD|LOCATION=" & $SID反查当前相遇地点 & "|EVHP=" & $SID反查当前努力HP & "|EVATK=" & $SID反查当前努力ATK & "|EVDEF=" & $SID反查当前努力DEF & "|EVSPA=" & $SID反查当前努力SPA & "|EVSPD=" & $SID反查当前努力SPD & "|EVSPE=" & $SID反查当前努力SPE & "|DEX=" & $SID反查当前图鉴编号 & "|NAME=" & $SID反查当前名称 & "|NATURE=" & $SID反查当前性格 & "|GENDER=" & $SID反查当前性别 & "|LEVEL=" & $SID反查当前等级 & "|HP=" & $SID反查当前HP & "|ATK=" & $SID反查当前ATK & "|DEF=" & $SID反查当前DEF & "|SPA=" & $SID反查当前SPA & "|SPD=" & $SID反查当前SPD & "|SPE=" & $SID反查当前SPE
     ENDIF
+    PRINT "FRLG_STAGE|END|sid.observation.read|!"
     RETURN 1
 ENDFUNC
 

@@ -86,6 +86,7 @@ FUNC HOME_BUFFER识别稳定状态($只使用当前NX: INT): INT
 
     IF $HOME_BUFFER自适应首次分数 < $HOME_BUFFER有效识图阈值
         $HOME_BUFFER有效识图阈值 = $HOME_BUFFER自适应首次分数
+        PRINT "FRLG_STAGE|THRESHOLD|main.home_buffer|" & $HOME_BUFFER有效识图阈值 & "|!"
     ENDIF
     PRINT "HOME_BUFFER_ADAPTIVE|OLD=95|NEW=" & $HOME_BUFFER有效识图阈值 & "|STATE=" & $HOME_BUFFER自适应首次状态 & "|STABLE=" & $HOME_BUFFER自适应稳定要求
     RETURN $HOME_BUFFER自适应首次状态

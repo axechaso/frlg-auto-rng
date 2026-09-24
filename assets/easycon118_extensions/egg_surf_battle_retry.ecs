@@ -10,17 +10,20 @@ $孵蛋库_池塘冲浪结果 = 0
 
 FUNC 孵蛋测试_等待池塘冲浪结束(): INT
     # “冲浪”标签命中表示冲浪转场已经结束，此时才允许按 X。
-    # 最多等待 10 秒，避免依赖固定 5 秒窗口，也避免转场中提前发送 X。
+    # 20 次、每次 2500 ms；沿用既有脚本上限，避免转场中提前发送 X。
+    PRINT "FRLG_STAGE|BEGIN|egg.pond_surf|egg.pond_surf|0|lib/27_孵蛋测试流程.ecs|孵蛋测试_等待池塘冲浪结束|egg27.pond_surf|manual_prepare_then_restart|OR;冲浪.IL:>:95|!"
     FOR $孵蛋库_池塘冲浪检测尝试 = 1 TO 20
         WAIT 2500
         $孵蛋库_池塘冲浪匹配 = @冲浪
         PRINT 孵蛋池塘冲浪检测|尝试= & $孵蛋库_池塘冲浪检测尝试 & "|冲浪=" & $孵蛋库_池塘冲浪匹配
         IF $孵蛋库_池塘冲浪匹配 > 95
+            PRINT "FRLG_STAGE|END|egg.pond_surf|!"
             RETURN 1
         ELSE
             A
         ENDIF
     NEXT
+    PRINT "FRLG_STAGE|FAIL|egg.pond_surf|冲浪识别达到脚本内二十次上限|!"
     RETURN 0
 ENDFUNC
 
@@ -28,15 +31,18 @@ FUNC 孵蛋测试_等待池塘野生战斗(): INT
     # 正常情况下 10 秒固定等待后已经停在“野生宝可梦出现”文本。
     # 这里只等待并重采样，不盲按 A；若实际仍在地图/菜单，额外按键会让状态继续错位。
     # 仍未出现战斗标签时立即交给外层重启，禁止在非战斗画面误跑名称 OCR。
+    PRINT "FRLG_STAGE|BEGIN|egg.pond_battle|egg.pond_battle|0|lib/27_孵蛋测试流程.ecs|孵蛋测试_等待池塘野生战斗|egg27.pond_battle|manual_prepare_then_restart|OR;野生出现.IL:>:90,抓捕就绪.IL:>:95|!"
     FOR $孵蛋库_池塘战斗检测尝试 = 1 TO 4
         $孵蛋库_池塘野生出现匹配 = @野生出现
         $孵蛋库_池塘抓捕就绪匹配 = @抓捕就绪
         PRINT 孵蛋池塘战斗检测|尝试= & $孵蛋库_池塘战斗检测尝试 & "|野生出现=" & $孵蛋库_池塘野生出现匹配 & "|抓捕就绪=" & $孵蛋库_池塘抓捕就绪匹配
         IF $孵蛋库_池塘野生出现匹配 > 90 or $孵蛋库_池塘抓捕就绪匹配 > 95
+            PRINT "FRLG_STAGE|END|egg.pond_battle|!"
             RETURN 1
         ENDIF
         WAIT 750
     NEXT
+    PRINT "FRLG_STAGE|FAIL|egg.pond_battle|池塘野生战斗识别达到脚本内四次上限|!"
     RETURN 0
 ENDFUNC
 

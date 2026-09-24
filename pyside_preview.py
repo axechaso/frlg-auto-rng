@@ -794,7 +794,14 @@ class FrlgPreviewWindow(QMainWindow):
         self.precalibration_check = _button("命中后更新预校准", "quickToggle", enabled=True)
         self.precalibration_check.setToolTip("正式版仅在完整命中后保存，按游戏/主机/Seed 模式/启动/模板/流程隔离；TID、SID 阶段不参与。")
         self.precalibration_check.setAccessibleName("命中后更新预校准")
-        for button, width in ((self.home_buffer_check, 110), (self.precalibration_check, 150)):
+        self.label_supervision_check = _button("标签故障保护", "quickToggle", enabled=True)
+        self.label_supervision_check.setToolTip(
+            "默认关闭。开启后，兼容运行器会监督已登记的识图等待阶段；超时或重试耗尽时立即锁定手柄输入，"
+            "保存故障截图与标签资料，并在设备标签卡片中提供修复入口。"
+        )
+        self.label_supervision_check.setAccessibleName("标签故障保护")
+        for button, width in ((self.home_buffer_check, 110), (self.precalibration_check, 150),
+                              (self.label_supervision_check, 124)):
             button.setCheckable(True)
             button.setFixedSize(width, 36)
             button.toggled.connect(lambda checked, b=button, title=button.text(): b.setText(f"✓ {title}" if checked else title))
@@ -1046,9 +1053,10 @@ class FrlgPreviewWindow(QMainWindow):
         if compact:
             rows = ((self.home_buffer_check, self.precalibration_check, *self.quick_device_groups),
                     tuple(self.quick_seed_groups),
-                    (self.quick_tools, self.advanced_group, self.settings_button))
+                    (self.quick_tools, self.label_supervision_check, self.advanced_group, self.settings_button))
         else:
-            rows = ((self.home_buffer_check, self.precalibration_check, *self.quick_seed_groups),
+            rows = ((self.home_buffer_check, self.precalibration_check, self.label_supervision_check,
+                     *self.quick_seed_groups),
                     (*self.quick_device_groups, self.quick_tools, self.advanced_group, self.settings_button))
         flexible = (*self.quick_seed_groups, *self.quick_device_groups)
         for index, row in enumerate(self.quick_rows):
@@ -2041,11 +2049,30 @@ class FrlgPreviewWindow(QMainWindow):
         self.label_issues.setColumnWidth(0, 220)
         self.label_issues.setColumnWidth(4, 350)
         labels.layout.addWidget(self.label_issues)
+        incident_banner = QWidget()
+        incident_layout = QHBoxLayout(incident_banner)
+        incident_layout.setContentsMargins(4, 4, 4, 4)
+        self.label_incident_thumbnail = QLabel("暂无故障截图")
+        self.label_incident_thumbnail.setFixedSize(180, 102)
+        self.label_incident_thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_incident_thumbnail.setStyleSheet("background:#202b3a; color:#e5edf7; border:1px solid #69788c;")
+        incident_layout.addWidget(self.label_incident_thumbnail)
+        incident_text = QVBoxLayout()
+        self.label_incident_summary = QLabel()
+        self.label_incident_summary.setWordWrap(True)
+        incident_text.addWidget(self.label_incident_summary)
+        self.label_incident_open = _button("打开故障标签修复")
+        incident_text.addWidget(self.label_incident_open)
+        incident_text.addStretch(1)
+        incident_layout.addLayout(incident_text, 1)
+        self.label_incident_banner = incident_banner
+        self.label_incident_banner.hide()
+        labels.layout.addWidget(incident_banner)
         drop = _label("拖放 .IL 文件或文件夹 · 尚未接入", role="muted")
         drop.setAlignment(Qt.AlignmentFlag.AlignCenter)
         drop.setMinimumHeight(44)
         labels.layout.addWidget(drop)
-        self._actions(labels, "选择标签文件（可多选）", "选择标签文件夹", "清除当前设备覆盖")
+        self._actions(labels, "制作 / 修复标签", "选择标签文件（可多选）", "选择标签文件夹", "清除当前设备覆盖")
         clear = _button("清空诊断列表", enabled=True)
         clear.setMaximumWidth(240)
         clear.clicked.connect(lambda: self.label_issues.setRowCount(0))

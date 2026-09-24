@@ -353,7 +353,11 @@ class CompleteWindow(FrlgWindow):
             self.before_workflow_start(prepared, command)
             self.refresh_state()
             self.process.start(command.program, list(command.arguments))
-        self.launch_job(lambda cancel, status: prepare_workflow_run(prepared, self.paths, port, video, prepared.inputs.capture_name),
+        supervision = self.label_supervision_check.isChecked()
+        self.launch_job(lambda cancel, status: prepare_workflow_run(
+            prepared, self.paths, port, video, prepared.inputs.capture_name,
+            label_supervision=supervision,
+        ),
                         ready, "正在重新核对设备与工程……")
 
     def before_workflow_start(self, prepared, command):
@@ -363,6 +367,8 @@ class CompleteWindow(FrlgWindow):
         super()._process_started()
         if hasattr(self, "accessories"):
             self.accessories.run_started()
+            prepared = self.running_workflow or getattr(self, "running_prepared", None)
+            self.accessories.mark_project_loaded(prepared)
 
     def _process_finished(self, code, status):
         prepared = self.running_workflow
@@ -409,6 +415,8 @@ class CompleteWindow(FrlgWindow):
                     self.set_status(
                         f"御三家已确认闪光；SID ADV 修正 {correction:+d} 已自动保存。"
                     )
+        if hasattr(self, "accessories"):
+            self.accessories.finish_loaded_incidents(code)
         self.refresh_state()
         if hasattr(self, "accessories"):
             self.accessories.run_finished()
@@ -433,6 +441,7 @@ class CompleteWindow(FrlgWindow):
                 write_json_atomic(self.paths.user / "pyside6_settings.json", {
                     **{key: self.fields[key].text() for key in ("source", "ezcon", "sid_source", "tid_source")},
                     "update_source": self.fields["update_source"].currentData() or "auto",
+                    "label_supervision": self.label_supervision_check.isChecked(),
                 })
             except OSError:
                 pass  # Base close already reports settings write failures.

@@ -175,6 +175,7 @@ class StartupPathTests(unittest.TestCase):
             self.assertEqual(restored, {
                 **{key: str(value) for key, value in defaults.items()},
                 "update_source": "auto",
+                "label_supervision": False,
             })
 
     def test_startup_recovers_after_previous_package_is_removed(self):

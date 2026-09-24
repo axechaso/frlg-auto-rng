@@ -127,6 +127,26 @@ class PySideAppUpdateTests(unittest.TestCase):
         )
         self.assertEqual(saved["update_source"], "gitee")
 
+    def test_label_supervision_defaults_off_and_persists_opt_in(self):
+        self.assertFalse(self.window.label_supervision_check.isChecked())
+        self.window.label_supervision_check.setChecked(True)
+        self.window.close()
+        saved = json.loads(
+            (self.root / "user" / "pyside6_settings.json").read_text(encoding="utf-8")
+        )
+        self.assertIs(saved["label_supervision"], True)
+
+        from pyside_app.migration import CompleteWindow
+        from pyside_app.services import AppPaths
+
+        self.window.deleteLater()
+        self.app.processEvents()
+        self.window = CompleteWindow(
+            paths=AppPaths(user=self.root / "user", output=self.root / "runtime-2"),
+            auto_detect=False,
+        )
+        self.assertTrue(self.window.label_supervision_check.isChecked())
+
     def test_running_process_defers_available_install(self):
         from PySide6.QtWidgets import QMessageBox
 

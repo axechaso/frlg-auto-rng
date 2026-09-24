@@ -47,7 +47,7 @@ ENDFUNC
 
         self.assertEqual(
             backend.EXPECTED_COMPAT_PATCH_ID,
-            "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v6",
+            "easycon164a-label-supervision-v9",
         )
         self.assertIn("captureTask = Task.Run", additions)
         self.assertIn("latestFrame = frame.Clone()", additions)
@@ -78,6 +78,38 @@ ENDFUNC
         build_script = (
             root / "tools" / "build_easycon164a_compat_runner.ps1"
         ).read_text(encoding="utf-8")
+        supervision_patch = (
+            root / "tools" / "patches" / "easycon164a-label-supervision.patch"
+        ).read_text(encoding="utf-8")
+        supervision_additions = "\n".join(
+            line[1:]
+            for line in supervision_patch.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        )
+        self.assertIn("LabelFaultSupervisor", supervision_additions)
+        self.assertIn('"FRLG_STAGE|"', supervision_additions)
+        self.assertIn("verify-label", supervision_additions)
+        self.assertIn("save-frames-dir", supervision_additions)
+        self.assertIn("Math.Ceiling(rawScore)", supervision_additions)
+        v8_patch = (
+            root / "tools" / "patches" / "easycon164a-label-supervision-v8.patch"
+        ).read_text(encoding="utf-8")
+        self.assertIn("UpdateThreshold", v8_patch)
+        self.assertIn('parts[0] == "THRESHOLD"', v8_patch)
+        self.assertIn("MarkProgress", v8_patch)
+        self.assertIn("parts[0] == \"FAIL\"", v8_patch)
+        self.assertIn("marker.TimeoutMs < 0", v8_patch)
+        self.assertIn("stage.Marker.TimeoutMs > 0", v8_patch)
+        v9_patch = (
+            root / "tools" / "patches" / "easycon164a-label-supervision-v9.patch"
+        ).read_text(encoding="utf-8")
+        self.assertIn('Option<bool>("--label-supervision")', v9_patch)
+        self.assertIn("if (labelSupervision)", v9_patch)
+        self.assertIn("supervisor?.ObserveMatch", v9_patch)
+        self.assertIn("easycon164a-label-supervision.patch", build_script)
+        self.assertIn("easycon164a-label-supervision-v8.patch", build_script)
+        self.assertIn("easycon164a-label-supervision-v9.patch", build_script)
+        self.assertIn("easycon164a-label-supervision-v9", build_script)
         self.assertIn("-p:PublishSingleFile=false", build_script)
         self.assertNotIn("-p:PublishSingleFile=true", build_script)
         self.assertIn("self-contained onedir", build_script)
@@ -168,6 +200,26 @@ ENDFUNC
         self.assertEqual(
             command[command.index("--preview-port") + 1],
             "43123",
+        )
+        self.assertNotIn("--label-supervision", command)
+        self.assertNotIn("--incident-dir", command)
+
+        supervised = backend.build_run_command(
+            "ezcon.exe",
+            "main.ecs",
+            port="COM22",
+            video_device=0,
+            incident_directory="incidents",
+            run_id="run-1",
+            workflow="wild",
+            capture_device_name="Capture",
+            label_supervision=True,
+        )
+        self.assertIn("--label-supervision", supervised)
+        self.assertEqual(supervised[supervised.index("--run-id") + 1], "run-1")
+        self.assertEqual(supervised[supervised.index("--workflow") + 1], "wild")
+        self.assertEqual(
+            supervised[supervised.index("--capture-device-name") + 1], "Capture"
         )
 
         with self.assertRaises(ValueError):

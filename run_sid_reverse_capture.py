@@ -415,6 +415,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port")
     parser.add_argument("--video", type=int)
     parser.add_argument("--preview-port", type=int, default=0)
+    parser.add_argument("--incident-dir", type=Path)
+    parser.add_argument("--run-id", default="")
+    parser.add_argument("--workflow", default="sid")
+    parser.add_argument("--capture-device-name", default="")
     parser.add_argument("--request-json", type=Path, help="GUI 生成的 SID plan.json")
     parser.add_argument("--log-path", type=Path)
     parser.add_argument("--report-path", type=Path)
@@ -520,6 +524,11 @@ def main(argv: list[str] | None = None) -> int:
                     video_device=video,
                     video_type="DSHOW",
                     preview_port=args.preview_port,
+                    incident_directory=args.incident_dir,
+                    run_id=args.run_id,
+                    workflow=args.workflow,
+                    capture_device_name=args.capture_device_name,
+                    label_supervision=args.incident_dir is not None,
                 )
                 code, output, stopped_for_unique_pid = _run_easycon(
                     command,
@@ -530,6 +539,9 @@ def main(argv: list[str] | None = None) -> int:
                     stop_file=args.stop_file,
                 )
                 all_output.append(output)
+                if code == 20:
+                    _safe_print("标签故障保护已停止 SID 流程；本只未完成，之前已保存的记录保留。", file=sys.stderr)
+                    return code
                 if "SIDREV|ERROR|" in output or (
                     code != 0 and not stopped_for_unique_pid
                 ):

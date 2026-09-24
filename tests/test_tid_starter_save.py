@@ -123,8 +123,8 @@ ENDFUNC
 """
         generated = _adaptive_home_buffer(original, "TID")
         body = functions(generated)["TID_HOME_BUFFER"]
-        # Removing just the four intended substitutions must recover every
-        # action, delay, failure return and retry guard of the original.
+        # Remove the classifier substitution and diagnostic marker, then check
+        # that actions, delays, returns and retry guards are unchanged.
         restored = body.replace(
             "$HOME_BUFFER识别状态 = TID_HOME_BUFFER识别稳定状态()", "CALL TID_读取当前退出标签"
         ).replace(
@@ -132,9 +132,44 @@ ENDFUNC
             "IF $TID当前HOME_BUFFER正确退出 >= 95 and $TID当前错误退出 < 95",
         ).replace("ELIF $HOME_BUFFER识别状态 == 3", "ELIF $TID当前错误退出 >= 95").replace(
             "ELIF $HOME_BUFFER识别状态 == 2", "ELIF $TID当前正确退出 >= 95"
+        ).replace(
+            '        PRINT "FRLG_STAGE|THRESHOLD|tid.home_buffer|" & $HOME_BUFFER有效识图阈值 & "|!"\n',
+            "",
         )
         self.assertEqual(restored, original.rstrip())
         self.assertIn("FUNC TID_HOME_BUFFER识别稳定状态(): INT", generated)
+        self.assertIn("FRLG_STAGE|THRESHOLD|tid.home_buffer", generated)
+
+    def test_adaptive_classifier_updates_registered_stage_threshold(self):
+        original = """FUNC TID_HOME_BUFFER_登记阶段()
+    IF $NS机型 == 2
+        PRINT "FRLG_STAGE|BEGIN|tid.home_buffer|tid.home_buffer|3600000|source.ecs|TID_HOME_BUFFER|probe|manual_prepare_then_restart|OR;HOME_BUFFER正确退出_NS2.IL:>=:95,正确退出_NS2.IL:>=:95,错误退出_NS2.IL:>=:95|!"
+    ELSE
+        PRINT "FRLG_STAGE|BEGIN|tid.home_buffer|tid.home_buffer|3600000|source.ecs|TID_HOME_BUFFER|probe|manual_prepare_then_restart|OR;HOME_BUFFER正确退出.IL:>=:95,正确退出.IL:>=:95,错误退出.IL:>=:95|!"
+    ENDIF
+ENDFUNC
+
+FUNC TID_HOME_BUFFER(): INT
+    FOR
+        CALL TID_读取当前退出标签
+        IF $TID当前HOME_BUFFER正确退出 >= 95 and $TID当前错误退出 < 95
+            RETURN 1
+        ELIF $TID当前错误退出 >= 95
+            RETURN 0
+        ELIF $TID当前正确退出 >= 95
+            RETURN 0
+        ENDIF
+    NEXT
+    RETURN 0
+ENDFUNC
+"""
+        generated = _adaptive_home_buffer(original, "TID")
+
+        self.assertIn(
+            'PRINT "FRLG_STAGE|THRESHOLD|tid.home_buffer|" & $HOME_BUFFER有效识图阈值 & "|!"',
+            generated,
+        )
+        self.assertIn("FUNC TID_HOME_BUFFER_登记阶段()", generated)
 
 
 def model_compensated_fixture():

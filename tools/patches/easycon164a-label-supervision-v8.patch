@@ -1,0 +1,140 @@
+--- a/src/EasyCon2.CLI/LabelFaultSupervisor.cs
++++ b/src/EasyCon2.CLI/LabelFaultSupervisor.cs
+@@ -75,12 +75,36 @@
+     private sealed record MatchedFrame(Mat Frame, long Sequence, long CapturedTicks);
+     private sealed class ActiveStage(StageMarker marker, int instance, long enteredTicks, DateTimeOffset enteredAtUtc)
+     {
+-        public StageMarker Marker { get; } = marker;
++        public StageMarker Marker { get; private set; } = marker;
+         public int Instance { get; } = instance;
+-        public long EnteredTicks { get; } = enteredTicks;
+-        public DateTimeOffset EnteredAtUtc { get; } = enteredAtUtc;
++        public long StartedTicks { get; } = enteredTicks;
++        public DateTimeOffset StartedAtUtc { get; } = enteredAtUtc;
++        public long LastProgressTicks { get; private set; } = enteredTicks;
++        public DateTimeOffset LastProgressAtUtc { get; private set; } = enteredAtUtc;
++        public int ProgressCount { get; private set; }
+         public Dictionary<string, ScoreState> Scores { get; } = new(StringComparer.Ordinal);
+         public Queue<MatchedFrame> Frames { get; } = new();
++
++        public void MarkProgress(long now, DateTimeOffset atUtc)
++        {
++            LastProgressTicks = now;
++            LastProgressAtUtc = atUtc;
++            ProgressCount++;
++            Scores.Clear();
++            foreach (var frame in Frames)
++                frame.Frame.Dispose();
++            Frames.Clear();
++        }
++
++        public void UpdateThreshold(int threshold)
++        {
++            Marker = Marker with
++            {
++                Labels = Marker.Labels
++                    .Select(label => label with { Threshold = threshold })
++                    .ToArray(),
++            };
++        }
+     }
+ 
+     private readonly object _gate = new();
+@@ -187,6 +211,15 @@
+         var parts = markerText.Split('|');
+         if (parts.Length < 2)
+             return;
++        if (parts[0] == "THRESHOLD" && parts.Length >= 3 && int.TryParse(parts[2], out var threshold))
++        {
++            lock (_gate)
++            {
++                if (_active?.Marker.StageId == parts[1] && threshold >= 0 && threshold <= 100)
++                    _active.UpdateThreshold(threshold);
++            }
++            return;
++        }
+         if (parts[0] == "END" && parts.Length >= 2)
+         {
+             lock (_gate)
+@@ -206,9 +239,25 @@
+         {
+             lock (_gate)
+             {
+-                _retryGroupStarts.Remove(parts[1]);
+-                _retryGroupStartUtc.Remove(parts[1]);
+-            }
++                var now = Stopwatch.GetTimestamp();
++                var nowUtc = DateTimeOffset.UtcNow;
++                _retryGroupStarts[parts[1]] = now;
++                _retryGroupStartUtc[parts[1]] = nowUtc;
++                if (_active?.Marker.RetryGroupId == parts[1])
++                    _active.MarkProgress(now, nowUtc);
++            }
++            return;
++        }
++        if (parts[0] == "FAIL" && parts.Length >= 2)
++        {
++            string? reason = null;
++            lock (_gate)
++            {
++                if (_active?.Marker.StageId == parts[1])
++                    reason = parts.Length >= 3 ? parts[2] : $"阶段 {parts[1]} 达到脚本内失败出口";
++            }
++            if (reason is not null)
++                Trigger("stage_timeout", reason);
+             return;
+         }
+         if (parts[0] != "BEGIN" || parts.Length < 9)
+@@ -223,7 +272,7 @@
+             var marker = new StageMarker(
+                 parts[1], parts[2], int.Parse(parts[3]), parts[4], parts[5], parts[6],
+                 parts[7], groupOperator, labels);
+-            if (marker.TimeoutMs < 100 || marker.TimeoutMs > 24 * 60 * 60 * 1000 || labels.Length == 0)
++            if (marker.TimeoutMs < 0 || marker.TimeoutMs > 24 * 60 * 60 * 1000 || labels.Length == 0)
+                 throw new FormatException("阶段标记的预算或标签组无效");
+             lock (_gate)
+             {
+@@ -309,12 +358,18 @@
+                     Trigger("capture_unavailable", $"采集画面 {frameAge} ms 未更新");
+                     return;
+                 }
+-                if (ElapsedMs(stage.EnteredTicks) >= stage.Marker.TimeoutMs)
+-                {
+-                    var stalled = HasSatisfiedPredicate(stage);
++                if (stage.Marker.TimeoutMs > 0 && ElapsedMs(stage.LastProgressTicks) >= stage.Marker.TimeoutMs)
++                {
++                    bool stalled;
++                    lock (_gate)
++                    {
++                        if (_active != stage)
++                            continue;
++                        stalled = HasSatisfiedPredicate(stage);
++                    }
+                     var failureKind = stalled ? "state_stalled" : "stage_timeout";
+                     var reason = stalled
+-                        ? $"阶段 {stage.Marker.StageId} 在标签条件成立后仍超过 {stage.Marker.TimeoutMs} ms 未推进"
++                        ? $"阶段 {stage.Marker.StageId} 在标签条件成立后超过 {stage.Marker.TimeoutMs} ms 未推进"
+                         : $"阶段 {stage.Marker.StageId} 超过 {stage.Marker.TimeoutMs} ms 未达到标签条件";
+                     Trigger(failureKind, reason);
+                     return;
+@@ -466,7 +521,10 @@
+             },
+             ["reason"] = reason,
+             ["failure_label"] = failureLabel,
+-            ["elapsed_ms"] = stage is null ? null : ElapsedMs(stage.EnteredTicks),
++            ["elapsed_ms"] = stage is null ? null : ElapsedMs(stage.StartedTicks),
++            ["last_progress_elapsed_ms"] = stage is null ? null : ElapsedMs(stage.LastProgressTicks),
++            ["last_progress_at_utc"] = stage?.LastProgressAtUtc,
++            ["progress_count"] = stage?.ProgressCount ?? 0,
+             ["timeout_ms"] = stage?.Marker.TimeoutMs,
+             ["predicate"] = new Dictionary<string, object?>
+             {
+@@ -502,7 +560,7 @@
+             ["restart_policy"] = stage?.Marker.RecoveryPolicy ?? "manual_prepare_then_restart",
+             ["script_path"] = _scriptPath,
+             ["log_tail"] = "log-tail.txt",
+-            ["started_at_utc"] = stage?.EnteredAtUtc ?? snapshotUtc,
++            ["started_at_utc"] = stage?.StartedAtUtc ?? snapshotUtc,
+         };
+         assets["log-tail.txt"] = Encoding.UTF8.GetBytes(_logTail());
+         foreach (var item in expected)

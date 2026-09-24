@@ -129,6 +129,8 @@ class RunCommand:
     stop_path: Path
     preview_url: str
     check: EasyConRuntimeCheck
+    run_id: str = ""
+    incident_root: Path | None = None
 
 
 def validate_wild_inputs(inputs: WildInputs) -> None:
@@ -221,11 +223,67 @@ def prepare_wild(
     return prepared
 
 
-def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str) -> RunCommand:
+def rebuild_wild_with_override(prepared: PreparedWild, paths: AppPaths) -> PreparedWild:
+    """Recreate a wild runtime project from its already selected plan.
+
+    This deliberately does not call ``search_best_plan``.  A label repair must
+    keep the user's Seed and Advance choice unchanged.
+    """
+    inputs = prepared.inputs
+    if not prepared.project:
+        raise ValueError("当前方案没有可重建的正式运行工程")
+    if not prepared.result.plan.route_support.can_start:
+        raise ValueError("当前目标仅支持搜索，不能重建自动运行工程")
+    validate_wild_inputs(inputs)
+    output = paths.output / ("wild-" + uuid.uuid4().hex)
+    output.mkdir(parents=True, exist_ok=False)
+    plan_path = output / "search-result.json"
+    old_output = prepared.project.parent
+    try:
+        plan_path.write_text(
+            json.dumps(prepared.result.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        project = write_configured_project(
+            inputs.source,
+            output / "project",
+            prepared.result.plan,
+            inputs.options,
+            template_name=inputs.template_name,
+            precalibration_store_path=paths.user / "precalibration.json",
+        )
+        if inputs.capture_name:
+            store = LabelOverrideStore(paths.user / "device_label_overrides")
+            profile = store.profile(inputs.capture_name)
+            if profile.manifest_path.is_file():
+                store.list_overrides(inputs.capture_name)
+                apply_profile_to_projects(project.parent, profile)
+        validate_generated_project_consistency(
+            project, prepared.result.plan, inputs.options,
+            template_name=inputs.template_name,
+        )
+        check = validate_runtime(
+            inputs.ezcon, project, fingerprint_warning_only=inputs.advanced,
+        )
+        rebuilt = PreparedWild(inputs, prepared.result, project, plan_path, check)
+    except Exception as exc:
+        shutil.rmtree(output, ignore_errors=True)
+        raise ValueError(f"按原目标重建运行工程失败：{exc}") from exc
+    cleanup_generated_plan_directories(
+        paths.output,
+        archive_root=paths.user / "logs" / "generated-plans",
+        keep=(old_output, output),
+    )
+    return rebuilt
+
+
+def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str,
+                paths: AppPaths | None = None, *, label_supervision: bool = False) -> RunCommand:
     """Revalidate devices and generated content immediately before execution."""
     if not prepared.project or not prepared.check.ok:
         raise ValueError("请先生成并通过预检")
     inputs = prepared.inputs
+    paths = paths or AppPaths()
     if inputs.capture_name != capture_name:
         raise ValueError("采集卡与生成时不一致，请重新生成以应用正确的设备标签")
     ports, videos, _output = probe_easycon_devices(inputs.ezcon, include_video_names=True)
@@ -247,14 +305,19 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
     run_id = uuid.uuid4().hex
     log_path = prepared.project.parent / f"easycon-{run_id}.log"
     stop_path = log_path.with_suffix(".stop")
+    incident_root = paths.user / "label_incidents" if label_supervision else None
     command = build_run_command(runner, prepared.project, port=port, video_device=video,
-                                video_type="DSHOW", preview_port=preview_port)
+                                video_type="DSHOW", preview_port=preview_port,
+                                incident_directory=incident_root,
+                                run_id=run_id, workflow="wild", capture_device_name=capture_name,
+                                label_supervision=label_supervision)
     worker_command = build_worker_command("easycon-log", (
                  "--log-path", str(log_path), "--cwd", str(prepared.project.parent),
                  "--stop-file", str(stop_path), "--", *command))
     return RunCommand(worker_command[0], tuple(worker_command[1:]), log_path, stop_path,
                       f"http://127.0.0.1:{preview_port}/mjpeg",
-                      EasyConRuntimeCheck(True, (), tuple(warnings)))
+                      EasyConRuntimeCheck(True, (), tuple(warnings)), run_id,
+                      incident_root)
 
 
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")

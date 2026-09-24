@@ -212,7 +212,8 @@ def _prepare_workflow_in_directory(
                             details, metrics, profile.directory if profile else None)
 
 
-def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, video, capture_name):
+def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, video, capture_name,
+                         *, label_supervision: bool = False):
     inputs = prepared.inputs
     if not prepared.check.ok:
         raise ValueError("请先通过预检")
@@ -229,10 +230,14 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
         sock.bind(("127.0.0.1", 0))
         preview_port = sock.getsockname()[1]
     tag = uuid.uuid4().hex
+    incident_root = paths.user / "label_incidents" if label_supervision else None
     log = prepared.directory / f"run-{tag}.log"
     stop = log.with_suffix(".stop")
     common = ["--ezcon", str(inputs.ezcon), "--port", port, "--video", str(video),
               "--log-path", str(log), "--stop-file", str(stop), "--preview-port", str(preview_port)]
+    if label_supervision:
+        common += ["--incident-dir", str(incident_root), "--run-id", tag,
+                   "--workflow", inputs.mode, "--capture-device-name", capture_name]
     if inputs.advanced:
         common.append("--fingerprint-warnings")
     request = inputs.request
@@ -278,7 +283,12 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
         else:
             runner = prepare_compat_runner(inputs.ezcon, fingerprint_warning_only=inputs.advanced)
         command = build_run_command(runner, prepared.project, port=port, video_device=video,
-                                   video_type="DSHOW", preview_port=preview_port, verbose=inputs.extra.get("verbose", False))
+                                   video_type="DSHOW", preview_port=preview_port, verbose=inputs.extra.get("verbose", False),
+                                   incident_directory=incident_root if backend != SCRIPT_TEST_BACKEND_ORIGINAL else None,
+                                   run_id=tag if backend != SCRIPT_TEST_BACKEND_ORIGINAL else None,
+                                   workflow=inputs.mode if backend != SCRIPT_TEST_BACKEND_ORIGINAL else None,
+                                   capture_device_name=capture_name if backend != SCRIPT_TEST_BACKEND_ORIGINAL else None,
+                                   label_supervision=label_supervision and backend != SCRIPT_TEST_BACKEND_ORIGINAL)
         args = ["--log-path", str(log), "--cwd", str(prepared.project.parent), "--stop-file", str(stop)]
         if inputs.mode == "egg":
             for marker in ("孵蛋流程完成", "孵蛋流程失败", "孵蛋流程测试完成", "孵蛋流程测试失败"):
@@ -290,4 +300,5 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
                 "backend": backend, "runner": str(runner), "port": port, "video": video, "command": command})
     command = build_worker_command(worker, args)
     return RunCommand(command[0], tuple(command[1:]), log, stop,
-                      f"http://127.0.0.1:{preview_port}/mjpeg" if preview_port else "", check)
+                      f"http://127.0.0.1:{preview_port}/mjpeg" if preview_port else "", check,
+                      tag, incident_root)

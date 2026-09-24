@@ -180,6 +180,10 @@ def run_traversal(
     fingerprint_warnings: bool = False,
     label_override_profile: Path | None = None,
     preview_port: int = 0,
+    incident_directory: Path | None = None,
+    run_id: str = "",
+    workflow: str = "sid_traversal",
+    capture_device_name: str = "",
 ) -> int:
     request, options, payload = _load_plan(plan_path)
     source_dir = source_dir.resolve()
@@ -329,6 +333,11 @@ def run_traversal(
                 video_device=int(video),
                 video_type="DSHOW",
                 preview_port=preview_port,
+                incident_directory=incident_directory,
+                run_id=run_id,
+                workflow=workflow,
+                capture_device_name=capture_device_name,
+                label_supervision=incident_directory is not None,
             )
             code = run_logged(
                 command,
@@ -360,7 +369,7 @@ def run_traversal(
             _append_log(log_path, f"ADV={advance} 未取得明确完成标记，保留当前起点")
             state_report.update({"status": "paused", "state": session.state})
             _write_report(report_path, state_report)
-            return 130 if code == 130 else 1
+            return code if code != 0 else 1
 
         state_report.update({"status": "exhausted", "state": session.state})
         _append_log(log_path, "SID遍历达到上限，未发现闪光")
@@ -387,6 +396,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fingerprint-warnings", action="store_true")
     parser.add_argument("--label-override-profile", type=Path)
     parser.add_argument("--preview-port", type=int, default=0)
+    parser.add_argument("--incident-dir", type=Path)
+    parser.add_argument("--run-id", default="")
+    parser.add_argument("--workflow", default="sid_traversal")
+    parser.add_argument("--capture-device-name", default="")
     args = parser.parse_args(argv)
     try:
         return run_traversal(
@@ -407,6 +420,10 @@ def main(argv: list[str] | None = None) -> int:
             fingerprint_warnings=args.fingerprint_warnings,
             label_override_profile=args.label_override_profile,
             preview_port=args.preview_port,
+            incident_directory=args.incident_dir,
+            run_id=args.run_id,
+            workflow=args.workflow,
+            capture_device_name=args.capture_device_name,
         )
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"SID遍历启动失败: {exc}", file=sys.stderr)

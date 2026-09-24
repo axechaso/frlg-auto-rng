@@ -11,11 +11,13 @@ FUNC HOME_BUFFER
     $HOME_BUFFER恢复关闭次数 = 0
     $HOME_BUFFER恢复稳定 = 0
     $HOME_BUFFER恢复未知 = 0
+    PRINT "FRLG_STAGE|BEGIN|main.home_buffer|main.home_buffer|0|NS火叶全自动一键乱数2.0.ecs|HOME_BUFFER|main.home_buffer.calibrate|manual_prepare_then_restart|OR;主页.IL:>=:95,主页_NS2.IL:>=:95,正确退出.IL:>=:" & $HOME_BUFFER有效识图阈值 & ",正确退出_NS2.IL:>=:" & $HOME_BUFFER有效识图阈值 & ",HOME_BUFFER正确退出.IL:>=:" & $HOME_BUFFER有效识图阈值 & ",HOME_BUFFER正确退出_NS2.IL:>=:" & $HOME_BUFFER有效识图阈值 & ",错误退出.IL:>=:" & $HOME_BUFFER有效识图阈值 & ",错误退出_NS2.IL:>=:" & $HOME_BUFFER有效识图阈值 & ",正在关闭.IL:>=:95,正在关闭_暗.IL:>=:95|!"
     FOR
         $HOME_BUFFER尝试 = $HOME_BUFFER尝试 + 1
         $孵蛋HOME_BUFFER尝试 = $HOME_BUFFER尝试
         IF $HOME_BUFFER尝试 > 20
             PRINT HOME_BUFFER校准失败：20轮恢复或试探后仍未确认可用窗口
+            PRINT "FRLG_STAGE|FAIL|main.home_buffer|HOME_BUFFER校准达到20轮上限|!"
             IF $静态或野生 == "孵蛋"
                 $孵蛋HOME_BUFFER失败 = 1
             ENDIF
@@ -32,6 +34,7 @@ FUNC HOME_BUFFER
                 $HOME_BUFFER锁定延迟 = $HOME_BUFFER本轮延迟
                 $HOME_BUFFER锁定连续失败 = 0
                 PRINT 可用并锁定HOME_BUFFER延迟: & $HOME_BUFFER锁定延迟 & " ms"
+                PRINT "FRLG_STAGE|END|main.home_buffer|!"
                 RETURN
             ENDIF
             IF $HOME_BUFFER恢复结果 == 0
@@ -58,6 +61,7 @@ FUNC HOME_BUFFER
             $HOME_BUFFER锁定延迟 = $HOME_BUFFER延迟
             $HOME_BUFFER锁定连续失败 = 0
             PRINT 可用并锁定HOME_BUFFER延迟: & $HOME_BUFFER锁定延迟 & " ms"
+            PRINT "FRLG_STAGE|END|main.home_buffer|!"
             RETURN
         ENDIF
         IF $HOME_BUFFER识别状态 == 0
@@ -66,6 +70,7 @@ FUNC HOME_BUFFER
         $HOME_BUFFER下一延迟 = HOME_BUFFER规划下一延迟($HOME_BUFFER识别状态)
         IF $HOME_BUFFER下一延迟 < 100 or $HOME_BUFFER下一延迟 > 3000
             PRINT HOME_BUFFER校准失败：下一延迟超出100-3000 ms
+            PRINT "FRLG_STAGE|FAIL|main.home_buffer|下一延迟超出100-3000毫秒范围|!"
             IF $静态或野生 == "孵蛋"
                 $孵蛋HOME_BUFFER失败 = 1
             ENDIF
@@ -78,4 +83,5 @@ FUNC HOME_BUFFER
         $HOME_BUFFER恢复稳定 = 0
         $HOME_BUFFER恢复未知 = 0
     NEXT
+    PRINT "FRLG_STAGE|FAIL|main.home_buffer|HOME_BUFFER校准循环意外退出|!"
 ENDFUNC

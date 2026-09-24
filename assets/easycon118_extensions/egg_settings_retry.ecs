@@ -2,6 +2,7 @@
 # 本文件由 Python 拼接到 2.0 的 lib/27_孵蛋测试流程.ecs，不单独执行。
 
 FUNC 孵蛋测试_识别文字速度($识图阈值: INT): INT
+    PRINT "FRLG_STAGE|BEGIN|egg.settings.text_speed|egg.settings.text_speed|0|lib/27_孵蛋测试流程.ecs|孵蛋测试_识别文字速度|egg27.settings.text_speed|manual_prepare_then_restart|OR;TEXT_SPEED_FAST.IL:>=:" & $识图阈值 & ",日版TEXT_SPEED_FAST.IL:>=:" & $识图阈值 & ",TEXT_SPEED_MID.IL:>=:" & $识图阈值 & ",日版TEXT_SPEED_MID.IL:>=:" & $识图阈值 & ",TEXT_SPEED_SLOW.IL:>=:" & $识图阈值 & ",日版TEXT_SPEED_SLOW.IL:>=:" & $识图阈值 & "|!"
     FOR $孵蛋库_设置识别尝试 = 1 TO 3
         $孵蛋库_设置分数1 = @TEXT_SPEED_FAST
         $孵蛋库_设置候选分数 = @日版TEXT_SPEED_FAST
@@ -31,14 +32,17 @@ FUNC 孵蛋测试_识别文字速度($识图阈值: INT): INT
             $孵蛋库_设置状态 = 1
         ENDIF
         IF $孵蛋库_设置最佳分数 >= $识图阈值
+            PRINT "FRLG_STAGE|END|egg.settings.text_speed|!"
             RETURN $孵蛋库_设置状态
         ENDIF
         WAIT 500
     NEXT
+    PRINT "FRLG_STAGE|FAIL|egg.settings.text_speed|文字速度识别达到脚本内三次上限|!"
     RETURN -1
 ENDFUNC
 
 FUNC 孵蛋测试_识别战斗动画($识图阈值: INT): INT
+    PRINT "FRLG_STAGE|BEGIN|egg.settings.battle_scene|egg.settings.battle_scene|0|lib/27_孵蛋测试流程.ecs|孵蛋测试_识别战斗动画|egg27.settings.battle_scene|manual_prepare_then_restart|OR;BATTLE_SCENE_OFF.IL:>=:" & $识图阈值 & ",日版BATTLE_SCENE_OFF.IL:>=:" & $识图阈值 & ",BATTLE_SCENE_ON.IL:>=:" & $识图阈值 & ",日版BATTLE_SCENE_ON.IL:>=:" & $识图阈值 & "|!"
     FOR $孵蛋库_设置识别尝试 = 1 TO 3
         $孵蛋库_设置分数1 = @BATTLE_SCENE_OFF
         $孵蛋库_设置候选分数 = @日版BATTLE_SCENE_OFF
@@ -59,14 +63,17 @@ FUNC 孵蛋测试_识别战斗动画($识图阈值: INT): INT
             $孵蛋库_设置状态 = 1
         ENDIF
         IF $孵蛋库_设置最佳分数 >= $识图阈值
+            PRINT "FRLG_STAGE|END|egg.settings.battle_scene|!"
             RETURN $孵蛋库_设置状态
         ENDIF
         WAIT 500
     NEXT
+    PRINT "FRLG_STAGE|FAIL|egg.settings.battle_scene|战斗动画识别达到脚本内三次上限|!"
     RETURN -1
 ENDFUNC
 
 FUNC 孵蛋测试_识别声音($识图阈值: INT): INT
+    PRINT "FRLG_STAGE|BEGIN|egg.settings.sound|egg.settings.sound|0|lib/27_孵蛋测试流程.ecs|孵蛋测试_识别声音|egg27.settings.sound|manual_prepare_then_restart|OR;SOUND_MONO.IL:>=:" & $识图阈值 & ",日版SOUND_MONO.IL:>=:" & $识图阈值 & ",SOUND_STEREO.IL:>=:" & $识图阈值 & ",日版SOUND_STEREO.IL:>=:" & $识图阈值 & "|!"
     FOR $孵蛋库_设置识别尝试 = 1 TO 3
         $孵蛋库_设置分数1 = @SOUND_MONO
         $孵蛋库_设置候选分数 = @日版SOUND_MONO
@@ -87,14 +94,17 @@ FUNC 孵蛋测试_识别声音($识图阈值: INT): INT
             $孵蛋库_设置状态 = 1
         ENDIF
         IF $孵蛋库_设置最佳分数 >= $识图阈值
+            PRINT "FRLG_STAGE|END|egg.settings.sound|!"
             RETURN $孵蛋库_设置状态
         ENDIF
         WAIT 500
     NEXT
+    PRINT "FRLG_STAGE|FAIL|egg.settings.sound|声音识别达到脚本内三次上限|!"
     RETURN -1
 ENDFUNC
 
 FUNC 孵蛋测试_识别按键模式($识图阈值: INT): INT
+    PRINT "FRLG_STAGE|BEGIN|egg.settings.button_mode|egg.settings.button_mode|0|lib/27_孵蛋测试流程.ecs|孵蛋测试_识别按键模式|egg27.settings.button_mode|manual_prepare_then_restart|OR;BUTTON_MODE_HELP.IL:>=:" & $识图阈值 & ",日版BUTTON_MODE_HELP.IL:>=:" & $识图阈值 & ",BUTTON_MODE_LA.IL:>=:" & $识图阈值 & ",日版BUTTON_MODE_LA.IL:>=:" & $识图阈值 & ",BUTTON_MODE_LR.IL:>=:" & $识图阈值 & ",日版BUTTON_MODE_LR.IL:>=:" & $识图阈值 & "|!"
     FOR $孵蛋库_设置识别尝试 = 1 TO 3
         $孵蛋库_设置分数1 = @BUTTON_MODE_HELP
         $孵蛋库_设置候选分数 = @日版BUTTON_MODE_HELP
@@ -124,10 +134,12 @@ FUNC 孵蛋测试_识别按键模式($识图阈值: INT): INT
             $孵蛋库_设置状态 = 2
         ENDIF
         IF $孵蛋库_设置最佳分数 >= $识图阈值
+            PRINT "FRLG_STAGE|END|egg.settings.button_mode|!"
             RETURN $孵蛋库_设置状态
         ENDIF
         WAIT 500
     NEXT
+    PRINT "FRLG_STAGE|FAIL|egg.settings.button_mode|按键模式识别达到脚本内三次上限|!"
     RETURN -1
 ENDFUNC
 

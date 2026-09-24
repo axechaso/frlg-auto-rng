@@ -35,6 +35,15 @@ class SIDReverse118Tests(unittest.TestCase):
         self.assertIn("$HOME_BUFFER稳定低分自适应 = 1", configured)
         self.assertIn("$HOME_BUFFER自适应最低阈值 = 90", configured)
         self.assertIn("$HOME_BUFFER自适应稳定要求 = 3", configured)
+        self.assertIn("FRLG_STAGE|BEGIN|sid.home_buffer|sid.home_buffer|120000", configured)
+        self.assertIn("FRLG_STAGE|THRESHOLD|sid.home_buffer", configured)
+        self.assertIn("FRLG_STAGE|PROGRESS|sid.home_buffer", configured)
+        self.assertIn("FRLG_STAGE|BEGIN|sid.home_buffer.wait_shutdown", configured)
+        self.assertIn("FRLG_STAGE|BEGIN|sid.close|sid.close|60000", configured)
+        self.assertIn("FRLG_STAGE|BEGIN|sid.observation.read", configured)
+        self.assertIn("FRLG_STAGE|FAIL|sid.observation.read", configured)
+        self.assertIn("SPE_百位_3.IL:>=:", configured)
+        self.assertNotIn("sid.candy", configured)
         self.assertIn(
             "$HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态(1)",
             configured,

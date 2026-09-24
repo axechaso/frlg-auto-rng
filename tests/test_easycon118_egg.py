@@ -604,6 +604,15 @@ ENDFUNC
         self.assertIn("设置识别 SOUND 第", configured)
         self.assertIn("设置识别 BUTTON 第", configured)
         self.assertIn("WAIT 2000", configured)
+        for stage in (
+            "egg.settings.text_speed",
+            "egg.settings.battle_scene",
+            "egg.settings.sound",
+            "egg.settings.button_mode",
+        ):
+            self.assertIn(f"FRLG_STAGE|BEGIN|{stage}|", configured)
+            self.assertIn(f"FRLG_STAGE|END|{stage}|", configured)
+            self.assertIn(f"FRLG_STAGE|FAIL|{stage}|", configured)
 
     def test_game_restart_uses_original_flow_with_exit_state_priority(self):
         original = """\
@@ -636,6 +645,9 @@ ENDFUNC
         self.assertIn("$孵蛋库_已请求主页 == 0", configured)
         self.assertIn("$孵蛋库_重启识别尝试 < 3", configured)
         self.assertIn("已从游戏内请求主页，重新采样", configured)
+        self.assertIn("FRLG_STAGE|BEGIN|egg.restart.resolve_state|", configured)
+        self.assertIn("FRLG_STAGE|BEGIN|egg.restart.await_close_animation|", configured)
+        self.assertIn("FRLG_STAGE|FAIL|egg.restart.resolve_state|", configured)
 
     def test_egg_summary_fix_is_idempotent(self):
         original = """\
@@ -1009,6 +1021,10 @@ ENDFUNC
         self.assertIn("@冲浪", configured)
         self.assertNotIn("@三代菜单栏", configured)
         self.assertIn("@野生出现", configured)
+        for stage in ("egg.pond_surf", "egg.pond_battle"):
+            self.assertIn(f"FRLG_STAGE|BEGIN|{stage}|", configured)
+            self.assertIn(f"FRLG_STAGE|END|{stage}|", configured)
+            self.assertIn(f"FRLG_STAGE|FAIL|{stage}|", configured)
         self.assertIn("@抓捕就绪", configured)
         surf_gate = configured[
             configured.index("FUNC 孵蛋测试_等待池塘冲浪结束") : configured.index(

@@ -3,6 +3,7 @@ FUNC 孵蛋测试_关闭游戏($识图阈值: INT): INT
     PRINT 【孵蛋准备】识图关闭游戏
     $孵蛋库_重启识别尝试 = 0
     $孵蛋库_已请求主页 = 0
+    PRINT "FRLG_STAGE|BEGIN|egg.restart.resolve_state|egg.restart.resolve_state|15000|lib/27_孵蛋测试流程.ecs|孵蛋测试_关闭游戏|egg27.restart.resolve_state|manual_prepare_then_restart|OR;主页.IL:>=:" & $识图阈值 & ",主页_NS2.IL:>=:" & $识图阈值 & ",正确退出.IL:>=:" & $识图阈值 & ",正确退出_NS2.IL:>=:" & $识图阈值 & ",HOME_BUFFER正确退出.IL:>=:" & $识图阈值 & ",HOME_BUFFER正确退出_NS2.IL:>=:" & $识图阈值 & ",错误退出.IL:>=:" & $识图阈值 & ",错误退出_NS2.IL:>=:" & $识图阈值 & "|!"
     FOR
         $孵蛋库_主页匹配 = @主页
         $孵蛋库_主页NS2匹配 = @主页_NS2
@@ -19,11 +20,13 @@ FUNC 孵蛋测试_关闭游戏($识图阈值: INT): INT
         # 原版关闭顺序：先处理已经显示的正确/错误退出状态，再决定是否需要 HOME。
         # 不能先按 HOME，否则会把刚进入的主页切回游戏。
         IF ($孵蛋库_正确退出匹配 >= $识图阈值 or $孵蛋库_HOME_BUFFER正确退出匹配 >= $识图阈值) or ($孵蛋库_正确退出NS2匹配 >= $识图阈值 or $孵蛋库_HOME_BUFFER正确退出NS2匹配 >= $识图阈值)
+            PRINT "FRLG_STAGE|END|egg.restart.resolve_state|!"
             PRINT 第一次退出正确
             X
             WAIT 1500
             A
             WAIT 1500
+            PRINT "FRLG_STAGE|BEGIN|egg.restart.await_close_animation|egg.restart.await_close_animation|15000|lib/27_孵蛋测试流程.ecs|孵蛋测试_关闭游戏|egg27.restart.await_close_animation|manual_prepare_then_restart|OR;正在关闭.IL:>=:" & $识图阈值 & "|!"
             FOR
                 $孵蛋库_正在关闭匹配 = @正在关闭
                 IF $孵蛋库_调试日志输出 == 1
@@ -32,6 +35,7 @@ FUNC 孵蛋测试_关闭游戏($识图阈值: INT): INT
                 IF $孵蛋库_正在关闭匹配 >= $识图阈值
                     WAIT 1000
                 ELSE
+                    PRINT "FRLG_STAGE|END|egg.restart.await_close_animation|!"
                     BREAK
                 ENDIF
             NEXT
@@ -44,6 +48,7 @@ FUNC 孵蛋测试_关闭游戏($识图阈值: INT): INT
             $孵蛋库_重启识别尝试 = 0
             CONTINUE
         ELIF $孵蛋库_主页匹配 >= $识图阈值 or $孵蛋库_主页NS2匹配 >= $识图阈值
+            PRINT "FRLG_STAGE|END|egg.restart.resolve_state|!"
             PRINT 游戏外启动
             RETURN 1
         ELSE
@@ -62,6 +67,7 @@ FUNC 孵蛋测试_关闭游戏($识图阈值: INT): INT
                 CONTINUE
             ENDIF
             PRINT "孵蛋重启识图失败：请求主页后仍未识别主页、正确退出或错误退出"
+            PRINT "FRLG_STAGE|FAIL|egg.restart.resolve_state|请求主页后达到脚本内三次识别上限|!"
             RETURN 0
         ENDIF
     NEXT

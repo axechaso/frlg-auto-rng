@@ -5,6 +5,9 @@ $source = Join-Path $root ".build\easycon164a-clean"
 $output = Join-Path $root "runtime_backend\easycon164a-cli-gui-rounding-selfcontained"
 $buildRoot = [IO.Path]::GetFullPath((Join-Path $root ".build"))
 $patch = Join-Path $PSScriptRoot "patches\easycon164a-cli-gui-rounding-next.patch"
+$labelSupervisionPatch = Join-Path $PSScriptRoot "patches\easycon164a-label-supervision.patch"
+$labelSupervisionV8Patch = Join-Path $PSScriptRoot "patches\easycon164a-label-supervision-v8.patch"
+$labelSupervisionV9Patch = Join-Path $PSScriptRoot "patches\easycon164a-label-supervision-v9.patch"
 $commit = "9c86137c7e63bff842175470895727a5fa9bab52"
 $sourceCommitMarker = Join-Path $source ".easycon-source-commit"
 $assemblyName = "EasyCon2.CLI.PreviewV5"
@@ -85,6 +88,54 @@ if (-not $patchAlreadyApplied) {
     if ($LASTEXITCODE -ne 0) { throw "EasyCon compatibility patch failed" }
 }
 
+$supervisorSource = Join-Path $source "src\EasyCon2.CLI\LabelFaultSupervisor.cs"
+$labelPatchAlreadyApplied = (
+    (Test-Path -LiteralPath $supervisorSource) -and
+    (Select-String -LiteralPath $programSource -Pattern 'new LabelFaultSupervisor\(' -Quiet) -and
+    (Select-String -LiteralPath $programSource -Pattern 'verifyLabelCommand' -Quiet) -and
+    (Select-String -LiteralPath $programSource -Pattern 'incidentDirectoryOption' -Quiet) -and
+    (Select-String -LiteralPath $programSource -Pattern 'save-frames-dir' -Quiet) -and
+    (Select-String -LiteralPath (Join-Path $source "src\EasyCon2.CLI\ConsoleOutAdapter.cs") -Pattern 'LineWritten' -Quiet)
+)
+if (-not $labelPatchAlreadyApplied) {
+    git -c "safe.directory=$source" -C $source apply --ignore-space-change --ignore-whitespace --check $labelSupervisionPatch
+    if ($LASTEXITCODE -ne 0) {
+        throw "EasyCon label supervision patch does not apply cleanly; the source may be partially patched"
+    }
+    git -c "safe.directory=$source" -C $source apply --ignore-space-change --ignore-whitespace $labelSupervisionPatch
+    if ($LASTEXITCODE -ne 0) { throw "EasyCon label supervision patch failed" }
+}
+
+$labelSupervisionV8AlreadyApplied = (
+    (Test-Path -LiteralPath $supervisorSource) -and
+    (Select-String -LiteralPath $supervisorSource -Pattern 'UpdateThreshold\(int threshold\)' -Quiet) -and
+    (Select-String -LiteralPath $supervisorSource -Pattern 'MarkProgress\(long now, DateTimeOffset atUtc\)' -Quiet) -and
+    (Select-String -LiteralPath $supervisorSource -Pattern 'marker.TimeoutMs < 0' -Quiet) -and
+    (Select-String -LiteralPath $supervisorSource -Pattern 'stage.Marker.TimeoutMs > 0' -Quiet)
+)
+if (-not $labelSupervisionV8AlreadyApplied) {
+    git -c "safe.directory=$source" -C $source apply --ignore-space-change --ignore-whitespace --check $labelSupervisionV8Patch
+    if ($LASTEXITCODE -ne 0) {
+        throw "EasyCon label supervision v8 patch does not apply cleanly; the source may be partially patched"
+    }
+    git -c "safe.directory=$source" -C $source apply --ignore-space-change --ignore-whitespace $labelSupervisionV8Patch
+    if ($LASTEXITCODE -ne 0) { throw "EasyCon label supervision v8 patch failed" }
+}
+
+$labelSupervisionV9AlreadyApplied = (
+    (Select-String -LiteralPath $programSource -Pattern 'labelSupervisionOption' -Quiet) -and
+    (Select-String -LiteralPath $programSource -Pattern 'if \(labelSupervision\)' -Quiet) -and
+    (Select-String -LiteralPath $programSource -Pattern 'supervisor\?\.ObserveMatch' -Quiet)
+)
+if (-not $labelSupervisionV9AlreadyApplied) {
+    git -c "safe.directory=$source" -C $source apply --ignore-space-change --ignore-whitespace --check $labelSupervisionV9Patch
+    if ($LASTEXITCODE -ne 0) {
+        throw "EasyCon label supervision v9 patch does not apply cleanly; the source may be partially patched"
+    }
+    git -c "safe.directory=$source" -C $source apply --ignore-space-change --ignore-whitespace $labelSupervisionV9Patch
+    if ($LASTEXITCODE -ne 0) { throw "EasyCon label supervision v9 patch failed" }
+}
+
 $project = Join-Path $source "src\EasyCon2.CLI\EasyCon2.CLI.csproj"
 dotnet restore $project -r win-x64 -p:DefaultTargetFramework=net9.0 -p:LtsTargetFramework=net9.0
 if ($LASTEXITCODE -ne 0) { throw "NuGet restore failed" }
@@ -123,8 +174,8 @@ $manifest = [ordered]@{
     source_repository = "https://github.com/EasyConNS/EasyCon.git"
     source_commit = $commit
     source_version = "1.6.4-a"
-    patch_id = "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v6"
-    description = "Continuously capture the newest DSHOW frame, share it with local OCR, and optionally expose the newest frame through a loopback-only MJPEG preview without a second capture-device owner."
+    patch_id = "easycon164a-label-supervision-v9"
+    description = "Run EasyCon 1.6.4-a native label checks and optionally supervise ECS stage markers and script-bounded retry failures; when enabled, save complete fault bundles, lock and reset gamepad input on faults, and capture three fresh verification frames without a second capture-device owner."
     build_target = "net9.0/win-x64 self-contained onedir"
     filename = $runnerFilename
     bytes = $length

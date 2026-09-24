@@ -1,5 +1,14 @@
 # SID 反查 HOME_BUFFER：校准完成后回到原启动函数，继续跳 OP 动画和进入存档。
+FUNC SID反查登记HOME_BUFFER阶段
+    IF $NX机型 == 2
+        PRINT "FRLG_STAGE|BEGIN|sid.home_buffer|sid.home_buffer|120000|NS火叶SID反查-采集测试.ecs|SID反查HOME_BUFFER|sid.home_buffer.probe|manual_prepare_then_restart|OR;HOME_BUFFER正确退出_NS2.IL:>=:" & $HOME_BUFFER有效识图阈值 & ",正确退出_NS2.IL:>=:" & $HOME_BUFFER有效识图阈值 & ",错误退出_NS2.IL:>=:" & $HOME_BUFFER有效识图阈值 & "|!"
+    ELSE
+        PRINT "FRLG_STAGE|BEGIN|sid.home_buffer|sid.home_buffer|120000|NS火叶SID反查-采集测试.ecs|SID反查HOME_BUFFER|sid.home_buffer.probe|manual_prepare_then_restart|OR;HOME_BUFFER正确退出.IL:>=:" & $HOME_BUFFER有效识图阈值 & ",正确退出.IL:>=:" & $HOME_BUFFER有效识图阈值 & ",错误退出.IL:>=:" & $HOME_BUFFER有效识图阈值 & "|!"
+    ENDIF
+ENDFUNC
+
 FUNC SID反查HOME_BUFFER
+    CALL SID反查登记HOME_BUFFER阶段
     FOR
         A
         WAIT 1500
@@ -11,21 +20,26 @@ FUNC SID反查HOME_BUFFER
 
         # SID 页明确选择 Switch 1/2，只读取所选主机的三类标签。
         $HOME_BUFFER识别状态 = HOME_BUFFER识别稳定状态(1)
+        PRINT "FRLG_STAGE|THRESHOLD|sid.home_buffer|" & $HOME_BUFFER有效识图阈值 & "|!"
         IF $HOME_BUFFER识别状态 == 1
             PRINT 可用HOME_BUFFER延迟: & $HOME_BUFFER延迟 & " ms"
+            PRINT "FRLG_STAGE|END|sid.home_buffer|!"
             RETURN
         ELIF $HOME_BUFFER识别状态 == 3
             PRINT 错误进入休眠菜单
             B
             WAIT 1500
             CALL SID反查关闭游戏
+            CALL SID反查登记HOME_BUFFER阶段
         ELIF $HOME_BUFFER识别状态 == 2
             PRINT HOME_BUFFER延迟过长，减100继续尝试中
             $HOME_BUFFER延迟 -= 100
+            PRINT "FRLG_STAGE|PROGRESS|sid.home_buffer|!"
             X
             WAIT 1500
             A
             WAIT 1500
+            PRINT "FRLG_STAGE|BEGIN|sid.home_buffer.wait_shutdown|sid.home_buffer.shutdown|15000|NS火叶SID反查-采集测试.ecs|SID反查HOME_BUFFER|sid.home_buffer.wait_shutdown|manual_prepare_then_restart|OR;正在关闭.IL:>=:95|!"
             FOR
                 IF @正在关闭 >= 95
                     WAIT 100
@@ -33,11 +47,15 @@ FUNC SID反查HOME_BUFFER
                     BREAK
                 ENDIF
             NEXT
+            PRINT "FRLG_STAGE|END|sid.home_buffer.wait_shutdown|!"
+            CALL SID反查登记HOME_BUFFER阶段
             CALL SID反查关闭游戏
+            CALL SID反查登记HOME_BUFFER阶段
         ELSE
             PRINT HOME_BUFFER延迟过短，加100继续尝试中
             $HOME_BUFFER延迟 += 100
             CALL SID反查关闭游戏
+            CALL SID反查登记HOME_BUFFER阶段
         ENDIF
     NEXT
 ENDFUNC

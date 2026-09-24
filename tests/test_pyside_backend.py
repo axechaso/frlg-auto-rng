@@ -408,7 +408,9 @@ class PySideBackendTests(unittest.TestCase):
             self.assertFalse(w.fields["video"].isEnabled())
             self.assertTrue(w.stop_button.isEnabled())
             self.wait_until(lambda: not w.running)
-        prepare.assert_called_once_with(checked, "COM4", 3, "Capture")
+        prepare.assert_called_once_with(
+            checked, "COM4", 3, "Capture", w.paths, label_supervision=False,
+        )
         prompt = confirm.call_args.args[0]
         self.assertIn("运行前必须确认", prompt)
         self.assertIn("队伍放五只宝可梦，第六位留空", prompt)

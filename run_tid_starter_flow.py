@@ -101,6 +101,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tid-context", type=Path)
     parser.add_argument("--tid-records", type=Path)
     parser.add_argument("--preview-port", type=int, default=0)
+    parser.add_argument("--incident-dir", type=Path)
+    parser.add_argument("--run-id", default="")
+    parser.add_argument("--workflow", default="tid")
+    parser.add_argument("--capture-device-name", default="")
     parser.add_argument("--calibrate-first", action="store_true")
     parser.add_argument("--calibration-result", type=Path)
     parser.add_argument("--tid-progress-dir", type=Path)
@@ -126,6 +130,10 @@ class FlowRunner:
         log: TextIO,
         recording=None,
         preview_port: int = 0,
+        incident_directory: Path | None = None,
+        run_id: str = "",
+        workflow: str = "tid",
+        capture_device_name: str = "",
     ) -> None:
         self.runner_path = runner_path
         self.port = port
@@ -133,6 +141,10 @@ class FlowRunner:
         self.log = log
         self.recording = recording
         self.preview_port = preview_port
+        self.incident_directory = incident_directory
+        self.run_id = run_id
+        self.workflow = workflow
+        self.capture_device_name = capture_device_name
         self.current_process: subprocess.Popen[str] | None = None
         self.stop_requested = False
         self.stage_lines: list[str] = []
@@ -186,6 +198,11 @@ class FlowRunner:
             video_device=self.video_device,
             video_type="DSHOW",
             preview_port=self.preview_port,
+            incident_directory=self.incident_directory,
+            run_id=self.run_id,
+            workflow=self.workflow,
+            capture_device_name=self.capture_device_name,
+            label_supervision=self.incident_directory is not None,
         )
         flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         marker_seen = required_marker is None
@@ -707,6 +724,10 @@ def main() -> int:
             log=log,
             recording=recording,
             preview_port=args.preview_port,
+            incident_directory=args.incident_dir,
+            run_id=args.run_id,
+            workflow=args.workflow,
+            capture_device_name=args.capture_device_name,
         )
         if hasattr(signal, "SIGBREAK"):
             signal.signal(signal.SIGBREAK, flow.request_stop)

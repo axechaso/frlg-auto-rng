@@ -8,6 +8,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import cv2
+import numpy as np
+
 import automation.easycon118 as easycon118
 from device_label_overrides import (
     PROJECT_OVERRIDE_FILENAME,
@@ -23,9 +26,17 @@ from device_label_overrides import (
 
 
 def write_label(path: Path, *, method: int = 5, image: bytes = b"base-image-012345") -> None:
+    color = np.frombuffer(hashlib.sha256(image).digest(), dtype=np.uint8)[:3]
+    pixels = np.empty((40, 30, 4 if method == 14 else 3), dtype=np.uint8)
+    pixels[:, :, :3] = color
+    if method == 14:
+        pixels[:, :, 3] = 255
+    ok, encoded = cv2.imencode(".png", pixels)
+    if not ok:
+        raise RuntimeError("failed to create label fixture")
     payload = {
         "searchMethod": method,
-        "ImgBase64": base64.b64encode(image).decode("ascii"),
+        "ImgBase64": base64.b64encode(encoded.tobytes()).decode("ascii"),
         "RangeX": 0,
         "RangeY": 0,
         "RangeWidth": 1920,
@@ -57,7 +68,18 @@ class DeviceLabelOverrideTests(unittest.TestCase):
             replacement = root / "replacement" / "HOME_BUFFER正确退出.IL"
             write_label(replacement, image=b"device-image-abcdef")
             store = LabelOverrideStore(root / "profiles")
-            imported = store.import_paths("[7] USB Capture", (replacement,), (base,))
+            verification = {"schema": "frlg-label-verification/v1", "same_image": {"passed": True}}
+            imported = store.import_paths(
+                "[7] USB Capture", (replacement,), (base,),
+                provenance={"HOME_BUFFER正确退出.IL": {
+                    "incident_id": "incident-1", "verification": verification,
+                    "operation": "label_editor", "source": "in_app_label_editor",
+                }},
+            )
+            metadata = store.load_manifest(imported.profile)["files"]["HOME_BUFFER正确退出.IL"]
+            self.assertEqual(metadata["incident_id"], "incident-1")
+            self.assertEqual(metadata["source"], "in_app_label_editor")
+            self.assertEqual(metadata["original_sha256"], hashlib.sha256(original).hexdigest())
             profile = load_label_override_profile(imported.profile.directory)
 
             project = root / "project"
@@ -71,6 +93,8 @@ class DeviceLabelOverrideTests(unittest.TestCase):
                 "device overrides must never modify the audited source corpus",
             )
             self.assertTrue((project / PROJECT_OVERRIDE_FILENAME).is_file())
+            project_override = json.loads((project / PROJECT_OVERRIDE_FILENAME).read_text(encoding="utf-8"))
+            self.assertEqual(project_override["files"][0]["incident_id"], "incident-1")
             plan = json.loads((project / "plan.json").read_text(encoding="utf-8"))
             self.assertEqual(
                 plan["device_label_overrides"]["base_corpus"]["sha256"],
@@ -100,6 +124,66 @@ class DeviceLabelOverrideTests(unittest.TestCase):
             tampered = validate_project_overrides(project / "ImgLabel", base_hash)
             self.assertFalse(tampered.ok)
             self.assertIn("再次修改", "\n".join(tampered.errors))
+
+    def test_override_history_restores_one_label_and_clear_is_recoverable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / "base" / "ImgLabel"
+            write_label(base / "known.IL", image=b"base")
+            store = LabelOverrideStore(root / "profiles")
+            first = root / "revision-one" / "known.IL"
+            second = root / "revision-two" / "known.IL"
+            write_label(first, image=b"first")
+            write_label(second, image=b"second")
+            imported = store.import_paths("[2] USB Card", (first,), (base,))
+            first_bytes = (imported.profile.label_dir / "known.IL").read_bytes()
+            store.import_paths("[2] USB Card", (second,), (base,))
+            second_bytes = (imported.profile.label_dir / "known.IL").read_bytes()
+            self.assertNotEqual(first_bytes, second_bytes)
+
+            self.assertEqual(store.restore_previous("[2] USB Card", "known.IL"), "已恢复上一版设备标签")
+            self.assertEqual((imported.profile.label_dir / "known.IL").read_bytes(), first_bytes)
+
+    def test_interrupted_override_transaction_recovers_before_next_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / "base" / "ImgLabel"
+            write_label(base / "known.IL", image=b"base")
+            replacement = root / "replacement" / "known.IL"
+            write_label(replacement, image=b"first")
+            store = LabelOverrideStore(root / "profiles")
+            result = store.import_paths("[2] USB Card", (replacement,), (base,))
+            profile = result.profile
+            before_label = (profile.label_dir / "known.IL").read_bytes()
+            before_manifest = profile.manifest_path.read_bytes()
+            transaction = store.root / ".transactions" / profile.key / "pending-recovery"
+            (transaction / "before").mkdir(parents=True)
+            (transaction / "after").mkdir()
+            (transaction / "before" / "known.IL").write_bytes(before_label)
+            (transaction / "before" / "manifest.json").write_bytes(before_manifest)
+            write_label(root / "replacement-next.IL", image=b"interrupted")
+            (profile.label_dir / "known.IL").write_bytes((root / "replacement-next.IL").read_bytes())
+            (transaction / "transaction.json").write_text(json.dumps({
+                "schema": "frlg-label-override-transaction/v1",
+                "transaction_id": "pending-recovery",
+                "profile_key": profile.key,
+                "status": "prepared",
+                "labels": ["known.IL"],
+                "before_files": {"known.IL": True},
+                "before_manifest_exists": True,
+            }), encoding="utf-8")
+
+            listed = store.list_overrides("[2] USB Card")
+
+            self.assertEqual(len(listed), 1)
+            self.assertEqual((profile.label_dir / "known.IL").read_bytes(), before_label)
+            self.assertEqual(json.loads(profile.manifest_path.read_text(encoding="utf-8"))["files"]["known.IL"]["sha256"], listed[0]["sha256"])
+
+            store.clear("[2] USB Card")
+            self.assertEqual(store.list_overrides("[2] USB Card"), ())
+            self.assertFalse((profile.label_dir / "known.IL").exists())
+            self.assertEqual(store.restore_previous("[2] USB Card", "known.IL"), "已恢复上一版设备标签")
+            self.assertEqual((profile.label_dir / "known.IL").read_bytes(), before_label)
 
     def test_unknown_label_and_method_change_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

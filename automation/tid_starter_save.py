@@ -15,9 +15,11 @@ if TYPE_CHECKING:
 
 
 TID_STARTER_SAVE_NAME = "NS火叶TID-SID到御三家球前存档-测试.ecs"
-TID_STARTER_SAVE_SHA256 = "a732fbaa2726a67ce584f4cddf9bc2b5f82cf94f188b59dea760e29d77211b00"
+TID_STARTER_SAVE_SHA256 = "a52a6af4262509c83bed50267808a5bcc452dd76ace2b68e16c6198eb3f06375"
 TID_STARTER_SAVE_SUPPORTED_SHA256 = {
     TID_STARTER_SAVE_SHA256,
+    # Previous unified mother before stage-failure supervision markers were added.
+    "a732fbaa2726a67ce584f4cddf9bc2b5f82cf94f188b59dea760e29d77211b00",
     # Previous unified mother before both label paths rejected >65535 and
     # first-position 7/8/9 were removed consistently.
     "143fcdcf816e5754abcc6acac68eb9e2e8ffd9b2c2dd4705dd08ac1c4381cb36",
@@ -149,7 +151,8 @@ def _adaptive_home_buffer(module: str, prefix: str) -> str:
         body = match.group()
         replacements = {
             "        CALL TID_读取当前退出标签\n":
-                "        $HOME_BUFFER识别状态 = TID_HOME_BUFFER识别稳定状态()\n",
+                "        $HOME_BUFFER识别状态 = TID_HOME_BUFFER识别稳定状态()\n"
+                "        PRINT \"FRLG_STAGE|THRESHOLD|tid.home_buffer|\" & $HOME_BUFFER有效识图阈值 & \"|!\"\n",
             "IF $TID当前HOME_BUFFER正确退出 >= 95 and $TID当前错误退出 < 95":
                 "IF $HOME_BUFFER识别状态 == 1 and $HOME_BUFFER选中错误 < $HOME_BUFFER有效识图阈值",
             "ELIF $TID当前错误退出 >= 95": "ELIF $HOME_BUFFER识别状态 == 3",
@@ -162,7 +165,19 @@ def _adaptive_home_buffer(module: str, prefix: str) -> str:
         classifier = TID_HOME_BUFFER_ADAPTIVE_PATH.read_text(encoding="utf-8").split(
             "\nFUNC HOME_BUFFER\n", 1
         )[0].rstrip()
-        return module[:match.start()] + classifier + "\n\n" + body + module[match.end():]
+        configured = module[:match.start()] + classifier + "\n\n" + body + module[match.end():]
+        helper_end = "    ENDIF\nENDFUNC\n\nFUNC TID_HOME_BUFFER(): INT"
+        if configured.count(helper_end) > 1:
+            raise ValueError("TID HOME_BUFFER阶段登记函数结构不唯一")
+        if configured.count(helper_end) == 1:
+            configured = configured.replace(
+                helper_end,
+                "    ENDIF\n"
+                "    PRINT \"FRLG_STAGE|THRESHOLD|tid.home_buffer|\" & $HOME_BUFFER有效识图阈值 & \"|!\"\n"
+                "ENDFUNC\n\nFUNC TID_HOME_BUFFER(): INT",
+                1,
+            )
+        return configured
 
     def convert(text: str) -> str:
         return _blocking_buttons(text).replace(

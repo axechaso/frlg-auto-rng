@@ -39,7 +39,7 @@ EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
 EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
-EXPECTED_COMPAT_PATCH_ID = "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v6"
+EXPECTED_COMPAT_PATCH_ID = "easycon164a-label-supervision-v9"
 EXPECTED_TESSDATA_SHA256 = {
     "frlg_battle.traineddata": "7abcaef4936727b33717656b38fd5b5027823e1cafec21abb06cc8ef1f7ff758",
     "FRLG_EN_ALL.traineddata": "3272f23a6f259518813025d89be77d706574ccdf163132ccf6f5be15ca19cfa0",
@@ -216,6 +216,12 @@ PREVIOUS_SCRIPT_SHA256S += (
     # September 22 package with adaptive frame-parity scheme 0; the
     # ordinary F1/F2 parity offset advances after three target-Seed misses.
     "bedcd4a3d33fab526a9fcc715cd6ab2325ef46272d0ab3f52167c4eae7b36bc1",
+    # September 24 package with registered label-wait failures for capture,
+    # Safari, egg restart, settings and pond checks without changing actions.
+    "3b18638522d1be9a5292a6d013da29902c903ed2bb51c83fcef137840683df3a",
+    # September 24 package with label-wait registration for HOME_BUFFER,
+    # Japanese starter reads, wild-name OCR and stat candidate fallbacks.
+    "5ab831733be435433f436f078d9ac94fe1b1008aa814231033d9fcfb1b761f03",
 )
 EXPECTED_SCRIPT_SHA256 = "6a0afe3ff17890c9387f53efa6cd364f052b342a7a916a5efe8e1213a406a750"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -345,6 +351,12 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "38d1e97107d9f5a67d44dbed176538d49b6709fb35ac0c22c75e797d30a16e69",
     # Materialized counterpart of the roaming-encounter retry policy.
     "744de89df74600a604c8b8a0fa27b909ce1a6e470af8d7ec54809f751ad0e9c9",
+    # Local materialization with supervised capture turns and bounded egg
+    # restart, settings, pond-surf and battle-result waits.
+    "72db7407b63fdd388d90df2bf06015505c940a5f4af0daede65723c6c5c74747",
+    # September 24 materialization with HOME_BUFFER, Japanese starter,
+    # wild-name OCR and stat-candidate stages.
+    "95c6e2924217fd40615ae8785df42ccc3eeb02d8d8381c4bf2f7664ea5a4578f",
 )
 
 
@@ -4601,6 +4613,11 @@ def build_run_command(
     video_type: str = "DSHOW",
     verbose: bool = False,
     preview_port: int = 0,
+    incident_directory: str | Path | None = None,
+    run_id: str | None = None,
+    workflow: str | None = None,
+    capture_device_name: str | None = None,
+    label_supervision: bool = False,
 ) -> list[str]:
     if video_device < 0:
         raise ValueError("采集卡序号不能为负数")
@@ -4627,6 +4644,16 @@ def build_run_command(
         command.append("--verbose")
     if preview_port:
         command.extend(["--preview-port", str(preview_port)])
+    if label_supervision:
+        command.append("--label-supervision")
+    if label_supervision and incident_directory is not None:
+        command.extend(["--incident-dir", str(Path(incident_directory).resolve())])
+    if label_supervision and run_id:
+        command.extend(["--run-id", run_id])
+    if label_supervision and workflow:
+        command.extend(["--workflow", workflow])
+    if label_supervision and capture_device_name:
+        command.extend(["--capture-device-name", capture_device_name])
     return command
 
 

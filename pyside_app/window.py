@@ -564,7 +564,8 @@ class FrlgWindow(FrlgPreviewWindow):
                     widget for key, widget in self.fields.items()
                     if key not in {"history_workflow", "history_search"}
                 ] + [self.profile_selector, self.advanced_check, self.home_buffer_check,
-                    self.precalibration_check, self.item_check, self.dunsparce_three_segment_check, *self.capture_checks,
+                    self.precalibration_check, self.label_supervision_check, self.item_check,
+                    self.dunsparce_three_segment_check, *self.capture_checks,
                     *(widget for pair in self.iv_ranges for widget in pair),
                     *(button for key, button in self.nav_buttons.items()
                       if key not in ("wild", "logs", "history_logs", "tid_records"))]
@@ -738,7 +739,11 @@ class FrlgWindow(FrlgPreviewWindow):
             self.running = True
             self.refresh_state()
             self.process.start(command.program, list(command.arguments))
-        self.launch_job(lambda _cancel, _status: prepare_run(prepared, port, video, self.devices[1][video]), ready, "正在重新核对设备、脚本与正式运行器……")
+        supervision = self.label_supervision_check.isChecked()
+        self.launch_job(lambda _cancel, _status: prepare_run(
+            prepared, port, video, self.devices[1][video], self.paths,
+            label_supervision=supervision,
+        ), ready, "正在重新核对设备、脚本与正式运行器……")
 
     def _confirm_wild_start(self, prompt: str) -> bool:
         dialog = QMessageBox(self)
@@ -827,7 +832,11 @@ class FrlgWindow(FrlgPreviewWindow):
                 self._append_log("\n预校准已更新。\n" if record else "\n没有完整命中记录，预校准未更新。\n")
             except (OSError, ValueError, TypeError) as exc:
                 self._append_log(f"\n预校准更新失败，原记录保留：{exc}\n")
-        if self.runtime_issues:
+        from label_incidents import REPAIR_REQUIRED_EXIT_CODE
+        if code == REPAIR_REQUIRED_EXIT_CODE:
+            self._append_log("\n[标签故障保护] 手柄输入已锁定，本次运行以安全停止码结束。请在设备标签卡片查看截图并修复标签。\n")
+            self.set_status("标签故障保护已停止运行；请打开设备标签卡片处理故障事件。")
+        elif self.runtime_issues:
             for explanation in self.runtime_issues.values():
                 self._append_log("\n[本次运行问题] " + explanation.message + "\n")
             issue = next(iter(self.runtime_issues.values()))
@@ -901,6 +910,7 @@ class FrlgWindow(FrlgPreviewWindow):
             update_source = values.get("update_source", "auto")
             source_index = self.fields["update_source"].findData(update_source)
             self.fields["update_source"].setCurrentIndex(max(0, source_index))
+            self.label_supervision_check.setChecked(values.get("label_supervision") is True)
         except (OSError, ValueError, TypeError):
             pass
 
@@ -918,6 +928,7 @@ class FrlgWindow(FrlgPreviewWindow):
             write_json_atomic(self.paths.user / "pyside6_settings.json", {
                 **{key: self.fields[key].text() for key in ("source", "ezcon")},
                 "update_source": self.fields["update_source"].currentData() or "auto",
+                "label_supervision": self.label_supervision_check.isChecked(),
             })
         except (OSError, ValueError) as exc:
             if not self.closing:

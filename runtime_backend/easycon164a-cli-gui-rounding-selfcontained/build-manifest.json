@@ -2,10 +2,10 @@
   "source_repository": "https://github.com/EasyConNS/EasyCon.git",
   "source_commit": "9c86137c7e63bff842175470895727a5fa9bab52",
   "source_version": "1.6.4-a",
-  "patch_id": "cli-latest-frame-ceiling-ocr-loopback-mjpeg-onedir-v6",
-  "description": "Continuously capture the newest DSHOW frame, share it with local OCR, and optionally expose the newest frame through a loopback-only MJPEG preview without a second capture-device owner, including pure button/timing stages.",
+  "patch_id": "easycon164a-label-supervision-v9",
+  "description": "Run EasyCon 1.6.4-a native label checks and optionally supervise ECS stage markers and script-bounded retry failures; when enabled, save complete fault bundles, lock and reset gamepad input on faults, and capture three fresh verification frames without a second capture-device owner.",
   "build_target": "net9.0/win-x64 self-contained onedir",
   "filename": "EasyCon2.CLI.PreviewV5.exe",
   "bytes": 156672,
-  "sha256": "00487aeb32f9cda74173e924ce3c19c895b36e092314b65326a7dacaa68d1771"
+  "sha256": "0f959a351238292b19a1255891f30eb410071486afa642e5caff2b4dff8cd140"
 }
