@@ -204,9 +204,12 @@ class TidSearchTests(unittest.TestCase):
             source=configure_tid_template_text(self.template,request)
             allowed={p+"_"+name for name in ("打印参数","匹配","计算穷举候选距离","穷举模式偏移运算","乱数模式操作延迟校验",
                 "穷举推进到下一个搜索点", "乱数模式偏移运算", "乱数定位到当前壳层下一个有效组合", "乱数推进到下一个壳层组合")}
+            allowed.update({"TID_读取当前退出标签", "TID_关闭游戏"})
             for name in re.findall(r"(?m)^FUNC ([^\s(]+)",self.template):
                 if name not in allowed:
                     self.assertEqual(function(source,name),function(self.template,name),name)
+            self.assertIn("$TID当前主页 = @主页", function(source, "TID_读取当前退出标签"))
+            self.assertIn("已连续确认主页且游戏未运行", function(source, "TID_关闭游戏"))
 
     def test_multiple_targets_use_nearest_ring_distance_and_match_exactly(self):
         request = TidRngRequest(mode=0, target_tid=11111, additional_target_tids=(0,33333,65535),

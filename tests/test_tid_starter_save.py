@@ -11,7 +11,9 @@ from automation.tid_rng137 import (
 )
 from automation.tid_starter_save import (
     DEFAULT_TID_STARTER_SAVE_SOURCE, TID_STARTER_SAVE_NAME,
-    TID_STARTER_SAVE_SHA256, _blocking_buttons, _adaptive_home_buffer, configure_starter_save_id,
+    TID_STARTER_SAVE_SHA256, _accept_already_closed_home,
+    _validate_bridge_save_confirmation, _blocking_buttons, _adaptive_home_buffer,
+    configure_starter_save_id,
     render_starter_save_bridge,
     set_starter_save_sid_correction, split_tid_modules,
 )
@@ -196,6 +198,80 @@ ENDIF
 
 
 class TidStarterSaveTests(unittest.TestCase):
+    def test_close_game_accepts_an_already_closed_title_for_both_models(self):
+        source = """$TID当前正确退出 = 0
+$TID当前HOME_BUFFER正确退出 = 0
+$TID当前错误退出 = 0
+FUNC TID_读取当前退出标签
+    IF $NS机型 == 2
+        $TID当前正确退出 = @正确退出_NS2
+        $TID当前HOME_BUFFER正确退出 = @HOME_BUFFER正确退出_NS2
+        $TID当前错误退出 = @错误退出_NS2
+    ELSE
+        $TID当前正确退出 = @正确退出
+        $TID当前HOME_BUFFER正确退出 = @HOME_BUFFER正确退出
+        $TID当前错误退出 = @错误退出
+    ENDIF
+ENDFUNC
+FUNC TID_关闭游戏(): INT
+    $TID关闭游戏尝试 = 0
+    IF $NS机型 == 2
+        PRINT "FRLG_STAGE|BEGIN|tid.close|tid.close|0|source.ecs|TID_关闭游戏|tid.close.classify|manual_prepare_then_restart|OR;正确退出_NS2.IL:>=:95,HOME_BUFFER正确退出_NS2.IL:>=:95,错误退出_NS2.IL:>=:95|!"
+    ELSE
+        PRINT "FRLG_STAGE|BEGIN|tid.close|tid.close|0|source.ecs|TID_关闭游戏|tid.close.classify|manual_prepare_then_restart|OR;正确退出.IL:>=:95,HOME_BUFFER正确退出.IL:>=:95,错误退出.IL:>=:95|!"
+    ENDIF
+    FOR
+        $TID关闭游戏尝试 += 1
+        IF $TID关闭游戏尝试 > $TID关闭游戏尝试上限
+            RETURN 0
+        ENDIF
+        CALL TID_读取当前退出标签
+        IF $TID当前正确退出 < 95 and $TID当前HOME_BUFFER正确退出 < 95
+            HOME DOWN
+            WAIT 100
+            HOME UP
+            WAIT $关闭游戏延迟
+            CALL TID_读取当前退出标签
+        ENDIF
+        IF ($TID当前正确退出 >= 95 or $TID当前HOME_BUFFER正确退出 >= 95) and $TID当前错误退出 < 95
+            RETURN 1
+        ELIF $TID当前错误退出 >= 95
+            PRINT 错误进入休眠菜单
+            B DOWN
+            WAIT 50
+            B UP
+            WAIT $关闭游戏延迟
+            CONTINUE
+        ELSE
+            PRINT 关闭游戏延迟过短，+100继续尝试
+            $关闭游戏延迟 += 100
+            CONTINUE
+        ENDIF
+    NEXT
+ENDFUNC
+"""
+        configured = _accept_already_closed_home(source)
+        self.assertEqual(_accept_already_closed_home(configured), configured)
+        self.assertIn("$TID当前主页 = @主页\n", configured)
+        self.assertIn("$TID当前主页 = @主页_NS2\n", configured)
+        self.assertIn("$TID关闭游戏主页稳定 >= 3", configured)
+        self.assertIn("TID关闭游戏：已连续确认主页且游戏未运行", configured)
+        self.assertIn("OR;主页.IL:>=:95,正确退出.IL:>=:95", configured)
+        self.assertIn("OR;主页_NS2.IL:>=:95,正确退出_NS2.IL:>=:95", configured)
+        self.assertIn(
+            "IF $TID当前主页 < 95 and $TID当前正确退出 < 95",
+            configured,
+        )
+        self.assertIn("ELIF $TID当前主页 >= 95", configured)
+        closed_branch = configured.split(
+            "IF $TID当前主页 >= 95 and $TID当前正确退出 < 90", 1
+        )[1].split("$TID关闭游戏主页稳定 = 0", 1)[0]
+        self.assertNotRegex(closed_branch, r"(?m)^\s*(?:HOME|A|B|X)(?:\s|$)")
+        self.assertLess(
+            configured.index("IF $TID当前主页 >= 95 and $TID当前正确退出 < 90"),
+            configured.index("HOME DOWN"),
+        )
+
     def test_r4_startup_guard_stays_before_down_and_keeps_post_confirm_wait(self):
         head, english, japanese, tail = split_tid_modules(model_compensated_fixture())
         modules = []
@@ -295,9 +371,36 @@ WAIT 550
 
     def test_compact_bridge_keeps_source_route_without_duplicating_it(self):
         source = compact_fixture()
-        bridge = render_starter_save_bridge(source, "小火龙")
+        bridge = render_starter_save_bridge(source, "小火龙", language="英文")
         self.assertEqual(bridge.count("CALL FLOW_桥接到御三家存档点"), 1)
         self.assertEqual(functions(bridge), {n: b for n, b in functions(source).items() if n.startswith("FLOW_")})
+
+    def test_bridge_save_confirmation_requires_current_language_branch(self):
+        route = """FUNC FLOW_桥接到御三家存档点
+    PRINT >>> 开始保存 >>>
+{presses}
+    UP
+    WAIT 500
+    A
+    WAIT 2500
+    $连续流程_桥接完成 = 1
+ENDFUNC"""
+        six = "\n\n".join("    A\n    WAIT 1500" for _ in range(6))
+        conditional = route.format(
+            presses=six
+            + "\n\n    IF $连续流程_游戏版本 == 1\n"
+              "        A\n"
+              "        WAIT 1500\n"
+              "    ENDIF"
+        )
+        self.assertIsNone(_validate_bridge_save_confirmation(conditional))
+        for count in (6, 7):
+            source = route.format(
+                presses="\n\n".join("    A\n    WAIT 1500" for _ in range(count))
+            )
+            with self.subTest(unconditional=count):
+                with self.assertRaisesRegex(ValueError, "语言分支"):
+                    _validate_bridge_save_confirmation(source)
 
     def test_unrecognized_user_boundary_is_rejected(self):
         source = compact_fixture().replace("$KeyDelay = 50", "$KeyDelay = 51")
@@ -362,7 +465,8 @@ WAIT 550
     def test_bridge_reuses_original_functions_once(self):
         for starter, choice in (("妙蛙种子", 0), ("杰尼龟", 1), ("小火龙", 2)):
             source = fixture()
-            bridge = render_starter_save_bridge(source, starter)
+            bridge = render_starter_save_bridge(source, starter, language="英文")
+            self.assertIn("$连续流程_游戏版本 = 0", bridge)
             self.assertIn(f"$连续流程_御三家选择 = {choice}", bridge)
             self.assertEqual(bridge.count("CALL FLOW_桥接到御三家存档点"), 1)
             self.assertIn("IF $连续流程_桥接完成 == 1\n    PRINT TIDFLOW|BRIDGE|DONE=1", bridge)
@@ -411,38 +515,42 @@ class TidStarterSaveSourceTests(unittest.TestCase):
                     "TID_HOME_BUFFER" if "TID_HOME_BUFFER" in original_functions
                     else ("EN" if language == "英文" else "JP") + "_HOME_BUFFER"
                 )
+                changed_functions = {"TID_读取当前退出标签", "TID_关闭游戏"}
                 for function, body in original_functions.items():
+                    if function in changed_functions:
+                        continue
                     if adaptive and function == changed_home:
                         continue
                     self.assertEqual(body, generated_functions[function], function)
+                self.assertIn("$TID当前主页 = @主页", generated_functions["TID_读取当前退出标签"])
+                self.assertIn("已连续确认主页且游戏未运行", generated_functions["TID_关闭游戏"])
                 self.assertNotIn("CALL FLOW_桥接到御三家存档点", configured)
                 self.assertEqual(configured.count("TIDFLOW|ID|TID="), 5)
 
     def test_real_bridge_keeps_all_original_route_functions(self):
         source = DEFAULT_TID_STARTER_SAVE_SOURCE.read_text(encoding="utf-8-sig")
-        bridge = render_starter_save_bridge(source, "小火龙")
-        self.assertEqual(functions(bridge), {name: body for name, body in functions(source).items() if name.startswith("FLOW_")})
+        original = {name: body for name, body in functions(source).items() if name.startswith("FLOW_")}
+        for language in ("英文", "日文"):
+            bridge = render_starter_save_bridge(source, "小火龙", language=language)
+            self.assertEqual(functions(bridge), original)
 
-    def test_real_bridge_uses_current_overwrite_save_sequence(self):
+    def test_real_bridge_uses_language_specific_overwrite_save_sequences(self):
         source_path = DEFAULT_TID_STARTER_SAVE_SOURCE
         source = source_path.read_text(encoding="utf-8-sig")
         self.assertEqual(hashlib.sha256(source_path.read_bytes()).hexdigest(), TID_STARTER_SAVE_SHA256)
-        bridge = render_starter_save_bridge(source, "小火龙")
-        save_block = bridge.split("PRINT >>> 开始保存 >>>", 1)[1].split(
-            "$连续流程_桥接完成 = 1", 1
-        )[0]
-        executable = [
-            line.split("#", 1)[0].strip()
-            for line in save_block.splitlines()
-            if line.split("#", 1)[0].strip()
-        ]
-        expected = (
-            ["X", "WAIT 1000"]
-            + ["DOWN", "WAIT 500"]
-            + ["A", "WAIT 1500"] * 6
-            + ["UP", "WAIT 500", "A", "WAIT 2500"]
-        )
-        self.assertEqual(executable, expected)
+        for language, count in (("英文", 6), ("日文", 7)):
+            bridge = render_starter_save_bridge(source, "小火龙", language=language)
+            save_block = bridge.split("PRINT >>> 开始保存 >>>", 1)[1].split(
+                "$连续流程_桥接完成 = 1", 1
+            )[0]
+            raw_pairs = len(re.findall(
+                r"(?m)^[ \t]+A\n[ \t]+WAIT 1500$",
+                save_block.split("\n    UP\n", 1)[0],
+            ))
+            self.assertEqual(raw_pairs, 7)
+            self.assertEqual(save_block.count("IF $连续流程_游戏版本 == 1"), 1)
+            runtime_count = raw_pairs - (1 if language == "英文" else 0)
+            self.assertEqual(runtime_count, count, language)
 
 
 if __name__ == "__main__":

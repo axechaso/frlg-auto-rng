@@ -15,32 +15,7 @@ if TYPE_CHECKING:
 
 
 TID_STARTER_SAVE_NAME = "NS火叶TID-SID到御三家球前存档-测试.ecs"
-TID_STARTER_SAVE_SHA256 = "a52a6af4262509c83bed50267808a5bcc452dd76ace2b68e16c6198eb3f06375"
-TID_STARTER_SAVE_SUPPORTED_SHA256 = {
-    TID_STARTER_SAVE_SHA256,
-    # Previous unified mother before stage-failure supervision markers were added.
-    "a732fbaa2726a67ce584f4cddf9bc2b5f82cf94f188b59dea760e29d77211b00",
-    # Previous unified mother before both label paths rejected >65535 and
-    # first-position 7/8/9 were removed consistently.
-    "143fcdcf816e5754abcc6acac68eb9e2e8ffd9b2c2dd4705dd08ac1c4381cb36",
-    # Previous unified mother before English OCR-first recognition was merged.
-    "b20057d7f79ac1f8a7fc0d5f8eaa983333ea4adc66fe1b2cf40b38e757682633",
-    # Previous combined source before the dark HOME-closing recognition path.
-    "ca12bdc6ad08db2f2fe9473c9990bea105e523863067f0de8413ceeb0ab814b8",
-    # Previous combined source before NX-specific, bounded startup retries.
-    "c2e6f316e2ef66d4968fb26327761d7be29fcb593d15b72c017a2d356b454504",
-    # Previous combined source before the English naming page wait became 600 ms.
-    "ecfeaa5d2209992711afaa17e6967c287bd657b9c38085762b785db1b081baf5",
-    "3b8cb56328817dcf5adec8c6271a530fae8aab3ce6b784b29a73d22797c366c5",
-    "54decdea179cf86689426444779cef90b6bedaa490932843901b83d541f97b35",
-    # 2026-08-27-r4 and earlier audited revisions remain valid inputs.
-    "02734f7382d6921f40e1a2de4049b4d195e2e094d5e8ca47dd67793d4a519f21",
-    "ba4d1f602915d40382cb93a51b1484ba3942868945cbfa45e1d133ef59d8d383",
-    "485278694b326ae9a1b4bcc3aeb37b629a9ef212fa6688a1a7fc6c5f1626b324",
-    "8ccbe63e539788c72ef20219ca5b58dce124f58bbb3940cc9ed55cce8e16ce03",
-    # 同一执行代码，仅英文用户区的 $ID_RNG 初值为 0。
-    "711f6ceb6fd08309a92b98caa853db235ab5b25070f3813baa5011e9af89cd58",
-}
+TID_STARTER_SAVE_SHA256 = "116aa90e3874dc4d79a8fc7f4f178dc923bf7021f0e3fc0929716c0e734c98ec"
 _LOCAL_TID_STARTER_SAVE_SOURCE = (
     Path(__file__).resolve().parents[1]
     / "local_assets" / "tid_rng137" / TID_STARTER_SAVE_NAME
@@ -73,6 +48,7 @@ _COMPACT_TAIL = "IF $连续流程_游戏版本 != 0 and $连续流程_游戏版�
 _ID_END = "# 工具 ID 阶段结束：桥接与存档只在第二阶段执行。\nRETURN 0\n"
 _EN_NAME_PAGE_WAIT_550 = "$select基础次数 += 1\n        550"
 _EN_NAME_PAGE_WAIT_600 = "$select基础次数 += 1\n        600"
+_CLOSED_HOME_MARKER = "TID关闭游戏：已连续确认主页且游戏未运行"
 
 
 def is_starter_save_template(text: str) -> bool:
@@ -93,6 +69,114 @@ def stabilize_english_name_page_wait(text: str) -> str:
         "英文取名翻页等待结构不唯一："
         f"550ms={old_count}，600ms={new_count}"
     )
+
+
+def _accept_already_closed_home(text: str) -> str:
+    """Let the shared TID shutdown stage continue when no title is running."""
+    if _CLOSED_HOME_MARKER in text:
+        return text
+    if "FUNC TID_关闭游戏(): INT\n" not in text:
+        return text
+
+    global_anchor = "$TID当前正确退出 = 0\n"
+    if text.count(global_anchor) != 1:
+        raise ValueError("TID关闭游戏缺少唯一的当前退出标签全局变量")
+    text = text.replace(
+        global_anchor,
+        "$TID当前主页 = 0\n"
+        "$TID当前正确退出 = 0\n"
+        "$TID关闭游戏主页稳定 = 0\n",
+        1,
+    )
+
+    read_function = """FUNC TID_读取当前退出标签
+    IF $NS机型 == 2
+        $TID当前正确退出 = @正确退出_NS2
+        $TID当前HOME_BUFFER正确退出 = @HOME_BUFFER正确退出_NS2
+        $TID当前错误退出 = @错误退出_NS2
+    ELSE
+        $TID当前正确退出 = @正确退出
+        $TID当前HOME_BUFFER正确退出 = @HOME_BUFFER正确退出
+        $TID当前错误退出 = @错误退出
+    ENDIF
+ENDFUNC"""
+    read_replacement = """FUNC TID_读取当前退出标签
+    IF $NS机型 == 2
+        $TID当前主页 = @主页_NS2
+        $TID当前正确退出 = @正确退出_NS2
+        $TID当前HOME_BUFFER正确退出 = @HOME_BUFFER正确退出_NS2
+        $TID当前错误退出 = @错误退出_NS2
+    ELSE
+        $TID当前主页 = @主页
+        $TID当前正确退出 = @正确退出
+        $TID当前HOME_BUFFER正确退出 = @HOME_BUFFER正确退出
+        $TID当前错误退出 = @错误退出
+    ENDIF
+ENDFUNC"""
+    if text.count(read_function) != 1:
+        raise ValueError("TID关闭游戏的机型标签读取函数与审计版本不一致")
+    text = text.replace(read_function, read_replacement, 1)
+
+    stage_replacements = {
+        "OR;正确退出_NS2.IL:>=:95": "OR;主页_NS2.IL:>=:95,正确退出_NS2.IL:>=:95",
+        "OR;正确退出.IL:>=:95": "OR;主页.IL:>=:95,正确退出.IL:>=:95",
+    }
+    for old, new in stage_replacements.items():
+        if text.count(old) != 1:
+            raise ValueError("TID关闭游戏的阶段监视标签与审计版本不一致")
+        text = text.replace(old, new, 1)
+
+    loop_anchor = """    FOR
+        $TID关闭游戏尝试 += 1"""
+    if text.count(loop_anchor) != 1:
+        raise ValueError("TID关闭游戏缺少唯一的重试循环")
+    text = text.replace(
+        loop_anchor,
+        """    $TID关闭游戏主页稳定 = 0
+    FOR
+        $TID关闭游戏尝试 += 1""",
+        1,
+    )
+
+    classify_anchor = """        CALL TID_读取当前退出标签
+        IF $TID当前正确退出 < 95 and $TID当前HOME_BUFFER正确退出 < 95
+            HOME DOWN"""
+    classify_replacement = f"""        CALL TID_读取当前退出标签
+        IF $TID当前主页 >= 95 and $TID当前正确退出 < 90 and $TID当前HOME_BUFFER正确退出 < 90 and $TID当前错误退出 < 90
+            $TID关闭游戏主页稳定 += 1
+            IF $TID关闭游戏主页稳定 >= 3
+                PRINT {_CLOSED_HOME_MARKER}
+                PRINT \"FRLG_STAGE|END|tid.close|!\"
+                RETURN 1
+            ENDIF
+            WAIT 200
+            CONTINUE
+        ENDIF
+        $TID关闭游戏主页稳定 = 0
+
+        IF $TID当前主页 < 95 and $TID当前正确退出 < 95 and $TID当前HOME_BUFFER正确退出 < 95
+            HOME DOWN"""
+    if text.count(classify_anchor) != 1:
+        raise ValueError("TID关闭游戏的主页切换入口与审计版本不一致")
+    text = text.replace(classify_anchor, classify_replacement, 1)
+
+    # A visible HOME page with a 90-94 running marker is ambiguous evidence.
+    # Resample it instead of changing a timing value that cannot fix OCR.
+    error_end = """            WAIT $关闭游戏延迟
+            CONTINUE
+        ELSE
+            PRINT 关闭游戏延迟过短，+100继续尝试"""
+    error_end_replacement = """            WAIT $关闭游戏延迟
+            CONTINUE
+        ELIF $TID当前主页 >= 95
+            PRINT TID关闭游戏：主页状态未稳定，保持关闭延迟并重新识别
+            WAIT 200
+            CONTINUE
+        ELSE
+            PRINT 关闭游戏延迟过短，+100继续尝试"""
+    if text.count(error_end) != 1:
+        raise ValueError("TID关闭游戏的未识别分支与审计版本不一致")
+    return text.replace(error_end, error_end_replacement, 1)
 
 
 def split_tid_modules(text: str) -> tuple[str, str, str, str]:
@@ -197,6 +281,7 @@ def configure_starter_save_id(
     from .tid_rng137 import _TID_HOME_BUFFER_ADAPTIVE_GLOBALS
 
     head, english, japanese, _tail = split_tid_modules(template)
+    head = _accept_already_closed_home(head)
     prefix = "EN" if request.language == "英文" else "JP"
     selected = english if prefix == "EN" else japanese
     if prefix == "EN":
@@ -255,12 +340,47 @@ def set_starter_save_sid_correction(text: str, language: str, correction: int) -
     return head + english + japanese + tail
 
 
-def render_starter_save_bridge(template: str, starter: str) -> str:
+def _validate_bridge_save_confirmation(route: str) -> None:
+    """Require the current mother script's language-specific save branch."""
+    if "PRINT >>> 开始保存 >>>" not in route:
+        return
+
+    lines = route.splitlines(keepends=True)
+    save_start = next(
+        index for index, line in enumerate(lines)
+        if "PRINT >>> 开始保存 >>>" in line
+    )
+    save_end = next(
+        index for index in range(save_start + 1, len(lines))
+        if "$连续流程_桥接完成 = 1" in lines[index]
+    )
+    pairs = [
+        index for index in range(save_start + 1, save_end - 1)
+        if lines[index].strip() == "A" and lines[index + 1].strip() == "WAIT 1500"
+    ]
+    save_block = "".join(lines[save_start + 1:save_end])
+    conditional = re.findall(
+        r"(?m)^[ \t]*IF \$连续流程_游戏版本 == 1\r?\n"
+        r"[ \t]+A\r?\n[ \t]+WAIT 1500\r?\n[ \t]*ENDIF$",
+        save_block,
+    )
+    if len(conditional) != 1 or len(pairs) != 7:
+        raise ValueError("TID桥接覆盖存档缺少当前美版6次、日版7次的语言分支")
+
+
+def render_starter_save_bridge(
+    template: str, starter: str, *, language: str
+) -> str:
     choices = {"妙蛙种子": 0, "Bulbasaur": 0, "杰尼龟": 1, "Squirtle": 1, "小火龙": 2, "Charmander": 2}
     if starter not in choices:
         raise ValueError("御三家必须是妙蛙种子、小火龙或杰尼龟")
+    if language not in {"英文", "日文"}:
+        raise ValueError("TID桥接游戏语言必须是英文或日文")
     head, _, _, _ = split_tid_modules(template)
-    settings = [f"$连续流程_御三家选择 = {choices[starter]}"]
+    settings = [
+        f"$连续流程_游戏版本 = {0 if language == '英文' else 1}",
+        f"$连续流程_御三家选择 = {choices[starter]}",
+    ]
     for name in ("步进间隔", "按键时长", "Oak文本推进次数"):
         matches = re.findall(rf"(?m)^\$连续流程_{name} = \d+$", head)
         if len(matches) != 1:
@@ -271,6 +391,11 @@ def render_starter_save_bridge(template: str, starter: str) -> str:
     if len(functions) != 5 or set(functions) != expected:
         raise ValueError("TID桥接函数与审计版本不一致")
     bodies = [m[0] for m in re.finditer(r"(?ms)^FUNC FLOW_[^\n]*\n.*?^ENDFUNC", head)]
+    bridge_route = next(
+        body for body in bodies
+        if body.startswith("FUNC FLOW_桥接到御三家存档点")
+    )
+    _validate_bridge_save_confirmation(bridge_route)
     return (
         "# 来自 " + TID_STARTER_SAVE_NAME + "；原样复用球前路线。\n"
         + "\n".join(settings) + "\n$连续流程_桥接完成 = 0\n\n"

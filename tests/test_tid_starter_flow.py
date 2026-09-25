@@ -44,6 +44,20 @@ HAS_TID_ASSETS = any(
 )
 
 
+def bridge_save_confirmation_count(text: str) -> int:
+    block = text.split("PRINT >>> 开始保存 >>>", 1)[1].split(
+        "$连续流程_桥接完成 = 1", 1
+    )[0]
+    before_up = block.split("\n    UP\n", 1)[0]
+    count = len(re.findall(r"(?m)^[ \t]+A\n[ \t]+WAIT 1500$", before_up))
+    if (
+        "$连续流程_游戏版本 = 0" in text
+        and "IF $连续流程_游戏版本 == 1" in before_up
+    ):
+        count -= 1
+    return count
+
+
 class TidStarterFlowTests(unittest.TestCase):
     def test_old_english_name_page_wait_is_upgraded_idempotently(self):
         legacy = """\
@@ -282,8 +296,11 @@ ENDFUNC
                 starter_source_dir=SOURCE_118,
             )
             starter = (output / "03_starter_118" / "main.ecs").read_text(encoding="utf-8")
+            bridge = (output / "02_lab_bridge" / "main.ecs").read_text(encoding="utf-8")
             fire_red = (output / "03_starter_118" / "lib" / "02_Seed表_火红_NX.ecs").read_text(encoding="utf-8-sig")
 
+        self.assertIn("$连续流程_游戏版本 = 1", bridge)
+        self.assertEqual(bridge_save_confirmation_count(bridge), 7)
         self.assertIn("$Seed模式 = 10", starter)
         self.assertIn("FUNC 读取并输出日版御三家识图结果(): INT", starter)
         self.assertIn("# JAPANESE_STARTER_PAGE_SYNC_V2", starter)
@@ -668,6 +685,8 @@ ENDFUNC
             self.assertNotIn("FUNC JP_", id_text)
         self.assertIn("$SID_ADV修正 = 2", id_attempt_1)
         self.assertIn("TIDFLOW|BRIDGE|DONE=1", bridge_text)
+        self.assertIn("$连续流程_游戏版本 = 0", bridge_text)
+        self.assertEqual(bridge_save_confirmation_count(bridge_text), 6)
         self.assertIn('$目标Seed = "9CA9"', starter_text)
         self.assertIn("$目标消耗帧 = 1513", starter_text)
         self.assertIn("$目标全国图鉴编号 = 1", starter_text)

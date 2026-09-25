@@ -719,7 +719,11 @@ def write_tid_starter_flow_bundle(
     bridge_dir.mkdir(parents=True, exist_ok=True)
     bridge_path = bridge_dir / "main.ecs"
     bridge_path.write_text(
-        render_starter_save_bridge(bridge_source_text, plan.request.starter),
+        render_starter_save_bridge(
+            bridge_source_text,
+            plan.request.starter,
+            language=plan.request.tid_request.language,
+        ),
         encoding="utf-8",
     )
     if plan.starter_run_plan is not None:
