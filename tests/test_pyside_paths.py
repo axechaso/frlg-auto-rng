@@ -80,6 +80,23 @@ class ResourcePathTests(unittest.TestCase):
                     str(current),
                 )
 
+    def test_tid_directory_without_unified_mother_falls_back_to_current_bundle(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            old = root / "old-tid"
+            current = root / "current-tid"
+            (old / "ImgLabel").mkdir(parents=True)
+            current.mkdir(parents=True)
+            (current / "NS火叶TID-SID到御三家球前存档-测试.ecs").write_text("mother", encoding="utf-8")
+            self.assertEqual(
+                restore_resource_path(
+                    str(old), current,
+                    bundled_suffix="_internal/local_assets/tid_rng137",
+                    required_file="NS火叶TID-SID到御三家球前存档-测试.ecs",
+                ),
+                str(current),
+            )
+
     def test_unknown_custom_label_corpus_is_not_silently_replaced(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -141,6 +158,8 @@ class StartupPathTests(unittest.TestCase):
                         path.touch()
                     else:
                         path.mkdir(parents=True, exist_ok=True)
+                    if key == "tid_source":
+                        (path / "NS火叶TID-SID到御三家球前存档-测试.ecs").write_text("mother", encoding="utf-8")
             settings = root / "pyside6_settings.json"
             settings.write_text(json.dumps({key: str(path) for key, path in saved.items()}), encoding="utf-8")
             # The original saved configuration remains untouched while loading.

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QCompleter, QFileDialog, QLa
 from app_paths import RESOURCE_ROOT
 from assets.game_text import SPECIES_EN_TO_ZH
 from automation import STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME, resolve_script_test_entry
+from automation.tid_starter_save import TID_STARTER_SAVE_NAME
 from automation.precalibration import update_from_manifest
 from rng.tenlines_utils import get_species_name
 from rng.sid_reverse import find_earliest_shiny_sid, parse_pid_hex, sid_min_advances_for_f3, DEFAULT_TID_SID_SEARCH_ADVANCES
@@ -458,6 +459,7 @@ class CompleteWindow(FrlgWindow):
             ):
                 self.fields[key].setText(restore_resource_path(
                     values.get(key), default, bundled_suffix=suffix,
+                    required_file=TID_STARTER_SAVE_NAME if key == "tid_source" else None,
                     legacy_label_counts=(119, 328, 329) if key == "tid_source" else (),
                 ))
         except (OSError, ValueError, TypeError, AttributeError):

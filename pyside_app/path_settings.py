@@ -19,6 +19,7 @@ def restore_resource_path(
     *,
     bundled_suffix: str,
     file: bool = False,
+    required_file: str | None = None,
     legacy_label_counts: tuple[int, ...] = (),
 ) -> str:
     default = Path(default)
@@ -35,6 +36,9 @@ def restore_resource_path(
         return str(default)
     saved_exists = saved.is_file() if file else saved.is_dir()
     default_exists = default.is_file() if file else default.is_dir()
+    if required_file and not file:
+        saved_exists = saved_exists and (saved / required_file).is_file()
+        default_exists = default_exists and (default / required_file).is_file()
     saved_label_count = (
         _label_count(saved) if legacy_label_counts and not file and saved_exists else None
     )
