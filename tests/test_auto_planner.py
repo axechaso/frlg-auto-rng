@@ -19,6 +19,7 @@ from automation.planner import (
     NoReachablePlanError,
     SearchCancelledError,
     is_three_segment_dunsparce_pid,
+    select_seed_mode_for_seed,
     search_best_plan,
 )
 from automation.seed_modes import seed_mode_to_settings, settings_to_seed_mode
@@ -388,6 +389,24 @@ class CompatibilityTests(unittest.TestCase):
             ))
 
         self.assertEqual(result.plan.seed_mode, 1)
+
+    def test_shared_seed_mode_selector_matches_direct_plan_priority(self):
+        def seeds(_data, setting_key, _game, extra_button):
+            routes = {
+                ("mono_h_a", "none"): 31000,
+                ("stereo_h_a", "none"): 30000,
+                ("mono_h_a", "blackout_r"): 29000,
+            }
+            seed_time = routes.get((setting_key, extra_button))
+            return [] if seed_time is None else [{"initial_seed": 0x1234, "seed_time": seed_time}]
+
+        with patch("automation.planner.load_frlg_seed_data", return_value=({}, {})), \
+             patch("automation.planner.get_contiguous_seed_list", side_effect=seeds):
+            selection = select_seed_mode_for_seed("fr_nx", "1234")
+
+        self.assertEqual(selection.seed_mode, 4)
+        self.assertEqual(selection.seed_time, 29000)
+        self.assertEqual(selection.reachable_mode_count, 3)
 
     def test_direct_seed_mode_auto_rejects_seed_unreachable_in_every_mode(self):
         with patch("automation.planner.load_frlg_seed_data", return_value=({}, {})), \

@@ -158,7 +158,8 @@ def workflow_start_confirmation_html(prepared, port: str, capture_name: str, war
         seed_label, seed_value = "目标 Seed", getattr(request, "normalized_seed", request.target_seed)
         advance_label = "目标 Advance"
         advance_value = f"Held {request.held_advances:,} / Pickup {request.pickup_advances:,}"
-        seed_mode = f"{request.seed_mode} · 启动方案 {request.seed_startup_scheme}"
+        mode_prefix = "自动选择 → " if inputs.extra.get("seed_mode_auto") else ""
+        seed_mode = f"{mode_prefix}{request.seed_mode} · 启动方案 {request.seed_startup_scheme}"
         checklist = (
             "队伍与亲本资料按方案填写，蛋生成与领取位置保持不变。",
             "背包第一页第一格放神奇糖果，数量不限。",

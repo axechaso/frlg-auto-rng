@@ -1933,9 +1933,13 @@ class FrlgPreviewWindow(QMainWindow):
             ("egg_species", "蛋种（名称/编号）", _line(placeholder="中文名 / 英文名 / 编号")),
         ])
         self._form(conditions, [
-            ("egg_seed_mode", "Seed 模式", _combo("请选择", *SEED_MODE_LABELS)),
+            ("egg_seed_mode", "Seed 模式", _combo("自动选择", *SEED_MODE_LABELS)),
             ("egg_start", "启动准备", _combo("完整准备（自动走 254 步并存档）", "从已完成 254 步准备开始")),
         ], 2)
+        self.fields["egg_seed_mode"].setToolTip(
+            "自动选择会按目标 Seed 精确查询当前游戏和主机的 Seed 表，"
+            "优先使用启动等待时间最短的可达模式；也可手动固定模式 0-9。"
+        )
         self.fields["egg_start"].setToolTip("从基础档开始仅跳过一次性准备，要求已经完成并保存 254 步；之后仍执行 Seed 启动与全部校准流程。")
         layout.addWidget(conditions)
 

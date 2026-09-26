@@ -163,6 +163,28 @@ class RemainingQtTests(unittest.TestCase):
         self.assertIsNone(parsed["egg_seed_reverse_min_advances"])
         self.assertIsNone(parsed["egg_seed_reverse_max_advances"])
 
+    def test_egg_auto_seed_mode_resolves_and_full_config_keeps_auto_choice(self):
+        self.configure_egg()
+        combo = self.w.fields["egg_seed_mode"]
+        combo.setCurrentIndex(0)
+        self.assertEqual(combo.currentText(), "自动选择")
+
+        with patch("pyside_app.forms.select_seed_mode_for_seed") as select:
+            select.return_value = Mock(seed_mode=4)
+            request = self.w.reader.egg()
+            inputs = self.w.collect_workflow()
+            payload = self.w.egg_payload(True)
+
+        self.assertEqual(request.seed_mode, 4)
+        self.assertEqual(inputs.request.seed_mode, 4)
+        self.assertTrue(inputs.extra["seed_mode_auto"])
+        self.assertTrue(payload["seed_mode_auto"])
+        self.assertEqual(payload["seed_mode"], 4)
+
+        self.w.apply_egg_config(payload, True)
+        self.assertEqual(combo.currentIndex(), 0)
+        self.assertEqual(combo.currentText(), "自动选择")
+
     def test_egg_compatibility_defaults_to_chinese_and_language_toggle_keeps_value(self):
         self.configure_egg()
         combo = self.w.fields["egg_compatibility"]

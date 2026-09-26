@@ -74,6 +74,10 @@ class PySideBackendTests(unittest.TestCase):
         self.assertIn("OBS Virtual Camera", html)
         self.assertIn("运行前必须确认", html)
 
+        prepared.inputs.extra["seed_mode_auto"] = True
+        html = workflow_start_confirmation_html(prepared, "COM4", "OBS Virtual Camera")
+        self.assertIn("自动选择 → 0", html)
+
         tid = TidRngRequest(target_tid=12345, target_sid=54321)
         prepared.inputs = SimpleNamespace(mode="tid", request=tid, extra={"flow": None})
         html = workflow_start_confirmation_html(prepared, "COM4", "Capture")

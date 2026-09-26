@@ -6,9 +6,11 @@ from .planner import (
     NoReachablePlanError,
     PlanSearchResult,
     RunPlan,
+    SeedModeSelection,
     SearchCancelledError,
     SearchWorkLimitError,
     is_three_segment_dunsparce_pid,
+    select_seed_mode_for_seed,
     search_best_plan,
 )
 from .support import RouteSupport, RouteSupportLevel, get_route_support
@@ -146,9 +148,11 @@ __all__ = [
     "RouteSupport",
     "RouteSupportLevel",
     "RunPlan",
+    "SeedModeSelection",
     "SearchCancelledError",
     "SearchWorkLimitError",
     "is_three_segment_dunsparce_pid",
+    "select_seed_mode_for_seed",
     "STATIC_CATEGORIES_118",
     "PLANNER_STATIC_CATEGORIES",
     "STATIC_TARGETS_BY_GAME",

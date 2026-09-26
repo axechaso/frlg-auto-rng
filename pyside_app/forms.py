@@ -2,7 +2,13 @@
 from dataclasses import replace
 from pathlib import Path
 
-from automation import EggRunRequest, SIDReverseRunRequest, TidRngRequest, TidStarterFlowRequest
+from automation import (
+    EggRunRequest,
+    SIDReverseRunRequest,
+    TidRngRequest,
+    TidStarterFlowRequest,
+    select_seed_mode_for_seed,
+)
 from automation.tid_search import parse_target_tids
 from assets.game_text import SPECIES_ZH_TO_EN, LOCATION_ZH_TO_EN
 from rng.tenlines_utils import get_species_id
@@ -61,8 +67,14 @@ class FormReader:
         if require_ack and not self.w.egg_ack.isChecked():
             raise ValueError("请先确认孵蛋前置条件")
         parents = self.w.egg_parent_widgets
-        request = EggRunRequest(game=self.w.game_code(include_profile_language=False), seed_mode=self.index("egg_seed_mode") - 1,
-            target_seed=self.text("egg_seed"), held_advances=self.integer("egg_held"),
+        game = self.w.game_code(include_profile_language=False)
+        target_seed = self.text("egg_seed")
+        mode_index = self.index("egg_seed_mode")
+        seed_mode = mode_index - 1
+        if mode_index == 0:
+            seed_mode = select_seed_mode_for_seed(game, target_seed).seed_mode
+        request = EggRunRequest(game=game, seed_mode=seed_mode,
+            target_seed=target_seed, held_advances=self.integer("egg_held"),
             pickup_advances=self.integer("egg_pickup"), species_id=species_id(self.text("egg_species")),
             compatibility=self.selected_integer("egg_compatibility"), parent_a_gender=parents[0][0].currentText(),
             parent_b_gender=parents[1][0].currentText(), parent_a_ivs=tuple(s.value() for s in parents[0][1:]),

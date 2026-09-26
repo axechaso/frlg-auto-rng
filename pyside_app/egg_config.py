@@ -203,6 +203,7 @@ def build_egg_full_config_payload(
     egg_seed_reverse_seed_tolerance=None,
     egg_seed_reverse_min_advances=None,
     egg_seed_reverse_max_advances=None,
+    seed_mode_auto=False,
 ) -> dict:
     """Validate and build a complete egg-page configuration."""
     parent = build_egg_parent_config_payload(
@@ -226,6 +227,8 @@ def build_egg_full_config_payload(
         seed_mode = int(seed_mode)
     except (TypeError, ValueError) as exc:
         raise ValueError("孵蛋 Seed 模式必须在 0-9 之间") from exc
+    if not isinstance(seed_mode_auto, bool):
+        raise ValueError("孵蛋 Seed 模式自动选择标记必须是布尔值")
     try:
         held_advances = int(held_advances)
         pickup_advances = int(pickup_advances)
@@ -318,6 +321,7 @@ def build_egg_full_config_payload(
         "game": game,
         "nx_model": nx_model,
         "seed_mode": seed_mode,
+        "seed_mode_auto": seed_mode_auto,
         "target_seed": request.normalized_seed,
         "held_advances": held_advances,
         "pickup_advances": pickup_advances,
@@ -385,4 +389,5 @@ def parse_egg_full_config_payload(payload) -> dict:
         payload.get("egg_seed_reverse_seed_tolerance"),
         payload.get("egg_seed_reverse_min_advances"),
         payload.get("egg_seed_reverse_max_advances"),
+        payload.get("seed_mode_auto", False),
     )

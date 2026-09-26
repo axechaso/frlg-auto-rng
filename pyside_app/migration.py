@@ -116,6 +116,7 @@ class CompleteWindow(FrlgWindow):
         extra = {}
         if mode == "egg":
             request = r.egg()
+            extra["seed_mode_auto"] = f["egg_seed_mode"].currentIndex() == 0
         elif mode == "sid":
             request = r.sid()
             source = Path(f["sid_source"].text()).resolve()
@@ -518,6 +519,7 @@ class CompleteWindow(FrlgWindow):
             egg_seed_reverse_seed_tolerance=request.egg_seed_reverse_seed_tolerance,
             egg_seed_reverse_min_advances=request.egg_seed_reverse_min_advances,
             egg_seed_reverse_max_advances=request.egg_seed_reverse_max_advances,
+            seed_mode_auto=self.fields["egg_seed_mode"].currentIndex() == 0,
             **parent, **self.reader.expansion())
 
     def save_egg(self, full):
@@ -559,7 +561,9 @@ class CompleteWindow(FrlgWindow):
             self.advanced_check.setChecked(True)
             for key, source in (("egg_seed", "target_seed"), ("egg_held", "held_advances"), ("egg_pickup", "pickup_advances")):
                 self.fields[key].setText(str(config[source]))
-            self.fields["egg_seed_mode"].setCurrentIndex(config["seed_mode"] + 1)
+            self.fields["egg_seed_mode"].setCurrentIndex(
+                0 if config.get("seed_mode_auto", False) else config["seed_mode"] + 1
+            )
             self.fields["egg_start"].setCurrentIndex(int(config["start_from_prepared_254"]))
             self.home_buffer_check.setChecked(config["home_buffer_adaptive_threshold"])
             for key, source in (("seed_startup", "seed_startup_scheme"), ("seed_calibration", "seed_calibration_scheme"), ("output_log", "debug_log_output")):

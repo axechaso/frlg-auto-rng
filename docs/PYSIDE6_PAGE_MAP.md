@@ -88,7 +88,7 @@
 | --- | --- | --- |
 | 乱数条件 | 游戏、主机、TID、SID；类型仅野生/静态；遭遇方式/静态类别、地点、宝可梦 | `_populate_categories/locations/pokemon/abilities` 依次联动；御三家属于静态类别 Starter |
 | 个体值范围 | 六项最低/最高 0–31、单项重置、不限/6V/0A/0S/0A0S | `apply_iv_preset`；0A/0S 等是其余项精确 31，不是其余任意 |
-| 筛选与范围 | 筛选搜索/指定 Seed/帧数、最小/最大 Advance、闪光、性格、性别、特性、觉醒力量、Seed 模式、指定 Seed/ADV | `collect_request` → `AutoSearchRequest` → `search_best_plan`；指定模式跳过搜索且必须手选 Seed 模式；完整目录仍待接入 |
+| 筛选与范围 | 筛选搜索/指定 Seed/帧数、最小/最大 Advance、闪光、性格、性别、特性、觉醒力量、Seed 模式、指定 Seed/ADV | `collect_request` → `AutoSearchRequest` → `search_best_plan`；指定模式跳过目标搜索，Seed 模式可自动选择最短启动等待或手动固定；完整目录仍待接入 |
 | 出闪后处理 | 自动抓捕、麻痹、点到为止；直接显示，不折叠 | 抓捕流程尚未接入 |
 | 道具乱数 | 独立折叠栏：模式开关、队伍空位 1–5 | 仅野生可用，与 SID 遍历互斥 |
 | SID 遍历 | 独立折叠栏：开关、遍历上限、高级起点、断点状态；生成时询问 TID 和劲敌取名 | `_update_item_rng_controls` 限定野生且道具/遍历互斥；`generate_sid_traversal_plan` → `sid_traversal.py`，不是 TID 页功能 |
@@ -103,7 +103,7 @@
 
 亲本 A/B 各占一行：左侧是亲本标签与性别下拉框，右侧并排六项 IV；输入统一 36 px 高，保留上下增减与字段悬浮说明，不要求横向滚动。
 
-本页不搜索蛋目标，也不提供任意不同 Seed 模式；从 Ten Lines Egg 页取得同 Seed Held/Pickup，Pickup 至少晚 1800 ADV。整轮实机未验收说明保留，取消初版虚构的孵化周期/骑车次数成功卡。公共奇偶在本模式固定菜单方案。
+本页不搜索蛋目标；从 Ten Lines Egg 页取得同 Seed Held/Pickup，Pickup 至少晚 1800 ADV。Seed 模式默认按该初始 Seed 自动选择启动等待最短的精确可达模式，也可手动固定 0-9；运行脚本只接收最终确定的模式。整轮实机未验收说明保留，取消初版虚构的孵化周期/骑车次数成功卡。公共奇偶在本模式固定菜单方案。
 
 ## 脚本测试（高级）
 

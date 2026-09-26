@@ -17,7 +17,7 @@ from automation import (
     validate_generated_egg_project_consistency, write_configured_egg_project,
     write_sid_reverse_project, write_sid_reverse_plan, write_configured_tid_project,
     build_tid_starter_flow_plan, write_tid_starter_flow_bundle, inspect_script_corpus,
-    SearchCancelledError,
+    SearchCancelledError, select_seed_mode_for_seed,
 )
 from automation.tid_calibration import validate_tid_plan_runtime
 from automation.tid_search import progress_supported
@@ -127,6 +127,14 @@ def _prepare_workflow_in_directory(
             template_name=inputs.template, precalibration_store_path=paths.user / "precalibration.json")
         metrics = (request.normalized_seed, request.held_advances, request.pickup_advances)
         details = f"孵蛋目标：{request.normalized_seed}；Held {request.held_advances} / Pickup {request.pickup_advances}\n同一个初始 Seed；亲本资料已写入。"
+        if inputs.extra.get("seed_mode_auto"):
+            selection = select_seed_mode_for_seed(request.game, request.normalized_seed)
+            if selection.seed_mode != request.seed_mode:
+                raise ValueError("孵蛋自动选择的 Seed 模式在生成期间发生变化，请重新生成")
+            details += (
+                f"\n已自动选择 Seed 模式 {selection.seed_mode}，"
+                f"启动等待 {selection.seed_time} ms。"
+            )
     elif inputs.mode == "sid":
         request.validate()
         project = write_sid_reverse_project(inputs.source, directory, request)

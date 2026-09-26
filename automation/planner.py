@@ -7,6 +7,7 @@ from rng.config import RNGConfig, RNGSlot
 from rng.tenlines_utils import (
     IVs,
     IVsRange,
+    GameSettings,
     InitialSeedResult,
     NATURES,
     SHININESS,
@@ -38,6 +39,17 @@ class NoReachablePlanError(ValueError):
 
 class SearchCancelledError(RuntimeError):
     """The caller cancelled a long-running tiered search."""
+
+
+@dataclass(frozen=True)
+class SeedModeSelection:
+    """Exact Seed-table match chosen for a user-supplied initial Seed."""
+
+    seed: str
+    seed_mode: int
+    seed_time: int
+    settings: GameSettings
+    reachable_mode_count: int
 
 
 @dataclass(frozen=True)
@@ -293,18 +305,42 @@ def _candidate_key(item: tuple[SearcherResult, InitialSeedResult, int]) -> tuple
     )
 
 
-def _direct_plan(request: AutoSearchRequest) -> PlanSearchResult:
-    """Build a plan from an explicit initial Seed/Advance without target search."""
-    raw_seed = (request.direct_seed or "").strip().upper()
+def select_seed_mode_for_seed(
+    game: str,
+    seed: str | int,
+    requested_mode: int | None = None,
+) -> SeedModeSelection:
+    """Choose the exact reachable mode with the shortest startup wait.
+
+    ``requested_mode`` keeps the old hard-filter behavior.  ``None`` checks
+    every supported mode and uses the same ordering as direct wild/static
+    plans: startup milliseconds first, then no-extra-button, then mode id.
+    """
+    if game not in {
+        "fr_nx", "fr_nx2", "lg_nx", "lg_nx2",
+        "fr_jpn_nx", "fr_jpn_nx2", "lg_jpn_nx", "lg_jpn_nx2",
+    }:
+        raise ValueError(f"不支持的 Seed 表游戏版本: {game!r}")
+    raw_seed = format(seed, "X") if isinstance(seed, int) else str(seed).strip().upper()
     if raw_seed.startswith("0X"):
         raw_seed = raw_seed[2:]
-    seed = f"{int(raw_seed, 16):04X}"
-    seed_value = int(seed, 16)
-    seed_data = load_frlg_seed_data(request.game)
+    if not raw_seed or len(raw_seed) > 4:
+        raise ValueError("指定 Seed 必须是 0000-FFFF 的十六进制数")
+    try:
+        seed_value = int(raw_seed, 16)
+    except ValueError as exc:
+        raise ValueError("指定 Seed 必须是 0000-FFFF 的十六进制数") from exc
+    if not 0 <= seed_value <= 0xFFFF:
+        raise ValueError("指定 Seed 必须是 0000-FFFF 的十六进制数")
+    normalized_seed = f"{seed_value:04X}"
+    if requested_mode is not None and not 0 <= requested_mode <= 9:
+        raise ValueError("Seed 模式必须在 0-9 之间")
+
+    seed_data = load_frlg_seed_data(game)
     modes = (
-        (request.seed_mode,)
-        if request.seed_mode is not None
-        else ((0,) if "_jpn_" in request.game else tuple(range(10)))
+        (requested_mode,)
+        if requested_mode is not None
+        else ((0,) if "_jpn_" in game else tuple(range(10)))
     )
     candidates = []
     for seed_mode in modes:
@@ -314,7 +350,7 @@ def _direct_plan(request: AutoSearchRequest) -> PlanSearchResult:
             for entry in get_contiguous_seed_list(
                 seed_data,
                 settings.setting_key,
-                request.game,
+                game,
                 settings.extra_button,
             )
             if entry["initial_seed"] == seed_value
@@ -327,17 +363,34 @@ def _direct_plan(request: AutoSearchRequest) -> PlanSearchResult:
                 settings,
             ))
     if not candidates:
-        if request.seed_mode is None:
+        if requested_mode is None:
             raise ValueError(
-                f"指定 Seed {seed} 在 {request.game} 的所有可用 Seed 模式中均不可达"
+                f"指定 Seed {normalized_seed} 在 {game} 的所有可用 Seed 模式中均不可达"
             )
         raise ValueError(
-            f"指定 Seed {seed} 不在 {request.game} 的 Seed 表/模式 {request.seed_mode} 中"
+            f"指定 Seed {normalized_seed} 不在 {game} 的 Seed 表/模式 {requested_mode} 中"
         )
-    # The user's primary cost is waiting for the game to reach the initial
-    # Seed.  Prefer the shortest exact table time first.  Only break equal-time
-    # ties in favor of a mode without an extra/blackout button, then by mode id.
     seed_time, _, selected_mode, settings = min(candidates)
+    return SeedModeSelection(
+        seed=normalized_seed,
+        seed_mode=selected_mode,
+        seed_time=seed_time,
+        settings=settings,
+        reachable_mode_count=len(candidates),
+    )
+
+
+def _direct_plan(request: AutoSearchRequest) -> PlanSearchResult:
+    """Build a plan from an explicit initial Seed/Advance without target search."""
+    selection = select_seed_mode_for_seed(
+        request.game,
+        request.direct_seed or "",
+        request.seed_mode,
+    )
+    seed = selection.seed
+    seed_time = selection.seed_time
+    selected_mode = selection.seed_mode
+    settings = selection.settings
     advances = int(request.direct_advances)
     console = "NX2" if request.game.endswith("nx2") else "NX"
     total_frames = (seed_time / 16) + advances
@@ -376,7 +429,7 @@ def _direct_plan(request: AutoSearchRequest) -> PlanSearchResult:
             else str(selected_mode)
         )
         warnings.append(
-            f"指定 Seed 在 {len(candidates)} 个模式中可达；"
+            f"指定 Seed 在 {selection.reachable_mode_count} 个模式中可达；"
             f"已按启动等待最短选择 Seed 模式 {display_mode}（{seed_time} ms）。"
         )
     if not support.can_start:
