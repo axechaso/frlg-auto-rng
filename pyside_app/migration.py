@@ -20,7 +20,7 @@ from rng.sid_reverse import find_earliest_shiny_sid, parse_pid_hex, sid_min_adva
 from sid_traversal import DEFAULT_TARGET_MAX_ADVANCES, sid_traversal_start_advance
 from tid_session import write_json_atomic
 from pyside_preview import APP_STYLE, CompletionPopup
-from .window import FrlgWindow
+from .window import FrlgWindow, workflow_start_confirmation_html
 from .forms import FormReader, species_id
 from .workflows import WorkflowInputs, prepare_workflow, prepare_workflow_run
 from .egg_config import build_egg_parent_config_payload, build_egg_full_config_payload, parse_egg_parent_config_payload, parse_egg_full_config_payload
@@ -333,12 +333,10 @@ class CompleteWindow(FrlgWindow):
             if self.workflow is not prepared or self.collect_workflow().fingerprint() != prepared.inputs.fingerprint():
                 self.set_status("启动检查期间条件已变化，请重新生成。")
                 return
-            prompt = prepared.details + f"\n\n设备：{port} / {prepared.inputs.capture_name}\n"
-            if prepared.inputs.mode in ("tid", "sid_traversal"):
-                prompt += "本流程会新建 / 覆盖游戏存档并关闭游戏。请核对资料和当前游戏位置。"
-            else:
-                prompt += "请确认游戏位置与前置条件符合当前脚本要求。"
-            if QMessageBox.question(self, "开始运行", prompt) != QMessageBox.StandardButton.Yes:
+            prompt = workflow_start_confirmation_html(
+                prepared, port, prepared.inputs.capture_name, command.check.warnings,
+            )
+            if not self._confirm_wild_start(prompt):
                 self.set_status("预检通过，等待开始运行。")
                 return
             self.running_workflow = prepared

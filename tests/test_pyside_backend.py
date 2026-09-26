@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -51,6 +52,33 @@ class PySideBackendTests(unittest.TestCase):
         from tests.test_pyside_services import sample_result
         inputs = self.window.collect_inputs()
         return PreparedWild(inputs, sample_result(), self.root / "main.ecs", self.root / "plan.json", EasyConRuntimeCheck(True, (), ()))
+
+    def test_workflow_confirmation_uses_rich_layout_for_non_wild_modes(self):
+        from automation import EggRunRequest, TidRngRequest
+        from pyside_app.window import workflow_start_confirmation_html
+
+        egg = EggRunRequest(
+            game="fr_nx", seed_mode=0, target_seed="C901", held_advances=1200,
+            pickup_advances=3200, species_id=25, compatibility=70,
+            parent_a_gender="雄", parent_a_ivs=(0, 0, 0, 0, 0, 0),
+            parent_b_gender="雌", parent_b_ivs=(0, 0, 0, 0, 0, 0),
+        )
+        prepared = SimpleNamespace(
+            inputs=SimpleNamespace(mode="egg", request=egg, extra={}),
+            details="孵蛋目标：C901\n工程：ignored",
+            check=SimpleNamespace(warnings=()),
+        )
+        html = workflow_start_confirmation_html(prepared, "COM4", "OBS Virtual Camera")
+        self.assertIn("即将运行：孵蛋", html)
+        self.assertIn("C901", html)
+        self.assertIn("OBS Virtual Camera", html)
+        self.assertIn("运行前必须确认", html)
+
+        tid = TidRngRequest(target_tid=12345, target_sid=54321)
+        prepared.inputs = SimpleNamespace(mode="tid", request=tid, extra={"flow": None})
+        html = workflow_start_confirmation_html(prepared, "COM4", "Capture")
+        self.assertIn("即将运行：TID / SID 建档", html)
+        self.assertIn("12345", html)
 
     def test_history_page_lists_filters_and_previews_saved_logs(self):
         run_dir = self.root / "runtime" / ("egg-" + "a" * 32)

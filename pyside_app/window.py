@@ -129,6 +129,117 @@ def wild_start_confirmation_html(plan, options, port: str, capture_name: str, wa
 """.strip()
 
 
+def workflow_start_confirmation_html(prepared, port: str, capture_name: str, warnings=()) -> str:
+    """Render the same rich start confirmation for the non-planner workflows.
+
+    Wild/static runs historically used :func:`wild_start_confirmation_html`,
+    while the egg, SID and TID pages still showed a plain ``QMessageBox``
+    string.  Keep the data specific to each workflow, but share the visual
+    contract: title, ROM/device card, two prominent result cards and a
+    highlighted pre-run checklist.
+    """
+    esc = lambda value: html.escape(str(value))
+    inputs = prepared.inputs
+    request = inputs.request
+    mode = inputs.mode
+    game = getattr(request, "game", "") or ""
+    rom = "日版（日文）" if "_jpn_" in game else "美版（英文）"
+    mode_names = {
+        "egg": "孵蛋",
+        "sid": "SID 采集",
+        "tid": "TID → 御三家" if inputs.extra.get("flow") else "TID / SID 建档",
+        "sid_traversal": "SID 遍历",
+        "script_test": "脚本测试",
+    }
+    title = mode_names.get(mode, mode)
+
+    if mode == "egg":
+        target = f"孵蛋 · {get_species_name(request.species_id)}"
+        seed_label, seed_value = "目标 Seed", getattr(request, "normalized_seed", request.target_seed)
+        advance_label = "目标 Advance"
+        advance_value = f"Held {request.held_advances:,} / Pickup {request.pickup_advances:,}"
+        seed_mode = f"{request.seed_mode} · 启动方案 {request.seed_startup_scheme}"
+        checklist = (
+            "队伍与亲本资料按方案填写，蛋生成与领取位置保持不变。",
+            "背包第一页第一格放神奇糖果，数量不限。",
+            "确认游戏位于方案要求的存档位置，并保持 NS 主页/游戏启动状态符合脚本要求。",
+        )
+    elif mode == "sid":
+        target = "SID 逐只采集"
+        seed_label, seed_value = "目标 TID", f"{request.tid:05d}"
+        advance_label, advance_value = "队伍数量", str(request.party_count)
+        seed_mode = f"Switch {request.nx_model} · 起始位置 {request.start_slot}"
+        checklist = (
+            f"队伍从第 {request.start_slot} 位开始，连续准备 {request.party_count} 只目标个体。",
+            "背包第一页第一格放神奇糖果，数量不限。",
+            "确认游戏位于方案要求的存档位置，并保持 NS 主页/游戏启动状态符合脚本要求。",
+        )
+    elif mode == "tid":
+        target = title
+        seed_label, seed_value = "目标 TID", f"{request.target_tid:05d}"
+        sid_value = "运行后确定" if request.sid_random else f"{request.target_sid:05d}"
+        advance_label, advance_value = "目标 SID", sid_value
+        seed_mode = f"{request.language} · Switch {request.nx_model} · {'穷举' if request.mode == 0 else '乱数'}"
+        checklist = (
+            "确认主角名称、目标 TID/SID 与游戏版本填写正确。",
+            "本流程会新建 / 覆盖游戏存档并在阶段之间关闭游戏。",
+            "确认游戏位于方案要求的存档位置，并保持 NS 主页/游戏启动状态符合脚本要求。",
+        )
+    elif mode == "sid_traversal":
+        target = "SID 遍历"
+        seed_label, seed_value = "目标 TID", f"{request.tid:05d}"
+        advance_label, advance_value = "SID 起点 / 上限", f"{inputs.extra.get('start_advance') or '自动'} / {inputs.extra.get('max_advances', '—'):,}"
+        seed_mode = f"Switch {request.nx_model} · {'已取名劲敌' if inputs.extra.get('named_rival') else '未取名劲敌'}"
+        checklist = (
+            "确认 TID 填写正确，并确认劲敌取名状态与存档一致。",
+            "只有明确识别到闪光目标后才会结束遍历并输出 SID。",
+            "确认游戏位于方案要求的存档位置，并保持 NS 主页/游戏启动状态符合脚本要求。",
+        )
+    else:
+        target = "脚本测试"
+        seed_label, seed_value = "执行脚本", Path(inputs.extra.get("script", "")).name or "未选择"
+        advance_label, advance_value = "后端", inputs.extra.get("backend", "—")
+        seed_mode = "仅执行所选 ECS，不替换参数"
+        checklist = (
+            "确认所选 ECS 脚本、串口与采集卡均为本次测试目标。",
+            "脚本测试不会替换自选脚本中的用户参数。",
+        )
+
+    details = [line for line in str(getattr(prepared, "details", "")).splitlines()
+               if line.strip() and not line.startswith("工程：")]
+    detail_html = "".join(f"<li>{esc(line)}</li>" for line in details[:6])
+    warning_items = tuple(line for warning in warnings for line in str(warning).splitlines() if line.strip())
+    if not warning_items:
+        warning_items = tuple(getattr(prepared.check, "warnings", ()))
+    warning_html = "".join(f"<li>{esc(line)}</li>" for line in warning_items if line.strip())
+    if not warning_html:
+        warning_html = "<li>EasyCon 1.6.4-a 启动预检已通过。</li>"
+    requirements = "".join(f"<li>{esc(item)}</li>" for item in checklist)
+    if detail_html:
+        requirements += f"<li><b>方案</b><ul>{detail_html}</ul></li>"
+    return f"""
+<table width="620" cellspacing="0" cellpadding="0">
+  <tr><td style="font-size:18px; font-weight:600; color:#102a56; padding-bottom:8px;">即将运行：{esc(target)}</td></tr>
+  <tr><td>
+    <table width="100%" cellspacing="0" cellpadding="8" style="background-color:#edf3ff; border:1px solid #b8c9f5;">
+      <tr><td><b>ROM</b><br>{esc(rom)}</td><td><b>设备</b><br>{esc(port)} / {esc(capture_name)}</td></tr>
+      <tr><td><b>{esc(seed_label)}</b><br><span style="font-size:17px; color:#3157d5; font-weight:600;">{esc(seed_value)}</span></td>
+          <td><b>{esc(advance_label)}</b><br><span style="font-size:17px; color:#3157d5; font-weight:600;">{esc(advance_value)}</span></td></tr>
+      <tr><td colspan="2"><b>运行模式</b>：{esc(title)}　<span style="color:#53657d;">{esc(seed_mode)}</span></td></tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding-top:10px;">
+    <table width="100%" cellspacing="0" cellpadding="9" style="background-color:#fff4d6; border:1px solid #e0ae43;">
+      <tr><td><span style="font-size:15px; font-weight:600; color:#9a5200;">⚠ 运行前必须确认</span>
+        <ol style="margin-top:6px; margin-bottom:4px;">{requirements}</ol>
+      </td></tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding-top:8px; color:#66758a;"><b>预检信息</b><ul style="margin-top:3px; margin-bottom:0;">{warning_html}</ul></td></tr>
+</table>
+""".strip()
+
+
 class FrlgWindow(FrlgPreviewWindow):
     def __init__(self, *, paths=None, auto_detect=True):
         self.live_ready = False
