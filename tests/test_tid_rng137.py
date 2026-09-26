@@ -98,7 +98,7 @@ class TidTemplateRevisionTests(unittest.TestCase):
         self.assertEqual(len(warnings), 3)
         self.assertTrue(all(message.startswith("高级模式指纹警告：") for message in warnings))
 
-    def test_import_copies_selected_rewrite_and_preserves_old_text_files(self):
+    def test_import_copies_selected_rewrite_and_removes_stale_tid_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source, destination = root / "source", root / "cache"
@@ -110,6 +110,10 @@ class TidTemplateRevisionTests(unittest.TestCase):
             note.write_text("keep", encoding="utf-8")
             legacy = destination / TID_LEGACY_SCRIPT_NAMES["英文"]
             legacy.write_text("legacy", encoding="utf-8")
+            backup = destination / "NS火叶TID-SID到御三家球前存档-测试.abc123.bak.ecs"
+            backup.write_text("backup", encoding="utf-8")
+            rewrite = destination / "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7-164a重写版_v2_全局变量修正版.txt"
+            rewrite.write_text("rewrite", encoding="utf-8")
             manifest = {"scripts": {
                 language: {"filename": TID_STARTER_SAVE_NAME}
                 for language in TID_SCRIPT_NAMES
@@ -124,7 +128,9 @@ class TidTemplateRevisionTests(unittest.TestCase):
                 # 原地校验不得删除自己的标签或模板。
                 import_package(destination, destination)
             self.assertEqual(note.read_text(encoding="utf-8"), "keep")
-            self.assertEqual(legacy.read_text(encoding="utf-8"), "legacy")
+            self.assertFalse(legacy.exists())
+            self.assertFalse(backup.exists())
+            self.assertFalse(rewrite.exists())
             self.assertEqual(resolve_tid_template(destination, "英文").name, TID_STARTER_SAVE_NAME)
             self.assertEqual((destination / "ImgLabel" / "sample.IL").read_bytes(), b"label")
 

@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from automation.tid_rng137 import (  # noqa: E402
     DOWNLOADED_TID_SOURCE,
     IMPORTED_TID_SOURCE,
+    TID_LEGACY_SCRIPT_NAMES,
+    TID_REFERENCE_SCRIPT_NAMES,
     referenced_image_labels,
     verify_tid_package,
 )
@@ -30,6 +32,28 @@ from automation.tid_starter_save import (  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# The unified mother is the only TID script used by the application.  Older
+# standalone references and hashed .bak.ecs copies can be left behind when a
+# cache is refreshed in place, so remove those stale root files explicitly.
+_STALE_TID_ROOT_FILENAMES = {
+    *TID_REFERENCE_SCRIPT_NAMES.values(),
+    *TID_LEGACY_SCRIPT_NAMES.values(),
+    "【TID+SID乱数&穷举】英文版-火红叶绿1.3.7-164a重写版_v2_全局变量修正版.txt",
+}
+
+
+def remove_stale_tid_root_files(destination: Path) -> tuple[str, ...]:
+    removed: list[str] = []
+    if not destination.is_dir():
+        return ()
+    for path in destination.iterdir():
+        if not path.is_file():
+            continue
+        if path.name in _STALE_TID_ROOT_FILENAMES or path.name.endswith(".bak.ecs"):
+            path.unlink()
+            removed.append(path.name)
+    return tuple(sorted(removed))
 
 
 def audit_common_label_mother(source: Path, audit_parent: Path) -> dict:
@@ -94,6 +118,7 @@ def import_package(
     if source == destination and starter_save_source is None:
         return destination
     destination.mkdir(parents=True, exist_ok=True)
+    remove_stale_tid_root_files(destination)
     target_labels = destination / "ImgLabel"
     if target_labels.resolve().parent != destination:
         raise ValueError("TID 标签导入目标不能指向项目外部")
