@@ -213,6 +213,14 @@ class AppUpdateController(QObject):
             self.status.setText(message)
             QMessageBox.warning(self.w, "无法安装程序更新", message)
             return
+        QMessageBox.information(
+            self.w,
+            "安装前请关闭程序文件夹",
+            "即将退出当前版本并安装更新。\n\n"
+            "请先关闭绿色版程序目录的资源管理器窗口，并确认 EasyCon、监视窗口及其他"
+            "相关程序已经退出。目录若被短暂占用，更新器会自动等待并重试 60 秒。\n\n"
+            f"程序目录：\n{prepared.install_dir}",
+        )
         try:
             updates_root = self.w.paths.user / "updates"
             request_path = write_install_request(

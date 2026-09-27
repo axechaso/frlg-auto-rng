@@ -216,6 +216,11 @@ class PySideAppUpdateTests(unittest.TestCase):
                 "question",
                 return_value=QMessageBox.StandardButton.Yes,
             ),
+            patch.object(
+                QMessageBox,
+                "information",
+                return_value=QMessageBox.StandardButton.Ok,
+            ) as information,
         ):
             self.window.actions["检查程序更新"].click()
             self.wait_until(lambda: not self.window.isVisible())
@@ -226,6 +231,8 @@ class PySideAppUpdateTests(unittest.TestCase):
         request = json.loads(request_path.read_text(encoding="utf-8"))
         self.assertEqual(request["version_code"], 2026090701)
         self.assertTrue((request_path.parent / "FRLG-Auto-RNG-Updater.exe").is_file())
+        self.assertIn("关闭程序文件夹", information.call_args.args[1])
+        self.assertIn(str(install.resolve()), information.call_args.args[2])
 
 
 if __name__ == "__main__":

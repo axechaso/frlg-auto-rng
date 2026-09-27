@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 
 from app_updater import PreparedUpdate, UpdateManifest, write_install_request
-from update_installer import InstallError, InstallRequest, apply_update
+from update_installer import (
+    InstallError,
+    InstallRequest,
+    _replace_directory_with_retry,
+    apply_update,
+)
 
 
 class FakeProcess:
@@ -139,3 +144,51 @@ class UpdateInstallerTests(unittest.TestCase):
             self.assertEqual(result.status, "failed")
             self.assertTrue(stage.exists())
             self.assertEqual((install / "FRLG-Auto-RNG.exe").read_bytes(), b"old")
+
+    def test_directory_replace_retries_transient_windows_lock(self):
+        events = []
+
+        class TemporarilyLockedDirectory:
+            def __init__(self):
+                self.attempts = 0
+
+            def replace(self, _destination):
+                self.attempts += 1
+                if self.attempts < 3:
+                    error = PermissionError("directory is busy")
+                    error.winerror = 5
+                    raise error
+
+        source = TemporarilyLockedDirectory()
+        _replace_directory_with_retry(
+            source,
+            Path("unused"),
+            action="备份旧版目录",
+            log=events.append,
+            timeout=10,
+            interval=0,
+            sleep=lambda _seconds: None,
+            monotonic=lambda: 0,
+        )
+        self.assertEqual(source.attempts, 3)
+        self.assertIn("继续重试", events[0])
+        self.assertIn("第 3 次尝试时成功", events[-1])
+
+    def test_directory_replace_timeout_explains_open_explorer_folder(self):
+        class LockedDirectory:
+            def replace(self, _destination):
+                error = PermissionError("directory is busy")
+                error.winerror = 5
+                raise error
+
+        ticks = iter((0.0, 1.0))
+        with self.assertRaisesRegex(InstallError, "关闭打开该目录的资源管理器窗口"):
+            _replace_directory_with_retry(
+                LockedDirectory(),
+                Path("unused"),
+                action="备份旧版目录",
+                log=lambda _message: None,
+                timeout=0.5,
+                sleep=lambda _seconds: None,
+                monotonic=lambda: next(ticks),
+            )

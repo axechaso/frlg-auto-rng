@@ -19,6 +19,9 @@ from app_version import MAIN_EXECUTABLE, UPDATE_SCHEMA, UPDATER_EXECUTABLE
 
 TOKEN_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 REQUEST_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
+RETRIABLE_REPLACE_ERRORS = frozenset({5, 32, 33})
+DIRECTORY_REPLACE_TIMEOUT = 60.0
+DIRECTORY_REPLACE_INTERVAL = 1.0
 
 
 class InstallError(RuntimeError):
@@ -233,6 +236,45 @@ def _terminate_launched(process: object | None) -> None:
             pass
 
 
+def _replace_directory_with_retry(
+    source: Path,
+    destination: Path,
+    *,
+    action: str,
+    log: Callable[[str], None],
+    timeout: float = DIRECTORY_REPLACE_TIMEOUT,
+    interval: float = DIRECTORY_REPLACE_INTERVAL,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> None:
+    """Rename an update directory after transient Explorer/AV locks clear."""
+    deadline = monotonic() + max(0.0, timeout)
+    attempt = 0
+    while True:
+        try:
+            source.replace(destination)
+            if attempt:
+                log(f"{action}在第 {attempt + 1} 次尝试时成功。")
+            return
+        except OSError as exc:
+            attempt += 1
+            winerror = getattr(exc, "winerror", None)
+            remaining = deadline - monotonic()
+            if winerror not in RETRIABLE_REPLACE_ERRORS:
+                raise
+            if remaining <= 0:
+                raise InstallError(
+                    f"{action}失败：程序目录持续被占用。请关闭打开该目录的资源管理器窗口，"
+                    f"并退出 EasyCon、监视窗口或其他相关程序后重试。原始错误：{exc}"
+                ) from exc
+            if attempt == 1 or attempt % 5 == 0:
+                log(
+                    f"{action}暂时失败（WinError {winerror}），目录可能仍被资源管理器、"
+                    f"杀毒软件或相关进程占用；将在 {remaining:.0f} 秒内继续重试。"
+                )
+            sleep(min(max(0.0, interval), remaining))
+
+
 def apply_update(
     request: InstallRequest,
     *,
@@ -258,9 +300,19 @@ def apply_update(
     launched = None
     try:
         log("主程序已退出，开始交换绿色版目录。")
-        request.install_dir.replace(request.backup_dir)
+        _replace_directory_with_retry(
+            request.install_dir,
+            request.backup_dir,
+            action="备份旧版目录",
+            log=log,
+        )
         backup_created = True
-        request.stage_dir.replace(request.install_dir)
+        _replace_directory_with_retry(
+            request.stage_dir,
+            request.install_dir,
+            action="启用新版目录",
+            log=log,
+        )
         new_installed = True
         executable = request.install_dir / request.main_executable
         arguments = [
@@ -288,9 +340,19 @@ def apply_update(
         rollback_error: BaseException | None = None
         try:
             if new_installed and request.install_dir.exists():
-                request.install_dir.replace(request.failed_dir)
+                _replace_directory_with_retry(
+                    request.install_dir,
+                    request.failed_dir,
+                    action="保留启动失败的新版目录",
+                    log=log,
+                )
             if backup_created and request.backup_dir.exists():
-                request.backup_dir.replace(request.install_dir)
+                _replace_directory_with_retry(
+                    request.backup_dir,
+                    request.install_dir,
+                    action="恢复旧版目录",
+                    log=log,
+                )
         except BaseException as rollback_exc:
             rollback_error = rollback_exc
         if rollback_error is None:
