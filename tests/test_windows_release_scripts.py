@@ -51,6 +51,18 @@ class WindowsReleaseScriptTests(unittest.TestCase):
         self.assertIn("PySide6==6.11.2", requirements)
         self.assertIn('pywin32>=306; sys_platform == "win32"', requirements)
 
+    def test_ci_uses_pyside6_requirements_and_no_removed_tk_tests(self):
+        source = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("requirements-pyside6.txt", source)
+        for removed in (
+            "requirements-auto.txt",
+            "run_auto_rng_gui.py",
+            "tests.test_gui_inputs",
+            "tests.test_manual_tools",
+            "tests.test_tid_logging",
+        ):
+            self.assertNotIn(removed, source)
+
     def test_publisher_requires_preflight_and_draft_verification(self):
         source = (ROOT / "tools" / "publish_windows_release.ps1").read_text(encoding="utf-8")
         for required in (
