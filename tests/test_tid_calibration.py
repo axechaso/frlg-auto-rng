@@ -15,7 +15,6 @@ from automation.tid_calibration import (
 )
 from automation.tid_rng137 import TidRngRequest
 from automation.tid_starter_flow import TidStarterFlowRequest
-from run_auto_rng_gui import AutoRngApp
 from run_tid_starter_flow import FlowRunner, run_tid_plan
 from tid_records import TidRecordContext, TidRecordingSession
 
@@ -265,106 +264,6 @@ class TidCalibrationTests(unittest.TestCase):
         session.feed("========== 第1阶段：正式 ==========\n当前TID：12345\n【OP】3693【F1】2693【F2】2105\nselect执行次数：2\n")
         row = recorded[0][1]
         self.assertEqual((row.tid, row.context.game, row.context.nx_model, row.context.op_fixed_delay), (12345, "叶绿", 2, 30700))
-
-
-class Variable:
-    def __init__(self, value=None):
-        self.value = value
-    def get(self):
-        return self.value
-    def set(self, value):
-        self.value = value
-
-
-class TidCalibrationGuiTests(unittest.TestCase):
-    def test_starter_controls_do_not_disable_or_clear_calibration(self):
-        app = SimpleNamespace(
-            tid_starter_flow_var=Variable(True), tid_mode_var=Variable("乱数模式"),
-            tid_calibration_var=Variable(True), tid_sid_mode_var=Variable(""),
-            _updating=False, tid_mode_combo=Mock(), tid_sid_mode_combo=Mock(),
-            tid_sid_entry=Mock(), tid_calibration_check=Mock(), tid_special_checks=[],
-            tid_starter_flow_controls=[], _update_tid_delay_controls=Mock(),
-            tid_any_tid_var=Variable(False), tid_any_tid_check=Mock(), tid_target_entry=Mock(),
-            tid_any_tid_denoise_check=Mock(),
-        )
-        AutoRngApp._update_tid_flow_controls(app)
-        self.assertTrue(app.tid_calibration_var.get())
-        app.tid_calibration_check.configure.assert_called_with(state="normal")
-
-    def test_collect_flow_strips_calibration_only_from_formal_request(self):
-        app = SimpleNamespace(tid_starter_flow_var=Variable(True), tid_game_var=Variable("火红"),
-                              tid_starter_var=Variable("妙蛙种子"), tid_starter_min_adv_var=Variable("1500"),
-                              tid_starter_max_adv_var=Variable("1600"), tid_sid_retry_radius_var=Variable("20"))
-        app.tid_any_tid_var = Variable(False)
-        app.tid_any_tid_denoise_var = Variable(True)
-        initial = TidRngRequest(calibration_check=True)
-        formal = AutoRngApp.collect_tid_starter_flow_request(app, initial)
-        self.assertEqual(formal.tid_request, replace(initial, calibration_check=False))
-        self.assertTrue(initial.calibration_check)
-
-    def test_collect_flow_keeps_tid_and_starter_game_settings_independent(self):
-        app = SimpleNamespace(
-            tid_starter_flow_var=Variable(True),
-            tid_game_var=Variable("火红"),
-            tid_starter_var=Variable("妙蛙种子"),
-            tid_starter_min_adv_var=Variable("1500"),
-            tid_starter_max_adv_var=Variable("1600"),
-            tid_sid_retry_radius_var=Variable("20"),
-            tid_starter_sound_var=Variable("STEREO"),
-            tid_starter_button_mode_var=Variable("HELP"),
-            tid_starter_seed_button_var=Variable("A"),
-            tid_any_tid_var=Variable(False),
-            tid_any_tid_denoise_var=Variable(True),
-        )
-        initial = TidRngRequest(sound=0, button_mode=1, seed_button=2)
-        formal = AutoRngApp.collect_tid_starter_flow_request(app, initial)
-        self.assertEqual((formal.tid_request.sound, formal.tid_request.button_mode, formal.tid_request.seed_button), (0, 1, 2))
-        self.assertEqual((formal.starter_sound, formal.starter_button_mode, formal.starter_seed_button), (1, 0, 0))
-        self.assertEqual(formal.to_starter_search_request().setting_key, "stereo_h_a")
-
-    def test_any_tid_option_disables_target_filters_only_for_exhaustive_flow(self):
-        for enabled, exhaustive in ((True, True), (True, False), (False, True)):
-            app = SimpleNamespace(
-                tid_starter_flow_var=Variable(enabled), tid_mode_var=Variable("穷举模式" if exhaustive else "乱数模式"),
-                tid_calibration_var=Variable(True), tid_sid_mode_var=Variable(""),
-                tid_any_tid_var=Variable(True), tid_any_tid_check=Mock(), tid_target_entry=Mock(),
-                tid_any_tid_denoise_check=Mock(),
-                _updating=False, tid_mode_combo=Mock(), tid_sid_mode_combo=Mock(),
-                tid_sid_entry=Mock(), tid_calibration_check=Mock(), tid_special_checks=[Mock()],
-                tid_sid_retry_radius_entry=Mock(), tid_starter_flow_controls=[], _update_tid_delay_controls=Mock(),
-            )
-            AutoRngApp._update_tid_flow_controls(app)
-            app.tid_any_tid_check.configure.assert_called_with(state="normal" if enabled and exhaustive else "disabled")
-            app.tid_target_entry.configure.assert_called_with(state="disabled" if enabled and exhaustive else "normal")
-            app.tid_any_tid_denoise_check.configure.assert_called_with(state="normal" if enabled and exhaustive else "disabled")
-            self.assertTrue(app.tid_calibration_var.get())
-
-    def test_gui_fills_measurements_once_but_preserves_new_user_input(self):
-        for state in ("unchanged", "edited", "wrong_run", "tampered"):
-            with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:
-                initial = TidRngRequest(calibration_check=True)
-                path = Path(directory) / "result.json"
-                payload = {"schema": 1, "initial_request": initial.to_dict(), "values": VALUES,
-                           "request": calibrated_tid_request(initial, VALUES).to_dict()}
-                if state == "wrong_run":
-                    payload["initial_request"]["target_tid"] = 1
-                if state == "tampered":
-                    payload["request"]["nx_model"] = 2
-                save_json(path, payload)
-                app = SimpleNamespace(
-                    tid_calibration_result_path=path, tid_calibration_applied=False,
-                    tid_calibration_snapshot=initial, tid_calibration_input_fingerprint=("start",),
-                    input_fingerprint=lambda: ("edited",) if state == "edited" else ("start",),
-                    tid_op_delay_var=Variable("30600"), tid_f1_delay_var=Variable("22050"),
-                    tid_f2_delay_var=Variable("4250"), tid_f3_delay_var=Variable("14900"),
-                    tid_op_correction_var=Variable("0"), tid_calibration_var=Variable(True),
-                    status_var=Variable(""), _updating=False, invalidate_plan=Mock(),
-                )
-                AutoRngApp._poll_tid_calibration_result(app)
-                AutoRngApp._poll_tid_calibration_result(app)
-                self.assertEqual(app.tid_op_delay_var.get(), "30700" if state == "unchanged" else "30600")
-                self.assertEqual(app.invalidate_plan.call_count, int(state == "unchanged"))
-                self.assertEqual(app.tid_calibration_var.get(), state != "unchanged")
 
 
 if __name__ == "__main__":

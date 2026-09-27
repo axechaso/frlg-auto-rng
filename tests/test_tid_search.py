@@ -345,42 +345,6 @@ class TidSearchTests(unittest.TestCase):
                     self.assertIn("$SID_ADV修正 = 1",started[0])
                     self.assertIn("TIDPROGRESS|RESUMED=1",started[0])
 
-    def test_gui_collects_new_fields_and_refreshes_rng_and_switched_progress(self):
-        import tkinter as tk
-        from run_auto_rng_gui import AutoRngApp, TkinterDnD
-        root=TkinterDnD.Tk() if TkinterDnD is not None else tk.Tk()
-        root.withdraw()
-        try:
-            with patch.object(AutoRngApp,"_install_tid_persistence"), patch.object(AutoRngApp,"check_devices"), patch("run_auto_rng_gui.resolve_tid_template",return_value=DEFAULT_TID_STARTER_SAVE_SOURCE):
-                app=AutoRngApp(root)
-                app.tid_mode_var.set("穷举模式")
-                app.tid_language_var.set("英文")
-                app.tid_name_var.set("Alxe")
-                app.tid_target_var.set("00000")
-                app.tid_auto_rng_var.set(True)
-                app.tid_additional_targets_var.set("33333，65535")
-                request=app.collect_tid_request()
-                self.assertEqual(request.additional_target_tids,(33333,65535))
-                self.assertEqual((request.auto_op_rng_range,request.auto_f1_rng_range,request.auto_f2_rng_range),(20,20,10))
-                self.assertTrue(request.auto_rng)
-                app.collect_tid_starter_flow_request=Mock(return_value=None)
-                for switched in (False,True):
-                    req=replace(request,sid_random=True) if switched else TidRngRequest(sid_random=True,op_rng_range=20)
-                    m,p,_=self.setup_machine(req)
-                    if switched:
-                        m.state["TID区域目标"]=33333
-                        m.call(p+"_自动转乱数")
-                    state=self.state(m,p)
-                    app.collect_tid_request=Mock(return_value=req)
-                    with patch("run_auto_rng_gui.read_progress",return_value={"state":state,"status":"running"}):
-                        app._refresh_tid_progress()
-                    self.assertIn("乱数",app.tid_progress_status_var.get())
-                    self.assertIn("当前壳层",app.tid_progress_status_var.get())
-                    if switched: self.assertIn("33333",app.tid_progress_status_var.get())
-        finally:
-            root.destroy()
-
-
 class TidSearchInputTests(unittest.TestCase):
     def test_progress_context_matches_gui_and_generated_flow_annotations(self):
         from tid_session import progress_context

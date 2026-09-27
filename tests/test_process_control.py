@@ -9,10 +9,9 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from process_control import StopFileWatcher, terminate_process_tree
-from run_auto_rng_gui import AutoRngApp
 from run_easycon_logged import run_logged
 from run_sid_reverse_capture import _run_easycon
 from run_tid_starter_flow import FlowRunner
@@ -53,27 +52,6 @@ def pid_alive(pid):
 
 
 class ProcessControlTests(unittest.TestCase):
-    def test_gui_writes_stop_file_instead_of_sending_cross_console_signal(self):
-        with tempfile.TemporaryDirectory() as temp:
-            process = Mock(poll=Mock(return_value=None))
-            app = SimpleNamespace(process=process, stop_request_path=Path(temp) / "private.stop",
-                root=Mock(), stop_button=Mock(), status_var=Mock(), _force_stop_process=Mock(),
-                finish_stop_request=Mock())
-            AutoRngApp._request_stop(app)
-            self.assertTrue(app.stop_request_path.is_file())
-            process.send_signal.assert_not_called()
-            process.terminate.assert_not_called()
-            self.assertEqual(app.root.after.call_args.args[0], 5000)
-
-    def test_old_stop_timeout_cannot_kill_new_run(self):
-        old = Mock(poll=Mock(return_value=None))
-        new = Mock(poll=Mock(return_value=None))
-        app = SimpleNamespace(process=new, _force_stop_process=Mock(), status_var=Mock())
-        AutoRngApp.finish_stop_request(app, old)
-        app._force_stop_process.assert_not_called()
-        AutoRngApp.finish_stop_request(app, new)
-        app._force_stop_process.assert_called_once_with(new)
-
     def test_existing_stop_file_prevents_easycon_start(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

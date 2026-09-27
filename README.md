@@ -8,7 +8,7 @@
 
 QQ 通知已接入 PySide6 正式界面：点击顶部“QQ 通知”可配置机器人、绑定私聊／群聊、查看 12 步图文教学、通知规则和发送记录；教学页可直接打开 [QQ 开放平台机器人注册地址](https://q.qq.com/#/apps)。独立链路验证工具仍保留在[这里](tools/qq_notify_test/README.md)；接入细节和验收清单见 [QQ 通知集成准备](docs/QQ_NOTIFICATION_INTEGRATION.md)。通知默认关闭，真实 QQ 连接与收发已由用户实测通过；其他使用者仍须填写自己的机器人凭据和目标。
 
-当前构建版本为 `0.9.4.1`，正式界面与冻结包入口均已切换为 PySide6。安装包不携带旧 Tk 界面、`tkinterdnd2` 或 Tcl/Tk 运行库；旧 Tk 源码只留在仓库中作为历史实现与迁移参照。`0.2.2` 及后续绿色版继续使用内置整包更新协议。源码模式只检查并提示版本，不替换源码目录；绿色版更新只替换程序目录，不会覆盖 `%LOCALAPPDATA%\FRLG-Auto-RNG` 中的配置、日志、进度、Seed 表、设备标签覆盖或公告偏好。程序更新源可选“自动（GitHub 优先）”“GitHub”或“Gitee”；自动模式仅在 GitHub 检查或下载失败时切换到 Gitee，手动模式不会跨源回退。更新内容见 [0.9.4.1 发布说明](docs/releases/v0.9.4.1.md)，升级后须重新生成方案。
+当前构建版本为 `0.9.4.1`，正式界面、源码入口与冻结包入口均统一为 PySide6。仓库和安装包均不再携带旧 Tk 界面、`tkinterdnd2` 或 Tcl/Tk 运行时；共享搜索、生成、运行和持久化服务继续保留。`0.2.2` 及后续绿色版继续使用内置整包更新协议。源码模式只检查并提示版本，不替换源码目录；绿色版更新只替换程序目录，不会覆盖 `%LOCALAPPDATA%\FRLG-Auto-RNG` 中的配置、日志、进度、Seed 表、设备标签覆盖或公告偏好。程序更新源可选“自动（GitHub 优先）”“GitHub”或“Gitee”；自动模式仅在 GitHub 检查或下载失败时切换到 Gitee，手动模式不会跨源回退。更新内容见 [0.9.4.1 发布说明](docs/releases/v0.9.4.1.md)，升级后须重新生成方案。
 
 开发约定：每完成一轮较大的功能改动并通过本地验证，就提交并推送到私有 `origin`，让 GitHub Actions 自动复核；零散小修改可以合并到下一轮大改一起推送。
 
@@ -122,15 +122,11 @@ EasyCon 原始 1.6.4a 压缩包不包含这两份火叶 OCR 模型。安装器�
 在项目根目录依次双击：
 
 ```text
-安装-自动乱数首版.bat
-启动-自动乱数首版.bat
+安装-PySide6源码版.bat
+启动-PySide6功能版.bat
 ```
 
-安装器会创建 `.venv`、安装 `requirements-auto.txt`、导入并校验 2.0 与 TID/SID 1.3.7 快照，以及准备 EasyCon 1.6.4a OCR 环境。GUI 启动失败时查看：
-
-```text
-runtime\launcher.log
-```
+安装器会创建 `.venv`、安装 `requirements-pyside6.txt`、导入并校验 2.0 与 TID/SID 1.3.7 快照，以及准备 EasyCon 1.6.4a OCR 环境。GUI 启动失败时可在命令行运行 `run_pyside6_gui.py` 查看错误。
 
 应用内更新访问 GitHub 或 Gitee 时会先使用 Windows 系统证书库验证 HTTPS；若仅因证书链构建失败，会改用程序内置的 Mozilla CA 证书库再次进行完整验证，不会关闭证书或主机名检查。两套证书库都失败时，应先校准系统时间并通过 Windows 更新补齐根证书；单位网络还需让管理员正确安装 HTTPS 代理根证书。现有发生证书错误的旧绿色版不能自行获得这项修复，需先手工安装包含该修复的新包一次。
 
@@ -313,9 +309,8 @@ rng/                        Ten Lines Python/C++ 搜索代码
 tests/                      单元测试
 tools/                      2.0 导入、标签审计、EasyCon 准备工具
 run_pyside6_gui.py          0.9 正式 GUI 主入口
-run_auto_rng_gui.py         旧 Tk 历史实现（不进入发布包）
 run_auto_planner.py         命令行计划器
-requirements-auto.txt       新自动流程最小依赖
+requirements-pyside6.txt    正式 PySide6 与自动流程依赖
 local_assets/easycon118/    导入的 2.0 快照（兼容目录名），Git 忽略
 local_assets/tid_rng137/    导入的 TID/SID 1.3.7 快照，Git 忽略
 runtime/easycon118/         当前生成的 ECS 工程，Git 忽略

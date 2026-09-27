@@ -1,34 +1,10 @@
-### 快速开始
+### PySide6 源码版快速开始
 
-1. 双击“启动-RNG乱数.bat”，填写RNG目标，支持智能识别tenlines校准网址参数
-2. 点击确定后，会自动检查参数/单片机/采集卡，检查通过后打开游戏界面，点击run即可开始乱数
+1. 首次使用双击“安装-PySide6源码版.bat”。
+2. 安装完成后双击“启动-PySide6功能版.bat”。
+3. 在顶部选择串口和采集卡，在存档信息中填写版本、语言、TID 与 SID。
+4. 选择需要的 SID、TID、野生/静态或孵蛋流程，搜索并生成方案，预检通过后开始运行。
 
-### 更多功能
+本工具使用 EasyCon 1.6.4-a 的本地标签与 OCR，不需要部署在线模型、Qwen、vLLM 或 Ollama。
 
-1. 双击“启动-所有功能.bat”
-2. 选择对应选项
-
-### RNG暂不支持以下情况
-
-1. 日版
-2. 碎岩
-3. 部分定点
-4. help以外的button mode
-5. none以外的extra button
-6. 只有一个NS用户
-
-### OCR提速
-
-默认是调用在线模型进行OCR识别，断网会中断刷闪，如果设备有显卡，可以尝试：
-1. 打开命令提示符，输入：wsl --install，或wsl --update，安装wsl，然后重启电脑（大约60分钟）
-2. 打开命令提示符，输入：wsl --install Ubuntu-24.04，安装Ubuntu（大约30分钟）
-3. 双击start_vllm.bat，配置vllm环境，下载并部署OCR模型（大约15分钟）
-
-上述安装成功后，后续只需要双击start_vllm.bat，即可快速启动OCR模型，秒出OCR结果
-
-### 更新版本
-
-1. 双击PortableGit.7z.exe，安装PortableGit到当前目录
-2. 打开命令行，切换到PyEasyCon目录
-3. 输入：PortableGit\bin\git.exe fetch --all，自动下载最新代码，这一步可能需要重试多次才成功
-4. 输入：PortableGit\bin\git.exe reset --hard origin/master，将当前目录代码同步至最新版
+绿色打包版直接运行 FRLG-Auto-RNG.exe，不需要安装 Python。

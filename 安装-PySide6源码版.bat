@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title FRLG Auto RNG Setup
+title FRLG Auto RNG PySide6 Setup
 chcp 65001 >nul
 cd /d "%~dp0"
 
@@ -31,7 +31,7 @@ if errorlevel 1 (
     goto error
 )
 
-".venv\Scripts\python.exe" -m pip install -r requirements-auto.txt
+".venv\Scripts\python.exe" -m pip install -r requirements-pyside6.txt
 if errorlevel 1 goto error
 
 ".venv\Scripts\python.exe" -c "import cv2,numpy; import rng.tenlines_utils; import automation"

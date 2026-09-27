@@ -32,12 +32,9 @@ class PackageEntryTests(unittest.TestCase):
     def test_normal_launch_uses_pyside6_entry(self):
         calls = []
         qt = SimpleNamespace(main=lambda argv=None: calls.append(list(argv or ())) or 0)
-        legacy = SimpleNamespace(
-            main=lambda: self.fail("packaged startup must not enter the Tk GUI")
-        )
         with patch.dict(
             sys.modules,
-            {"run_pyside6_gui": qt, "run_auto_rng_gui": legacy},
+            {"run_pyside6_gui": qt},
         ):
             self.assertEqual(package_entry.main(["--no-device-check"]), 0)
         self.assertEqual(calls, [["--no-device-check"]])
@@ -47,12 +44,9 @@ class PackageEntryTests(unittest.TestCase):
             path = Path(temporary) / "health.json"
             calls = []
             qt = SimpleNamespace(main=lambda argv=None: calls.append(list(argv or ())) or 0)
-            legacy = SimpleNamespace(
-                main=lambda: self.fail("update health launch must not enter the Tk GUI")
-            )
             with patch.dict(
                 sys.modules,
-                {"run_pyside6_gui": qt, "run_auto_rng_gui": legacy},
+                {"run_pyside6_gui": qt},
             ):
                 code = package_entry.main(
                     [

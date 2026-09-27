@@ -1,6 +1,6 @@
 # PySide6 界面迁移预览
 
-`pyside_preview.py` 是独立的视觉和交互原型，不替换 `run_auto_rng_gui.py`，也不会修改配置、搜索方案或启动 EasyCon。
+`pyside_preview.py` 是独立的视觉和交互原型，不会修改配置、搜索方案或启动 EasyCon；正式入口是 `run_pyside6_gui.py`。
 
 2026-09-06 新增独立的 `run_pyside6_gui.py` / `启动-PySide6功能版.bat`，优先接入野生 / 静态与共用服务。实际接入范围、启动方法及验收边界见 [功能版说明](PYSIDE6_FUNCTIONAL.md)。下文的“未接入”描述针对纯预览入口。
 

@@ -47,7 +47,7 @@ class WindowsReleaseScriptTests(unittest.TestCase):
             self.assertNotIn(removed, source)
 
     def test_formal_requirements_pin_pyside6(self):
-        requirements = (ROOT / "requirements-auto.txt").read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements-pyside6.txt").read_text(encoding="utf-8")
         self.assertIn("PySide6==6.11.2", requirements)
         self.assertIn('pywin32>=306; sys_platform == "win32"', requirements)
 

@@ -271,7 +271,7 @@ class KeyMappingPanel:
         col = idx // items_per_col
         row = idx % items_per_col
 
-        # 横向：两列整体居中（与 launch_gui add_button_row 风格一致）
+        # 横向：两列整体居中。
         total_area_w = self.width - self.PAD * 2
         col_w = 130
         cols_w = self.COLS * col_w + self.GAP * (self.COLS - 1)

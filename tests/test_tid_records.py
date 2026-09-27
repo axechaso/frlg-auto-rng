@@ -6,12 +6,10 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from automation.tid_rng137 import TidRngRequest
-from run_auto_rng_gui import AutoRngApp
 from run_easycon_logged import run_logged
 from run_tid_starter_flow import FlowRunner
 from tid_records import (
@@ -255,26 +253,6 @@ class TidRecordTests(unittest.TestCase):
                     runner.output("========== 第3阶段：御三家 ==========")
                     runner.output(observation())
             self.assertEqual(TidRecordStore(root / "tid.sqlite3").rows()[0]["occurrences"], 1)
-
-    def test_gui_filters_pass_both_game_and_model(self):
-        variable = lambda value: SimpleNamespace(get=lambda: value)
-        app = SimpleNamespace(tid_record_game_var=variable("叶绿"), tid_record_nx_var=variable("Switch 2"), tid_record_filter_var=variable("00001"))
-        self.assertEqual(AutoRngApp._tid_record_filters(app), {"game": "叶绿", "nx_model": 2, "tid": 1})
-        app.tid_record_filter_var = variable("65536")
-        with self.assertRaises(ValueError):
-            AutoRngApp._tid_record_filters(app)
-
-    def test_gui_context_snapshot_does_not_include_sid_or_follow_later_changes(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            app = SimpleNamespace(tid_game_var=SimpleNamespace(get=lambda: "叶绿"), tid_request=TidRngRequest(nx_model=2))
-            args = AutoRngApp._tid_record_arguments(app, root / "run.log")
-            data = json.loads(Path(args[1]).read_text(encoding="utf-8"))
-            self.assertEqual((data["game"], data["nx_model"]), ("叶绿", 2))
-            self.assertFalse(any("sid" in key.lower() for key in data))
-            app.tid_request = TidRngRequest(nx_model=1)
-            self.assertEqual(json.loads(Path(args[1]).read_text(encoding="utf-8"))["nx_model"], 2)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,7 +29,6 @@ from automation.precalibration import (
 )
 from automation.seed_modes import seed_mode_to_settings
 from rng.tenlines_utils import IVs, InitialSeedResult, SearcherResult
-from run_auto_rng_gui import AutoRngApp
 
 
 SOURCE_118 = Path(__file__).resolve().parents[1] / "local_assets" / "easycon118"
@@ -193,63 +192,6 @@ class PrecalibrationStoreTests(unittest.TestCase):
             context = PrecalibrationContext("fr", 1, 1, "FORMAL", "WILD", 0)
             self.assertIsNone(update_from_log(path, context, "普通运行日志"))
             self.assertFalse(path.exists())
-
-    def test_gui_completion_reads_the_full_log_before_updating(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            project = root / "project"
-            project.mkdir()
-            main = project / "main.ecs"
-            main.write_text("", encoding="utf-8")
-            context = PrecalibrationContext("fr", 1, 1, "FORMAL", "WILD", 0)
-            (project / "plan.json").write_text(
-                json.dumps(
-                    {
-                        "precalibration": {
-                            "enabled": True,
-                            "context": context.to_dict(),
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
-            log = root / "run.log"
-            log.write_text(
-                build_marker(
-                    context,
-                    seed_index=-2,
-                    frame_enabled=True,
-                    frame_pre=31,
-                )
-                + "\n"
-                + ("tail\n" * 20000),
-                encoding="utf-8",
-            )
-            store = root / "precalibration.json"
-            with patch(
-                "run_auto_rng_gui.DEFAULT_PRECALIBRATION_STORE_PATH",
-                store,
-            ):
-                note = AutoRngApp._update_completed_precalibration(main, log, 0)
-            self.assertIn("预校准已更新", note)
-            self.assertEqual(read_record(store, context)["frame_ns1"], 31)
-
-    def test_gui_nonzero_exit_never_updates(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            store = root / "precalibration.json"
-            with patch(
-                "run_auto_rng_gui.DEFAULT_PRECALIBRATION_STORE_PATH",
-                store,
-            ):
-                note = AutoRngApp._update_completed_precalibration(
-                    root / "main.ecs",
-                    root / "run.log",
-                    2,
-                )
-            self.assertIsNone(note)
-            self.assertFalse(store.exists())
-
 
 @unittest.skipUnless(SOURCE_118.is_dir(), "requires materialized EasyCon assets")
 class PrecalibrationGenerationTests(unittest.TestCase):

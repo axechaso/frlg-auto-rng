@@ -4,6 +4,12 @@
 
 快照日期：2026-09-27。
 
+## 2026-09-27 工作区移除旧 Tk 界面
+
+- 正式源码入口与绿色版入口统一为 `run_pyside6_gui.py`。旧自动乱数 Tk 界面、早期刷闪/遍历/努力值 Tk 界面、Tk 手柄/监视实现、TkDnD 钩子、对应启动脚本及纯界面测试已从工作区删除；不要从历史提交恢复。
+- 共享的 `automation/`、`rng/`、EasyCon 运行器、TID/SID 工作进程、持久化与命令行计划器均保留。Qt 手柄和监视功能位于 `pyside_app/manual.py`，不受清理影响。
+- 源码安装入口改为 `安装-PySide6源码版.bat`，正式依赖改名为 `requirements-pyside6.txt`；启动使用 `启动-PySide6功能版.bat`。下方历史快照中出现的旧 Tk 文件名只用于说明迁移历史，不代表文件仍应存在。
+
 ## 2026-09-27 程序目录占用时的更新容错
 
 - 实机更新日志确认：旧版主程序退出后，资源管理器仍打开绿色版目录会使 Windows 在把安装目录改名为 `.frlg-update-backup-*` 时返回 `WinError 5`。失败发生在目录交换的第一步，新版尚未安装或启动；每次重新更新生成的新 UUID 暂存目录因此会让桌面看起来不断出现文件夹。
@@ -245,7 +251,7 @@
 ## 2026-09-07 PySide6 0.9 打包与更新
 
 - 正式应用版本为 `0.9`，内部版本码为 `2026090701`；冻结入口 `package_entry.py` 的普通启动直接进入 `run_pyside6_gui.py`，同时保留版本探针、健康检查和后台工作进程协议。
-- `0.9` Windows 绿色包仅携带 PySide6 及正式运行所需资源，不携带 `run_auto_rng_gui.py`、`tkinterdnd2`、`_tkinter.pyd` 或 Tcl/Tk 运行库。旧 Tk 源码只留在 Git 仓库中作为历史实现，之后不要求同步。
+- `0.9` Windows 绿色包仅携带 PySide6 及正式运行所需资源，不携带 `tkinterdnd2`、`_tkinter.pyd` 或 Tcl/Tk 运行库。旧 Tk 源码后来也已从 Git 工作区移除。
 - PySide6 的“检查程序更新”已接入原整包更新协议。`0.2.2` 可直接下载 `0.9` 清单和 ZIP，校验大小与 SHA-256 后完成替换；程序目录外的 `%LOCALAPPDATA%\FRLG-Auto-RNG` 用户数据保持不变，失败健康检查会回滚旧安装。
 - 发布说明唯一来源为 `docs/releases/v0.9.md`；打包与发布脚本读取同一文件。发布标签固定为 `v0.9`，标题固定为 `FRLG Auto RNG 0.9 PySide6版`，资产名固定为 `FRLG-Auto-RNG-0.9-windows-x64.zip`、同名 `.sha256` 与 `update-manifest.json`。
 - 源码运行只检查版本并提示，不自动覆盖工作区；绿色包更新时若 EasyCon 正在运行，可以先检查，但必须等待本轮停止后再安装。公告“不再提示”偏好与配置、日志、TID 进度、Seed 表和标签覆盖一并位于用户目录，不随整包替换。
@@ -257,7 +263,7 @@
 ## 2026-09-07 界面开发全面转向 PySide6
 
 - 从本节起，正式界面功能、交互修正、运行结束回填、说明文本和后续打包只在 PySide6 入口实现与验收；旧 Tk 界面不再要求功能同步，也不再作为新功能是否完成的判断依据，除非用户以后明确点名要求处理 Tk。
-- `run_auto_rng_gui.py` 暂时保留作历史实现和迁移参照，不因新增 PySide6 功能顺手删除；共享的搜索、生成器、运行器和持久化模块仍应保持 UI 无关，PySide6 继续直接复用这些核心能力。
+- 该阶段曾暂留旧 Tk 作迁移参照；2026-09-27 已按用户要求删除。共享的搜索、生成器、运行器和持久化模块仍保持 UI 无关，PySide6 继续直接复用这些核心能力。
 - 修改前先确认代码属于共享核心还是界面层：共享算法的正确性仍需完整回归，界面接线与文案只改 `pyside_preview.py`、`pyside_app/` 和 PySide6 资源/测试。发布说明不再写“Tk 与 PySide6 均已接入”，打包目标也以 PySide6 正式入口为准。
 
 ### PySide6 启动公告与赞助致谢
@@ -417,7 +423,7 @@
 
 - 冻结版“检查程序更新”曾直接使用 `urllib.request.urlopen`，部分 Windows/杀毒 HTTPS 代理环境会返回 `CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate`。更新检查、清单读取和 ZIP 下载现统一经 `truststore.SSLContext(PROTOCOL_TLS_CLIENT)` 使用 Windows CryptoAPI 信任库，可取得系统中间证书和受管代理根证书。
 - 没有增加忽略证书或不安全重试：系统信任库仍无法验证时会明确提示检查系统时间、Windows 根证书更新或 HTTPS 代理证书，并说明程序不会关闭证书验证。原有 GitHub URL 白名单、清单字段、包大小及 SHA-256 校验均保留。
-- `truststore==0.10.4` 已进入正式 `requirements-auto.txt`；主程序与独立更新器的 PyInstaller 参数均显式收集其平台子模块。旧绿色版的更新器代码无法自我修复，用户必须手工安装首个包含本修复的新包，之后才恢复应用内更新。
+- `truststore==0.10.4` 已进入正式 `requirements-pyside6.txt`；主程序与独立更新器的 PyInstaller 参数均显式收集其平台子模块。旧绿色版的更新器代码无法自我修复，用户必须手工安装首个包含本修复的新包，之后才恢复应用内更新。
 - 新增系统 SSLContext、证书错误不降级及打包收集测试；源码及带 `truststore` 的临时 PyInstaller 单文件 EXE 均真实访问 GitHub Release 并返回 `current`，项目 `.venv` 完整 467 项测试通过。Actions 结果以本次提交记录为准，本轮未修改 ECS 或自动乱数流程。
 
 ## 2026-09-05 PySide6 操作细节与说明补齐
@@ -741,7 +747,7 @@ git branch --show-current
 git log -1 --oneline
 ```
 
-如果 `automation/`、`run_auto_rng_gui.py`、`tests/` 等文件不存在，说明拿到的是旧提交而不是当前工作区。
+如果 `automation/`、`pyside_app/`、`run_pyside6_gui.py` 或 `tests/` 不存在，说明拿到的是旧提交而不是当前工作区；`run_auto_rng_gui.py` 已按要求删除。
 
 ## 项目目标和当前决策
 
@@ -776,7 +782,7 @@ flowchart LR
 
 边界非常重要：
 
-- `run_auto_rng_gui.py` 和 `run_auto_planner.py` 调用 `automation/`，再调用外部 `ezcon.exe`；
+- `run_pyside6_gui.py` 和 `run_auto_planner.py` 调用共享服务与 `automation/`，再调用外部 `ezcon.exe`；
 - `easycon/controller.py` 等旧 PyEasyCon 直连串口代码属于另一条执行链；
 - 新流程不需要启动 vLLM、Ollama 或 ModelScope；
 - EasyCon 1.6.4a 不含 1.7.0 的 `ir` 命令，语法预检必须使用 `ezcon format <main.ecs>`。
@@ -784,7 +790,7 @@ flowchart LR
 
 ## GUI 当前状态
 
-正式主入口：`run_pyside6_gui.py`；旧 `run_auto_rng_gui.py` 只作历史实现和共享逻辑参照，不再同步新界面功能。
+正式且唯一的 GUI 主入口：`run_pyside6_gui.py`。旧 Tk 界面已经从工作区移除。
 
 页面使用完整纵向滚动容器，默认窗口 1100×880，最小 900×620。右侧滚动条滚动整页；鼠标位于结果或运行日志文本框时只滚动对应文本。
 
@@ -915,7 +921,6 @@ Ten Lines 预设是精确 IV，不是“其余任意”：
 
 | 文件 | 作用 |
 |---|---|
-| `run_auto_rng_gui.py` | 四个输入选项卡、常驻运行日志页、默认隐藏的高级脚本测试页、设备下拉枚举、Seed 表更新、HOME_BUFFER 可选开关、输入校验、后台搜索/采集、方案展示、预检和启动/停止 |
 | `run_pyside6_gui.py` | PySide6 正式入口、页面选择、截图入口和程序启动 |
 | `pyside_app/window.py` | PySide6 正式窗口后端、方案运行、实时日志与历史日志交互 |
 | `pyside_app/log_history.py` | 过往日志发现、流程分类、去重、搜索和大文件安全预览 |
@@ -1025,8 +1030,8 @@ EasyCon 1.6.4a 的 OCR 是本地 Tesseract，不依赖外部 AI 服务。原始 
 2. 确认 `rng/src/pybind/calibration_bind.cp312-win_amd64.pyd` 存在。
 3. 当前 2.0 原包位于 `D:\Download\NS火叶全自动一键乱数1.1.8`；迁移或换机时应在 GUI/准备脚本中显式选择该实际目录，不再依赖已删除的旧默认路径。
 4. 把 EasyCon 1.6.4a 放到默认目录，或后续显式调整准备脚本和 GUI 路径。
-5. 运行 `安装-自动乱数首版.bat`。
-6. 运行 `启动-自动乱数首版.bat`。
+5. 运行 `安装-PySide6源码版.bat`。
+6. 运行 `启动-PySide6功能版.bat`。
 7. GUI 启动后会自动检测一次；核对串口和带设备名的采集卡下拉框，必要时再点“检测端口/采集卡”。不要照搬旧设备的 COM 号和采集卡序号。
 
 若安装器已经创建旧的错误 `.venv`，应先人工确认没有需要保留的内容，再删除 `.venv` 并用 64 位 Python 3.12 重装；不要由新对话擅自删除用户目录。
@@ -1035,7 +1040,7 @@ EasyCon 1.6.4a 的 OCR 是本地 Tesseract，不依赖外部 AI 服务。原始 
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE = "1"
-.\.venv\Scripts\python.exe -m py_compile run_auto_rng_gui.py
+.\.venv\Scripts\python.exe -m py_compile run_pyside6_gui.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 ```
@@ -1104,13 +1109,13 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 
 请接手这个火红/叶绿全自动乱数项目。先完整阅读 README.md、docs/HANDOFF.md 和 docs/INITIAL_AUTO_RNG.md，然后运行 git status --short，确认不要覆盖或清理现有未提交改动。
 
-当前主入口是 run_auto_rng_gui.py：GUI 依次有“SID 查找”“TID 乱数”“TID 实测表”“野生 / 静态”“孵蛋”五个正式选项卡，末尾常驻“运行日志”，整页可滚动。公共设置勾选高级模式后才显示“脚本测试（高级）”：它可把同一 ECS 原地交给正式兼容 runner 或原始 EasyCon 1.6.4-a CLI 做 A/B，不经过参数生成。SID 页逐只采集闪光宝可梦并由 Python 反查；TID 页使用锁定的英文/日文 1.3.7 脚本和独立标签包。普通流程由 Ten Lines 搜索，按最高 IV 总和、再按最小 Advance 选择方案，生成 2.0 ECS 后交给固定 EasyCon 1.6.4-a。本流程不部署 AI。孵蛋只接收 Ten Lines Egg 页已经得到的同 Seed、Held 和 Pickup，尚未完成整轮实机验收。
+当前唯一 GUI 主入口是 run_pyside6_gui.py：界面依次有“SID 查找”“TID 乱数”“TID 实测表”“野生 / 静态”“孵蛋”“运行日志”和“历史日志”，高级模式下另有“脚本测试（高级）”。旧 Tk 界面、入口、启动脚本和专用测试已删除，不要恢复。SID 页逐只采集闪光宝可梦并由 Python 反查；TID 页使用锁定的英文/日文 1.3.7 脚本和独立标签包。普通流程由 Ten Lines 搜索，按最高 IV 总和、再按最小 Advance 选择方案，生成 2.0 ECS 后交给固定 EasyCon 1.6.4-a。本流程不部署 AI。
 
 EasyCon 必须锁定 1.6.4-a+9c86137...，预检使用 ezcon format，不要改成 1.7.0 的 ir。狩猎区、碎岩、漫游兽和孵蛋不能宣称已实机完成。IV/Seed 反查迁到 Python 是以后方案，当前不要实施。
 
 先运行：
 $env:PYTHONDONTWRITEBYTECODE = "1"
-.\.venv\Scripts\python.exe -m py_compile run_auto_rng_gui.py
+.\.venv\Scripts\python.exe -m py_compile run_pyside6_gui.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 .\.venv\Scripts\python.exe tools\prepare_easycon164a.py --check-only
 

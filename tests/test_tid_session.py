@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 import re
 import tempfile
-import tkinter as tk
 import unittest
 from unittest.mock import Mock, patch
 
@@ -243,80 +242,6 @@ class TidPersistenceTests(unittest.TestCase):
             self.assertEqual(code, 2)
             runner.run_stage.assert_not_called()
             self.assertEqual(read_progress(root / "progress", context)["state"], state)
-
-
-class TidGuiPersistenceTests(unittest.TestCase):
-    def app(self):
-        from run_auto_rng_gui import AutoRngApp
-        app = AutoRngApp.__new__(AutoRngApp)
-        app.root = tk.Tcl()
-        app.tid_name_var = tk.StringVar(app.root, "Alxe")
-        app.tid_op_start_var = tk.StringVar(app.root, "0")
-        app.tid_resume_var = tk.BooleanVar(app.root, True)
-        app.tid_starter_flow_var = tk.BooleanVar(app.root, False)
-        app.tid_progress_status_var = tk.StringVar(app.root, "")
-        app.tid_record_filter_var = tk.StringVar(app.root, "12345")
-        app._update_tid_flow_controls = Mock()
-        app._restore_pending_tid_calibration = Mock()
-        app._refresh_tid_progress = Mock()
-        return app
-
-    def test_reopening_restores_tid_inputs_but_not_record_filters(self):
-        with tempfile.TemporaryDirectory() as temp, patch("run_auto_rng_gui.TID_SETTINGS_PATH", Path(temp) / "tid.json"):
-            app = self.app()
-            app._install_tid_persistence()
-            app.tid_name_var.set("レット゛")
-            app.tid_op_start_var.set("42")
-            app.tid_resume_var.set(False)
-            app._save_tid_settings()
-            saved = load_tid_settings(Path(temp) / "tid.json")
-            self.assertNotIn("tid_record_filter_var", saved["values"])
-            reopened = self.app()
-            reopened._install_tid_persistence()
-            self.assertEqual(reopened.tid_name_var.get(), "レット゛")
-            self.assertEqual(reopened.tid_op_start_var.get(), "42")
-            self.assertFalse(reopened.tid_resume_var.get())
-
-    def test_completed_background_calibration_is_loaded_on_reopen(self):
-        from run_auto_rng_gui import AutoRngApp
-        from tests.test_tid_calibration import VALUES
-        with tempfile.TemporaryDirectory() as temp:
-            app = self.app()
-            initial = TidRngRequest(calibration_check=True)
-            for name in ("tid_op_delay_var", "tid_f1_delay_var", "tid_f2_delay_var", "tid_f3_delay_var", "tid_op_correction_var"):
-                setattr(app, name, tk.StringVar(app.root, "0"))
-            app.tid_calibration_var = tk.BooleanVar(app.root, True)
-            app.status_var = tk.StringVar(app.root, "")
-            app.input_fingerprint = lambda: ("same",)
-            app.invalidate_plan = Mock()
-            path = Path(temp) / "calibration.json"
-            updated = calibrated_tid_request(initial, VALUES)
-            write_json_atomic(path, {"schema": 1, "initial_request": initial.to_dict(),
-                "values": VALUES, "request": updated.to_dict()})
-            app._tid_pending_calibration = {"path": str(path), "request": initial.to_dict(),
-                "values": app._tid_settings_fingerprint()}
-            AutoRngApp._restore_pending_tid_calibration(app)
-            self.assertEqual(app.tid_op_delay_var.get(), str(updated.op_fixed_delay))
-            self.assertEqual(app.tid_op_correction_var.get(), str(updated.op_correction))
-            self.assertFalse(app.tid_calibration_var.get())
-            self.assertIsNone(app._tid_pending_calibration)
-
-    def test_closing_exhaustive_can_pause_keep_running_or_cancel(self):
-        from run_auto_rng_gui import AutoRngApp
-        for answer in (True, False, None):
-            app = self.app()
-            app.busy = False
-            app.process = Mock(poll=Mock(return_value=None))
-            app.close_when_stopped = False
-            app.running_tid_exhaustive = True
-            app._save_tid_settings = Mock()
-            app._request_stop = Mock()
-            app._finish_close = Mock()
-            with patch("run_auto_rng_gui.messagebox.askyesnocancel", return_value=answer):
-                AutoRngApp.on_close(app)
-            self.assertEqual(app._request_stop.called, answer is True)
-            self.assertEqual(app._finish_close.called, answer is False)
-            self.assertEqual(app.close_when_stopped, answer is True)
 
 
 if __name__ == "__main__":
