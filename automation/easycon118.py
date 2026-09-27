@@ -222,11 +222,42 @@ PREVIOUS_SCRIPT_SHA256S += (
     # September 24 package with label-wait registration for HOME_BUFFER,
     # Japanese starter reads, wild-name OCR and stat candidate fallbacks.
     "5ab831733be435433f436f078d9ac94fe1b1008aa814231033d9fcfb1b761f03",
+    # September 26 package: keep the egg no-save message inside the egg
+    # completion branch and make formal fishing logs say ordinary fishing.
+    "0c081869fcae6dee8fb897136fcf577d316c026fe207bc332cff4238c740dc96",
+    # September 27 direct-run package with trusted Held +/-1 no-egg
+    # correction and recovery-attempt reset after an anchor is absorbed.
+    "8ab1f246c17805828a4b2008ba89ab5a9586d2cd34c9f70216658175b49a40aa",
+    # Equivalent direct-run corpus after removing the mistaken fixed-236
+    # experiment; dynamic Held/Pickup correction remains authoritative.
+    "52fd35b079b6d873a0160c77d958cb168bc2727c09c1cfcdfef96b148943d64d",
+    # Direct-run corpus with deterministic roaming summary navigation and
+    # the obsolete roaming-bicycle setup requirement removed.
+    "2bb95144cc8c2b7149af3a54d65d0470fd885b65be481b2d1ab2ef681c1586eb",
+    # Direct-run corpus with every fishing route using a registered rod,
+    # Teachy TV opened from Bag, and explicit post-catch cursor navigation.
+    "abc734a8f44ff152312bf3f62f5e8cc87194b13325bb3e2985f567a45325418b",
 )
-EXPECTED_SCRIPT_SHA256 = "6a0afe3ff17890c9387f53efa6cd364f052b342a7a916a5efe8e1213a406a750"
+EXPECTED_SCRIPT_SHA256 = "13c161b688aeee5cf78b2583920d9925ac8dcbaa4d7aef0b67a2beea19b5514e"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # September 27 materialization before the final roaming/fishing mother
+    # was re-imported through every existing 1.6.4-a compatibility transform.
+    "c6419713b40c79b33b813baab2e21ddc65c46bab32b34c50f5e8da37cce7e29c",
+    # Canonical corpus before fishing TV and rod shortcut roles were swapped.
+    "fb6e46385fe0e97e68bfa5fb5e365ab6ba2a9a6df75265ec43f70443d1408f77",
+    # Canonical materialization before roaming summary navigation stopped
+    # depending on the unrelated Teachy TV shortcut state.
+    "381b4703d9b183118f7bb38a74cbb3775483c8221f5600f1d07642d699e336c3",
+    # Canonical corpus before the Held no-egg deadlock fix.  Keep accepting
+    # installed caches while newly bundled projects use the corrected mother.
+    "6a0afe3ff17890c9387f53efa6cd364f052b342a7a916a5efe8e1213a406a750",
+    # Local canonical mother immediately before the trusted Held +/-1
+    # no-egg evidence and recovery-attempt reset were added.
+    "03047c6bed6c67bbff7830fa17496c70d482b17e660574b4c49dbf9b212dc693",
+    # Materialized counterpart of the September 27 direct-run package.
+    "866fa5e0bae2c26a5b5f753de22c6d9088d43d99c092b65e64a81f4a3c3c58d3",
     # Canonical corpus before the egg flow was promoted to the formal WAIT entry.
     "36c83915f208741608d278c17754deae7951c3389b3a3f1e450694c687f66003",
     # Canonical corpus before the fixed user-selection HOME startup A/B was added.
@@ -357,6 +388,8 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # September 24 materialization with HOME_BUFFER, Japanese starter,
     # wild-name OCR and stat-candidate stages.
     "95c6e2924217fd40615ae8785df42ccc3eeb02d8d8381c4bf2f7664ea5a4578f",
+    # September 26 materialization of the corrected formal/timeline logging.
+    "f6287406e4a7c3b04baee4cbcddabca07e8f1d192a8503b1a0e3491251527416",
 )
 
 
@@ -667,6 +700,308 @@ PARTY_SUMMARY_SHARED_UP_BLOCK = """\
             ELSE
                 $反查队伍槽选择结果 = 反查_队伍页按上移次数选择目标(2)
             ENDIF
+"""
+ROAMER_SUMMARY_CURSOR_LEGACY_BLOCK = """\
+                # 游走
+                IF $遭遇类型 == 1 and ($目标全国图鉴编号 == 243 or $目标全国图鉴编号 == 244 or $目标全国图鉴编号 == 245)
+                    IF $刚进入TV == 1
+                        UP
+                        500
+                        BREAK
+                    ELSE
+                        BREAK
+                    ENDIF
+                ENDIF
+"""
+ROAMER_SUMMARY_CURSOR_CURRENT_BLOCK = """\
+                # 游走路线在2号道路必定从主菜单进入背包使用黄金喷雾；
+                # Teachy TV通过Y快捷键启动，不影响最终停在“背包”的主菜单光标。
+                IF $遭遇类型 == 1 and ($目标全国图鉴编号 == 243 or $目标全国图鉴编号 == 244 or $目标全国图鉴编号 == 245)
+                    UP
+                    500
+                    BREAK
+                ENDIF
+"""
+ROAMER_BICYCLE_BAG_REQUIREMENT_LEGACY = (
+    "            IF $目标全国图鉴编号 == 175 or $目标全国图鉴编号 == 243 or "
+    "$目标全国图鉴编号 == 244 or $目标全国图鉴编号 == 245\n"
+    "                PRINT 背包第二页第四格放自行车\n"
+    "            ENDIF\n"
+)
+ROAMER_BICYCLE_BAG_REQUIREMENT_CURRENT = (
+    "            IF $目标全国图鉴编号 == 175\n"
+    "                PRINT 背包第二页第四格放自行车\n"
+    "            ENDIF\n"
+)
+ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY = (
+    "        IF $目标全国图鉴编号 == 243 or $目标全国图鉴编号 == 244 or "
+    "$目标全国图鉴编号 == 245 or $目标全国图鉴编号 == 175\n"
+    "            PRINT 自行车登录快捷键\n"
+    "        ENDIF\n"
+)
+ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_CURRENT = (
+    "        IF $目标全国图鉴编号 == 175\n"
+    "            PRINT 自行车登录快捷键\n"
+    "        ENDIF\n"
+)
+FISHING_REQUIREMENTS_LEGACY_BLOCK = """\
+    IF $目标消耗帧 > $TV进入阈值
+        IF $静态或野生 == "野生" and 是否狩猎地带($运行前遭遇地点) == 1
+            PRINT Teachy TV放在背包第二页第一格，不要登录快捷键
+            IF $宝可梦遭遇方法 == "破旧钓竿"
+                PRINT 破旧钓竿登录快捷键
+            ELIF $宝可梦遭遇方法 == "好钓竿"
+                PRINT 好钓竿登录快捷键
+            ELIF $宝可梦遭遇方法 == "厉害钓竿" or $宝可梦遭遇方法 == "超级钓竿"
+                PRINT 厉害钓竿登录快捷键
+            ENDIF
+        ELSE
+            PRINT Teachy TV登录快捷键
+            IF $静态或野生 == "野生" and $宝可梦遭遇方法 == "破旧钓竿"
+                PRINT 背包第二页第一格放破旧钓竿
+            ENDIF
+            IF $静态或野生 == "野生" and $宝可梦遭遇方法 == "好钓竿"
+                PRINT 背包第二页第二格放好钓竿
+            ENDIF
+            IF $静态或野生 == "野生" and ($宝可梦遭遇方法 == "厉害钓竿" or $宝可梦遭遇方法 == "超级钓竿")
+                PRINT 背包第二页第三格放厉害钓竿
+            ENDIF
+            IF $目标全国图鉴编号 == 175
+                PRINT 背包第二页第四格放自行车
+            ENDIF
+        ENDIF
+    ELSE
+        IF $静态或野生 == "野生" and $宝可梦遭遇方法 == "破旧钓竿"
+            PRINT 破旧钓竿登录快捷键
+        ENDIF
+        IF $静态或野生 == "野生" and $宝可梦遭遇方法 == "好钓竿"
+            PRINT 好钓竿登录快捷键
+        ENDIF
+        IF $静态或野生 == "野生" and ($宝可梦遭遇方法 == "厉害钓竿" or $宝可梦遭遇方法 == "超级钓竿")
+            PRINT 厉害钓竿登录快捷键
+        ENDIF
+        IF $目标全国图鉴编号 == 175
+            PRINT 自行车登录快捷键
+        ENDIF
+    ENDIF
+"""
+FISHING_REQUIREMENTS_CURRENT_BLOCK = """\
+    IF $目标消耗帧 > $TV进入阈值
+        IF $静态或野生 == "野生" and ($宝可梦遭遇方法 == "破旧钓竿" or $宝可梦遭遇方法 == "好钓竿" or $宝可梦遭遇方法 == "厉害钓竿" or $宝可梦遭遇方法 == "超级钓竿")
+            PRINT Teachy TV放在背包第二页第一格，不要登录快捷键
+            IF $宝可梦遭遇方法 == "破旧钓竿"
+                PRINT 破旧钓竿登录快捷键
+            ELIF $宝可梦遭遇方法 == "好钓竿"
+                PRINT 好钓竿登录快捷键
+            ELSE
+                PRINT 厉害钓竿登录快捷键
+            ENDIF
+        ELIF $静态或野生 == "野生" and 是否狩猎地带($运行前遭遇地点) == 1
+            PRINT Teachy TV放在背包第二页第一格，不要登录快捷键
+        ELSE
+            PRINT Teachy TV登录快捷键
+            IF $目标全国图鉴编号 == 175
+                PRINT 背包第二页第四格放自行车
+            ENDIF
+        ENDIF
+    ELSE
+        IF $静态或野生 == "野生" and $宝可梦遭遇方法 == "破旧钓竿"
+            PRINT 破旧钓竿登录快捷键
+        ENDIF
+        IF $静态或野生 == "野生" and $宝可梦遭遇方法 == "好钓竿"
+            PRINT 好钓竿登录快捷键
+        ENDIF
+        IF $静态或野生 == "野生" and ($宝可梦遭遇方法 == "厉害钓竿" or $宝可梦遭遇方法 == "超级钓竿")
+            PRINT 厉害钓竿登录快捷键
+        ENDIF
+        IF $目标全国图鉴编号 == 175
+            PRINT 自行车登录快捷键
+        ENDIF
+    ENDIF
+"""
+FISHING_TV_GUARD_LEGACY_BLOCK = """\
+    # 狩猎区第0轮固定延迟测试不能以0ms立刻退出Teachy TV：实机确认首个B会被启动切换吞掉。
+    # 只给第0轮传入1000ms保护；后续乱数轮仍使用原TV等待，不改变既有参数。
+    $目标获取TV等待MS = $TV等待MS
+    IF $循环计数 == 0 and $进入TV == 1 and 是否狩猎地带($遭遇地点) == 1
+        $目标获取TV等待MS = 1000
+        IF $调试日志输出 == 1
+            PRINT 狩猎区第0轮Teachy TV启动保护: & $目标获取TV等待MS & " ms"
+        ENDIF
+    ENDIF
+"""
+FISHING_TV_GUARD_CURRENT_BLOCK = """\
+    # 从背包启动Teachy TV时，第0轮不能以0ms立刻退出：首个B可能被启动切换吞掉。
+    # 狩猎区与普通钓鱼都只在第0轮使用1000ms保护；后续仍使用原TV等待。
+    $目标获取TV等待MS = $TV等待MS
+    IF $循环计数 == 0 and $进入TV == 1
+        IF 是否狩猎地带($遭遇地点) == 1
+            $目标获取TV等待MS = 1000
+            IF $调试日志输出 == 1
+                PRINT 背包Teachy TV第0轮启动保护: & $目标获取TV等待MS & " ms"
+            ENDIF
+        ELIF $遭遇类型 == 2 and ($遭遇方法 == 201 or $遭遇方法 == 202 or $遭遇方法 == 203)
+            $目标获取TV等待MS = 1000
+            IF $调试日志输出 == 1
+                PRINT 背包Teachy TV第0轮启动保护: & $目标获取TV等待MS & " ms"
+            ENDIF
+        ENDIF
+    ENDIF
+"""
+FISHING_TV_DISPATCH_LEGACY_BLOCK = """\
+    IF $进入TV == 1 and $目标全国图鉴编号 != 1 and $目标全国图鉴编号 != 4 and $目标全国图鉴编号 != 7 and 是否狩猎地带($遭遇地点) == 0
+        IF $循环计数 == 0
+            $time_TV开始 = TIME()
+        ENDIF
+        CALL 执行TV等待流程
+        $刚进入TV = 1
+    ELIF $进入TV == 1 and 是否狩猎地带($遭遇地点) == 1
+"""
+FISHING_TV_DISPATCH_CURRENT_BLOCK = """\
+    IF $进入TV == 1 and $目标全国图鉴编号 != 1 and $目标全国图鉴编号 != 4 and $目标全国图鉴编号 != 7 and 是否狩猎地带($遭遇地点) == 0
+        IF $循环计数 == 0
+            $time_TV开始 = TIME()
+        ENDIF
+        IF $遭遇类型 == 2 and ($遭遇方法 == 201 or $遭遇方法 == 202 or $遭遇方法 == 203)
+            CALL 执行钓鱼背包TV等待流程
+        ELSE
+            CALL 执行TV等待流程
+        ENDIF
+        $刚进入TV = 1
+    ELIF $进入TV == 1 and 是否狩猎地带($遭遇地点) == 1
+"""
+FISHING_SUMMARY_CURSOR_LEGACY_BLOCK = """\
+                IF $遭遇类型 == 2 and ($遭遇方法 == 201 or $遭遇方法 == 202 or $遭遇方法 == 203)
+                    IF 是否狩猎地带($遭遇地点) == 1
+                        # 狩猎区钓鱼：菜单从“图鉴”起，当前少一次DOWN会按A进图鉴，固定补一次DOWN。
+                        DOWN
+                        500
+                        DOWN
+                        500
+                    ELIF $刚进入TV == 1
+                        UP
+                        500
+                    ENDIF
+                    BREAK
+                ENDIF
+"""
+FISHING_SUMMARY_CURSOR_CURRENT_BLOCK = """\
+                IF $遭遇类型 == 2 and ($遭遇方法 == 201 or $遭遇方法 == 202 or $遭遇方法 == 203)
+                    IF 是否狩猎地带($遭遇地点) == 1
+                        # 狩猎区战斗返回后菜单从“退出”起：下移两次到“宝可梦”。
+                        DOWN
+                        500
+                        DOWN
+                        500
+                    ELIF $刚进入TV == 1
+                        # 普通钓鱼TV从背包进入，退出后主菜单记忆光标在“背包”。
+                        UP
+                        500
+                    ELSE
+                        # 普通非TV钓鱼只用Y快捷键；冷启动主菜单光标在“图鉴”。
+                        DOWN
+                        500
+                    ENDIF
+                    BREAK
+                ENDIF
+"""
+FISHING_TV_FUNCTION_MARKER = "FUNC 执行钓鱼背包TV等待流程"
+FISHING_TV_FUNCTION_ANCHOR = "FUNC 执行TV等待流程"
+FISHING_TV_FUNCTION_FORMAL = """\
+FUNC 执行钓鱼背包TV等待流程
+    # 冷启动进档后普通主菜单光标在“图鉴”：下移两次进入背包。
+    X
+    WAIT 3000
+    DOWN
+    WAIT 1000
+    DOWN
+    WAIT 500
+    A
+    WAIT 3500
+    RIGHT
+    WAIT 2500
+    A
+    WAIT 500
+    A
+    IF $循环计数 == 0
+        $time_TV等待开始 = TIME()
+        $第0轮TV等待请求 = $目标获取TV等待MS
+    ENDIF
+    WAIT $目标获取TV等待MS
+    IF $循环计数 == 0
+        $time_TV等待结束 = TIME()
+    ENDIF
+    # 依次退出Teachy TV、背包和主菜单；主菜单记忆光标停在“背包”。
+    B
+    WAIT 2500
+    B
+    WAIT 2000
+    B
+    WAIT 1500
+    IF $循环计数 == 0
+        $time_TV结束 = TIME()
+    ENDIF
+ENDFUNC
+
+"""
+FISHING_TV_FUNCTION_TIMELINE = FISHING_TV_FUNCTION_FORMAL.replace(
+    "    WAIT $目标获取TV等待MS\n",
+    "    $Seed时间轴开始 = TIME()\n"
+    "    $Seed时间轴结果 = 执行时间轴等待到($Seed时间轴开始, $目标获取TV等待MS)\n"
+    "    $Seed时间轴实际 = TIME() - $Seed时间轴开始\n"
+    "    $Seed时间轴超时 = $Seed时间轴实际 - $目标获取TV等待MS\n"
+    "    PRINT TV局部时间轴: 请求 & $目标获取TV等待MS & \" ms，实际 \" & $Seed时间轴实际 & \" ms，超时 \" & $Seed时间轴超时 & \" ms\"\n",
+    1,
+)
+FISHING_LIBRARY_LEGACY_BLOCK = """\
+        IF $进入TV == 0
+            $钓鱼时间轴允许抛竿 = 钓鱼时间轴检查可否抛竿()
+            IF $钓鱼时间轴允许抛竿 != 1
+                RETURN 0
+            ENDIF
+            Y
+        ELSE
+            X
+            500
+            DOWN
+            500
+            DOWN
+            500
+            A
+            1500
+            RIGHT
+            1500
+            IF $遭遇方法 == 201
+                # 破旧钓竿
+            ELIF $遭遇方法 == 202
+                # 好钓竿
+                DOWN
+                500
+            ELIF $遭遇方法 == 203
+                # 厉害钓竿
+                DOWN
+                500
+                DOWN
+                500
+            ENDIF
+            A
+            500
+            $钓鱼时间轴允许抛竿 = 钓鱼时间轴检查可否抛竿()
+            IF $钓鱼时间轴允许抛竿 != 1
+                RETURN 0
+            ENDIF
+            A
+            1500
+        ENDIF
+"""
+FISHING_LIBRARY_CURRENT_BLOCK = """\
+        # 所有普通钓鱼统一由Y快捷键使用钓竿；TV模式会在进入本函数前
+        # 从背包第一格打开Teachy TV，并完整退回场地。
+        $钓鱼时间轴允许抛竿 = 钓鱼时间轴检查可否抛竿()
+        IF $钓鱼时间轴允许抛竿 != 1
+            RETURN 0
+        ENDIF
+        Y
 """
 EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
 EGG_TRANSIENT_RETRY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：瞬时动作失败重启后继续下一轮"
@@ -3655,6 +3990,95 @@ def _apply_party_summary_navigation_text(
     )
 
 
+def _apply_roamer_menu_cursor_text(template_text: str) -> str:
+    """Keep roaming summary navigation and visible setup requirements in sync."""
+    if ROAMER_SUMMARY_CURSOR_CURRENT_BLOCK not in template_text:
+        if template_text.count(ROAMER_SUMMARY_CURSOR_LEGACY_BLOCK) != 1:
+            raise ValueError("主脚本缺少唯一的游走能力页光标分支，拒绝修正")
+        template_text = template_text.replace(
+            ROAMER_SUMMARY_CURSOR_LEGACY_BLOCK,
+            ROAMER_SUMMARY_CURSOR_CURRENT_BLOCK,
+            1,
+        )
+
+    if ROAMER_BICYCLE_BAG_REQUIREMENT_CURRENT not in template_text:
+        if template_text.count(ROAMER_BICYCLE_BAG_REQUIREMENT_LEGACY) != 1:
+            raise ValueError("主脚本缺少唯一的游走TV自行车背包要求，拒绝修正")
+        template_text = template_text.replace(
+            ROAMER_BICYCLE_BAG_REQUIREMENT_LEGACY,
+            ROAMER_BICYCLE_BAG_REQUIREMENT_CURRENT,
+            1,
+        )
+
+    if ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_CURRENT not in template_text:
+        if template_text.count(ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY) != 1:
+            raise ValueError("主脚本缺少唯一的游走自行车快捷键要求，拒绝修正")
+        template_text = template_text.replace(
+            ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY,
+            ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_CURRENT,
+            1,
+        )
+    return template_text
+
+
+def _apply_fishing_shortcut_and_cursor_text(template_text: str) -> str:
+    """Use a registered rod for every fishing route and keep cursor math explicit."""
+    replacements = (
+        (
+            FISHING_REQUIREMENTS_CURRENT_BLOCK,
+            FISHING_REQUIREMENTS_LEGACY_BLOCK,
+            "主脚本缺少唯一的钓鱼运行要求块，拒绝修正",
+        ),
+        (
+            FISHING_TV_GUARD_CURRENT_BLOCK,
+            FISHING_TV_GUARD_LEGACY_BLOCK,
+            "主脚本缺少唯一的背包TV首轮保护块，拒绝修正",
+        ),
+        (
+            FISHING_TV_DISPATCH_CURRENT_BLOCK,
+            FISHING_TV_DISPATCH_LEGACY_BLOCK,
+            "主脚本缺少唯一的钓鱼TV分派块，拒绝修正",
+        ),
+        (
+            FISHING_SUMMARY_CURSOR_CURRENT_BLOCK,
+            FISHING_SUMMARY_CURSOR_LEGACY_BLOCK,
+            "主脚本缺少唯一的钓鱼能力页光标分支，拒绝修正",
+        ),
+    )
+    for current, legacy, error in replacements:
+        if current in template_text:
+            continue
+        if template_text.count(legacy) != 1:
+            raise ValueError(error)
+        template_text = template_text.replace(legacy, current, 1)
+
+    if FISHING_TV_FUNCTION_MARKER not in template_text:
+        if template_text.count(FISHING_TV_FUNCTION_ANCHOR) != 1:
+            raise ValueError("主脚本缺少唯一的TV等待函数，拒绝注入钓鱼背包TV流程")
+        function_text = FISHING_TV_FUNCTION_FORMAL
+        if "FUNC 执行时间轴等待到" in template_text:
+            function_text = FISHING_TV_FUNCTION_TIMELINE
+        template_text = template_text.replace(
+            FISHING_TV_FUNCTION_ANCHOR,
+            function_text + FISHING_TV_FUNCTION_ANCHOR,
+            1,
+        )
+    return template_text
+
+
+def _apply_fishing_rod_shortcut_library_text(library_text: str) -> str:
+    """Remove the old TV-mode Bag rod selection from the fishing library."""
+    if FISHING_LIBRARY_CURRENT_BLOCK in library_text:
+        return library_text
+    if library_text.count(FISHING_LIBRARY_LEGACY_BLOCK) != 1:
+        raise ValueError("野生目标库缺少唯一的钓鱼取竿分支，拒绝修正")
+    return library_text.replace(
+        FISHING_LIBRARY_LEGACY_BLOCK,
+        FISHING_LIBRARY_CURRENT_BLOCK,
+        1,
+    )
+
+
 def _apply_standard_home_buffer_runtime_override_text(
     template_text: str,
     override_text: str,
@@ -4037,6 +4461,8 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
             template_path.read_text(encoding="utf-8"),
             party_summary_helper,
         )
+        configured = _apply_roamer_menu_cursor_text(configured)
+        configured = _apply_fishing_shortcut_and_cursor_text(configured)
         template_path.write_text(configured, encoding="utf-8")
 
     apply_wild_pid_retry_limit(standard_path)
@@ -4044,6 +4470,13 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
     apply_ocr_runtime_fallback(source_dir / "lib" / OCR_NAME_LIBRARY_NAME)
     apply_egg_settings_runtime_override(
         source_dir / "lib" / EGG_SETTINGS_LIBRARY_NAME
+    )
+    wild_target_path = source_dir / "lib" / "17_获取_野生目标.ecs"
+    wild_target_path.write_text(
+        _apply_fishing_rod_shortcut_library_text(
+            wild_target_path.read_text(encoding="utf-8")
+        ),
+        encoding="utf-8",
     )
     static_target_path = source_dir / "lib" / "16_获取_静态目标.ecs"
     static_target_text = _apply_togepi_hatch_cycle_override_text(

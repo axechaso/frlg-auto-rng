@@ -18,10 +18,10 @@ def _replace(text: str, old: str, new: str, count: int = 1) -> str:
 def _upgrade_normal_menu_advance(text: str) -> str:
     if MENU_ADVANCE_MARKER in text or "FUNC 重新计算等待参数" not in text:
         return text
-    if "$普通帧轴菜单额外推进帧 = 128" in text:
+    if re.search(r"(?m)^\$普通帧轴菜单额外推进帧 = \d+$", text):
         # Direct-run packages may already contain the reviewed change without
-        # an automation marker.  The configuration itself is the idempotency
-        # marker; do not rewrite the source corpus merely to add a comment.
+        # an automation marker.  The measured value can be retuned by the
+        # direct-run mother, so the field itself is the idempotency marker.
         return text
     text, count = re.subn(
         r"(?m)^(\$帧奇偶修正方案 = [01])$",

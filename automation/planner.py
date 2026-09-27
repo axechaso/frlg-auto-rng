@@ -586,7 +586,11 @@ def search_best_plan(
         warnings.append(
             f"已自动选择 Seed 模式 {selected_mode}；运行前必须确认游戏内 SOUND/BUTTON MODE 与该模式一致。"
         )
-    if "Safari Zone" in request.location and route.advances > 14400:
+    if request.category in {"OldRod", "GoodRod", "SuperRod"} and route.advances > 14400:
+        warnings.append(
+            "钓鱼TV路线固定由背包重要道具第一格打开Teachy TV，并用Y快捷键抛竿；启动前确认两项位置。"
+        )
+    elif "Safari Zone" in request.location and route.advances > 14400:
         warnings.append(
             "该狩猎区路线会进入 Teachy TV 长流程；启动前确认游戏内钓竿/道具快捷键设置。"
         )

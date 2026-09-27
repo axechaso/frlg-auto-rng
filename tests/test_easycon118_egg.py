@@ -42,7 +42,24 @@ from automation.easycon118 import (
     EGG_SURF_BATTLE_OVERRIDE_PATH,
     EGG_TRANSIENT_RETRY_OVERRIDE_MARKER,
     EGG_TERMINAL_STOP_OVERRIDE_MARKER,
+    FISHING_LIBRARY_CURRENT_BLOCK,
+    FISHING_LIBRARY_LEGACY_BLOCK,
+    FISHING_REQUIREMENTS_CURRENT_BLOCK,
+    FISHING_REQUIREMENTS_LEGACY_BLOCK,
+    FISHING_SUMMARY_CURSOR_CURRENT_BLOCK,
+    FISHING_SUMMARY_CURSOR_LEGACY_BLOCK,
+    FISHING_TV_DISPATCH_CURRENT_BLOCK,
+    FISHING_TV_DISPATCH_LEGACY_BLOCK,
+    FISHING_TV_FUNCTION_MARKER,
+    FISHING_TV_GUARD_CURRENT_BLOCK,
+    FISHING_TV_GUARD_LEGACY_BLOCK,
     PARTY_SUMMARY_NAVIGATION_PATH,
+    ROAMER_BICYCLE_BAG_REQUIREMENT_CURRENT,
+    ROAMER_BICYCLE_BAG_REQUIREMENT_LEGACY,
+    ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_CURRENT,
+    ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY,
+    ROAMER_SUMMARY_CURSOR_CURRENT_BLOCK,
+    ROAMER_SUMMARY_CURSOR_LEGACY_BLOCK,
     SEED_HOLD_OBSERVATION_CURRENT_BRANCH,
     SEED_HOLD_OBSERVATION_CURRENT_DECISION,
     SEED_HOLD_OBSERVATION_DIRECT_HALF_MARKER,
@@ -76,6 +93,9 @@ from automation.easycon118 import (
     _apply_egg_transient_retry_runtime_override_text,
     _apply_egg_terminal_stop_policy_text,
     _apply_party_summary_navigation_text,
+    _apply_roamer_menu_cursor_text,
+    _apply_fishing_rod_shortcut_library_text,
+    _apply_fishing_shortcut_and_cursor_text,
     _apply_egg_post_pickup_retry_policy_text,
     _apply_egg_no_egg_evidence_policy_text,
     _apply_egg_no_egg_seed_gate_text,
@@ -963,6 +983,49 @@ ENDFUNC
         )[0]
         self.assertIn("反查_队伍页按上移次数选择目标(3)", fifth_slot)
 
+    def test_roamer_summary_always_moves_from_bag_to_party(self):
+        original = (
+            ROAMER_BICYCLE_BAG_REQUIREMENT_LEGACY
+            + ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY
+            + ROAMER_SUMMARY_CURSOR_LEGACY_BLOCK
+        )
+        configured = _apply_roamer_menu_cursor_text(original)
+
+        self.assertEqual(_apply_roamer_menu_cursor_text(configured), configured)
+        self.assertIn(ROAMER_SUMMARY_CURSOR_CURRENT_BLOCK, configured)
+        self.assertNotIn("IF $刚进入TV == 1", configured)
+        self.assertIn(ROAMER_BICYCLE_BAG_REQUIREMENT_CURRENT, configured)
+        self.assertIn(ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_CURRENT, configured)
+        self.assertNotIn(ROAMER_BICYCLE_BAG_REQUIREMENT_LEGACY, configured)
+        self.assertNotIn(ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY, configured)
+
+    def test_fishing_uses_bag_tv_registered_rod_and_explicit_summary_cursor(self):
+        original = (
+            FISHING_REQUIREMENTS_LEGACY_BLOCK
+            + FISHING_TV_GUARD_LEGACY_BLOCK
+            + FISHING_TV_DISPATCH_LEGACY_BLOCK
+            + FISHING_SUMMARY_CURSOR_LEGACY_BLOCK
+            + "FUNC 执行TV等待流程\nENDFUNC\n"
+        )
+        configured = _apply_fishing_shortcut_and_cursor_text(original)
+
+        self.assertEqual(_apply_fishing_shortcut_and_cursor_text(configured), configured)
+        self.assertIn(FISHING_REQUIREMENTS_CURRENT_BLOCK, configured)
+        self.assertIn(FISHING_TV_GUARD_CURRENT_BLOCK, configured)
+        self.assertIn(FISHING_TV_DISPATCH_CURRENT_BLOCK, configured)
+        self.assertIn(FISHING_SUMMARY_CURSOR_CURRENT_BLOCK, configured)
+        self.assertIn(FISHING_TV_FUNCTION_MARKER, configured)
+        self.assertIn("普通非TV钓鱼只用Y快捷键", configured)
+        self.assertNotIn("背包第二页第三格放厉害钓竿", configured)
+
+        library = _apply_fishing_rod_shortcut_library_text(
+            FISHING_LIBRARY_LEGACY_BLOCK
+        )
+        self.assertEqual(_apply_fishing_rod_shortcut_library_text(library), library)
+        self.assertEqual(library, FISHING_LIBRARY_CURRENT_BLOCK)
+        self.assertIn("Y\n", library)
+        self.assertNotIn("IF $进入TV == 0", library)
+
     def test_candy_navigation_uses_the_same_party_tail_rule(self):
         original = """\
 FUNC 孵蛋测试_使用神奇糖果指定槽($队伍位置: INT): INT
@@ -1650,9 +1713,26 @@ ENDFUNC
         self.assertIn("$孵蛋Held反查帧容差 = 100", template)
         self.assertIn("$孵蛋Pickup反查帧容差 = 2000", template)
         self.assertIn(
-            "Pickup尚未稳定：仍登记本轮Held无蛋区间证据，仅使用临时跳区，不修改正式Held修正",
+            "Pickup尚未稳定：仍登记本轮Held无蛋区间证据；已有可信Held正式修正时允许直接吸收±1帧",
             template,
         )
+        no_egg_handler = template.split(
+            "FUNC 孵蛋流程_处理目标Seed无蛋(): INT", 1
+        )[1].split("ENDFUNC", 1)[0]
+        self.assertIn(
+            "IF $孵蛋流程Held正式修正可信 == 1 and ($孵蛋流程Held无蛋微调差 == -1 or $孵蛋流程Held无蛋微调差 == 1)",
+            no_egg_handler,
+        )
+        self.assertIn(
+            "$孵蛋Held执行修正帧 += $孵蛋流程Held无蛋微调差",
+            no_egg_handler,
+        )
+        anchor_hit = template.split("PRINT Held恢复锚点精确命中:", 1)[1].split(
+            "ENDIF", 1
+        )[0]
+        self.assertIn("$孵蛋流程Held正式修正可信 = 1", anchor_hit)
+        self.assertIn("$孵蛋流程无蛋跳出尝试次数 = 0", anchor_hit)
+        self.assertIn("$孵蛋流程已尝试Held锚点表 = []", anchor_hit)
         self.assertIn(
             "无蛋后未命中目标Seed：本轮只校正Seed等待；保留同一Held请求已有无蛋区间证据",
             template,

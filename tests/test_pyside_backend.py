@@ -84,6 +84,53 @@ class PySideBackendTests(unittest.TestCase):
         self.assertIn("即将运行：TID / SID 建档", html)
         self.assertIn("12345", html)
 
+    def test_roamer_requirements_do_not_request_a_bicycle(self):
+        from pyside_app.window import wild_run_requirements
+
+        request = SimpleNamespace(method="Static 1", category="Roaming")
+        options = SimpleNamespace(
+            item_rng_mode=False,
+            party_empty_slots=1,
+            paralysis=False,
+            false_swipe=False,
+            continue_capture_after_shiny=False,
+        )
+        plan = SimpleNamespace(
+            request=request,
+            species_id=243,
+            initial_seed=SimpleNamespace(advances=15000),
+        )
+        requirements = wild_run_requirements(plan, options)
+
+        self.assertTrue(any("Teachy TV" in item for item in requirements))
+        self.assertFalse(any("自行车" in item and "不使用" not in item for item in requirements))
+
+    def test_fishing_tv_requirements_use_bag_tv_and_registered_rod(self):
+        from pyside_app.window import wild_run_requirements
+
+        request = SimpleNamespace(
+            method="Wild 1",
+            category="SuperRod",
+            location="Fuchsia City",
+        )
+        options = SimpleNamespace(
+            item_rng_mode=False,
+            party_empty_slots=1,
+            paralysis=False,
+            false_swipe=False,
+            continue_capture_after_shiny=False,
+        )
+        plan = SimpleNamespace(
+            request=request,
+            species_id=129,
+            initial_seed=SimpleNamespace(advances=15000),
+        )
+        requirements = wild_run_requirements(plan, options)
+
+        self.assertTrue(any("重要道具第一格" in item for item in requirements))
+        self.assertTrue(any("厉害钓竿" in item and "快捷键" in item for item in requirements))
+        self.assertFalse(any("Teachy TV 登录到快捷键" in item for item in requirements))
+
     def test_history_page_lists_filters_and_previews_saved_logs(self):
         run_dir = self.root / "runtime" / ("egg-" + "a" * 32)
         run_dir.mkdir(parents=True)

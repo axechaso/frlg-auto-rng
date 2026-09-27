@@ -82,12 +82,28 @@ def wild_run_requirements(plan, options) -> tuple[str, ...]:
     if species in _ROAMING_SPECIES:
         requirements.append("背包第一页第三格放黄金喷雾。")
 
+    fishing_rods = {
+        "OldRod": "破旧钓竿",
+        "GoodRod": "好钓竿",
+        "SuperRod": "厉害钓竿",
+    }
+    rod = fishing_rods.get(request.category) if is_wild else None
     if plan.initial_seed.advances > 14400:
-        requirements.append("目标 Advance 超过 14400：按当前路线准备 Teachy TV 与所需钓竿/自行车位置。")
-    elif is_wild and request.category in {"OldRod", "GoodRod", "SuperRod"}:
-        rod = {"OldRod": "破旧钓竿", "GoodRod": "好钓竿", "SuperRod": "厉害钓竿"}[request.category]
+        if rod is not None:
+            requirements.append(
+                f"目标 Advance 超过 14400：Teachy TV 放在重要道具第一格且不要登录快捷键；将{rod}登录到快捷键。"
+            )
+        elif species in _ROAMING_SPECIES:
+            requirements.append("目标 Advance 超过 14400：将 Teachy TV 登录到快捷键；游走路线不使用自行车。")
+        elif species == 175:
+            requirements.append("目标 Advance 超过 14400：将 Teachy TV 登录到快捷键；自行车放在重要道具第四格。")
+        elif "Safari Zone" in request.location:
+            requirements.append("目标 Advance 超过 14400：Teachy TV 放在重要道具第一格且不要登录快捷键。")
+        else:
+            requirements.append("目标 Advance 超过 14400：将 Teachy TV 登录到快捷键。")
+    elif rod is not None:
         requirements.append(f"将{rod}登录到快捷键。")
-    elif species == 175 or species in _ROAMING_SPECIES:
+    elif species == 175:
         requirements.append("将自行车登录到快捷键。")
 
     requirements.append("确认游戏位于方案要求的存档位置，并保持 NS 主页/游戏启动状态符合脚本要求。")
