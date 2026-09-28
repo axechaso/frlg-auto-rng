@@ -115,6 +115,27 @@ class EasyConLoggedTests(unittest.TestCase):
                 log_path.read_text(encoding="utf-8"),
             )
 
+    def test_fatal_easycon_output_overrides_zero_exit_code_and_success_marker(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_path = root / "runner.log"
+            child_code = (
+                "print('WILD_DONE'); "
+                "print('!!意外错误!!Index was outside the bounds of the array.')"
+            )
+            with mock.patch("run_easycon_logged._write_console"):
+                result = run_logged(
+                    [sys.executable, "-c", child_code],
+                    root,
+                    log_path,
+                    ("WILD_DONE", "WILD_FAILED"),
+                )
+
+            self.assertEqual(result, 3)
+            log_text = log_path.read_text(encoding="utf-8")
+            self.assertIn("未处理异常", log_text)
+            self.assertIn("[EASYCON_DIAGNOSTIC]", log_text)
+
     def test_headless_package_logs_when_stdout_is_unavailable(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -42,6 +42,7 @@ from .diagnostics import explain_error, parse_integer
 from .profiles import ProfileManager
 from .services import AppPaths, WildInputs, prepare_wild, prepare_run, display_log_line
 from notifications.qq_service import QQNotificationService, QQSettingsStore
+from easycon_outcome import easycon_log_has_fatal_error
 from .qq_notifications import QQNotificationDialog
 
 
@@ -952,8 +953,9 @@ class FrlgWindow(FrlgPreviewWindow):
         self._read_output()
         self._append_log(self.decoder.decode(b"", final=True), final=True)
         self.running = False
+        fatal_output = easycon_log_has_fatal_error(self.log_view.toPlainText())
         prepared = getattr(self, "running_prepared", None)
-        if code == 0 and prepared and prepared.inputs.options.update_precalibration and self.run_command:
+        if code == 0 and not fatal_output and prepared and prepared.inputs.options.update_precalibration and self.run_command:
             try:
                 record = update_from_manifest(self.paths.user / "precalibration.json", prepared.project.parent / "plan.json",
                                               self.run_command.log_path.read_text(encoding="utf-8", errors="replace"))
@@ -964,6 +966,9 @@ class FrlgWindow(FrlgPreviewWindow):
         if code == REPAIR_REQUIRED_EXIT_CODE:
             self._append_log("\n[标签故障保护] 手柄输入已锁定，本次运行以安全停止码结束。请在设备标签卡片查看截图并修复标签。\n")
             self.set_status("标签故障保护已停止运行；请打开设备标签卡片处理故障事件。")
+        elif fatal_output:
+            self._append_log("\n[运行失败] EasyCon 报告了未处理异常；即使退出码为 0，也不会判定为完成。\n")
+            self.set_status("运行失败：EasyCon 报告了未处理异常，请查看完整日志。")
         elif self.runtime_issues:
             for explanation in self.runtime_issues.values():
                 self._append_log("\n[本次运行问题] " + explanation.message + "\n")
@@ -971,7 +976,7 @@ class FrlgWindow(FrlgPreviewWindow):
             self.set_status(f"运行已结束（退出码 {code}）：{issue.summary}")
         else:
             self.set_status(f"运行进程已结束（退出码 {code}）；请查看日志中的实际结果。")
-        self._notify_run_finished(code)
+        self._notify_run_finished(code, fatal_output=fatal_output)
         if self.current_page == "history_logs":
             self.refresh_history_logs()
         if self.current_page == "tid_records" and not self.closing:
@@ -1002,14 +1007,14 @@ class FrlgWindow(FrlgPreviewWindow):
         self.qq_dialog.raise_()
         self.qq_dialog.activateWindow()
 
-    def _notify_run_finished(self, code):
+    def _notify_run_finished(self, code, *, fatal_output=False):
         if self._run_notification_sent:
             return
         self._run_notification_sent = True
         if self._manual_stop_requested:
             outcome = "已停止"
         else:
-            outcome = "已完成" if code == 0 else "失败"
+            outcome = "已完成" if code == 0 and not fatal_output else "失败"
         detail = self.log_view.toPlainText().strip()
         if len(detail) > 800:
             detail = detail[-800:]

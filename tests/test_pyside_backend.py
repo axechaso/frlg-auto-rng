@@ -131,6 +131,21 @@ class PySideBackendTests(unittest.TestCase):
         self.assertTrue(any("厉害钓竿" in item and "快捷键" in item for item in requirements))
         self.assertFalse(any("Teachy TV 登录到快捷键" in item for item in requirements))
 
+    def test_zero_exit_with_easycon_exception_notifies_failure(self):
+        from easycon_outcome import easycon_log_has_fatal_error
+
+        w = self.window
+        w._begin_run_notification()
+        w.log_view.setPlainText(
+            "WILD_DONE\n!!意外错误!!Index was outside the bounds of the array."
+        )
+        with patch.object(w.qq_service, "notify_task") as notify:
+            fatal = easycon_log_has_fatal_error(w.log_view.toPlainText())
+            w._notify_run_finished(0, fatal_output=fatal)
+
+        self.assertTrue(fatal)
+        self.assertEqual(notify.call_args.args[2], "失败")
+
     def test_history_page_lists_filters_and_previews_saved_logs(self):
         run_dir = self.root / "runtime" / ("egg-" + "a" * 32)
         run_dir.mkdir(parents=True)

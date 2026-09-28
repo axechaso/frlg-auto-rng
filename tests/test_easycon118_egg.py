@@ -48,9 +48,13 @@ from automation.easycon118 import (
     FISHING_REQUIREMENTS_LEGACY_BLOCK,
     FISHING_SUMMARY_CURSOR_CURRENT_BLOCK,
     FISHING_SUMMARY_CURSOR_LEGACY_BLOCK,
+    FISHING_SUMMARY_CURSOR_PREVIOUS_BLOCK,
     FISHING_TV_DISPATCH_CURRENT_BLOCK,
     FISHING_TV_DISPATCH_LEGACY_BLOCK,
+    FISHING_TV_DISPATCH_PREVIOUS_BLOCK,
     FISHING_TV_FUNCTION_MARKER,
+    FISHING_TV_FUNCTION_FORMAL,
+    FISHING_TV_FUNCTION_PREVIOUS_FORMAL,
     FISHING_TV_GUARD_CURRENT_BLOCK,
     FISHING_TV_GUARD_LEGACY_BLOCK,
     PARTY_SUMMARY_NAVIGATION_PATH,
@@ -60,6 +64,8 @@ from automation.easycon118 import (
     ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY,
     ROAMER_SUMMARY_CURSOR_CURRENT_BLOCK,
     ROAMER_SUMMARY_CURSOR_LEGACY_BLOCK,
+    SAFARI_TV_EXIT_CURRENT_BLOCK,
+    SAFARI_TV_EXIT_PREVIOUS_BLOCK,
     SEED_HOLD_OBSERVATION_CURRENT_BRANCH,
     SEED_HOLD_OBSERVATION_CURRENT_DECISION,
     SEED_HOLD_OBSERVATION_DIRECT_HALF_MARKER,
@@ -1025,6 +1031,54 @@ ENDFUNC
         self.assertEqual(library, FISHING_LIBRARY_CURRENT_BLOCK)
         self.assertIn("Y\n", library)
         self.assertNotIn("IF $进入TV == 0", library)
+
+    def test_fishing_tv_exit_covers_startup_swallow_and_all_menu_layers(self):
+        previous = (
+            FISHING_REQUIREMENTS_CURRENT_BLOCK
+            + FISHING_TV_GUARD_CURRENT_BLOCK
+            + FISHING_TV_DISPATCH_PREVIOUS_BLOCK
+            + FISHING_SUMMARY_CURSOR_PREVIOUS_BLOCK
+            + FISHING_TV_FUNCTION_PREVIOUS_FORMAL
+            + "FUNC 执行TV等待流程\nENDFUNC\n"
+        )
+        configured = _apply_fishing_shortcut_and_cursor_text(previous)
+
+        self.assertEqual(_apply_fishing_shortcut_and_cursor_text(configured), configured)
+        self.assertIn(FISHING_TV_FUNCTION_FORMAL, configured)
+        self.assertIn(FISHING_TV_DISPATCH_CURRENT_BLOCK, configured)
+        self.assertIn(
+            "执行钓鱼背包TV等待流程($目标获取TV等待MS)",
+            configured,
+        )
+        self.assertNotIn("WAIT $目标获取TV等待MS", FISHING_TV_FUNCTION_FORMAL)
+        self.assertIn("FOR 6\n        B\n        WAIT 1000\n    NEXT", configured)
+        self.assertIn("IF $刚进入TV == 1", FISHING_SUMMARY_CURSOR_CURRENT_BLOCK)
+        safari_branch = FISHING_SUMMARY_CURSOR_CURRENT_BLOCK.split(
+            "IF 是否狩猎地带($遭遇地点) == 1", 1
+        )[1].split("ELIF $刚进入TV == 1", 1)[0]
+        self.assertIn("UP", safari_branch)
+        self.assertIn("DOWN", safari_branch)
+
+    def test_safari_tv_exit_returns_to_field_before_next_navigation(self):
+        library = _apply_fishing_rod_shortcut_library_text(
+            FISHING_LIBRARY_CURRENT_BLOCK + SAFARI_TV_EXIT_PREVIOUS_BLOCK
+        )
+
+        self.assertEqual(_apply_fishing_rod_shortcut_library_text(library), library)
+        self.assertIn(SAFARI_TV_EXIT_CURRENT_BLOCK, library)
+        helper = SAFARI_TV_EXIT_CURRENT_BLOCK.split(
+            "FUNC 狩猎区执行TV等待", 1
+        )[1].split("FUNC 狩猎区TV后准备甜甜香气", 1)[0]
+        self.assertEqual(helper.count("\n    B\n"), 5)
+        sweet_scent = SAFARI_TV_EXIT_CURRENT_BLOCK.split(
+            "FUNC 狩猎区TV后准备甜甜香气", 1
+        )[1].split("FUNC 狩猎区TV后返回场地", 1)[0]
+        self.assertLess(sweet_scent.index("\n    X\n"), sweet_scent.index("\n    UP\n"))
+        return_to_field = SAFARI_TV_EXIT_CURRENT_BLOCK.split(
+            "FUNC 狩猎区TV后返回场地", 1
+        )[1]
+        self.assertNotIn("\n    B\n", return_to_field)
+        self.assertIn("WAIT 2000", return_to_field)
 
     def test_candy_navigation_uses_the_same_party_tail_rule(self):
         original = """\

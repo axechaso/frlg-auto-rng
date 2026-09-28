@@ -238,10 +238,13 @@ PREVIOUS_SCRIPT_SHA256S += (
     # Teachy TV opened from Bag, and explicit post-catch cursor navigation.
     "abc734a8f44ff152312bf3f62f5e8cc87194b13325bb3e2985f567a45325418b",
 )
-EXPECTED_SCRIPT_SHA256 = "13c161b688aeee5cf78b2583920d9925ac8dcbaa4d7aef0b67a2beea19b5514e"
+EXPECTED_SCRIPT_SHA256 = "95af0d033097233b4c273abeeaff96448fd9a8948532134f7f9b28031066f553"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # Canonical corpus before ordinary fishing passed its per-round Bag-TV
+    # wait into the helper explicitly and all Bag-TV exits became layer-safe.
+    "13c161b688aeee5cf78b2583920d9925ac8dcbaa4d7aef0b67a2beea19b5514e",
     # September 27 materialization before the final roaming/fishing mother
     # was re-imported through every existing 1.6.4-a compatibility transform.
     "c6419713b40c79b33b813baab2e21ddc65c46bab32b34c50f5e8da37cce7e29c",
@@ -857,7 +860,7 @@ FISHING_TV_DISPATCH_LEGACY_BLOCK = """\
         $刚进入TV = 1
     ELIF $进入TV == 1 and 是否狩猎地带($遭遇地点) == 1
 """
-FISHING_TV_DISPATCH_CURRENT_BLOCK = """\
+FISHING_TV_DISPATCH_PREVIOUS_BLOCK = """\
     IF $进入TV == 1 and $目标全国图鉴编号 != 1 and $目标全国图鉴编号 != 4 and $目标全国图鉴编号 != 7 and 是否狩猎地带($遭遇地点) == 0
         IF $循环计数 == 0
             $time_TV开始 = TIME()
@@ -870,6 +873,13 @@ FISHING_TV_DISPATCH_CURRENT_BLOCK = """\
         $刚进入TV = 1
     ELIF $进入TV == 1 and 是否狩猎地带($遭遇地点) == 1
 """
+FISHING_TV_DISPATCH_CURRENT_BLOCK = FISHING_TV_DISPATCH_PREVIOUS_BLOCK.replace(
+    "            CALL 执行钓鱼背包TV等待流程\n",
+    "            # 目标获取TV等待MS是本函数的局部变量，必须显式传入子函数。\n"
+    "            # EasyCon 1.6.4-a 跨函数读取它会触发 IndexOutOfRangeException。\n"
+    "            $钓鱼背包TV执行结果 = 执行钓鱼背包TV等待流程($目标获取TV等待MS)\n",
+    1,
+)
 FISHING_SUMMARY_CURSOR_LEGACY_BLOCK = """\
                 IF $遭遇类型 == 2 and ($遭遇方法 == 201 or $遭遇方法 == 202 or $遭遇方法 == 203)
                     IF 是否狩猎地带($遭遇地点) == 1
@@ -885,7 +895,7 @@ FISHING_SUMMARY_CURSOR_LEGACY_BLOCK = """\
                     BREAK
                 ENDIF
 """
-FISHING_SUMMARY_CURSOR_CURRENT_BLOCK = """\
+FISHING_SUMMARY_CURSOR_PREVIOUS_BLOCK = """\
                 IF $遭遇类型 == 2 and ($遭遇方法 == 201 or $遭遇方法 == 202 or $遭遇方法 == 203)
                     IF 是否狩猎地带($遭遇地点) == 1
                         # 狩猎区战斗返回后菜单从“退出”起：下移两次到“宝可梦”。
@@ -905,9 +915,35 @@ FISHING_SUMMARY_CURSOR_CURRENT_BLOCK = """\
                     BREAK
                 ENDIF
 """
+FISHING_SUMMARY_CURSOR_CURRENT_BLOCK = """\
+                IF $遭遇类型 == 2 and ($遭遇方法 == 201 or $遭遇方法 == 202 or $遭遇方法 == 203)
+                    IF 是否狩猎地带($遭遇地点) == 1
+                        IF $刚进入TV == 1
+                            # 狩猎区TV从背包使用Teachy TV；退出后光标仍记忆在“背包”。
+                            UP
+                            500
+                        ELSE
+                            # 狩猎区非TV钓鱼没有打开菜单；初始光标在“退出”。
+                            DOWN
+                            500
+                            DOWN
+                            500
+                        ENDIF
+                    ELIF $刚进入TV == 1
+                        # 普通钓鱼TV从背包进入，退出后主菜单记忆光标在“背包”。
+                        UP
+                        500
+                    ELSE
+                        # 普通非TV钓鱼只用Y快捷键；冷启动主菜单光标在“图鉴”。
+                        DOWN
+                        500
+                    ENDIF
+                    BREAK
+                ENDIF
+"""
 FISHING_TV_FUNCTION_MARKER = "FUNC 执行钓鱼背包TV等待流程"
 FISHING_TV_FUNCTION_ANCHOR = "FUNC 执行TV等待流程"
-FISHING_TV_FUNCTION_FORMAL = """\
+FISHING_TV_FUNCTION_LEGACY_FORMAL = """\
 FUNC 执行钓鱼背包TV等待流程
     # 冷启动进档后普通主菜单光标在“图鉴”：下移两次进入背包。
     X
@@ -944,13 +980,57 @@ FUNC 执行钓鱼背包TV等待流程
 ENDFUNC
 
 """
-FISHING_TV_FUNCTION_TIMELINE = FISHING_TV_FUNCTION_FORMAL.replace(
+FISHING_TV_FUNCTION_PREVIOUS_FORMAL = FISHING_TV_FUNCTION_LEGACY_FORMAL.replace(
+    "    # 依次退出Teachy TV、背包和主菜单；主菜单记忆光标停在“背包”。\n"
+    "    B\n"
+    "    WAIT 2500\n"
+    "    B\n"
+    "    WAIT 2000\n"
+    "    B\n"
+    "    WAIT 1500\n",
+    "    # TV等待很短时启动转场可能吞掉前面的B。保持原6000ms退出预算，\n"
+    "    # 分6次发送B，稳定退出TV、道具子菜单、背包和主菜单；多余B在场地无副作用。\n"
+    "    FOR 6\n"
+    "        B\n"
+    "        WAIT 1000\n"
+    "    NEXT\n",
+    1,
+)
+FISHING_TV_FUNCTION_FORMAL = (
+    FISHING_TV_FUNCTION_PREVIOUS_FORMAL
+    .replace(
+        "FUNC 执行钓鱼背包TV等待流程\n",
+        "FUNC 执行钓鱼背包TV等待流程($TV等待: INT): INT\n",
+        1,
+    )
+    .replace("$目标获取TV等待MS", "$TV等待")
+    .replace("ENDFUNC\n\n", "    RETURN 1\nENDFUNC\n\n", 1)
+)
+FISHING_TV_FUNCTION_LEGACY_TIMELINE = FISHING_TV_FUNCTION_LEGACY_FORMAL.replace(
     "    WAIT $目标获取TV等待MS\n",
     "    $Seed时间轴开始 = TIME()\n"
     "    $Seed时间轴结果 = 执行时间轴等待到($Seed时间轴开始, $目标获取TV等待MS)\n"
     "    $Seed时间轴实际 = TIME() - $Seed时间轴开始\n"
     "    $Seed时间轴超时 = $Seed时间轴实际 - $目标获取TV等待MS\n"
     "    PRINT TV局部时间轴: 请求 & $目标获取TV等待MS & \" ms，实际 \" & $Seed时间轴实际 & \" ms，超时 \" & $Seed时间轴超时 & \" ms\"\n",
+    1,
+)
+FISHING_TV_FUNCTION_PREVIOUS_TIMELINE = FISHING_TV_FUNCTION_PREVIOUS_FORMAL.replace(
+    "    WAIT $目标获取TV等待MS\n",
+    "    $Seed时间轴开始 = TIME()\n"
+    "    $Seed时间轴结果 = 执行时间轴等待到($Seed时间轴开始, $目标获取TV等待MS)\n"
+    "    $Seed时间轴实际 = TIME() - $Seed时间轴开始\n"
+    "    $Seed时间轴超时 = $Seed时间轴实际 - $目标获取TV等待MS\n"
+    "    PRINT TV局部时间轴: 请求 & $目标获取TV等待MS & \" ms，实际 \" & $Seed时间轴实际 & \" ms，超时 \" & $Seed时间轴超时 & \" ms\"\n",
+    1,
+)
+FISHING_TV_FUNCTION_TIMELINE = FISHING_TV_FUNCTION_FORMAL.replace(
+    "    WAIT $TV等待\n",
+    "    $Seed时间轴开始 = TIME()\n"
+    "    $Seed时间轴结果 = 执行时间轴等待到($Seed时间轴开始, $TV等待)\n"
+    "    $Seed时间轴实际 = TIME() - $Seed时间轴开始\n"
+    "    $Seed时间轴超时 = $Seed时间轴实际 - $TV等待\n"
+    "    PRINT TV局部时间轴: 请求 & $TV等待 & \" ms，实际 \" & $Seed时间轴实际 & \" ms，超时 \" & $Seed时间轴超时 & \" ms\"\n",
     1,
 )
 FISHING_LIBRARY_LEGACY_BLOCK = """\
@@ -1002,6 +1082,111 @@ FISHING_LIBRARY_CURRENT_BLOCK = """\
             RETURN 0
         ENDIF
         Y
+"""
+SAFARI_TV_EXIT_PREVIOUS_BLOCK = """\
+FUNC 狩猎区执行TV等待($TV等待: INT, $TV时间轴模式: INT): INT
+    X
+    WAIT 3000
+    DOWN
+    WAIT 1000
+    DOWN
+    WAIT 1000
+    DOWN
+    WAIT 500
+    A
+    WAIT 3500
+    RIGHT
+    WAIT 2500
+    A
+    WAIT 500
+    A
+    IF $TV时间轴模式 == 1
+        $狩猎区TV调用结果 = 狩猎区TV时间轴等待($TV等待)
+    ELSE
+        WAIT $TV等待
+    ENDIF
+    B
+    WAIT 2500
+    B
+    WAIT 2000
+    RETURN 1
+ENDFUNC
+
+FUNC 狩猎区TV后准备甜甜香气($TV等待: INT, $TV时间轴模式: INT): INT
+    $狩猎区TV调用结果 = 狩猎区执行TV等待($TV等待, $TV时间轴模式)
+    UP
+    WAIT 500
+    A
+    WAIT 1200
+    A
+    WAIT 500
+    DOWN
+    RETURN 1
+ENDFUNC
+
+FUNC 狩猎区TV后返回场地($TV等待: INT, $TV时间轴模式: INT): INT
+    $狩猎区TV调用结果 = 狩猎区执行TV等待($TV等待, $TV时间轴模式)
+    B
+    WAIT 1500
+    RETURN 1
+ENDFUNC
+"""
+SAFARI_TV_EXIT_CURRENT_BLOCK = """\
+FUNC 狩猎区执行TV等待($TV等待: INT, $TV时间轴模式: INT): INT
+    X
+    WAIT 3000
+    DOWN
+    WAIT 1000
+    DOWN
+    WAIT 1000
+    DOWN
+    WAIT 500
+    A
+    WAIT 3500
+    RIGHT
+    WAIT 2500
+    A
+    WAIT 500
+    A
+    IF $TV时间轴模式 == 1
+        $狩猎区TV调用结果 = 狩猎区TV时间轴等待($TV等待)
+    ELSE
+        WAIT $TV等待
+    ENDIF
+    # 最短TV等待可能吞掉第一次B；五次退出覆盖TV、道具子菜单、背包和主菜单。
+    # 等待总量保持4000ms，甜甜香气/钓鱼调用方再补足各自原有固定时序。
+    B
+    WAIT 1000
+    B
+    WAIT 1000
+    B
+    WAIT 1000
+    B
+    WAIT 500
+    B
+    WAIT 500
+    RETURN 1
+ENDFUNC
+
+FUNC 狩猎区TV后准备甜甜香气($TV等待: INT, $TV时间轴模式: INT): INT
+    $狩猎区TV调用结果 = 狩猎区执行TV等待($TV等待, $TV时间轴模式)
+    X
+    WAIT 500
+    UP
+    WAIT 500
+    A
+    WAIT 1200
+    A
+    WAIT 500
+    DOWN
+    RETURN 1
+ENDFUNC
+
+FUNC 狩猎区TV后返回场地($TV等待: INT, $TV时间轴模式: INT): INT
+    $狩猎区TV调用结果 = 狩猎区执行TV等待($TV等待, $TV时间轴模式)
+    WAIT 2000
+    RETURN 1
+ENDFUNC
 """
 EGG_PREPARED_254_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：可从已完成254步的基础存档开始"
 EGG_TRANSIENT_RETRY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：瞬时动作失败重启后继续下一轮"
@@ -4026,57 +4211,80 @@ def _apply_fishing_shortcut_and_cursor_text(template_text: str) -> str:
     replacements = (
         (
             FISHING_REQUIREMENTS_CURRENT_BLOCK,
-            FISHING_REQUIREMENTS_LEGACY_BLOCK,
+            (FISHING_REQUIREMENTS_LEGACY_BLOCK,),
             "主脚本缺少唯一的钓鱼运行要求块，拒绝修正",
         ),
         (
             FISHING_TV_GUARD_CURRENT_BLOCK,
-            FISHING_TV_GUARD_LEGACY_BLOCK,
+            (FISHING_TV_GUARD_LEGACY_BLOCK,),
             "主脚本缺少唯一的背包TV首轮保护块，拒绝修正",
         ),
         (
             FISHING_TV_DISPATCH_CURRENT_BLOCK,
-            FISHING_TV_DISPATCH_LEGACY_BLOCK,
+            (FISHING_TV_DISPATCH_PREVIOUS_BLOCK, FISHING_TV_DISPATCH_LEGACY_BLOCK),
             "主脚本缺少唯一的钓鱼TV分派块，拒绝修正",
         ),
         (
             FISHING_SUMMARY_CURSOR_CURRENT_BLOCK,
-            FISHING_SUMMARY_CURSOR_LEGACY_BLOCK,
+            (FISHING_SUMMARY_CURSOR_PREVIOUS_BLOCK, FISHING_SUMMARY_CURSOR_LEGACY_BLOCK),
             "主脚本缺少唯一的钓鱼能力页光标分支，拒绝修正",
         ),
     )
-    for current, legacy, error in replacements:
+    for current, previous_blocks, error in replacements:
         if current in template_text:
             continue
-        if template_text.count(legacy) != 1:
+        matches = [previous for previous in previous_blocks if template_text.count(previous) == 1]
+        if len(matches) != 1:
             raise ValueError(error)
-        template_text = template_text.replace(legacy, current, 1)
+        template_text = template_text.replace(matches[0], current, 1)
 
+    function_text = FISHING_TV_FUNCTION_FORMAL
+    previous_functions = (
+        FISHING_TV_FUNCTION_PREVIOUS_FORMAL,
+        FISHING_TV_FUNCTION_LEGACY_FORMAL,
+    )
+    if "FUNC 执行时间轴等待到" in template_text:
+        function_text = FISHING_TV_FUNCTION_TIMELINE
+        previous_functions = (
+            FISHING_TV_FUNCTION_PREVIOUS_TIMELINE,
+            FISHING_TV_FUNCTION_LEGACY_TIMELINE,
+        )
     if FISHING_TV_FUNCTION_MARKER not in template_text:
         if template_text.count(FISHING_TV_FUNCTION_ANCHOR) != 1:
             raise ValueError("主脚本缺少唯一的TV等待函数，拒绝注入钓鱼背包TV流程")
-        function_text = FISHING_TV_FUNCTION_FORMAL
-        if "FUNC 执行时间轴等待到" in template_text:
-            function_text = FISHING_TV_FUNCTION_TIMELINE
         template_text = template_text.replace(
             FISHING_TV_FUNCTION_ANCHOR,
             function_text + FISHING_TV_FUNCTION_ANCHOR,
             1,
         )
+    elif function_text not in template_text:
+        matches = [previous for previous in previous_functions if template_text.count(previous) == 1]
+        if len(matches) != 1:
+            raise ValueError("主脚本背包TV退出函数不是受支持版本，拒绝修正")
+        template_text = template_text.replace(matches[0], function_text, 1)
     return template_text
 
 
 def _apply_fishing_rod_shortcut_library_text(library_text: str) -> str:
-    """Remove the old TV-mode Bag rod selection from the fishing library."""
-    if FISHING_LIBRARY_CURRENT_BLOCK in library_text:
-        return library_text
-    if library_text.count(FISHING_LIBRARY_LEGACY_BLOCK) != 1:
-        raise ValueError("野生目标库缺少唯一的钓鱼取竿分支，拒绝修正")
-    return library_text.replace(
-        FISHING_LIBRARY_LEGACY_BLOCK,
-        FISHING_LIBRARY_CURRENT_BLOCK,
-        1,
-    )
+    """Use the rod shortcut and make Safari Bag-TV exits layer-safe."""
+    if FISHING_LIBRARY_CURRENT_BLOCK not in library_text:
+        if library_text.count(FISHING_LIBRARY_LEGACY_BLOCK) != 1:
+            raise ValueError("野生目标库缺少唯一的钓鱼取竿分支，拒绝修正")
+        library_text = library_text.replace(
+            FISHING_LIBRARY_LEGACY_BLOCK,
+            FISHING_LIBRARY_CURRENT_BLOCK,
+            1,
+        )
+    if ("FUNC 狩猎区执行TV等待" in library_text
+            and SAFARI_TV_EXIT_CURRENT_BLOCK not in library_text):
+        if library_text.count(SAFARI_TV_EXIT_PREVIOUS_BLOCK) != 1:
+            raise ValueError("野生目标库缺少唯一的狩猎区背包TV退出流程，拒绝修正")
+        library_text = library_text.replace(
+            SAFARI_TV_EXIT_PREVIOUS_BLOCK,
+            SAFARI_TV_EXIT_CURRENT_BLOCK,
+            1,
+        )
+    return library_text
 
 
 def _apply_standard_home_buffer_runtime_override_text(
