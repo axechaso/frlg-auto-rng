@@ -63,6 +63,19 @@ class WindowsReleaseScriptTests(unittest.TestCase):
         ):
             self.assertNotIn(removed, source)
 
+    def test_source_batch_launchers_use_windows_line_endings(self):
+        for path in ROOT.glob("*.bat"):
+            with self.subTest(path=path.name):
+                payload = path.read_bytes()
+                self.assertIn(b"\r\n", payload)
+                self.assertNotIn(b"\n", payload.replace(b"\r\n", b""))
+
+        launcher = (ROOT / "启动-PySide6功能版.bat").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"run_pyside6_gui.py"', launcher)
+        self.assertIn("安装-PySide6源码版.bat", launcher)
+
     def test_publisher_requires_preflight_and_draft_verification(self):
         source = (ROOT / "tools" / "publish_windows_release.ps1").read_text(encoding="utf-8")
         for required in (
