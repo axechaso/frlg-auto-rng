@@ -39,10 +39,10 @@ def import_package(source: Path, destination: Path) -> Path:
     if ROOT.resolve() not in destination.parents:
         raise ValueError("导入目标必须位于当前项目目录内")
     label_dir = source / "ImgLabel"
-    # The upstream script package may predate either repository extension:
-    # the SID shiny-male icon and the egg pond surf-complete marker. Always
-    # audit a copy with both canonical labels installed so old and new source
-    # folders produce the same deterministic 1151-label corpus.
+    # The upstream script package may predate repository extensions such as
+    # the SID shiny icon, egg surf marker and three shortcut-row labels. Always
+    # audit a copy with all canonical labels installed so old and new source
+    # folders produce the same deterministic 1154-label corpus.
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=".easycon118-label-audit-",

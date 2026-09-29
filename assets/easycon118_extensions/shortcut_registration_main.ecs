@@ -1,0 +1,119 @@
+# 1.6.4-a 第0轮快捷登记检查：重要道具第1项TV、第2项自行车、第3项当前钓竿。
+
+FUNC 取当前流程快捷登记目标(): INT
+    # 所有钓鱼路线都用Y快捷键出竿；TV改从背包使用。
+    IF $遭遇类型 == 2 and ($遭遇方法 == 201 or $遭遇方法 == 202 or $遭遇方法 == 203)
+        RETURN 3
+    ENDIF
+
+    # 狩猎区西区草丛路线需要自行车快捷键。
+    IF $遭遇类型 == 2 and $遭遇地点 == 57 and $遭遇方法 == 101
+        RETURN 2
+    ENDIF
+
+    # 波克比无TV时直接用自行车快捷键；有TV时由下面分支登记TV。
+    IF $目标全国图鉴编号 == 175 and $进入TV == 0
+        RETURN 2
+    ENDIF
+
+    # 普通定点、野生和游走的TV由Y快捷键启动；狩猎区TV从背包启动。
+    IF $进入TV == 1 and 是否狩猎地带($遭遇地点) == 0
+        RETURN 1
+    ENDIF
+
+    RETURN 0
+ENDFUNC
+
+FUNC 检查并校正快捷登记($目标位: INT, $识图阈值: INT): INT
+    IF $目标位 <= 0
+        RETURN 1
+    ENDIF
+
+    $快捷登记结果 = 1
+
+    PRINT "FRLG_STAGE|BEGIN|settings.shortcut|settings.shortcut|20000|NS火叶全自动一键乱数2.0.ecs|检查并校正快捷登记|main.settings.shortcut|manual_prepare_then_restart|OR;快捷第一位.IL:>=:" & $识图阈值 & ",快捷第二位.IL:>=:" & $识图阈值 & ",快捷第三位.IL:>=:" & $识图阈值 & "|!"
+    X
+    WAIT 500
+    # 不依赖主菜单上次停留项，先夹到顶部再进入背包。
+    FOR 8
+        UP
+        WAIT 100
+    NEXT
+    FOR 2
+        DOWN
+        WAIT 150
+    NEXT
+    A
+    WAIT 1500
+    RIGHT
+    WAIT 1500
+
+    $快捷登记第一分数 = @快捷第一位
+    $快捷登记第二分数 = @快捷第二位
+    $快捷登记第三分数 = @快捷第三位
+    $快捷登记目标分数 = $快捷登记第一分数
+    IF $目标位 == 2
+        $快捷登记目标分数 = $快捷登记第二分数
+    ELIF $目标位 == 3
+        $快捷登记目标分数 = $快捷登记第三分数
+    ENDIF
+    PRINT "快捷登记识别: 目标位=" & $目标位 & " 第一位=" & $快捷登记第一分数 & " 第二位=" & $快捷登记第二分数 & " 第三位=" & $快捷登记第三分数
+
+    IF $快捷登记目标分数 < $识图阈值
+        # 重要道具光标也先夹到顶部，再选择固定的第1/2/3项。
+        FOR 6
+            UP
+            WAIT 100
+        NEXT
+        $快捷登记移动次数 = $目标位 - 1
+        IF $快捷登记移动次数 > 0
+            FOR $快捷登记移动索引 = 1 TO $快捷登记移动次数
+                DOWN
+                WAIT 150
+            NEXT
+        ENDIF
+        A
+        WAIT 700
+        # 道具菜单固定为 USE / REGISTER / CANCEL，向下一项登记。
+        DOWN
+        WAIT 300
+        A
+        WAIT 1500
+
+        $快捷登记目标分数 = -1
+        FOR $快捷登记识别尝试 = 1 TO 3
+            IF $目标位 == 1
+                $快捷登记目标分数 = @快捷第一位
+            ELIF $目标位 == 2
+                $快捷登记目标分数 = @快捷第二位
+            ELSE
+                $快捷登记目标分数 = @快捷第三位
+            ENDIF
+            IF $快捷登记目标分数 >= $识图阈值
+                BREAK
+            ENDIF
+            WAIT 500
+        NEXT
+        IF $快捷登记目标分数 < $识图阈值
+            PRINT "FRLG_STAGE|FAIL|settings.shortcut|快捷登记后目标位置仍未匹配|!"
+            PRINT "快捷登记检查失败: 目标位=" & $目标位 & " 匹配度=" & $快捷登记目标分数
+            B
+            WAIT 700
+            B
+            WAIT 1000
+            RETURN 0
+        ENDIF
+        PRINT "快捷登记已修改为重要道具第" & $目标位 & "项"
+        $快捷登记结果 = 2
+    ELSE
+        PRINT "快捷登记正确: 重要道具第" & $目标位 & "项"
+        $快捷登记结果 = 1
+    ENDIF
+
+    B
+    WAIT 700
+    B
+    WAIT 1000
+    PRINT "FRLG_STAGE|END|settings.shortcut|!"
+    RETURN $快捷登记结果
+ENDFUNC

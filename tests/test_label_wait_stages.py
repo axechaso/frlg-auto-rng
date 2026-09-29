@@ -12,7 +12,7 @@ from automation.easycon118 import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ASSET_ROOT = REPO_ROOT / "local_assets" / "easycon118"
-SOURCE_CORPUS_SHA256 = "abc734a8f44ff152312bf3f62f5e8cc87194b13325bb3e2985f567a45325418b"
+SOURCE_CORPUS_SHA256 = "eb18777c634b7c5ab10c0f5a930fe29d65b1fdca7d18edb10b461c733dd30bbb"
 
 
 class LabelWaitStageMaterializationTests(unittest.TestCase):
@@ -25,7 +25,7 @@ class LabelWaitStageMaterializationTests(unittest.TestCase):
             (ASSET_ROOT / "asset_manifest.json").read_text(encoding="utf-8")
         )
         self.assertEqual(manifest["source_scripts"]["sha256"], SOURCE_CORPUS_SHA256)
-        self.assertEqual(manifest["source_scripts"]["bytes"], 2060488)
+        self.assertEqual(manifest["source_scripts"]["bytes"], 2081453)
         self.assertEqual(manifest["scripts"]["sha256"], scripts["sha256"])
         self.assertEqual(manifest["scripts"]["bytes"], scripts["bytes"])
 
@@ -40,6 +40,7 @@ class LabelWaitStageMaterializationTests(unittest.TestCase):
             "main.jp.spa",
             "main.jp.spd",
             "main.jp.spe",
+            "settings.shortcut",
         )
         main_files = (
             ASSET_ROOT / "NS火叶全自动一键乱数2.0.ecs",

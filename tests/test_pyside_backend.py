@@ -73,6 +73,7 @@ class PySideBackendTests(unittest.TestCase):
         self.assertIn("C901", html)
         self.assertIn("OBS Virtual Camera", html)
         self.assertIn("运行前必须确认", html)
+        self.assertIn("第2项放自行车", html)
 
         prepared.inputs.extra["seed_mode_auto"] = True
         html = workflow_start_confirmation_html(prepared, "COM4", "OBS Virtual Camera")
@@ -103,7 +104,8 @@ class PySideBackendTests(unittest.TestCase):
         requirements = wild_run_requirements(plan, options)
 
         self.assertTrue(any("Teachy TV" in item for item in requirements))
-        self.assertFalse(any("自行车" in item and "不使用" not in item for item in requirements))
+        self.assertTrue(any("游走路线不使用自行车" in item for item in requirements))
+        self.assertFalse(any("登记第2项" in item for item in requirements))
 
     def test_fishing_tv_requirements_use_bag_tv_and_registered_rod(self):
         from pyside_app.window import wild_run_requirements
@@ -127,8 +129,9 @@ class PySideBackendTests(unittest.TestCase):
         )
         requirements = wild_run_requirements(plan, options)
 
-        self.assertTrue(any("重要道具第一格" in item for item in requirements))
-        self.assertTrue(any("厉害钓竿" in item and "快捷键" in item for item in requirements))
+        self.assertTrue(any("第1项 Teachy TV" in item for item in requirements))
+        self.assertTrue(any("第2项自行车" in item for item in requirements))
+        self.assertTrue(any("第3项" in item and "厉害钓竿" in item for item in requirements))
         self.assertFalse(any("Teachy TV 登录到快捷键" in item for item in requirements))
 
     def test_zero_exit_with_easycon_exception_notifies_failure(self):

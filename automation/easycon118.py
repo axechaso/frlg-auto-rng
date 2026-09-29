@@ -32,9 +32,9 @@ from .precalibration import (
 from .seed_common_regions import apply_seed_common_regions
 
 
-EXPECTED_LABEL_COUNT = 1151
-EXPECTED_LABEL_METHODS = {1: 17, 3: 1, 5: 778, 11: 1, 14: 354}
-EXPECTED_LABEL_SHA256 = "6d2eca22d8fb525e9ef142e4b65e11c6a0f0121d8ccd154d09ba63a7b629e850"
+EXPECTED_LABEL_COUNT = 1154
+EXPECTED_LABEL_METHODS = {1: 17, 3: 1, 5: 781, 11: 1, 14: 354}
+EXPECTED_LABEL_SHA256 = "4d99ab33920f8812dea403b4ab0680b40aabf1c4eb370e1a6678a193898429ac"
 EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
@@ -67,6 +67,10 @@ STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数2.0.ecs"
 EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数2.0-时间轴.ecs"
 EGG_FORMAL_WAIT_MARKER = "# FORMAL_EGG_WAIT_V1"
 EXPECTED_TEMPLATE_NAMES = (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME)
+OPTIONAL_DIRECT_TEMPLATE_NAMES = (
+    "NS火叶全自动一键乱数2.0-正式版-170a.ecs",
+    "NS火叶全自动一键乱数2.0-170a.ecs",
+)
 PRECALIBRATION_RUNTIME_MARKER = "# GUI_PRECALIBRATION_V1"
 EXPECTED_SCRIPT_FILE_COUNT = 33
 EGG_PARENT_TYPES_COMMENT_OLD = (
@@ -238,10 +242,13 @@ PREVIOUS_SCRIPT_SHA256S += (
     # Teachy TV opened from Bag, and explicit post-catch cursor navigation.
     "abc734a8f44ff152312bf3f62f5e8cc87194b13325bb3e2985f567a45325418b",
 )
-EXPECTED_SCRIPT_SHA256 = "95af0d033097233b4c273abeeaff96448fd9a8948532134f7f9b28031066f553"
+EXPECTED_SCRIPT_SHA256 = "eb18777c634b7c5ab10c0f5a930fe29d65b1fdca7d18edb10b461c733dd30bbb"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
+    # Canonical corpus before the first/second/third Key Items shortcut
+    # labels were checked and corrected during the round-zero settings pass.
+    "95af0d033097233b4c273abeeaff96448fd9a8948532134f7f9b28031066f553",
     # Canonical corpus before ordinary fishing passed its per-round Bag-TV
     # wait into the helper explicitly and all Bag-TV exits became layer-safe.
     "13c161b688aeee5cf78b2583920d9925ac8dcbaa4d7aef0b67a2beea19b5514e",
@@ -425,7 +432,20 @@ EASYCON118_EXTENSION_LABEL_DIR = (
 EASYCON118_LOCAL_LABEL_DIR = (
     RESOURCE_ROOT / "local_assets" / "easycon118" / "ImgLabel"
 )
-EASYCON118_EXTENSION_LABEL_NAMES = ("闪公图标.IL", "冲浪.IL", "正在关闭_暗.IL")
+EASYCON118_EXTENSION_LABEL_NAMES = (
+    "闪公图标.IL",
+    "冲浪.IL",
+    "正在关闭_暗.IL",
+    "快捷第一位.IL",
+    "快捷第二位.IL",
+    "快捷第三位.IL",
+)
+SHORTCUT_REGISTRATION_MAIN_PATH = (
+    EASYCON118_EXTENSION_LABEL_DIR / "shortcut_registration_main.ecs"
+)
+SHORTCUT_REGISTRATION_EGG_PATH = (
+    EASYCON118_EXTENSION_LABEL_DIR / "shortcut_registration_egg.ecs"
+)
 EGG_SETTINGS_OVERRIDE_PATH = (
     EASYCON118_EXTENSION_LABEL_DIR
     / "egg_settings_retry.ecs"
@@ -539,6 +559,124 @@ ENDFUNC
 EGG_SETTINGS_LIBRARY_NAME = "27_孵蛋测试流程.ecs"
 EGG_SETTINGS_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：游戏设置 OCR 使用有限重试"
 EGG_SETTINGS_NEXT_FUNCTION = "FUNC 孵蛋测试_执行前置准备"
+SHORTCUT_REGISTRATION_MAIN_MARKER = (
+    "# 1.6.4-a 第0轮快捷登记检查：重要道具第1项TV、第2项自行车、第3项当前钓竿。"
+)
+SHORTCUT_REGISTRATION_EGG_MARKER = (
+    "# 1.6.4-a 孵蛋前快捷登记检查：重要道具第2项必须是已登记的自行车。"
+)
+SHORTCUT_REGISTRATION_SETTINGS_FUNCTION = "FUNC 检查并校正游戏设置(): INT"
+SHORTCUT_REGISTRATION_MAIN_CALL_ANCHOR = """\
+    $游戏设置目标按键 = 0
+
+    # 模式0-9均使用HELP；模式3为STEREO/HELP/START；模式10为日版MONO/HELP/A。
+"""
+SHORTCUT_REGISTRATION_MAIN_CALL_PREVIOUS = """\
+    $游戏设置目标按键 = 0
+
+    # 按本轮流程自动检查并切换重要道具快捷登记。
+    $游戏设置快捷目标位 = 取当前流程快捷登记目标()
+    $游戏设置快捷结果 = 检查并校正快捷登记($游戏设置快捷目标位, $游戏设置识图阈值)
+    IF $游戏设置快捷结果 == 0
+        RETURN 0
+    ENDIF
+
+    # 模式0-9均使用HELP；模式3为STEREO/HELP/START；模式10为日版MONO/HELP/A。
+"""
+SHORTCUT_REGISTRATION_MAIN_CALL_BLOCK = """\
+    $游戏设置目标按键 = 0
+
+    # 按本轮流程自动检查并切换重要道具快捷登记。
+    $游戏设置快捷目标位 = 取当前流程快捷登记目标()
+    $游戏设置快捷结果 = 检查并校正快捷登记($游戏设置快捷目标位, $游戏设置识图阈值)
+    IF $游戏设置快捷结果 == 0
+        RETURN 0
+    ENDIF
+    IF $游戏设置快捷结果 == 2
+        # 快捷登记属于存档状态；必须走本函数的保存/重启分支才能保留。
+        $游戏设置已修改 = 1
+    ENDIF
+
+    # 模式0-9均使用HELP；模式3为STEREO/HELP/START；模式10为日版MONO/HELP/A。
+"""
+SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL = """\
+    X
+    WAIT 500
+    IF 是否御三家目标() == 1
+"""
+SHORTCUT_REGISTRATION_OPTIONS_CURRENT = """\
+    X
+    WAIT 500
+    # 快捷登记检查会改变主菜单记忆位置，进入Options前统一夹到顶部。
+    FOR 8
+        UP
+        WAIT 100
+    NEXT
+    IF 是否御三家目标() == 1
+"""
+SHORTCUT_REGISTRATION_EGG_CALL_MARKER = (
+    "    $孵蛋库_快捷登记结果 = 孵蛋测试_检查并登记自行车快捷($识图阈值)\n"
+)
+SHORTCUT_REGISTRATION_EGG_CALL_ANCHOR = """\
+    PRINT 【孵蛋准备】按 Seed模式检查游戏设置
+    X
+    WAIT 500
+    FOR 5
+"""
+SHORTCUT_REGISTRATION_EGG_CALL_BLOCK = """\
+    PRINT 【孵蛋准备】按 Seed模式检查游戏设置
+    $孵蛋库_快捷登记结果 = 孵蛋测试_检查并登记自行车快捷($识图阈值)
+    IF $孵蛋库_快捷登记结果 == 0
+        RETURN 0
+    ENDIF
+
+    X
+    WAIT 500
+    # 快捷登记检查会改变主菜单记忆位置，进入Options前统一夹到顶部。
+    FOR 8
+        UP
+        WAIT 100
+    NEXT
+    FOR 5
+"""
+SHORTCUT_REGISTRATION_REQUIREMENT_ANCHOR = (
+    "    PRINT 背包第一页第一格放神奇糖果，数量不限\n"
+)
+SHORTCUT_REGISTRATION_REQUIREMENT_BLOCK = """\
+    PRINT 背包第一页第一格放神奇糖果，数量不限
+    PRINT 重要道具固定顺序: 第1项Teachy TV，第2项自行车，钓鱼时第3项放本次使用的钓竿
+    PRINT 第0轮会按当前流程自动检查并切换快捷登记
+"""
+SHORTCUT_REGISTRATION_REQUIREMENT_REPLACEMENTS = (
+    (
+        "PRINT Teachy TV放在背包第二页第一格，不要登录快捷键",
+        "PRINT 重要道具第1项放Teachy TV；本流程不登记TV快捷键",
+    ),
+    (
+        "PRINT Teachy TV登录快捷键",
+        "PRINT 重要道具第1项放Teachy TV，第0轮自动登记第1项",
+    ),
+    (
+        "PRINT 背包第二页第四格放自行车",
+        "PRINT 重要道具第2项放自行车",
+    ),
+    (
+        "PRINT 自行车登录快捷键",
+        "PRINT 重要道具第2项放自行车，第0轮自动登记第2项",
+    ),
+    (
+        "PRINT 破旧钓竿登录快捷键",
+        "PRINT 重要道具第3项放破旧钓竿，第0轮自动登记第3项",
+    ),
+    (
+        "PRINT 好钓竿登录快捷键",
+        "PRINT 重要道具第3项放好钓竿，第0轮自动登记第3项",
+    ),
+    (
+        "PRINT 厉害钓竿登录快捷键",
+        "PRINT 重要道具第3项放厉害钓竿，第0轮自动登记第3项",
+    ),
+)
 EGG_RESTART_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按 2.0 顺序关闭游戏，优先处理退出状态"
 EGG_RESTART_LEGACY_OVERRIDE_MARKER = "# GUI 孵蛋运行时覆盖：按 1.1.8 原版顺序关闭游戏，优先处理退出状态"
 EGG_RESTART_ORIGINAL_FUNCTION = "FUNC 孵蛋测试_关闭游戏"
@@ -731,9 +869,14 @@ ROAMER_BICYCLE_BAG_REQUIREMENT_LEGACY = (
     "                PRINT 背包第二页第四格放自行车\n"
     "            ENDIF\n"
 )
-ROAMER_BICYCLE_BAG_REQUIREMENT_CURRENT = (
+ROAMER_BICYCLE_BAG_REQUIREMENT_PREVIOUS = (
     "            IF $目标全国图鉴编号 == 175\n"
     "                PRINT 背包第二页第四格放自行车\n"
+    "            ENDIF\n"
+)
+ROAMER_BICYCLE_BAG_REQUIREMENT_CURRENT = (
+    "            IF $目标全国图鉴编号 == 175\n"
+    "                PRINT 重要道具第2项放自行车\n"
     "            ENDIF\n"
 )
 ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY = (
@@ -742,9 +885,14 @@ ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY = (
     "            PRINT 自行车登录快捷键\n"
     "        ENDIF\n"
 )
-ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_CURRENT = (
+ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_PREVIOUS = (
     "        IF $目标全国图鉴编号 == 175\n"
     "            PRINT 自行车登录快捷键\n"
+    "        ENDIF\n"
+)
+ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_CURRENT = (
+    "        IF $目标全国图鉴编号 == 175\n"
+    "            PRINT 重要道具第2项放自行车，第0轮自动登记第2项\n"
     "        ENDIF\n"
 )
 FISHING_REQUIREMENTS_LEGACY_BLOCK = """\
@@ -788,7 +936,7 @@ FISHING_REQUIREMENTS_LEGACY_BLOCK = """\
         ENDIF
     ENDIF
 """
-FISHING_REQUIREMENTS_CURRENT_BLOCK = """\
+FISHING_REQUIREMENTS_PREVIOUS_BLOCK = """\
     IF $目标消耗帧 > $TV进入阈值
         IF $静态或野生 == "野生" and ($宝可梦遭遇方法 == "破旧钓竿" or $宝可梦遭遇方法 == "好钓竿" or $宝可梦遭遇方法 == "厉害钓竿" or $宝可梦遭遇方法 == "超级钓竿")
             PRINT Teachy TV放在背包第二页第一格，不要登录快捷键
@@ -822,6 +970,12 @@ FISHING_REQUIREMENTS_CURRENT_BLOCK = """\
         ENDIF
     ENDIF
 """
+FISHING_REQUIREMENTS_CURRENT_BLOCK = FISHING_REQUIREMENTS_PREVIOUS_BLOCK
+for _shortcut_requirement_old, _shortcut_requirement_new in SHORTCUT_REGISTRATION_REQUIREMENT_REPLACEMENTS:
+    FISHING_REQUIREMENTS_CURRENT_BLOCK = FISHING_REQUIREMENTS_CURRENT_BLOCK.replace(
+        _shortcut_requirement_old,
+        _shortcut_requirement_new,
+    )
 FISHING_TV_GUARD_LEGACY_BLOCK = """\
     # 狩猎区第0轮固定延迟测试不能以0ms立刻退出Teachy TV：实机确认首个B会被启动切换吞掉。
     # 只给第0轮传入1000ms保护；后续乱数轮仍使用原TV等待，不改变既有参数。
@@ -4187,19 +4341,29 @@ def _apply_roamer_menu_cursor_text(template_text: str) -> str:
         )
 
     if ROAMER_BICYCLE_BAG_REQUIREMENT_CURRENT not in template_text:
-        if template_text.count(ROAMER_BICYCLE_BAG_REQUIREMENT_LEGACY) != 1:
+        previous_blocks = (
+            ROAMER_BICYCLE_BAG_REQUIREMENT_PREVIOUS,
+            ROAMER_BICYCLE_BAG_REQUIREMENT_LEGACY,
+        )
+        matches = [block for block in previous_blocks if template_text.count(block) == 1]
+        if len(matches) != 1:
             raise ValueError("主脚本缺少唯一的游走TV自行车背包要求，拒绝修正")
         template_text = template_text.replace(
-            ROAMER_BICYCLE_BAG_REQUIREMENT_LEGACY,
+            matches[0],
             ROAMER_BICYCLE_BAG_REQUIREMENT_CURRENT,
             1,
         )
 
     if ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_CURRENT not in template_text:
-        if template_text.count(ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY) != 1:
+        previous_blocks = (
+            ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_PREVIOUS,
+            ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY,
+        )
+        matches = [block for block in previous_blocks if template_text.count(block) == 1]
+        if len(matches) != 1:
             raise ValueError("主脚本缺少唯一的游走自行车快捷键要求，拒绝修正")
         template_text = template_text.replace(
-            ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_LEGACY,
+            matches[0],
             ROAMER_BICYCLE_SHORTCUT_REQUIREMENT_CURRENT,
             1,
         )
@@ -4211,7 +4375,7 @@ def _apply_fishing_shortcut_and_cursor_text(template_text: str) -> str:
     replacements = (
         (
             FISHING_REQUIREMENTS_CURRENT_BLOCK,
-            (FISHING_REQUIREMENTS_LEGACY_BLOCK,),
+            (FISHING_REQUIREMENTS_PREVIOUS_BLOCK, FISHING_REQUIREMENTS_LEGACY_BLOCK),
             "主脚本缺少唯一的钓鱼运行要求块，拒绝修正",
         ),
         (
@@ -4492,6 +4656,117 @@ def _apply_egg_settings_runtime_override_text(
     return library_text[:start] + replacement + library_text[end:]
 
 
+def _apply_shortcut_registration_main_text(
+    template_text: str,
+    helper_text: str,
+) -> str:
+    """Add the flow-aware Key Items shortcut check to a main entry script."""
+    if SHORTCUT_REGISTRATION_MAIN_MARKER in template_text:
+        start = template_text.index(SHORTCUT_REGISTRATION_MAIN_MARKER)
+        if template_text.count(SHORTCUT_REGISTRATION_SETTINGS_FUNCTION) != 1:
+            raise ValueError("主脚本缺少唯一的游戏设置检查函数，拒绝更新快捷登记检查")
+        end = template_text.index(SHORTCUT_REGISTRATION_SETTINGS_FUNCTION, start)
+        existing = template_text[start:end].rstrip()
+        if existing != helper_text.rstrip():
+            template_text = (
+                template_text[:start]
+                + helper_text.rstrip()
+                + "\n\n"
+                + template_text[end:]
+            )
+    else:
+        if template_text.count(SHORTCUT_REGISTRATION_SETTINGS_FUNCTION) != 1:
+            raise ValueError("主脚本缺少唯一的游戏设置检查函数，拒绝注入快捷登记检查")
+        template_text = template_text.replace(
+            SHORTCUT_REGISTRATION_SETTINGS_FUNCTION,
+            helper_text.rstrip()
+            + "\n\n"
+            + SHORTCUT_REGISTRATION_SETTINGS_FUNCTION,
+            1,
+        )
+
+    if SHORTCUT_REGISTRATION_MAIN_CALL_BLOCK not in template_text:
+        call_source = SHORTCUT_REGISTRATION_MAIN_CALL_ANCHOR
+        if SHORTCUT_REGISTRATION_MAIN_CALL_PREVIOUS in template_text:
+            call_source = SHORTCUT_REGISTRATION_MAIN_CALL_PREVIOUS
+        elif template_text.count(SHORTCUT_REGISTRATION_MAIN_CALL_ANCHOR) != 1:
+            raise ValueError("主脚本缺少唯一的游戏设置初始化块，拒绝接入快捷登记检查")
+        template_text = template_text.replace(
+            call_source,
+            SHORTCUT_REGISTRATION_MAIN_CALL_BLOCK,
+            1,
+        )
+
+    if SHORTCUT_REGISTRATION_OPTIONS_CURRENT not in template_text:
+        if template_text.count(SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL) != 1:
+            raise ValueError("主脚本缺少唯一的Options入口，拒绝修正快捷登记后的菜单光标")
+        template_text = template_text.replace(
+            SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL,
+            SHORTCUT_REGISTRATION_OPTIONS_CURRENT,
+            1,
+        )
+
+    if SHORTCUT_REGISTRATION_REQUIREMENT_BLOCK not in template_text:
+        if template_text.count(SHORTCUT_REGISTRATION_REQUIREMENT_ANCHOR) != 1:
+            raise ValueError("主脚本缺少唯一的背包要求位置，拒绝补充快捷位顺序说明")
+        template_text = template_text.replace(
+            SHORTCUT_REGISTRATION_REQUIREMENT_ANCHOR,
+            SHORTCUT_REGISTRATION_REQUIREMENT_BLOCK,
+            1,
+        )
+    for old, new in SHORTCUT_REGISTRATION_REQUIREMENT_REPLACEMENTS:
+        template_text = template_text.replace(old, new)
+    return template_text
+
+
+def _apply_shortcut_registration_egg_text(
+    library_text: str,
+    helper_text: str,
+) -> str:
+    """Require the second Key Items row (Bicycle) before egg preparation."""
+    if SHORTCUT_REGISTRATION_EGG_MARKER in library_text:
+        start = library_text.index(SHORTCUT_REGISTRATION_EGG_MARKER)
+        if library_text.count(EGG_SETTINGS_NEXT_FUNCTION) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的前置准备函数，拒绝更新自行车快捷检查")
+        end = library_text.index(EGG_SETTINGS_NEXT_FUNCTION, start)
+        existing = library_text[start:end].rstrip()
+        if existing != helper_text.rstrip():
+            library_text = (
+                library_text[:start]
+                + helper_text.rstrip()
+                + "\n\n"
+                + library_text[end:]
+            )
+    else:
+        if library_text.count(EGG_SETTINGS_NEXT_FUNCTION) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的前置准备函数，拒绝注入自行车快捷检查")
+        library_text = library_text.replace(
+            EGG_SETTINGS_NEXT_FUNCTION,
+            helper_text.rstrip() + "\n\n" + EGG_SETTINGS_NEXT_FUNCTION,
+            1,
+        )
+
+    if SHORTCUT_REGISTRATION_EGG_CALL_MARKER not in library_text:
+        if library_text.count(SHORTCUT_REGISTRATION_EGG_CALL_ANCHOR) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的游戏设置入口，拒绝接入自行车快捷检查")
+        library_text = library_text.replace(
+            SHORTCUT_REGISTRATION_EGG_CALL_ANCHOR,
+            SHORTCUT_REGISTRATION_EGG_CALL_BLOCK,
+            1,
+        )
+    return library_text
+
+
+def _shortcut_registration_main_helper_text(template_name: str) -> str:
+    """Return the shared shortcut helper with accurate stage-source metadata."""
+    helper_text = SHORTCUT_REGISTRATION_MAIN_PATH.read_text(encoding="utf-8")
+    return helper_text.replace(
+        f"|{STANDARD_TEMPLATE_NAME}|检查并校正快捷登记|",
+        f"|{template_name}|检查并校正快捷登记|",
+        1,
+    )
+
+
 def _apply_egg_restart_runtime_override_text(
     library_text: str,
     override_text: str,
@@ -4554,6 +4829,10 @@ def apply_egg_settings_runtime_override(library_path: str | Path) -> dict[str, s
     configured = _apply_egg_settings_runtime_override_text(
         configured,
         settings_override_text,
+    )
+    configured = _apply_shortcut_registration_egg_text(
+        configured,
+        SHORTCUT_REGISTRATION_EGG_PATH.read_text(encoding="utf-8"),
     )
     configured = _apply_egg_party_slot_candy_runtime_override_text(
         configured,
@@ -4671,6 +4950,23 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         )
         configured = _apply_roamer_menu_cursor_text(configured)
         configured = _apply_fishing_shortcut_and_cursor_text(configured)
+        configured = _apply_shortcut_registration_main_text(
+            configured,
+            _shortcut_registration_main_helper_text(template_path.name),
+        )
+        template_path.write_text(configured, encoding="utf-8")
+
+    # The download package may also carry direct-run 1.70a mirrors. They are
+    # not generator mothers and therefore do not enter the 33-file corpus,
+    # but their round-zero settings check must honor the same shortcut labels.
+    for template_name in OPTIONAL_DIRECT_TEMPLATE_NAMES:
+        template_path = source_dir / template_name
+        if not template_path.is_file():
+            continue
+        configured = _apply_shortcut_registration_main_text(
+            template_path.read_text(encoding="utf-8"),
+            _shortcut_registration_main_helper_text(template_path.name),
+        )
         template_path.write_text(configured, encoding="utf-8")
 
     apply_wild_pid_retry_limit(standard_path)

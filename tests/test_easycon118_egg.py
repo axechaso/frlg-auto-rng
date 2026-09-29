@@ -73,6 +73,10 @@ from automation.easycon118 import (
     SEED_HOLD_OBSERVATION_MIN_GLOBAL,
     SEED_HOLD_OBSERVATION_OLD_BRANCH,
     SEED_HOLD_OBSERVATION_OLD_DECISION,
+    SHORTCUT_REGISTRATION_EGG_MARKER,
+    SHORTCUT_REGISTRATION_EGG_PATH,
+    SHORTCUT_REGISTRATION_MAIN_MARKER,
+    SHORTCUT_REGISTRATION_MAIN_PATH,
     TOGEPI_HATCH_CYCLE_OVERRIDE_PATH,
     WILD_PID_RETRY_LIMIT_MARKER,
     EggRunRequest,
@@ -93,6 +97,8 @@ from automation.easycon118 import (
     _apply_egg_seed_controller_runtime_override_text,
     _apply_seed_hold_observation_window_text,
     _apply_seed_mode3_help_start_text,
+    _apply_shortcut_registration_egg_text,
+    _apply_shortcut_registration_main_text,
     _apply_egg_summary_fix_text,
     _apply_egg_settings_runtime_override_text,
     _apply_egg_surf_battle_runtime_override_text,
@@ -639,6 +645,67 @@ ENDFUNC
             self.assertIn(f"FRLG_STAGE|BEGIN|{stage}|", configured)
             self.assertIn(f"FRLG_STAGE|END|{stage}|", configured)
             self.assertIn(f"FRLG_STAGE|FAIL|{stage}|", configured)
+
+    def test_main_shortcut_registration_is_flow_aware_and_idempotent(self):
+        original = """\
+    PRINT 背包第一页第一格放神奇糖果，数量不限
+    PRINT Teachy TV登录快捷键
+    PRINT 自行车登录快捷键
+    PRINT 厉害钓竿登录快捷键
+FUNC 检查并校正游戏设置(): INT
+    $游戏设置已修改 = 0
+    $游戏设置目标声音 = 0
+    $游戏设置目标按键 = 0
+
+    # 模式0-9均使用HELP；模式3为STEREO/HELP/START；模式10为日版MONO/HELP/A。
+    X
+    WAIT 500
+    IF 是否御三家目标() == 1
+        RETURN 1
+    ENDIF
+ENDFUNC
+"""
+        helper = Path(SHORTCUT_REGISTRATION_MAIN_PATH).read_text(encoding="utf-8")
+        configured = _apply_shortcut_registration_main_text(original, helper)
+        configured_again = _apply_shortcut_registration_main_text(configured, helper)
+
+        self.assertEqual(configured_again, configured)
+        self.assertEqual(configured.count(SHORTCUT_REGISTRATION_MAIN_MARKER), 1)
+        self.assertIn("RETURN 3", configured)
+        self.assertIn("$遭遇地点 == 57", configured)
+        self.assertIn("$目标全国图鉴编号 == 175 and $进入TV == 0", configured)
+        self.assertIn("检查并校正快捷登记($游戏设置快捷目标位", configured)
+        self.assertIn("FRLG_STAGE|BEGIN|settings.shortcut|", configured)
+        self.assertIn("快捷第一位.IL", configured)
+        self.assertIn("重要道具固定顺序", configured)
+        self.assertIn("进入Options前统一夹到顶部", configured)
+
+    def test_egg_shortcut_registration_requires_second_row_and_is_idempotent(self):
+        original = """\
+FUNC 孵蛋测试_检查校正并保存游戏设置($Seed模式: INT, $识图阈值: INT): INT
+    PRINT 【孵蛋准备】按 Seed模式检查游戏设置
+    X
+    WAIT 500
+    FOR 5
+        DOWN
+    NEXT
+    RETURN 1
+ENDFUNC
+
+FUNC 孵蛋测试_执行前置准备($Seed模式: INT, $识图阈值: INT): INT
+    RETURN 1
+ENDFUNC
+"""
+        helper = Path(SHORTCUT_REGISTRATION_EGG_PATH).read_text(encoding="utf-8")
+        configured = _apply_shortcut_registration_egg_text(original, helper)
+        configured_again = _apply_shortcut_registration_egg_text(configured, helper)
+
+        self.assertEqual(configured_again, configured)
+        self.assertEqual(configured.count(SHORTCUT_REGISTRATION_EGG_MARKER), 1)
+        self.assertIn("$孵蛋库_快捷第二分数 = @快捷第二位", configured)
+        self.assertIn("孵蛋测试_检查并登记自行车快捷($识图阈值)", configured)
+        self.assertIn("FRLG_STAGE|BEGIN|egg.settings.shortcut|", configured)
+        self.assertIn("进入Options前统一夹到顶部", configured)
 
     def test_game_restart_uses_original_flow_with_exit_state_priority(self):
         original = """\

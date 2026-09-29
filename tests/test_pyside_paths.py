@@ -65,7 +65,7 @@ class ResourcePathTests(unittest.TestCase):
             root = Path(temp)
             legacy = root / "old-tid"
             current = root / "current-tid"
-            for directory, count in ((legacy, 328), (current, 1151)):
+            for directory, count in ((legacy, 328), (current, 1154)):
                 labels = directory / "ImgLabel"
                 labels.mkdir(parents=True)
                 for index in range(count):
@@ -102,7 +102,7 @@ class ResourcePathTests(unittest.TestCase):
             root = Path(temp)
             custom = root / "custom-tid"
             current = root / "current-tid"
-            for directory, count in ((custom, 500), (current, 1151)):
+            for directory, count in ((custom, 500), (current, 1154)):
                 labels = directory / "ImgLabel"
                 labels.mkdir(parents=True)
                 for index in range(count):

@@ -89,23 +89,26 @@ def wild_run_requirements(plan, options) -> tuple[str, ...]:
         "SuperRod": "厉害钓竿",
     }
     rod = fishing_rods.get(request.category) if is_wild else None
+    requirements.append(
+        "重要道具固定顺序：第1项 Teachy TV，第2项自行车；钓鱼时第3项放本次使用的钓竿。"
+    )
     if plan.initial_seed.advances > 14400:
         if rod is not None:
             requirements.append(
-                f"目标 Advance 超过 14400：Teachy TV 放在重要道具第一格且不要登录快捷键；将{rod}登录到快捷键。"
+                f"目标 Advance 超过 14400：TV 从背包使用；第0轮会自动把第3项{rod}登记为快捷键。"
             )
         elif species in _ROAMING_SPECIES:
-            requirements.append("目标 Advance 超过 14400：将 Teachy TV 登录到快捷键；游走路线不使用自行车。")
+            requirements.append("目标 Advance 超过 14400：第0轮会自动把第1项 Teachy TV 登记为快捷键；游走路线不使用自行车。")
         elif species == 175:
-            requirements.append("目标 Advance 超过 14400：将 Teachy TV 登录到快捷键；自行车放在重要道具第四格。")
+            requirements.append("目标 Advance 超过 14400：第0轮会自动把第1项 Teachy TV 登记为快捷键；自行车固定在第2项。")
         elif "Safari Zone" in request.location:
-            requirements.append("目标 Advance 超过 14400：Teachy TV 放在重要道具第一格且不要登录快捷键。")
+            requirements.append("目标 Advance 超过 14400：Teachy TV 固定在第1项并从背包使用。")
         else:
-            requirements.append("目标 Advance 超过 14400：将 Teachy TV 登录到快捷键。")
+            requirements.append("目标 Advance 超过 14400：第0轮会自动把第1项 Teachy TV 登记为快捷键。")
     elif rod is not None:
-        requirements.append(f"将{rod}登录到快捷键。")
+        requirements.append(f"第0轮会自动把第3项{rod}登记为快捷键。")
     elif species == 175:
-        requirements.append("将自行车登录到快捷键。")
+        requirements.append("第0轮会自动把第2项自行车登记为快捷键。")
 
     requirements.append("确认游戏位于方案要求的存档位置，并保持 NS 主页/游戏启动状态符合脚本要求。")
     return tuple(requirements)
@@ -180,6 +183,7 @@ def workflow_start_confirmation_html(prepared, port: str, capture_name: str, war
         checklist = (
             "队伍与亲本资料按方案填写，蛋生成与领取位置保持不变。",
             "背包第一页第一格放神奇糖果，数量不限。",
+            "重要道具第1项放 Teachy TV、第2项放自行车；前置设置检查会自动登记第2项自行车。",
             "确认游戏位于方案要求的存档位置，并保持 NS 主页/游戏启动状态符合脚本要求。",
         )
     elif mode == "sid":
