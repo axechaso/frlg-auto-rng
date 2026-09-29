@@ -119,10 +119,11 @@ class EasyConLoggedTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             log_path = root / "runner.log"
-            child_code = (
-                "print('WILD_DONE'); "
-                "print('!!意外错误!!Index was outside the bounds of the array.')"
-            )
+            payload = (
+                "WILD_DONE\n"
+                "!!意外错误!!Index was outside the bounds of the array.\n"
+            ).encode("utf-8")
+            child_code = f"import sys; sys.stdout.buffer.write({payload!r})"
             with mock.patch("run_easycon_logged._write_console"):
                 result = run_logged(
                     [sys.executable, "-c", child_code],
