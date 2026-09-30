@@ -350,7 +350,8 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(result.plan.initial_seed.advances, 4321)
 
     def test_direct_seed_mode_auto_selects_shortest_start_wait_even_with_blackout(self):
-        def seeds(_data, setting_key, _game, extra_button):
+        def seeds(_data, setting_key, _game, extra_button, *, initial_seed=None):
+            self.assertEqual(initial_seed, 0x1234)
             routes = {
                 ("mono_h_a", "none"): 31000,
                 ("stereo_h_a", "none"): 30000,
@@ -372,7 +373,8 @@ class CompatibilityTests(unittest.TestCase):
         self.assertIn("启动等待最短", "\n".join(result.plan.warnings))
 
     def test_direct_seed_mode_auto_tie_prefers_no_extra_button(self):
-        def seeds(_data, setting_key, _game, extra_button):
+        def seeds(_data, setting_key, _game, extra_button, *, initial_seed=None):
+            self.assertEqual(initial_seed, 0x1234)
             if (setting_key, extra_button) in {
                 ("stereo_h_a", "none"),
                 ("mono_h_a", "blackout_r"),
@@ -391,7 +393,8 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(result.plan.seed_mode, 1)
 
     def test_shared_seed_mode_selector_matches_direct_plan_priority(self):
-        def seeds(_data, setting_key, _game, extra_button):
+        def seeds(_data, setting_key, _game, extra_button, *, initial_seed=None):
+            self.assertEqual(initial_seed, 0x1234)
             routes = {
                 ("mono_h_a", "none"): 31000,
                 ("stereo_h_a", "none"): 30000,

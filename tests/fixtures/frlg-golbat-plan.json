@@ -1,0 +1,26 @@
+{
+  "request": {
+    "game": "fr_nx", "tid": 0, "sid": 38448, "method": "All Wild Methods",
+    "category": "Grass", "location": "Cerulean Cave 1F", "pokemon": "Golbat",
+    "max_advances": 100000, "min_advances": 3000,
+    "iv_min": [0, 0, 0, 0, 0, 0], "iv_max": [31, 31, 31, 31, 31, 31],
+    "shiny": "Star/Square", "nature": "Any", "gender": "Any", "ability": "Any", "hidden_type": "Any",
+    "initial_seed_result_count": 1, "max_iv_combinations": 25000000, "seed_mode": null,
+    "direct_mode": false, "direct_seed": null, "direct_advances": null, "dunsparce_three_segment": false
+  },
+  "target": {
+    "target_seed": "95594272", "method": "Wild 1", "pokemon": "Golbat", "level": 46,
+    "pid": "EE2F781E", "shiny": "Star", "nature": "Hardy", "ability": "Inner Focus",
+    "ivs": {"hp": 30, "attack": 28, "defense": 31, "sp_attack": 31, "sp_defense": 31, "speed": 30},
+    "hidden_type": "Psychic", "hidden_power": 68, "gender": "F"
+  },
+  "initial_seed": {
+    "seed": "7422", "advances": 25296, "total_frames": 29328, "total_time": "00:08:11.027", "seed_time": 64509,
+    "settings": {"sound": "mono", "button_mode": "h", "seed_button": "a", "extra_button": "none"}
+  },
+  "selection": {"iv_total": 181, "iv_average": 30.17, "rule": "highest_iv_total_then_lowest_advances"},
+  "execution": {"seed_mode": 0, "game_settings": {"sound": "mono", "button_mode": "h", "seed_button": "a", "extra_button": "none"}},
+  "route_support": {"level": "baseline_118", "summary": "2.0 普通野生流程基线；仍需按地点完成实机验收。", "can_start": true},
+  "warnings": ["已自动选择 Seed 模式 0；运行前必须确认游戏内 SOUND/BUTTON MODE 与该模式一致。"],
+  "search_summary": {"matching_outcomes": 3, "reachable_outcomes": 3, "feasible_routes": 2}
+}
