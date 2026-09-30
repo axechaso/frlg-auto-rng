@@ -363,6 +363,58 @@ class RemainingQtTests(unittest.TestCase):
         self.assertEqual(self.w.fields["wild_sid"].text(), "33333")
         self.assertEqual(self.errors, [])
 
+    def test_prefilled_profile_draft_is_create_only_and_saves_only_on_user_action(self):
+        from PySide6.QtWidgets import QMessageBox
+        from pyside_app.profiles import ProfileManager
+        from save_profiles import SaveProfileStore
+
+        store = SaveProfileStore(self.root / "draft-profiles.json")
+        existing = store.add("既有存档", "火红", 12345, 54321, 1)
+        draft = ProfileManager(store, self.w)
+        draft.prefill_new(
+            name="火红-玩家-00000",
+            game="火红",
+            language="英文",
+            nx_model=2,
+            tid=0,
+            sid=0,
+        )
+        self.assertIsNone(draft.profile_id)
+        self.assertTrue(draft.list.isHidden())
+        self.assertTrue(draft.action_buttons["新建"].isHidden())
+        self.assertTrue(draft.action_buttons["复制"].isHidden())
+        self.assertTrue(draft.action_buttons["删除"].isHidden())
+        self.assertEqual((draft.tid.text(), draft.sid.text()), ("00000", "00000"))
+        draft.reject()
+        self.assertEqual([profile.profile_id for profile in store.profiles], [existing.profile_id])
+
+        failed = ProfileManager(store, self.w)
+        failed.prefill_new(
+            name="失败草稿", game="火红", language="日文", nx_model=1, tid=7, sid=8
+        )
+        failed.show()
+        store._write = lambda: (_ for _ in ()).throw(OSError("disk full"))
+        with patch.object(QMessageBox, "warning") as warning:
+            failed.save()
+        warning.assert_called_once()
+        self.assertIsNone(failed.profile_id)
+        self.assertEqual(failed.name.text(), "失败草稿")
+        self.assertTrue(failed.isVisible())
+        failed.close()
+
+        # Restore the normal writer by loading a fresh store from disk.
+        store = SaveProfileStore(self.root / "draft-profiles.json")
+        store.load()
+        saved = ProfileManager(store, self.w)
+        saved.prefill_new(
+            name="火红-玩家-00000", game="火红", language="日文", nx_model=2, tid=0, sid=0
+        )
+        saved.save()
+        self.assertEqual(len(store.profiles), 2)
+        added = store.profiles[-1]
+        self.assertEqual((added.tid, added.sid, added.nx_model, added.language), (0, 0, 2, "日文"))
+        self.assertEqual(store.selected_profile_id, added.profile_id)
+
     def test_calibration_checks_identity_and_only_fills_measured_fields(self):
         from automation.tid_calibration import calibrated_tid_request
         w = self.w

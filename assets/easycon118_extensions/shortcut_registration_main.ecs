@@ -34,11 +34,6 @@ FUNC 检查并校正快捷登记($目标位: INT, $识图阈值: INT): INT
     PRINT "FRLG_STAGE|BEGIN|settings.shortcut|settings.shortcut|20000|NS火叶全自动一键乱数2.0.ecs|检查并校正快捷登记|main.settings.shortcut|manual_prepare_then_restart|OR;快捷第一位.IL:>=:" & $识图阈值 & ",快捷第二位.IL:>=:" & $识图阈值 & ",快捷第三位.IL:>=:" & $识图阈值 & "|!"
     X
     WAIT 500
-    # 不依赖主菜单上次停留项，先夹到顶部再进入背包。
-    FOR 8
-        UP
-        WAIT 100
-    NEXT
     FOR 2
         DOWN
         WAIT 150
@@ -60,11 +55,6 @@ FUNC 检查并校正快捷登记($目标位: INT, $识图阈值: INT): INT
     PRINT "快捷登记识别: 目标位=" & $目标位 & " 第一位=" & $快捷登记第一分数 & " 第二位=" & $快捷登记第二分数 & " 第三位=" & $快捷登记第三分数
 
     IF $快捷登记目标分数 < $识图阈值
-        # 重要道具光标也先夹到顶部，再选择固定的第1/2/3项。
-        FOR 6
-            UP
-            WAIT 100
-        NEXT
         $快捷登记移动次数 = $目标位 - 1
         IF $快捷登记移动次数 > 0
             FOR $快捷登记移动索引 = 1 TO $快捷登记移动次数
@@ -73,7 +63,7 @@ FUNC 检查并校正快捷登记($目标位: INT, $识图阈值: INT): INT
             NEXT
         ENDIF
         A
-        WAIT 700
+        WAIT 1500
         # 道具菜单固定为 USE / REGISTER / CANCEL，向下一项登记。
         DOWN
         WAIT 300
@@ -98,7 +88,7 @@ FUNC 检查并校正快捷登记($目标位: INT, $识图阈值: INT): INT
             PRINT "FRLG_STAGE|FAIL|settings.shortcut|快捷登记后目标位置仍未匹配|!"
             PRINT "快捷登记检查失败: 目标位=" & $目标位 & " 匹配度=" & $快捷登记目标分数
             B
-            WAIT 700
+            WAIT 1500
             B
             WAIT 1000
             RETURN 0
@@ -111,7 +101,7 @@ FUNC 检查并校正快捷登记($目标位: INT, $识图阈值: INT): INT
     ENDIF
 
     B
-    WAIT 700
+    WAIT 1500
     B
     WAIT 1000
     PRINT "FRLG_STAGE|END|settings.shortcut|!"

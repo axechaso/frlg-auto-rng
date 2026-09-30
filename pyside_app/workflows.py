@@ -244,8 +244,10 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
     common = ["--ezcon", str(inputs.ezcon), "--port", port, "--video", str(video),
               "--log-path", str(log), "--stop-file", str(stop), "--preview-port", str(preview_port)]
     if label_supervision:
-        common += ["--incident-dir", str(incident_root), "--run-id", tag,
-                   "--workflow", inputs.mode, "--capture-device-name", capture_name]
+        common += ["--incident-dir", str(incident_root)]
+    if label_supervision or inputs.mode == "tid":
+        common += ["--run-id", tag, "--workflow", inputs.mode,
+                   "--capture-device-name", capture_name]
     if inputs.advanced:
         common.append("--fingerprint-warnings")
     request = inputs.request

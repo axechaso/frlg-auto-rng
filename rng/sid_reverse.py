@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import product
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 from .tenlines import (
     METHOD_1,
@@ -195,6 +195,9 @@ def first_sid_advances(
     *,
     max_advances: int | None = DEFAULT_SID_SEARCH_ADVANCES,
     min_advances: int = 0,
+    progress_callback: Callable[[int, int | None], None] | None = None,
+    cancel_callback: Callable[[], bool] | None = None,
+    progress_interval: int = 50_000,
 ) -> tuple[SIDAdvanceCandidate, ...]:
     """Return candidates first seen in the configured TID-seed ADV window.
 
@@ -209,6 +212,8 @@ def first_sid_advances(
         raise ValueError("max_advances must be positive or None")
     if min_advances < 0:
         raise ValueError("min_advances must be non-negative")
+    if progress_interval <= 0:
+        raise ValueError("progress_interval must be positive")
     remaining = {int(sid) for sid in sid_candidates}
     if any(not 0 <= sid <= 0xFFFF for sid in remaining):
         raise ValueError("SID candidates must be in 0-65535")
@@ -216,6 +221,10 @@ def first_sid_advances(
     seed = tid
     advance = 0
     while remaining:
+        if cancel_callback is not None and advance % 1024 == 0 and cancel_callback():
+            raise InterruptedError("SID搜索已取消")
+        if progress_callback is not None and advance > 0 and advance % progress_interval == 0:
+            progress_callback(advance, max_advances)
         if max_advances is not None and advance >= max_advances:
             break
         seed = pokerng_next(seed)
@@ -229,6 +238,8 @@ def first_sid_advances(
         # tests instead of looping forever when an unbounded search is used.
         if max_advances is None and (seed == tid or advance >= LCG_FULL_PERIOD):
             break
+    if progress_callback is not None:
+        progress_callback(advance, max_advances)
     return tuple(sorted(found, key=lambda item: (item.advance, item.sid)))
 
 
@@ -238,6 +249,9 @@ def find_earliest_shiny_sid(
     *,
     max_advances: int | None = DEFAULT_TID_SID_SEARCH_ADVANCES,
     min_advances: int = 0,
+    progress_callback: Callable[[int, int | None], None] | None = None,
+    cancel_callback: Callable[[], bool] | None = None,
+    progress_interval: int = 50_000,
 ) -> SIDAdvanceCandidate | None:
     """Return the earliest SID making ``pid`` shiny for ``tid``.
 
@@ -256,6 +270,9 @@ def find_earliest_shiny_sid(
         candidates,
         max_advances=max_advances,
         min_advances=min_advances,
+        progress_callback=progress_callback,
+        cancel_callback=cancel_callback,
+        progress_interval=progress_interval,
     )
     return hits[0] if hits else None
 

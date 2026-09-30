@@ -12,6 +12,7 @@ from automation import (
 from automation.tid_search import parse_target_tids
 from assets.game_text import SPECIES_ZH_TO_EN, LOCATION_ZH_TO_EN
 from rng.tenlines_utils import get_species_id
+from rng.sid_reverse import parse_pid_hex
 from .diagnostics import parse_integer
 
 
@@ -146,6 +147,9 @@ class FormReader:
             starter_button_mode=self.index("starter_button"), starter_seed_button=self.index("starter_seed_button"),
             accept_any_tid=request.mode == 0 and self.w.tid_any_check.isChecked(),
             any_tid_require_denoise=self.w.tid_denoise_check.isChecked(),
+            any_tid_sixv_sid=self.w.tid_sixv_sid_check.isChecked(),
+            shiny_sid_pid=(parse_pid_hex(self.text("tid_pid"))
+                           if self.w.advanced_check.isChecked() else 0x7942EF72),
             starter_seed_startup_scheme=self.index("seed_startup") if self.w.advanced_check.isChecked() else 0,
             starter_template_name=self.w.current_template(), update_precalibration=self.w.precalibration_check.isChecked(),
             starter_debug_log_output=self.index("output_log"),

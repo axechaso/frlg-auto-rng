@@ -42,6 +42,7 @@ class TidState(QObject):
         checks = {"tid_calibration": window.tid_calibration_check, "tid_manual_delay": window.tid_manual_delay,
             "tid_starter_flow": window.tid_flow_check, "tid_any_tid": window.tid_any_check,
             "tid_any_tid_denoise": window.tid_denoise_check, "tid_auto_rng": window.tid_auto_rng_check,
+            "tid_any_tid_sixv_sid": window.tid_sixv_sid_check,
             "tid_resume": window.tid_resume_check, "home_buffer_adaptive": window.home_buffer_check}
         checks.update(zip(("tid_same_id", "tid_sequential_id", "tid_65535", "tid_single_digit"), window.tid_special_checks))
         self.widgets.update({key + "_var": widget for key, widget in checks.items()})

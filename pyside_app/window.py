@@ -164,6 +164,8 @@ def workflow_start_confirmation_html(prepared, port: str, capture_name: str, war
     mode = inputs.mode
     game = getattr(request, "game", "") or ""
     rom = "日版（日文）" if "_jpn_" in game else "美版（英文）"
+    if mode == "tid" and getattr(request, "language", "英文") == "日文":
+        rom = "日版（日文）"
     mode_names = {
         "egg": "孵蛋",
         "sid": "SID 采集",
@@ -207,6 +209,14 @@ def workflow_start_confirmation_html(prepared, port: str, capture_name: str, war
             "本流程会新建 / 覆盖游戏存档并在阶段之间关闭游戏。",
             "确认游戏位于方案要求的存档位置，并保持 NS 主页/游戏启动状态符合脚本要求。",
         )
+        flow = inputs.extra.get("flow")
+        if flow is not None and getattr(flow, "any_tid_sixv_sid", False):
+            checklist = (
+                "先穷举并去噪确认一个任意 TID 与对应参数。",
+                "随后再次新建游戏，按锁定参数乱数出 6V 闪 SID；首次穷举的游戏进度不会保留。",
+                "最后通过御三家验证候选 SID，成功后工具会预填一个新建存档草稿。",
+                "确认游戏位于方案要求的存档位置，并保持 NS 主页/游戏启动状态符合脚本要求。",
+            )
     elif mode == "sid_traversal":
         target = "SID 遍历"
         seed_label, seed_value = "目标 TID", f"{request.tid:05d}"

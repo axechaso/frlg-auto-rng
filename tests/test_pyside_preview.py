@@ -195,6 +195,81 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         self.assertEqual(window.fields["tid_f1_start"].text(), "0")
         self.assertEqual(window.fields["tid_target"].text(), "00001")
 
+    def test_sixv_sid_opt_in_requires_all_four_prerequisites_and_freezes_pid(self):
+        window = self.window
+        window.select_page("tid")
+        self.assertFalse(window.tid_sixv_sid_check.isChecked())
+        self.assertFalse(window.tid_sixv_sid_check.isEnabled())
+
+        window.fields["tid_mode"].setCurrentIndex(1)
+        window.tid_flow_check.setChecked(True)
+        self.assertTrue(window.tid_any_check.isEnabled())
+        self.assertFalse(window.tid_sixv_sid_check.isEnabled())
+        window.tid_any_check.setChecked(True)
+        self.assertTrue(window.tid_denoise_check.isEnabled())
+        self.assertTrue(window.tid_denoise_check.isChecked())
+        self.assertTrue(window.tid_sixv_sid_check.isEnabled())
+
+        window.tid_denoise_check.setChecked(False)
+        self.assertFalse(window.tid_sixv_sid_check.isEnabled())
+        self.assertFalse(window.tid_sixv_sid_check.isChecked())
+        window.tid_denoise_check.setChecked(True)
+        self.assertTrue(window.tid_sixv_sid_check.isEnabled())
+        window.tid_sixv_sid_check.setChecked(True)
+        from pyside_app.forms import FormReader
+        window.current_template = lambda: "NS火叶全自动一键乱数2.0.ecs"
+        reader = FormReader(window)
+        flow = reader.flow(reader.tid())
+        self.assertTrue(flow.any_tid_sixv_sid)
+        self.assertEqual(flow.shiny_sid_pid, 0x7942EF72)
+
+        window.advanced_check.setChecked(True)
+        window.fields["tid_pid"].setText("0123ABCD")
+        self.assertTrue(window.tid_sixv_sid_check.isChecked())
+        flow = reader.flow(reader.tid())
+        self.assertEqual(flow.shiny_sid_pid, 0x0123ABCD)
+
+        window.tid_any_check.setChecked(False)
+        self.assertFalse(window.tid_sixv_sid_check.isChecked())
+        self.assertFalse(window.tid_sixv_sid_check.isEnabled())
+        window.tid_any_check.setChecked(True)
+        window.tid_denoise_check.setChecked(False)
+        self.assertFalse(window.tid_sixv_sid_check.isChecked())
+        self.assertFalse(window.tid_sixv_sid_check.isEnabled())
+
+    def test_emphasis_attributes_are_limited_to_the_seven_requested_buttons(self):
+        from PySide6.QtWidgets import QPushButton
+
+        window = self.window
+        expected = {
+            window.home_buffer_check: ("blue", "toggle"),
+            window.precalibration_check: ("blue", "toggle"),
+            window.label_supervision_check: ("green", "toggle"),
+            window.qq_notification_button: ("amber", "action"),
+            window.advanced_check: ("violet", "segment"),
+            window.advanced_button: ("violet", "action"),
+            window.settings_button: ("solidBlue", "action"),
+        }
+        for button, (accent, role) in expected.items():
+            with self.subTest(button=button.objectName() or button.text()):
+                self.assertEqual(button.property("emphasis"), "true")
+                self.assertEqual(button.property("accent"), accent)
+                self.assertEqual(button.property("emphasisRole"), role)
+
+        emphasized = {
+            button for button in window.findChildren(QPushButton)
+            if button.property("emphasis") == "true"
+        }
+        self.assertEqual(emphasized, set(expected))
+        self.assertFalse(window.advanced_button.isEnabled())
+        window.advanced_check.setChecked(True)
+        self.assertTrue(window.advanced_button.isEnabled())
+        window.precalibration_check.setChecked(True)
+        self.assertIn("✓", window.precalibration_check.text())
+        self.assertTrue(window.precalibration_check.isChecked())
+        window.precalibration_check.setChecked(False)
+        self.assertFalse(window.precalibration_check.isChecked())
+
     def test_advanced_scope_and_egg_defaults(self):
         window = self.window
         self.assertTrue(window.nav_buttons["script_test"].isHidden())

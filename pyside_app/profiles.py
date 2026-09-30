@@ -14,6 +14,7 @@ class ProfileManager(QDialog):
         super().__init__(parent)
         self.store = store
         self.profile_id = None
+        self.close_after_save = False
         self.setWindowTitle("管理存档")
         self.resize(650, 580)
         layout = QVBoxLayout(self)
@@ -38,10 +39,12 @@ class ProfileManager(QDialog):
                 FrlgPreviewWindow._field(row, 0, column, label, widget)
             card.layout.addLayout(row)
         actions = QHBoxLayout()
+        self.action_buttons = {}
         for title, handler in (("新建", self.new), ("保存", self.save), ("复制", self.duplicate), ("删除", self.delete)):
             button = _button(title, enabled=True)
             button.clicked.connect(handler)
             actions.addWidget(button)
+            self.action_buttons[title] = button
         card.layout.addLayout(actions)
         layout.addWidget(card)
         done = _button("完成", enabled=True)
@@ -49,6 +52,23 @@ class ProfileManager(QDialog):
         layout.addWidget(done)
         self.list.currentRowChanged.connect(self.select)
         self.refresh()
+
+    def prefill_new(self, *, name, game, language, nx_model, tid, sid):
+        """Start an isolated create-only draft with no selected profile ID."""
+        self.setWindowTitle("创建存档")
+        self.profile_id = None
+        self.list.setCurrentRow(-1)
+        self.list.hide()
+        self.action_buttons["新建"].hide()
+        self.action_buttons["复制"].hide()
+        self.action_buttons["删除"].hide()
+        self.close_after_save = True
+        self.name.setText(str(name))
+        self.game.setCurrentText(str(game))
+        self.language.setCurrentIndex(str(language) == "日文")
+        self.nx.setCurrentIndex(int(nx_model) - 1)
+        self.tid.setText(f"{int(tid):05d}")
+        self.sid.setText(f"{int(sid):05d}")
 
     def refresh(self):
         selected = self.profile_id or self.store.selected_profile_id
@@ -99,6 +119,8 @@ class ProfileManager(QDialog):
                 profile = self.store.add(*values, language=language)
             self.profile_id = profile.profile_id
         self.mutate(commit)
+        if self.close_after_save and self.profile_id:
+            self.accept()
 
     def duplicate(self):
         if self.profile_id:

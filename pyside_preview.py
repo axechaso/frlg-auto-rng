@@ -504,6 +504,79 @@ APP_STYLE = APP_STYLE.replace("@SPIN_DOWN@", (_PREVIEW_ICONS / "chevron-down.svg
 APP_STYLE = APP_STYLE.replace("@CHECK_WHITE@", (_PREVIEW_ICONS / "check-white.svg").as_posix())
 APP_STYLE = APP_STYLE.replace("@CHECK_GRAY@", (_PREVIEW_ICONS / "check-gray.svg").as_posix())
 
+APP_STYLE += r"""
+QPushButton[emphasis="true"] {
+    min-height: 0; border: 2px solid; border-radius: 8px;
+    padding: 0 7px; font-size: 13px; font-weight: 700;
+}
+QPushButton[emphasis="true"][accent="blue"][emphasisRole="toggle"] {
+    background: #DBEAFE; color: #1E40AF; border-color: #3B82F6;
+}
+QPushButton[emphasis="true"][accent="blue"][emphasisRole="toggle"]:hover { background: #BFDBFE; }
+QPushButton[emphasis="true"][accent="blue"][emphasisRole="toggle"]:pressed { background: #93C5FD; }
+QPushButton[emphasis="true"][accent="blue"][emphasisRole="toggle"]:checked {
+    background: #1D4ED8; color: #FFFFFF; border-color: #3B82F6;
+}
+QPushButton[emphasis="true"][accent="blue"][emphasisRole="toggle"]:checked:hover { background: #1E40AF; }
+QPushButton[emphasis="true"][accent="blue"][emphasisRole="toggle"]:checked:pressed { background: #1E3A8A; }
+QPushButton[emphasis="true"][accent="green"][emphasisRole="toggle"] {
+    background: #D1FAE5; color: #065F46; border-color: #059669;
+}
+QPushButton[emphasis="true"][accent="green"][emphasisRole="toggle"]:hover { background: #A7F3D0; }
+QPushButton[emphasis="true"][accent="green"][emphasisRole="toggle"]:pressed { background: #6EE7B7; }
+QPushButton[emphasis="true"][accent="green"][emphasisRole="toggle"]:checked {
+    background: #047857; color: #FFFFFF; border-color: #059669;
+}
+QPushButton[emphasis="true"][accent="green"][emphasisRole="toggle"]:checked:hover { background: #065F46; }
+QPushButton[emphasis="true"][accent="green"][emphasisRole="toggle"]:checked:pressed { background: #064E3B; }
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="toggle"],
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="segment"] {
+    background: #EDE9FE; color: #5B21B6; border-color: #8B5CF6;
+}
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="toggle"]:hover,
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="segment"]:hover { background: #DDD6FE; }
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="toggle"]:pressed,
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="segment"]:pressed { background: #C4B5FD; }
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="toggle"]:checked {
+    background: #6D28D9; color: #FFFFFF; border-color: #8B5CF6;
+}
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="toggle"]:checked:hover { background: #5B21B6; }
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="toggle"]:checked:pressed { background: #4C1D95; }
+QPushButton[emphasis="true"][accent="amber"][emphasisRole="action"] {
+    background: #FBBF24; color: #422006; border-color: #D97706;
+}
+QPushButton[emphasis="true"][accent="amber"][emphasisRole="action"]:hover { background: #F59E0B; }
+QPushButton[emphasis="true"][accent="amber"][emphasisRole="action"]:pressed { background: #D97706; }
+QPushButton[emphasis="true"][accent="solidBlue"][emphasisRole="action"] {
+    background: #1D4ED8; color: #FFFFFF; border-color: #1D4ED8;
+}
+QPushButton[emphasis="true"][accent="solidBlue"][emphasisRole="action"]:hover { background: #1E40AF; }
+QPushButton[emphasis="true"][accent="solidBlue"][emphasisRole="action"]:pressed { background: #1E3A8A; }
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="action"] {
+    background: #EDE9FE; color: #5B21B6; border-color: #8B5CF6;
+}
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="action"]:hover { background: #DDD6FE; }
+QPushButton[emphasis="true"][accent="violet"][emphasisRole="action"]:pressed { background: #C4B5FD; }
+QPushButton[emphasis="true"]:focus { border-color: #172033; }
+QPushButton[emphasis="true"][emphasisRole="segment"] {
+    border-top-right-radius: 0; border-bottom-right-radius: 0;
+}
+QPushButton[kind="advancedSettings"][emphasis="true"][emphasisRole="action"] {
+    border-left: 1px solid #8B5CF6; border-top-left-radius: 0; border-bottom-left-radius: 0;
+    border-top-right-radius: 7px; border-bottom-right-radius: 7px;
+}
+QFrame#advancedControl { background: #F5F3FF; border: 1px solid #8B5CF6; border-radius: 8px; }
+QPushButton[emphasis="true"]:disabled {
+    background: #E2E8F0; color: #64748B; border-color: #CBD5E1;
+}
+QPushButton[emphasis="true"]:checked:disabled {
+    background: #CBD5E1; color: #475569; border-color: #94A3B8;
+}
+QPushButton[kind="advancedSettings"][emphasis="true"]:disabled {
+    background: #E2E8F0; color: #64748B; border-color: #CBD5E1;
+}
+"""
+
 STATS = ("HP", "攻击", "防御", "特攻", "特防", "速度")
 NOT_CONNECTED = "界面预览：此操作尚未接入后端。"
 SEED_CALIBRATION_CHOICES = (
@@ -769,6 +842,9 @@ class FrlgPreviewWindow(QMainWindow):
         top.addWidget(self.device_chip)
         self.qq_notification_button = _button("🔔  QQ 通知", enabled=True)
         self.qq_notification_button.setObjectName("qqNotificationButton")
+        self.qq_notification_button.setProperty("emphasis", "true")
+        self.qq_notification_button.setProperty("accent", "amber")
+        self.qq_notification_button.setProperty("emphasisRole", "action")
         self.qq_notification_button.setFixedSize(118, 50)
         self.qq_notification_button.setToolTip("配置 QQ 机器人、绑定接收方并查看通知规则")
         top.addWidget(self.qq_notification_button)
@@ -789,12 +865,21 @@ class FrlgPreviewWindow(QMainWindow):
             self.quick_layout.addWidget(row)
             self.quick_rows.append(row)
         self.home_buffer_check = _button("低分自适应", "quickToggle", enabled=True)
+        self.home_buffer_check.setProperty("emphasis", "true")
+        self.home_buffer_check.setProperty("accent", "blue")
+        self.home_buffer_check.setProperty("emphasisRole", "toggle")
         self.home_buffer_check.setAccessibleName("HOME_BUFFER 稳定低分自适应")
         self.home_buffer_check.setToolTip("HOME_BUFFER 稳定低分自适应：正式版作用于 2.0、TID 和 SID，默认关闭；只接受连续稳定的唯一最高分，不影响其他 OCR。")
         self.precalibration_check = _button("命中后更新预校准", "quickToggle", enabled=True)
+        self.precalibration_check.setProperty("emphasis", "true")
+        self.precalibration_check.setProperty("accent", "blue")
+        self.precalibration_check.setProperty("emphasisRole", "toggle")
         self.precalibration_check.setToolTip("正式版仅在完整命中后保存，按游戏/主机/Seed 模式/启动/模板/流程隔离；TID、SID 阶段不参与。")
         self.precalibration_check.setAccessibleName("命中后更新预校准")
         self.label_supervision_check = _button("标签故障保护", "quickToggle", enabled=True)
+        self.label_supervision_check.setProperty("emphasis", "true")
+        self.label_supervision_check.setProperty("accent", "green")
+        self.label_supervision_check.setProperty("emphasisRole", "toggle")
         self.label_supervision_check.setToolTip(
             "默认关闭。开启后，兼容运行器会监督已登记的识图等待阶段；超时或重试耗尽时立即锁定手柄输入，"
             "保存故障截图与标签资料，并在设备标签卡片中提供修复入口。"
@@ -829,6 +914,9 @@ class FrlgPreviewWindow(QMainWindow):
         for combo in (calibration, startup):
             combo.currentIndexChanged.connect(lambda _index, field=combo: field.setToolTip(field.currentData(Qt.ItemDataRole.ToolTipRole) or ""))
         self.advanced_check = _button("高级模式", "advancedToggle", enabled=True)
+        self.advanced_check.setProperty("emphasis", "true")
+        self.advanced_check.setProperty("accent", "violet")
+        self.advanced_check.setProperty("emphasisRole", "segment")
         self.advanced_check.setCheckable(True)
         self.advanced_check.setAccessibleName("高级模式")
         self.advanced_check.setFixedSize(96, 34)
@@ -843,12 +931,18 @@ class FrlgPreviewWindow(QMainWindow):
         advanced_layout.setSpacing(0)
         advanced_layout.addWidget(self.advanced_check)
         self.advanced_button = _button("设置", "advancedSettings", enabled=True)
+        self.advanced_button.setProperty("emphasis", "true")
+        self.advanced_button.setProperty("accent", "violet")
+        self.advanced_button.setProperty("emphasisRole", "action")
         self.advanced_button.setAccessibleName("打开高级设置")
         self.advanced_button.setFixedSize(46, 34)
         self.advanced_button.clicked.connect(lambda: self.advanced_dialog.show())
         self.advanced_button.setEnabled(False)
         advanced_layout.addWidget(self.advanced_button)
         self.settings_button = _button("共通设置", enabled=True)
+        self.settings_button.setProperty("emphasis", "true")
+        self.settings_button.setProperty("accent", "solidBlue")
+        self.settings_button.setProperty("emphasisRole", "action")
         self.settings_button.setFixedSize(82, 36)
         self.settings_button.clicked.connect(lambda: self.settings_dialog.show())
         self.quick_device_groups = []
@@ -1196,6 +1290,7 @@ class FrlgPreviewWindow(QMainWindow):
             (self.item_check, "item"), (self.traversal_check, "traversal"),
             (self.tid_flow_check, "starter"), (self.tid_any_check, "tid_any"),
             (self.tid_denoise_check, "tid_denoise"), (self.tid_manual_delay, "tid_delay"),
+            (self.tid_sixv_sid_check, "tid_sixv_sid"),
             (self.tid_calibration_check, "tid_detect"), (self.tid_auto_rng_check, "tid_near"),
             (self.tid_resume_check, "tid_resume"), (self.tid_progress_status, "tid_progress"),
             (self.log_view, "logs"),
@@ -1217,6 +1312,7 @@ class FrlgPreviewWindow(QMainWindow):
                     text = text.replace("</td>", f"<p>{escape(NOT_CONNECTED)}</p></td>")
                 button.setToolTip(text)
                 button.setProperty("helpKey", key)
+        self._refresh_tid_controls()
 
     @staticmethod
     def _table(headers: tuple[str, ...], rows: int = 0, height: int = 250) -> QTableWidget:
@@ -1824,8 +1920,13 @@ class FrlgPreviewWindow(QMainWindow):
         ])
         self.tid_any_check = self._check("取得任意 TID 后继续")
         self.tid_denoise_check = self._check("任意 TID 仍需去噪确认", True)
+        self.tid_sixv_sid_check = self._check("去噪成功后乱数 6V 闪 SID")
+        self.tid_sixv_sid_check.setToolTip(
+            "先确认一个任意 TID，再重新建档乱数让默认 6V 闪 PID 对应的 SID，最后运行御三家验证。"
+        )
         starter.layout.addWidget(self.tid_any_check)
         starter.layout.addWidget(self.tid_denoise_check)
+        starter.layout.addWidget(self.tid_sixv_sid_check)
         starter.layout.addWidget(_label("御三家 Seed 校准固定方案 0；Seed 启动在顶部，脚本入口在高级设置。", role="muted"))
         layout.addWidget(starter)
 
@@ -1849,7 +1950,8 @@ class FrlgPreviewWindow(QMainWindow):
         self.tid_progress_status = _label("未读取本机进度；当前表单在关闭窗口后丢弃。", role="muted")
         resume.layout.addWidget(self.tid_progress_status)
         layout.addWidget(resume)
-        for check in (self.tid_flow_check, self.tid_any_check, self.tid_manual_delay, self.tid_auto_rng_check):
+        for check in (self.tid_flow_check, self.tid_any_check, self.tid_denoise_check,
+                      self.tid_sixv_sid_check, self.tid_manual_delay, self.tid_auto_rng_check):
             check.toggled.connect(self._refresh_tid_controls)
         for name in ("tid_mode", "tid_sid_mode"):
             self.fields[name].currentIndexChanged.connect(self._refresh_tid_controls)
@@ -1882,6 +1984,32 @@ class FrlgPreviewWindow(QMainWindow):
             self.fields[name].setEnabled(exhaustive and not any_tid and self.tid_auto_rng_check.isChecked())
         self.tid_any_check.setEnabled(flow and exhaustive)
         self.tid_denoise_check.setEnabled(any_tid)
+        sixv_prerequisites = (
+            flow,
+            exhaustive,
+            self.tid_any_check.isChecked(),
+            self.tid_denoise_check.isChecked(),
+        )
+        sixv_enabled = all(sixv_prerequisites)
+        if not sixv_enabled and self.tid_sixv_sid_check.isChecked():
+            self.tid_sixv_sid_check.setChecked(False)
+        self.tid_sixv_sid_check.setEnabled(sixv_enabled)
+        if sixv_enabled:
+            pid = self.fields["tid_pid"].text().strip() if self.advanced_check.isChecked() else "7942EF72"
+            self.tid_sixv_sid_check.setToolTip(
+                f"先确认一个任意 TID，再重新建档乱数让 6V 闪 PID {pid or '7942EF72'} 对应的 SID，最后运行御三家验证。"
+            )
+        else:
+            missing = []
+            if not flow:
+                missing.append("TID 阶段完成后继续御三家")
+            if not exhaustive:
+                missing.append("穷举模式")
+            if not self.tid_any_check.isChecked():
+                missing.append("取得任意 TID 后继续")
+            if not self.tid_denoise_check.isChecked():
+                missing.append("任意 TID 仍需去噪确认")
+            self.tid_sixv_sid_check.setToolTip("启用前请先满足：" + "、".join(missing))
         for check in self.tid_special_checks:
             check.setEnabled((not flow or exhaustive) and not any_tid)
         for name, widget in self.fields.items():

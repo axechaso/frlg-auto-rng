@@ -26,8 +26,10 @@ from device_label_overrides import (
     load_label_override_profile,
 )
 from tid_records import recording_session
+from tid_session import write_json_atomic
 from process_control import StopFileWatcher, terminate_process_tree
 from tid_session import TidProgressSession, progress_context, progress_lease, latest_progress
+from rng.sid_reverse import first_sid_advances, sid_at_advance, sid_min_advances_for_f3
 from automation.tid_checkpoint import instrument_tid_checkpoint
 from automation.tid_search import progress_supported
 from automation.tid_calibration import (
@@ -45,8 +47,10 @@ from automation.precalibration import (
 )
 from automation.tid_starter_flow import (
     build_tid_starter_flow_plan,
+    derive_sixv_sid_flow_request,
     resolve_exhaustive_starter_plan,
     tid_starter_flow_request_from_dict,
+    validate_tid_starter_flow_runtime,
     write_resolved_exhaustive_starter_project,
     write_tid_starter_flow_bundle,
 )
@@ -55,15 +59,21 @@ from automation.tid_starter_flow import (
 ID_MARKER = "TIDFLOW|ID|MATCH=1"
 BRIDGE_MARKER = "TIDFLOW|BRIDGE|DONE=1"
 STARTER_SHINY_MARKER = "已识别到出闪，脚本停止"
+STARTER_STRUCTURED_SHINY_MARKER = "TIDFLOW|STARTER|TARGET_SHINY=1"
 STARTER_SID_MISS_MARKER = "已命中目标，脚本停止"
 ID_TID_PATTERN = re.compile(r"TIDFLOW\|ID\|TID=(\d{1,5})")
 ID_SID_ADV_PATTERN = re.compile(r"TIDFLOW\|ID\|SID_ADV=(-?\d+)")
+ID_SNAPSHOT_PATTERN = re.compile(r"TIDFLOW\|ID\|SNAPSHOT\|([A-Z0-9_]+)=(-?\d+)")
 
 
 def classify_starter_output(lines: list[str]) -> str:
-    """Classify the two terminal messages already emitted by 1.1.8."""
-    if any(STARTER_SHINY_MARKER in line for line in lines):
+    """Classify structured target success, exact target SID miss, or unknown."""
+    shiny = any(STARTER_SHINY_MARKER in line for line in lines)
+    structured = any(STARTER_STRUCTURED_SHINY_MARKER in line for line in lines)
+    if shiny and structured:
         return "shiny"
+    if shiny:
+        return "unverified_shiny"
     if any(STARTER_SID_MISS_MARKER in line for line in lines):
         return "sid_miss"
     return "unknown"
@@ -87,6 +97,31 @@ def parse_id_identity(lines: list[str]) -> tuple[int, int]:
     if sid_advance < 0:
         raise ValueError(f"TID阶段输出了非法SID ADV：{sid_advance}")
     return tid, sid_advance
+
+
+def parse_any_tid_snapshot(lines: list[str]) -> dict[str, int]:
+    """Read one complete, denoised parameter snapshot from a single ID stage."""
+    values: dict[str, int] = {}
+    duplicates: set[str] = set()
+    for line in lines:
+        for match in ID_SNAPSHOT_PATTERN.finditer(line):
+            key, raw = match.groups()
+            value = int(raw)
+            if key in values and values[key] != value:
+                duplicates.add(key)
+            values[key] = value
+    if duplicates:
+        raise ValueError("去噪快照字段在同一阶段出现冲突：" + "/".join(sorted(duplicates)))
+    required = {
+        "TID", "DIGITS_OK", "DENOISE_HITS", "DENOISE_NEED", "OP", "F1", "F2",
+        "SELECT_CORRECTION", "NX_MODEL", "GENDER", "SOUND", "BUTTON_MODE",
+        "SEED_BUTTON", "OP_FIXED", "F1_FIXED", "F2_FIXED", "F3_FIXED",
+        "OP_CORRECTION", "SID_CORRECTION", "OBSERVATION", "DENOISE_TRY",
+    }
+    missing = sorted(required - values.keys())
+    if missing:
+        raise ValueError("去噪成功快照缺少字段：" + "/".join(missing))
+    return values
 
 
 def parse_args() -> argparse.Namespace:
@@ -151,6 +186,18 @@ class FlowRunner:
         self.progress = None
         self.active_stage = None
         self.id_main_override: Path | None = None
+        self.report_plan: dict[str, object] | None = None
+        self.report_request = None
+        self.report_original_request = None
+        self.input_plan_sha256 = ""
+        self.final_identity: dict[str, int] | None = None
+        self.final_target: dict[str, object] | None = None
+        self.final_attempt_correction: int | None = None
+        self.sid_verified = False
+        self.verified_marker_seen = False
+        self.id_snapshot: dict[str, int] | None = None
+        self.sixv_state: dict[str, object] | None = None
+        self.sixv_state_path: Path | None = None
 
     def output(self, message: str) -> None:
         self.log.write(message + "\n")
@@ -281,14 +328,86 @@ def run_flow_attempts(flow: FlowRunner, flow_dir: Path, corrections: list[int], 
     """Run complete save attempts until 1.1.8 confirms a shiny starter."""
     bridge_main = flow_dir / "02_lab_bridge" / "main.ecs"
     starter_main = flow_dir / "03_starter_118" / "main.ecs"
+    plan_path = flow_dir / "flow_plan.json"
+    plan_payload = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.is_file() else {}
+    try:
+        flow.report_plan = plan_payload
+        flow.report_request = tid_starter_flow_request_from_dict(plan_payload["request"])
+    except (KeyError, TypeError, ValueError):
+        flow.report_plan = plan_payload
+        flow.report_request = None
+    target = plan_payload.get("starter_target")
+    flow.final_target = target if isinstance(target, dict) else None
+    request = flow.report_request
+    target_sid = (
+        request.tid_request.target_sid
+        if request is not None and type(request.tid_request.target_sid) is int
+        else None
+    )
     for attempt_index, correction in enumerate(corrections):
         if attempt_index < start_attempt:
             continue
+        if flow.stop_requested:
+            return 130
         flow.output("")
         flow.output(
             f"########## 建档尝试 {attempt_index + 1}/{len(corrections)}："
             f"SID ADV修正 {correction:+d} ##########"
         )
+        attempt_sid_plan = None
+        sixv_state = getattr(flow, "sixv_state", None)
+        sixv_state_path = getattr(flow, "sixv_state_path", None)
+        if sixv_state is not None and request is not None:
+            try:
+                minimum = sid_min_advances_for_f3(
+                    request.tid_request.f3_fixed_delay,
+                    language=request.tid_request.language,
+                    sid_advance_correction=correction,
+                )
+                hits = first_sid_advances(
+                    request.tid_request.target_tid,
+                    (request.tid_request.target_sid,),
+                    max_advances=request.sid_chain_search_advances,
+                    min_advances=minimum,
+                    progress_callback=lambda current, limit: flow.output(
+                        f"[6V闪SID重试规划] 修正 {correction:+d} 已扫描 {current:,} / "
+                        f"{limit if limit is not None else '完整链'} ADV。"
+                    ) if current and current % 100_000 == 0 else None,
+                    cancel_callback=lambda: flow.stop_requested,
+                )
+            except InterruptedError:
+                return 130
+            if flow.stop_requested:
+                return 130
+            if not hits:
+                flow.output(
+                    f"[6V闪SID重试规划失败] 修正 {correction:+d} 在有限搜索范围内没有找到"
+                    f"同一目标SID {request.tid_request.target_sid:05d} 的可执行出现位置。"
+                )
+                if sixv_state_path is not None:
+                    plans = sixv_state.setdefault("attempt_plans", {})
+                    if isinstance(plans, dict):
+                        plans[str(attempt_index)] = {
+                            "correction": correction,
+                            "minimum_executable_advance": minimum,
+                            "status": "no_executable_occurrence",
+                        }
+                    write_json_atomic(sixv_state_path, sixv_state)
+                continue
+            attempt_sid_plan = {
+                "correction": correction,
+                "minimum_executable_advance": minimum,
+                "selected_sid": hits[0].sid,
+                "selected_sid_advance": hits[0].advance,
+                "status": "planned",
+            }
+            sixv_state["current_minimum_executable_sid_advance"] = minimum
+            sixv_state["current_attempt_sid_advance"] = hits[0].advance
+            plans = sixv_state.setdefault("attempt_plans", {})
+            if isinstance(plans, dict):
+                plans[str(attempt_index)] = attempt_sid_plan
+            if sixv_state_path is not None:
+                write_json_atomic(sixv_state_path, sixv_state)
         id_main = flow_dir / "01_id" / f"main_attempt_{attempt_index:03d}.ecs"
         if prepare_attempt is None:
             code = flow.run_stage(1, "TID/SID 1.3.7", id_main, required_marker=ID_MARKER)
@@ -297,22 +416,74 @@ def run_flow_attempts(flow: FlowRunner, flow_dir: Path, corrections: list[int], 
                 code = flow.run_stage(1, "TID/SID 1.3.7", id_main, required_marker=ID_MARKER)
         if code != 0:
             return code
+        if flow.stop_requested:
+            return 130
+        try:
+            actual_tid, actual_sid_advance = parse_id_identity(flow.stage_lines)
+        except ValueError as exc:
+            flow.output(f"[流程错误] 无法记录最终建档身份：{exc}")
+            return 3
+        actual_sid = sid_at_advance(actual_tid, actual_sid_advance)
+        flow.final_identity = {
+            "tid": actual_tid,
+            "sid": actual_sid,
+            "sid_advance": actual_sid_advance,
+            "sid_correction": correction,
+        }
+        flow.final_attempt_correction = correction
+        if sixv_state is not None:
+            sixv_state["current_attempt_actual_identity"] = dict(flow.final_identity)
+            if attempt_sid_plan is not None:
+                attempt_sid_plan["actual_sid"] = actual_sid
+                attempt_sid_plan["actual_sid_advance"] = actual_sid_advance
+                attempt_sid_plan["status"] = "identity_confirmed" if actual_sid == target_sid else "identity_miss"
+                if actual_sid == target_sid:
+                    sixv_state["current_attempt_sid_advance"] = actual_sid_advance
+            if sixv_state_path is not None:
+                write_json_atomic(sixv_state_path, sixv_state)
+        if target_sid is not None and actual_sid != target_sid:
+            flow.sid_verified = False
+            flow.output(
+                f"[SID未命中] 本次建档得到 TID={actual_tid:05d} / SID={actual_sid:05d}，"
+                f"目标 SID={target_sid:05d}；继续下一个修正尝试。"
+            )
+            continue
+        if attempt_sid_plan is not None:
+            minimum = int(attempt_sid_plan["minimum_executable_advance"])
+            if actual_sid_advance < minimum:
+                flow.output(
+                    f"[流程错误] 本轮SID ADV={actual_sid_advance} 小于固定F3最小可执行ADV={minimum}。"
+                )
+                return 3
+            attempt_sid_plan["status"] = "identity_confirmed"
+            if sixv_state_path is not None:
+                write_json_atomic(sixv_state_path, sixv_state)
         code = flow.run_stage(2, "研究所桥接与存档", bridge_main, required_marker=BRIDGE_MARKER)
         if code != 0:
             return code
+        if flow.stop_requested:
+            return 130
         code = flow.run_stage(3, "1.1.8 御三家全自动乱数", starter_main)
         if code != 0:
             return code
+        if flow.stop_requested:
+            return 130
         update_starter_precalibration(flow, starter_main)
 
         starter_result = classify_starter_output(flow.stage_lines)
         if starter_result == "shiny":
+            if flow.final_identity is None or flow.final_identity.get("sid", -1) < 0 or not flow.final_target:
+                flow.output("[流程错误] 闪光标记缺少目标SID或御三家目标计划，不能验证SID。")
+                return 4
+            flow.sid_verified = True
+            flow.verified_marker_seen = True
             flow.output("")
             flow.output(
                 f"[流程完成] 已确认闪光御三家；成功使用SID ADV修正 {correction:+d}。"
             )
             return 0
         if starter_result == "sid_miss":
+            flow.sid_verified = False
             flow.output(
                 "[SID未命中] 1.1.8已精确命中目标Seed/帧，但御三家不闪；"
                 "将使用下一个SID ADV修正重新建档。"
@@ -327,12 +498,180 @@ def run_flow_attempts(flow: FlowRunner, flow_dir: Path, corrections: list[int], 
     return 5
 
 
+def _sixv_state_context(flow_dir: Path, payload: dict[str, object], flow: FlowRunner) -> dict[str, object]:
+    id_manifest = json.loads((flow_dir / "01_id" / "plan.json").read_text(encoding="utf-8"))
+    request = tid_starter_flow_request_from_dict(payload["request"])
+    starter_source = Path(str(payload["starter_source_dir"])).resolve()
+    starter_path = starter_source / request.starter_template_name
+    return {
+        "request": payload["request"],
+        "tid_source_manifest": id_manifest["source_manifest"],
+        "starter_source": str(starter_source),
+        "starter_template": request.starter_template_name,
+        "starter_template_sha256": hashlib.sha256(starter_path.read_bytes()).hexdigest(),
+        "port": flow.port,
+        "capture_device": flow.capture_device_name,
+    }
+
+
+def _load_sixv_state(path: Path, context_sha256: str) -> dict[str, object] | None:
+    if not path.is_file():
+        return None
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"6V闪SID续跑状态无法读取，原文件保留：{exc}") from exc
+    if not isinstance(state, dict) or state.get("schema_version") != 1:
+        raise ValueError("6V闪SID续跑状态版本不受支持，原文件保留")
+    if state.get("context_sha256") != context_sha256:
+        raise ValueError("6V闪SID续跑状态与当前参数、脚本或设备不兼容；请检查参数后重新生成")
+    return state
+
+
+def _persist_sixv_state(path: Path, state: dict[str, object]) -> None:
+    write_json_atomic(path, state)
+
+
+def _run_sixv_sid_continuation(
+    flow: FlowRunner,
+    flow_dir: Path,
+    payload: dict[str, object],
+    request,
+    *,
+    actual_tid: int,
+    sid_advance: int,
+    snapshot: dict[str, int],
+    state_path: Path,
+    context_sha256: str,
+    state: dict[str, object],
+    ezcon_path: Path,
+    fingerprint_warning_only: bool = False,
+    label_profile: LabelOverrideProfile | None = None,
+) -> int:
+    """Plan and execute the fresh-save fixed-TID / shiny-SID continuation."""
+    flow.sixv_state = state
+    flow.sixv_state_path = state_path
+    resume_sid_miss = state.get("status") == "sid_miss"
+    last_progress = 0
+
+    def report_sid_progress(current: int, limit: int | None) -> None:
+        nonlocal last_progress
+        if current == limit or current - last_progress >= 50_000:
+            total = str(limit) if limit is not None else "完整链"
+            flow.output(f"[6V闪SID搜索] 已扫描 {current:,} / {total} ADV。")
+            last_progress = current
+
+    derived, candidate = derive_sixv_sid_flow_request(
+        request,
+        snapshot,
+        progress_callback=report_sid_progress,
+        cancel_callback=lambda: flow.stop_requested,
+    )
+    if derived.tid_request.target_tid != actual_tid:
+        raise ValueError("派生请求TID与本轮去噪身份不一致")
+    if flow.stop_requested:
+        state["status"] = "stopped"
+        _persist_sixv_state(state_path, state)
+        return 130
+
+    state_directory = state_path.parent
+    derived_dir = state_directory / "derived-flow"
+    derived_plan = build_tid_starter_flow_plan(derived)
+    if not (derived_dir / "flow_plan.json").is_file():
+        write_tid_starter_flow_bundle(
+            Path(str(json.loads((flow_dir / "01_id" / "plan.json").read_text(encoding="utf-8"))["source"])),
+            derived_dir,
+            derived_plan,
+            starter_source_dir=Path(str(payload["starter_source_dir"])),
+            fingerprint_warning_only=fingerprint_warning_only,
+        )
+    if label_profile is not None:
+        apply_profile_to_projects(derived_dir, label_profile)
+    derived_payload = json.loads((derived_dir / "flow_plan.json").read_text(encoding="utf-8"))
+    stored_request = tid_starter_flow_request_from_dict(derived_payload["request"])
+    if (
+        stored_request.tid_request.target_tid != actual_tid
+        or stored_request.tid_request.target_sid != candidate.sid
+        or stored_request.sid_min_advances != derived.sid_min_advances
+    ):
+        raise ValueError("已保存的6V闪SID派生工程与当前去噪快照不一致")
+    if flow.stop_requested:
+        state["status"] = "stopped"
+        _persist_sixv_state(state_path, state)
+        return 130
+    check = validate_tid_starter_flow_runtime(
+        ezcon_path,
+        derived_dir / "01_id" / "main.ecs",
+        derived_dir / "02_lab_bridge" / "main.ecs",
+        derived_dir / "03_starter_118" / "main.ecs",
+        fingerprint_warning_only=fingerprint_warning_only,
+    )
+    if not check.ok:
+        raise ValueError("6V闪SID派生计划预检失败：" + "; ".join(check.errors))
+    if flow.stop_requested:
+        state["status"] = "stopped"
+        _persist_sixv_state(state_path, state)
+        return 130
+
+    state.update({
+        "schema_version": 1,
+        "context_sha256": context_sha256,
+        "status": "sid_plan_ready",
+        "identity": {"tid": actual_tid, "first_sid_advance": sid_advance},
+        "denoised_snapshot": snapshot,
+        "derived_plan_dir": str(derived_dir),
+        "selected_sid": candidate.sid,
+        "selected_sid_advance": candidate.advance,
+        "minimum_executable_sid_advance": derived.sid_min_advances,
+        "sixv_pid": request.shiny_sid_pid,
+        "locked_run_id": flow.run_id,
+    })
+    _persist_sixv_state(state_path, state)
+    flow.report_plan = derived_payload
+    flow.report_request = derived
+    flow.output(
+        f"[6V闪SID计划] 锁定TID={actual_tid:05d}；PID={request.shiny_sid_pid:08X}；"
+        f"选择SID={candidate.sid:05d} / ADV={candidate.advance}；"
+        f"F3最小可执行ADV={derived.sid_min_advances}。"
+    )
+    flow.output("[6V闪SID计划] 将再次新建游戏存档，按锁定的去噪参数定向取得该SID。")
+
+    current_attempt = 0 if resume_sid_miss else int(state.get("current_attempt", 0))
+
+    @contextmanager
+    def record_attempt(index, correction, _id_main):
+        state["status"] = "attempting"
+        state["current_attempt"] = index
+        state["current_correction"] = correction
+        _persist_sixv_state(state_path, state)
+        yield
+
+    corrections = [int(value) for value in derived_payload["sid_retry_corrections"]]
+    code = run_flow_attempts(
+        flow,
+        derived_dir,
+        corrections,
+        prepare_attempt=record_attempt,
+        start_attempt=min(current_attempt, max(0, len(corrections) - 1)),
+    )
+    state["status"] = "sid_verified" if code == 0 and flow.sid_verified else (
+        "stopped" if code == 130 or flow.stop_requested else
+        "sid_miss" if code == 5 else "failed"
+    )
+    state["exit_code"] = code
+    state["final_identity"] = flow.final_identity
+    state["final_attempt_correction"] = flow.final_attempt_correction
+    _persist_sixv_state(state_path, state)
+    return code
+
+
 def run_exhaustive_flow(
     flow: FlowRunner,
     flow_dir: Path,
     payload: dict[str, object],
     ezcon_path: Path,
     *,
+    state_directory: Path | None = None,
     fingerprint_warning_only: bool = False,
     label_profile: LabelOverrideProfile | None = None,
 ) -> int:
@@ -346,6 +685,8 @@ def run_exhaustive_flow(
         if not isinstance(request_payload, dict):
             raise ValueError("flow_plan.json中的request格式无效")
         request = tid_starter_flow_request_from_dict(request_payload)
+        flow.report_request = request
+        flow.report_plan = payload
         # Keep stage-1 startup tolerant of lightweight test/integration
         # request objects; the full request is validated when resolving the
         # runtime identity after that stage completes.
@@ -363,9 +704,145 @@ def run_exhaustive_flow(
         flow.output(f"[流程错误] 无法读取延后身份解析计划：{exc}")
         return 2
 
-    code = flow.run_stage(1, stage_name, id_main, required_marker=ID_MARKER)
-    if code != 0:
-        return code
+    sixv_state_path = None
+    sixv_context_sha256 = None
+    sixv_state = None
+    sixv_identity = None
+    sixv_snapshot = None
+    resume_locked_sixv = False
+    any_tid_sixv_sid = bool(getattr(request, "any_tid_sixv_sid", False))
+    if any_tid_sixv_sid:
+        try:
+            state_context = _sixv_state_context(flow_dir, payload, flow)
+            sixv_context_sha256 = hashlib.sha256(
+                json.dumps(state_context, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            state_root = Path(state_directory or (flow_dir.parent / ".tid-flow-state"))
+            sixv_state_path = state_root / f"sixv-{sixv_context_sha256[:24]}" / "state.json"
+            device_signature = hashlib.sha256(
+                f"{flow.port}\0{flow.capture_device_name}".encode("utf-8")
+            ).hexdigest()[:20]
+            for prior_path in state_root.glob("sixv-*/state.json"):
+                if prior_path == sixv_state_path:
+                    continue
+                try:
+                    prior = json.loads(prior_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                prior_context = prior.get("context", {}) if isinstance(prior, dict) else {}
+                if not isinstance(prior_context, dict):
+                    continue
+                prior_device = hashlib.sha256(
+                    f"{prior_context.get('port', '')}\0{prior_context.get('capture_device', '')}".encode("utf-8")
+                ).hexdigest()[:20]
+                if (
+                    isinstance(prior, dict)
+                    and prior_device == device_signature
+                    and prior.get("status") not in {"sid_verified", "discarded"}
+                ):
+                    flow.output("[6V闪SID续跑] 检测到设备上另有参数上下文的锁定状态，本轮不会复用该状态。")
+                    break
+            sixv_state = _load_sixv_state(sixv_state_path, sixv_context_sha256)
+            if sixv_state and sixv_state.get("status") in {
+                "tid_locked", "sid_plan_ready", "attempting", "sid_miss", "stopped", "failed", "planning_failed"
+            }:
+                raw_snapshot = sixv_state.get("denoised_snapshot")
+                raw_identity = sixv_state.get("identity")
+                if not isinstance(raw_snapshot, dict) or not isinstance(raw_identity, dict):
+                    raise ValueError("6V闪SID续跑状态缺少去噪身份快照")
+                sixv_snapshot = {str(key): int(value) for key, value in raw_snapshot.items()}
+                sixv_identity = {
+                    "tid": int(raw_identity["tid"]),
+                    "sid_advance": int(raw_identity["first_sid_advance"]),
+                }
+                resume_locked_sixv = True
+                flow.output(
+                    f"[6V闪SID续跑] 沿用已锁定TID={sixv_identity['tid']:05d}和去噪参数，不重新穷举。"
+                )
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            flow.output(f"[流程错误] 6V闪SID续跑状态无效：{exc}")
+            return 2
+
+    code = 0
+    if not resume_locked_sixv:
+        code = flow.run_stage(1, stage_name, id_main, required_marker=ID_MARKER)
+        if any_tid_sixv_sid:
+            has_handoff = any(ID_MARKER in line for line in flow.stage_lines)
+            if code != 0 and not (code == 130 and has_handoff):
+                return code
+            if has_handoff:
+                try:
+                    actual_tid, sid_advance = parse_id_identity(flow.stage_lines)
+                    sixv_snapshot = parse_any_tid_snapshot(flow.stage_lines)
+                    if sixv_snapshot["TID"] != actual_tid:
+                        raise ValueError("去噪快照TID与交接身份标记不一致")
+                    sixv_identity = {"tid": actual_tid, "sid_advance": sid_advance}
+                    flow.id_snapshot = sixv_snapshot
+                    flow.final_identity = {
+                        "tid": actual_tid,
+                        "sid": -1,
+                        "sid_advance": sid_advance,
+                        "sid_correction": request.tid_request.sid_advance_correction,
+                    }
+                    sixv_state = {
+                        "schema_version": 1,
+                        "context_sha256": sixv_context_sha256,
+                        "context": state_context,
+                        "status": "tid_locked",
+                        "identity": {"tid": actual_tid, "first_sid_advance": sid_advance},
+                        "denoised_snapshot": sixv_snapshot,
+                        "current_attempt": 0,
+                        "locked_run_id": flow.run_id,
+                    }
+                    _persist_sixv_state(sixv_state_path, sixv_state)
+                except (OSError, KeyError, TypeError, ValueError) as exc:
+                    flow.output(f"[流程错误] 去噪成功标记不包含可复现的参数快照：{exc}")
+                    return 3
+            elif code != 0:
+                return code
+        elif code != 0:
+            return code
+
+    if any_tid_sixv_sid:
+        assert sixv_state_path is not None and sixv_context_sha256 is not None
+        assert sixv_state is not None and sixv_identity is not None and sixv_snapshot is not None
+        if flow.stop_requested:
+            sixv_state["status"] = "stopped"
+            _persist_sixv_state(sixv_state_path, sixv_state)
+            return 130
+        try:
+            return _run_sixv_sid_continuation(
+                flow,
+                flow_dir,
+                payload,
+                request,
+                actual_tid=sixv_identity["tid"],
+                sid_advance=sixv_identity["sid_advance"],
+                snapshot=sixv_snapshot,
+                state_path=sixv_state_path,
+                context_sha256=sixv_context_sha256,
+                state=sixv_state,
+                ezcon_path=ezcon_path,
+                fingerprint_warning_only=fingerprint_warning_only,
+                label_profile=label_profile,
+            )
+        except InterruptedError as exc:
+            flow.output(f"[6V闪SID搜索] {exc}；已保留去噪TID与参数快照。")
+            if sixv_state is not None and sixv_state_path is not None:
+                sixv_state["status"] = "stopped"
+                sixv_state["failure"] = str(exc)
+                _persist_sixv_state(sixv_state_path, sixv_state)
+            return 130
+        except (OSError, KeyError, TypeError, ValueError, RuntimeError, LookupError) as exc:
+            flow.output(f"[流程错误] 6V闪SID派生阶段停止，去噪TID与快照已保留：{exc}")
+            if sixv_state is not None and sixv_state_path is not None:
+                sixv_state["status"] = "planning_failed"
+                sixv_state["failure"] = str(exc)
+                _persist_sixv_state(sixv_state_path, sixv_state)
+            return 2
+
+    if flow.stop_requested:
+        return 130
     try:
         actual_tid, sid_advance = parse_id_identity(flow.stage_lines)
         resolved = resolve_exhaustive_starter_plan(
@@ -386,6 +863,13 @@ def run_exhaustive_flow(
         return 2
 
     target = resolved.starter_target
+    flow.final_identity = {
+        "tid": resolved.tid,
+        "sid": resolved.sid,
+        "sid_advance": resolved.sid_advance,
+        "sid_correction": request.tid_request.sid_advance_correction,
+    }
+    flow.final_target = target.to_dict()
     flow.output(
         f"[{handoff_label}] 实际TID={resolved.tid:05d} / SID ADV={resolved.sid_advance} / "
         f"计算SID={resolved.sid:05d}"
@@ -411,22 +895,30 @@ def run_exhaustive_flow(
         for error in check.errors:
             flow.output(f"[流程错误] 动态御三家工程预检失败：{error}")
         return 2
+    if flow.stop_requested:
+        return 130
 
     code = flow.run_stage(2, "研究所桥接与存档", bridge_main, required_marker=BRIDGE_MARKER)
     if code != 0:
         return code
+    if flow.stop_requested:
+        return 130
     code = flow.run_stage(3, "1.1.8 御三家全自动乱数", starter_main)
     if code != 0:
         return code
+    if flow.stop_requested:
+        return 130
     update_starter_precalibration(flow, starter_main)
     starter_result = classify_starter_output(flow.stage_lines)
     if starter_result == "shiny":
+        flow.sid_verified = bool(flow.final_identity and flow.final_target)
+        flow.verified_marker_seen = flow.sid_verified
         flow.output(
             "[流程完成] 已按"
             + ("穷举" if request_mode == 0 else "不乱数SID")
             + "获得的实际TID/SID确认闪光御三家。"
         )
-        return 0
+        return 0 if flow.sid_verified else 4
     if starter_result == "sid_miss":
         flow.output(
             "[流程结束] 已精确命中御三家目标PID但没有出闪；"
@@ -514,8 +1006,13 @@ def run_tid_plan(
                     f"{sum(len(item.installed) for item in applied)} 个工程标签覆盖"
                 )
         if is_flow:
-            payload = json.loads((plan_dir / "flow_plan.json").read_text(encoding="utf-8"))
+            flow_plan_path = plan_dir / "flow_plan.json"
+            flow.input_plan_sha256 = hashlib.sha256(flow_plan_path.read_bytes()).hexdigest()
+            payload = json.loads(flow_plan_path.read_text(encoding="utf-8"))
             flow_request = tid_starter_flow_request_from_dict(payload["request"])
+            flow.report_request = flow_request
+            flow.report_original_request = flow_request
+            flow.report_plan = payload
             request = flow_request.tid_request
             id_dir = plan_dir / "01_id"
         else:
@@ -588,6 +1085,8 @@ def run_tid_plan(
                     fingerprint_warnings=fingerprint_warnings,
                 )
                 payload = json.loads((plan_dir / "flow_plan.json").read_text(encoding="utf-8"))
+                flow.report_plan = payload
+                flow.report_request = tid_starter_flow_request_from_dict(payload["request"])
             else:
                 write_configured_tid_project(
                     source,
@@ -652,6 +1151,7 @@ def run_tid_plan(
                 if is_flow:
                     return run_exhaustive_flow(
                         flow, plan_dir, payload, ezcon_path,
+                        state_directory=progress_dir,
                         fingerprint_warning_only=fingerprint_warning_only, label_profile=label_profile,
                     )
                 return flow.run_stage(1, "TID/SID正式计划", main)
@@ -666,6 +1166,7 @@ def run_tid_plan(
                 plan_dir,
                 payload,
                 ezcon_path,
+                state_directory=progress_dir,
                 fingerprint_warning_only=fingerprint_warning_only,
                 label_profile=label_profile,
             )
@@ -673,6 +1174,110 @@ def run_tid_plan(
     except (OSError, KeyError, TypeError, ValueError, RuntimeError, LookupError) as exc:
         flow.output(f"[流程错误] 不启动后续脚本：{exc}")
         return 2
+
+
+def _request_fingerprint(request) -> str:
+    from dataclasses import asdict
+
+    canonical = json.dumps(asdict(request), ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def build_flow_report(flow: FlowRunner, *, code: int, run_id: str) -> dict[str, object]:
+    request = flow.report_original_request or flow.report_request
+    if request is None:
+        raise ValueError("连续流程没有可用于报告的请求快照")
+    if flow.stop_requested or code == 130:
+        status = "stopped"
+    elif code == 0 and flow.sid_verified and flow.verified_marker_seen:
+        status = "sid_verified"
+    elif code == 5:
+        status = "sid_miss"
+    elif code == 0:
+        status = "completed_without_sid_verification"
+    else:
+        status = "failed"
+    identity = flow.final_identity
+    identity_complete = bool(
+        isinstance(identity, dict)
+        and type(identity.get("tid")) is int
+        and 0 <= identity["tid"] <= 65535
+        and type(identity.get("sid")) is int
+        and 0 <= identity["sid"] <= 65535
+        and type(identity.get("sid_advance")) is int
+        and identity["sid_advance"] >= 0
+    )
+    if status == "sid_verified" and (not identity_complete or not isinstance(flow.final_target, dict)):
+        status = "completed_without_sid_verification"
+    tid_request = request.tid_request
+    target = flow.final_target if isinstance(flow.final_target, dict) else None
+    return {
+        "schema_version": 1,
+        "run_id": run_id,
+        "workflow": "tid_starter_flow",
+        "status": status,
+        "exit_code": int(code),
+        "request_fingerprint": _request_fingerprint(request),
+        "input_plan_sha256": flow.input_plan_sha256,
+        "plan_summary": {
+            "game": request.version,
+            "language": tid_request.language,
+            "nx_model": tid_request.nx_model,
+            "player_name": tid_request.player_name,
+            "gender": tid_request.gender,
+            "starter": request.starter,
+            "mode": "any_tid_sixv_sid" if request.any_tid_sixv_sid else (
+                "exhaustive" if tid_request.mode == 0 else "random"
+            ),
+            "any_tid_sixv_sid": request.any_tid_sixv_sid,
+            "sixv_pid": f"{request.shiny_sid_pid:08X}" if request.any_tid_sixv_sid else None,
+        },
+        "final_identity": identity if identity_complete else None,
+        "starter_target": target,
+        "sid_verification": {
+            "verified": status == "sid_verified",
+            "method": "planned starter target plus structured EasyCon shiny-target marker",
+            "candidate_sid_source": "fixed target SID / resolved TID chain",
+            "structured_shiny_marker_seen": flow.verified_marker_seen,
+            "target_pid": (target.get("pid_hex") if target else None),
+            "target_seed": (target.get("seed_hex") if target else None),
+            "target_advances": (target.get("advances") if target else None),
+        },
+        "denoised_snapshot": flow.id_snapshot,
+        "sixv_sid_plan": (
+            {
+                "pid": f"{request.shiny_sid_pid:08X}",
+                "selected_sid": (flow.sixv_state.get("selected_sid") if isinstance(flow.sixv_state, dict) else None),
+        "selected_sid_advance": (
+                    flow.sixv_state.get("current_attempt_sid_advance")
+                    if isinstance(flow.sixv_state, dict)
+                    else None
+                ),
+                "initial_selected_sid_advance": (
+                    flow.sixv_state.get("selected_sid_advance")
+                    if isinstance(flow.sixv_state, dict) else None
+                ),
+                "minimum_executable_advance": (
+                    flow.sixv_state.get("current_minimum_executable_sid_advance",
+                                        flow.sixv_state.get("minimum_executable_sid_advance"))
+                    if isinstance(flow.sixv_state, dict) else None
+                ),
+                "attempt_plans": (
+                    flow.sixv_state.get("attempt_plans")
+                    if isinstance(flow.sixv_state, dict) else None
+                ),
+                "locked_initial_run_id": (
+                    flow.sixv_state.get("locked_run_id") if isinstance(flow.sixv_state, dict) else None
+                ),
+            }
+            if request.any_tid_sixv_sid else None
+        ),
+        "evidence": {
+            "final_attempt_sid_correction": flow.final_attempt_correction,
+            "sid_advance": identity.get("sid_advance") if identity_complete else None,
+            "sid_candidate": identity.get("sid") if identity_complete else None,
+        },
+    }
 
 
 def main() -> int:
@@ -740,7 +1345,7 @@ def main() -> int:
         with StopFileWatcher(args.stop_file, flow.request_stop) as stop:
             if stop.requested:
                 flow.request_stop()
-            return run_tid_plan(
+            result_code = run_tid_plan(
                 flow, flow_dir, Path(args.ezcon).resolve(),
                 is_flow=bool(args.flow_dir), calibrate_first=args.calibrate_first,
                 result_path=args.calibration_result,
@@ -749,6 +1354,19 @@ def main() -> int:
                 fingerprint_warning_only=args.fingerprint_warnings,
                 label_profile=label_profile,
             )
+            if args.flow_dir:
+                report_path = log_path.with_suffix(".report.json")
+                try:
+                    write_json_atomic(
+                        report_path,
+                        build_flow_report(flow, code=result_code, run_id=args.run_id),
+                    )
+                    log.write(f"[流程报告] {report_path}\n")
+                    log.flush()
+                except (OSError, TypeError, ValueError) as exc:
+                    log.write(f"[流程报告失败] {exc}\n")
+                    log.flush()
+            return result_code
 
 
 if __name__ == "__main__":

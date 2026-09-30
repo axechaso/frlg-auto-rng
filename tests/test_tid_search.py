@@ -287,10 +287,18 @@ class TidSearchTests(unittest.TestCase):
         from automation.tid_checkpoint import DONE_MARKER
         from automation.tid_starter_flow import TidStarterFlowRequest
         from automation.tid_starter_save import set_starter_save_sid_correction
-        from run_tid_starter_flow import FlowRunner, run_tid_plan, STARTER_SHINY_MARKER, STARTER_SID_MISS_MARKER
+        from run_tid_starter_flow import (
+            FlowRunner, run_tid_plan, ID_MARKER, STARTER_SHINY_MARKER,
+            STARTER_STRUCTURED_SHINY_MARKER, STARTER_SID_MISS_MARKER,
+        )
         from tid_session import progress_context, read_progress, write_json_atomic, TidProgressSession
         for is_flow in (False,True):
-            request=TidRngRequest(op_rng_range=20,include_65535=False)
+            request=TidRngRequest(
+                op_rng_range=20,
+                include_65535=False,
+                target_tid=12345,
+                target_sid=8832,
+            )
             flow_request=TidStarterFlowRequest(request,"火红","妙蛙种子")
             m,p,source=self.setup_machine(request)
             state=self.state(m,p)
@@ -302,9 +310,18 @@ class TidSearchTests(unittest.TestCase):
                 payload=asdict(flow_request)
                 payload["tid_request"]=request.to_dict()
                 payload["starter_seed_calibration_scheme"]=0
+                starter_target={
+                    "tid":12345,"sid":8832,"seed_hex":"9CA9",
+                    "advances":1513,"pid_hex":"01234567",
+                }
                 write_json_atomic(id_dir/"plan.json",{"tid_request":request.to_dict(),"source_manifest":{"scripts":{"英文":{"sha256":"a"*64}}}})
                 if is_flow:
-                    write_json_atomic(root/"flow_plan.json",{"request":payload,"deferred_identity":False,"sid_retry_corrections":[0,1]})
+                    write_json_atomic(root/"flow_plan.json",{
+                        "request":payload,
+                        "starter_target":starter_target,
+                        "deferred_identity":False,
+                        "sid_retry_corrections":[0,1],
+                    })
                     for index in (0,1):
                         (id_dir/f"main_attempt_{index:03d}.ecs").write_text(set_starter_save_sid_correction(source,"英文",index),encoding="utf-8")
                 runner=FlowRunner(Path("unused"),port="COM4",video_device=0,log=io.StringIO())
@@ -317,11 +334,20 @@ class TidSearchTests(unittest.TestCase):
                         started.append(actual.read_text(encoding="utf-8"))
                         runner.progress.feed(CHECKPOINT_V3_PREFIX+"|".join(f"{k}={v}" for k,v in state.items())+"|END=1")
                         runner.progress.feed(DONE_MARKER)
+                        runner.stage_lines=[
+                            ID_MARKER,
+                            "TIDFLOW|ID|TID=12345",
+                            "TIDFLOW|ID|SID_ADV=199",
+                        ]
                     else:
                         self.assertIsNone(runner.progress)
                         self.assertIsNone(runner.id_main_override)
                     if number==3:
-                        runner.stage_lines=[STARTER_SID_MISS_MARKER if len(started)==1 else STARTER_SHINY_MARKER]
+                        runner.stage_lines=(
+                            [STARTER_SID_MISS_MARKER]
+                            if len(started)==1
+                            else [STARTER_SHINY_MARKER,STARTER_STRUCTURED_SHINY_MARKER]
+                        )
                     return 0
                 runner.run_stage=Mock(side_effect=stage)
                 with patch("run_tid_starter_flow.validate_tid_runtime",return_value=EasyConRuntimeCheck(True,(),())), patch("run_tid_starter_flow.update_starter_precalibration"):

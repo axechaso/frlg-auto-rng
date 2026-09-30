@@ -1,8 +1,10 @@
 """Functional adapters for the remaining approved Qt pages."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from dataclasses import asdict
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,7 +22,7 @@ from rng.sid_reverse import find_earliest_shiny_sid, parse_pid_hex, sid_min_adva
 from sid_traversal import DEFAULT_TARGET_MAX_ADVANCES, sid_traversal_start_advance
 from tid_session import write_json_atomic
 from pyside_preview import APP_STYLE, CompletionPopup
-from .window import FrlgWindow, workflow_start_confirmation_html
+from .window import FrlgWindow, easycon_log_has_fatal_error, workflow_start_confirmation_html
 from .forms import FormReader, species_id
 from .workflows import WorkflowInputs, prepare_workflow, prepare_workflow_run
 from .egg_config import build_egg_parent_config_payload, build_egg_full_config_payload, parse_egg_parent_config_payload, parse_egg_full_config_payload
@@ -33,6 +35,7 @@ class CompleteWindow(FrlgWindow):
         self.workflow = None
         self.running_workflow = None
         self.workflow_summary = None
+        self._shown_tid_profile_run_ids = set()
         self.named_rival = None
         parents = self.egg_parents.layout()
         self.egg_parent_widgets = []
@@ -378,6 +381,10 @@ class CompleteWindow(FrlgWindow):
         # in sync without sending a second event.
         report_text = None
         report = None
+        profile_report = None
+        current_run_id = self.run_command.run_id if self.run_command else ""
+        stopped_by_user = self._manual_stop_requested
+        window_closing = self.closing
         if prepared and self.run_command:
             suffix = ".report.txt" if prepared.inputs.mode == "sid" else ".report.json"
             report = self.run_command.log_path.with_suffix(suffix)
@@ -385,6 +392,69 @@ class CompleteWindow(FrlgWindow):
                 report_text = report.read_text(encoding="utf-8", errors="replace")
                 self.result_panel.setPlainText(report_text)
                 self._append_log(f"\n报告：{report}\n{report_text}\n")
+                if prepared.inputs.mode == "tid" and prepared.inputs.extra.get("flow") is not None:
+                    try:
+                        payload = json.loads(report_text)
+                        if not isinstance(payload, dict):
+                            raise ValueError("流程报告必须是JSON对象")
+                        expected_plan = prepared.directory / "flow_plan.json"
+                        expected_request = prepared.inputs.extra["flow"]
+                        request_json = json.dumps(
+                            asdict(expected_request),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
+                        expected_request_fingerprint = hashlib.sha256(request_json.encode("utf-8")).hexdigest()
+                        expected_plan_fingerprint = hashlib.sha256(expected_plan.read_bytes()).hexdigest()
+                        final_identity = payload.get("final_identity")
+                        target = payload.get("starter_target")
+                        verification = payload.get("sid_verification")
+                        plan_summary = payload.get("plan_summary")
+                        report_valid = (
+                            isinstance(payload, dict)
+                            and payload.get("schema_version") == 1
+                            and payload.get("workflow") == "tid_starter_flow"
+                            and payload.get("status") == "sid_verified"
+                            and payload.get("run_id") == current_run_id
+                            and payload.get("exit_code") == 0
+                            and payload.get("request_fingerprint") == expected_request_fingerprint
+                            and payload.get("input_plan_sha256") == expected_plan_fingerprint
+                            and isinstance(plan_summary, dict)
+                            and plan_summary.get("game") == expected_request.version
+                            and plan_summary.get("language") == expected_request.tid_request.language
+                            and plan_summary.get("nx_model") == expected_request.tid_request.nx_model
+                            and plan_summary.get("player_name") == expected_request.tid_request.player_name
+                            and isinstance(final_identity, dict)
+                            and type(final_identity.get("tid")) is int
+                            and 0 <= final_identity["tid"] <= 65535
+                            and type(final_identity.get("sid")) is int
+                            and 0 <= final_identity["sid"] <= 65535
+                            and type(final_identity.get("sid_advance")) is int
+                            and final_identity["sid_advance"] >= 0
+                            and isinstance(target, dict)
+                            and isinstance(target.get("pid_hex"), str)
+                            and isinstance(target.get("seed_hex"), str)
+                            and target.get("tid") == final_identity.get("tid")
+                            and target.get("sid") == final_identity.get("sid")
+                            and isinstance(verification, dict)
+                            and verification.get("target_pid") == target.get("pid_hex")
+                            and verification.get("target_seed") == target.get("seed_hex")
+                            and verification.get("target_advances") == target.get("advances")
+                            and type(target.get("advances")) is int
+                            and target["advances"] >= 0
+                            and verification.get("verified") is True
+                            and verification.get("structured_shiny_marker_seen") is True
+                            and not stopped_by_user
+                            and not window_closing
+                            and not easycon_log_has_fatal_error(
+                                self.run_command.log_path.read_text(encoding="utf-8", errors="replace")
+                            )
+                        )
+                        if report_valid and current_run_id not in self._shown_tid_profile_run_ids:
+                            self._shown_tid_profile_run_ids.add(current_run_id)
+                            profile_report = payload
+                    except (OSError, TypeError, ValueError, KeyError):
+                        profile_report = None
         super()._process_finished(code, status)
         if prepared and self.run_command:
             if prepared.inputs.mode == "egg" and code == 0 and prepared.inputs.request.update_precalibration:
@@ -421,6 +491,39 @@ class CompleteWindow(FrlgWindow):
         if hasattr(self, "accessories"):
             self.accessories.run_finished()
             self.tid_state.poll()
+        if profile_report is not None and not self.closing:
+            QTimer.singleShot(0, lambda payload=profile_report: self._show_verified_profile_draft(payload))
+
+    def _show_verified_profile_draft(self, report):
+        if self.closing or not self.profiles_available:
+            return
+        if not self.run_command or report.get("run_id") != self.run_command.run_id:
+            return
+        identity = report.get("final_identity") or {}
+        summary = report.get("plan_summary") or {}
+        if not isinstance(identity, dict) or not isinstance(summary, dict):
+            return
+        tid, sid = identity.get("tid"), identity.get("sid")
+        if type(tid) is not int or type(sid) is not int or not (0 <= tid <= 65535 and 0 <= sid <= 65535):
+            return
+        base = f"{summary.get('game', '存档')}-{summary.get('player_name', '主角')}-{tid:05d}"
+        name = base
+        suffix = 2
+        existing = {profile.name.casefold() for profile in self.profile_store.profiles}
+        while name.casefold() in existing:
+            name = f"{base} ({suffix})"
+            suffix += 1
+        dialog = ProfileManager(self.profile_store, self)
+        dialog.prefill_new(
+            name=name,
+            game=summary.get("game", "火红"),
+            language=summary.get("language", "英文"),
+            nx_model=summary.get("nx_model", 1),
+            tid=tid,
+            sid=sid,
+        )
+        dialog.changed.connect(lambda: self.reload_profiles(apply=True))
+        dialog.exec()
 
     def closeEvent(self, event):
         if hasattr(self, "app_update"):

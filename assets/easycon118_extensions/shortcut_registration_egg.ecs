@@ -4,10 +4,6 @@ FUNC 孵蛋测试_检查并登记自行车快捷($识图阈值: INT): INT
     PRINT "FRLG_STAGE|BEGIN|egg.settings.shortcut|egg.settings.shortcut|20000|lib/27_孵蛋测试流程.ecs|孵蛋测试_检查并登记自行车快捷|egg27.settings.shortcut|manual_prepare_then_restart|OR;快捷第一位.IL:>=:" & $识图阈值 & ",快捷第二位.IL:>=:" & $识图阈值 & ",快捷第三位.IL:>=:" & $识图阈值 & "|!"
     X
     WAIT 500
-    FOR 8
-        UP
-        WAIT 100
-    NEXT
     FOR 2
         DOWN
         WAIT 150
@@ -22,14 +18,10 @@ FUNC 孵蛋测试_检查并登记自行车快捷($识图阈值: INT): INT
     $孵蛋库_快捷第三分数 = @快捷第三位
     PRINT "孵蛋快捷登记识别: 第一位=" & $孵蛋库_快捷第一分数 & " 第二位=" & $孵蛋库_快捷第二分数 & " 第三位=" & $孵蛋库_快捷第三分数
     IF $孵蛋库_快捷第二分数 < $识图阈值
-        FOR 6
-            UP
-            WAIT 100
-        NEXT
         DOWN
         WAIT 150
         A
-        WAIT 700
+        WAIT 1500
         DOWN
         WAIT 300
         A
@@ -47,7 +39,7 @@ FUNC 孵蛋测试_检查并登记自行车快捷($识图阈值: INT): INT
             PRINT "FRLG_STAGE|FAIL|egg.settings.shortcut|登记自行车后第二位仍未匹配|!"
             PRINT "孵蛋快捷登记检查失败: 第二位匹配度=" & $孵蛋库_快捷第二分数
             B
-            WAIT 700
+            WAIT 1500
             B
             WAIT 1000
             RETURN 0
@@ -58,7 +50,7 @@ FUNC 孵蛋测试_检查并登记自行车快捷($识图阈值: INT): INT
     ENDIF
 
     B
-    WAIT 700
+    WAIT 1500
     B
     WAIT 1000
     PRINT "FRLG_STAGE|END|egg.settings.shortcut|!"

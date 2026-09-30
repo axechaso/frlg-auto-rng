@@ -242,7 +242,11 @@ PREVIOUS_SCRIPT_SHA256S += (
     # Teachy TV opened from Bag, and explicit post-catch cursor navigation.
     "abc734a8f44ff152312bf3f62f5e8cc87194b13325bb3e2985f567a45325418b",
 )
-EXPECTED_SCRIPT_SHA256 = "eb18777c634b7c5ab10c0f5a930fe29d65b1fdca7d18edb10b461c733dd30bbb"
+PREVIOUS_SCRIPT_SHA256S += (
+    # September 27 source corpus before the October 1 four-file upstream sync.
+    "eb18777c634b7c5ab10c0f5a930fe29d65b1fdca7d18edb10b461c733dd30bbb",
+)
+EXPECTED_SCRIPT_SHA256 = "b0f0302037b778661ac5087c6d007ab03865f4030fcd6a680c9f2d450afa1392"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
@@ -400,6 +404,12 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "95c6e2924217fd40615ae8785df42ccc3eeb02d8d8381c4bf2f7664ea5a4578f",
     # September 26 materialization of the corrected formal/timeline logging.
     "f6287406e4a7c3b04baee4cbcddabca07e8f1d192a8503b1a0e3491251527416",
+    # Previous canonical source/runtime corpus remains accepted for existing
+    # projects while new imports use the October 1 upstream source.
+    "eb18777c634b7c5ab10c0f5a930fe29d65b1fdca7d18edb10b461c733dd30bbb",
+    # October 1 materialization preserves the updated wild-lookup helper,
+    # bounded upstream egg retry policy, and reviewed shortcut overlays.
+    "04a0cdda3c9ded4dda8fb2192765ed76cc46ed6e963fc6cb737c18f8125ad994",
 )
 
 
@@ -604,6 +614,8 @@ SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL = """\
     WAIT 500
     IF 是否御三家目标() == 1
 """
+# Exact legacy block injected by an earlier GUI build. It is migrated back to
+# the current source-package entry; the current menu cursor is already known.
 SHORTCUT_REGISTRATION_OPTIONS_CURRENT = """\
     X
     WAIT 500
@@ -621,7 +633,7 @@ SHORTCUT_REGISTRATION_EGG_CALL_ANCHOR = """\
     PRINT 【孵蛋准备】按 Seed模式检查游戏设置
     X
     WAIT 500
-    FOR 5
+    FOR 3
 """
 SHORTCUT_REGISTRATION_EGG_CALL_BLOCK = """\
     PRINT 【孵蛋准备】按 Seed模式检查游戏设置
@@ -632,12 +644,7 @@ SHORTCUT_REGISTRATION_EGG_CALL_BLOCK = """\
 
     X
     WAIT 500
-    # 快捷登记检查会改变主菜单记忆位置，进入Options前统一夹到顶部。
-    FOR 8
-        UP
-        WAIT 100
-    NEXT
-    FOR 5
+    FOR 3
 """
 SHORTCUT_REGISTRATION_REQUIREMENT_ANCHOR = (
     "    PRINT 背包第一页第一格放神奇糖果，数量不限\n"
@@ -4233,6 +4240,23 @@ def _apply_egg_terminal_stop_policy_text(template_text: str) -> str:
     """Stop terminal egg lookup failures without closing or restarting the game."""
     if EGG_TERMINAL_STOP_OVERRIDE_MARKER in template_text:
         return template_text
+    signature = "FUNC 孵蛋流程_执行孵化与个体反查(): INT"
+    upstream_retry_marker = "# 反查无结果/识图失败仅重试下一轮一次；配置与其他终止原因仍保留现场。"
+    if template_text.count(signature) == 1:
+        start = template_text.index(signature)
+        end = template_text.index("ENDFUNC", start) + len("ENDFUNC")
+        section = template_text[start:end]
+        # Newer 2.0 mothers already implement one bounded retry for lookup and
+        # OCR failures, and preserve the current game screen for other terminal
+        # errors. Recognize that exact reviewed branch so this older overlay
+        # does not replace it with its simpler legacy behavior.
+        if (
+            section.count(upstream_retry_marker) == 1
+            and section.count("处理本轮反查识图失败()") == 2
+            and section.count("CALL 孵蛋流程_重开下一轮") == 4
+            and section.count("PRINT 停止前保留当前游戏画面，不关闭或重启游戏") == 1
+        ):
+            return template_text
     configured = template_text
     for original, replacement in EGG_TERMINAL_STOP_REPLACEMENTS:
         if configured.count(original) != 1:
@@ -4697,14 +4721,18 @@ def _apply_shortcut_registration_main_text(
             1,
         )
 
-    if SHORTCUT_REGISTRATION_OPTIONS_CURRENT not in template_text:
-        if template_text.count(SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL) != 1:
-            raise ValueError("主脚本缺少唯一的Options入口，拒绝修正快捷登记后的菜单光标")
+    legacy_count = template_text.count(SHORTCUT_REGISTRATION_OPTIONS_CURRENT)
+    current_count = template_text.count(SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL)
+    if legacy_count:
+        if legacy_count != 1 or current_count:
+            raise ValueError("主脚本Options入口存在重复或混合版本，拒绝迁移菜单光标")
         template_text = template_text.replace(
-            SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL,
             SHORTCUT_REGISTRATION_OPTIONS_CURRENT,
+            SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL,
             1,
         )
+    elif current_count != 1:
+        raise ValueError("主脚本缺少唯一的Options入口，拒绝迁移未知菜单结构")
 
     if SHORTCUT_REGISTRATION_REQUIREMENT_BLOCK not in template_text:
         if template_text.count(SHORTCUT_REGISTRATION_REQUIREMENT_ANCHOR) != 1:

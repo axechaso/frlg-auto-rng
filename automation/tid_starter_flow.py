@@ -13,10 +13,13 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+from typing import Callable
 
 from rng.sid_reverse import (
     DEFAULT_TID_SID_SEARCH_ADVANCES,
+    find_earliest_shiny_sid,
     first_sid_advances,
+    sid_min_advances_for_f3,
     sid_at_advance,
 )
 from rng.tenlines import get_hidden_power, pokerng_jump
@@ -101,6 +104,10 @@ class TidStarterFlowRequest:
     starter_seed_button: int = 0
     accept_any_tid: bool = False
     any_tid_require_denoise: bool = True
+    any_tid_sixv_sid: bool = False
+    shiny_sid_pid: int = 0x7942EF72
+    # Derived plans use the same F3 floor for SID selection and ECS planning.
+    sid_min_advances: int = 0
     starter_seed_startup_scheme: int = 0
     starter_template_name: str = STANDARD_TEMPLATE_NAME
     update_precalibration: bool = False
@@ -116,6 +123,12 @@ class TidStarterFlowRequest:
             raise ValueError("任意TID衔接开关必须为布尔值")
         if not isinstance(self.any_tid_require_denoise, bool):
             raise ValueError("任意TID去噪开关必须为布尔值")
+        if not isinstance(self.any_tid_sixv_sid, bool):
+            raise ValueError("去噪后乱数6V闪SID开关必须为布尔值")
+        if type(self.shiny_sid_pid) is not int or not 0 <= self.shiny_sid_pid <= 0xFFFFFFFF:
+            raise ValueError("6V闪PID必须是32位无符号整数")
+        if type(self.sid_min_advances) is not int or self.sid_min_advances < 0:
+            raise ValueError("SID最小可执行ADV必须是非负整数")
         if self.starter_seed_startup_scheme not in {0, 1}:
             raise ValueError("御三家 Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
         if self.starter_template_name not in {STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME}:
@@ -140,6 +153,14 @@ class TidStarterFlowRequest:
             raise ValueError("御三家 Seed Button 只能是 A、START 或 L(L=A)")
         if self.accept_any_tid and self.tid_request.mode != 0:
             raise ValueError("任意TID衔接仅适用于穷举模式")
+        if self.any_tid_sixv_sid and not (
+            self.tid_request.mode == 0
+            and self.accept_any_tid
+            and self.any_tid_require_denoise
+        ):
+            raise ValueError("去噪后乱数6V闪SID要求穷举、连续御三家、任意TID和去噪确认同时开启")
+        if self.any_tid_sixv_sid and self.sid_chain_search_advances is None:
+            raise ValueError("去噪后6V闪SID搜索必须保留有限上限")
         if self.tid_request.calibration_check:
             raise ValueError("连续流程不能同时启用TID固定延迟检查")
         if self.tid_request.mode == 0 and not self.tid_request.sid_random:
@@ -250,6 +271,9 @@ def tid_starter_flow_request_from_dict(payload: dict[str, object]) -> TidStarter
         starter_seed_button=int(payload.get("starter_seed_button", 0)),
         accept_any_tid=payload.get("accept_any_tid", False),
         any_tid_require_denoise=payload.get("any_tid_require_denoise", True),
+        any_tid_sixv_sid=payload.get("any_tid_sixv_sid", False),
+        shiny_sid_pid=int(payload.get("shiny_sid_pid", 0x7942EF72)),
+        sid_min_advances=int(payload.get("sid_min_advances", 0)),
         starter_seed_startup_scheme=int(payload.get("starter_seed_startup_scheme", 0)),
         starter_template_name=str(
             payload.get("starter_template_name", STANDARD_TEMPLATE_NAME)
@@ -426,6 +450,7 @@ def build_tid_starter_flow_plan(request: TidStarterFlowRequest) -> TidStarterFlo
         request.tid_request.target_tid,
         (request.tid_request.target_sid,),
         max_advances=request.sid_chain_search_advances,
+        min_advances=request.sid_min_advances,
     )
     if not sid_hits:
         if request.sid_chain_search_advances is None:
@@ -447,6 +472,114 @@ def build_tid_starter_flow_plan(request: TidStarterFlowRequest) -> TidStarterFlo
         starter_run_plan=starter_run_plan,
         sid_retry_corrections=retry_corrections,
     )
+
+
+def derive_sixv_sid_flow_request(
+    request: TidStarterFlowRequest,
+    snapshot: dict[str, int],
+    *,
+    progress_callback: Callable[[int, int | None], None] | None = None,
+    cancel_callback: Callable[[], bool] | None = None,
+) -> tuple[TidStarterFlowRequest, object]:
+    """Freeze a denoised exhaustive point into a fixed-TID shiny-SID plan."""
+    request.validate()
+    if not request.any_tid_sixv_sid:
+        raise ValueError("当前流程未启用去噪后6V闪SID模式")
+    required = {
+        "TID", "DIGITS_OK", "DENOISE_HITS", "DENOISE_NEED", "OP", "F1", "F2",
+        "SELECT_CORRECTION", "NX_MODEL", "GENDER", "SOUND", "BUTTON_MODE",
+        "SEED_BUTTON", "OP_FIXED", "F1_FIXED", "F2_FIXED", "F3_FIXED",
+        "OP_CORRECTION", "SID_CORRECTION", "OBSERVATION", "DENOISE_TRY",
+    }
+    if not isinstance(snapshot, dict) or any(type(snapshot.get(key)) is not int for key in required):
+        raise ValueError("去噪成功快照不完整或包含非整数值")
+    if not 0 <= snapshot["TID"] <= 65535 or snapshot["DIGITS_OK"] != 1:
+        raise ValueError("快照TID未通过完整数字识别")
+    if snapshot["DENOISE_NEED"] != request.tid_request.denoise_need_hit:
+        raise ValueError("快照去噪门槛与本轮请求不一致")
+    if snapshot["DENOISE_HITS"] < snapshot["DENOISE_NEED"]:
+        raise ValueError("该参数点未达到去噪确认次数")
+    if snapshot["DENOISE_TRY"] < snapshot["DENOISE_HITS"] or snapshot["OBSERVATION"] < 0:
+        raise ValueError("去噪快照观察边界无效")
+    tid_request = request.tid_request
+    expected_settings = {
+        "NX_MODEL": tid_request.nx_model,
+        "GENDER": tid_request.gender,
+        "SOUND": tid_request.sound,
+        "BUTTON_MODE": tid_request.button_mode,
+        "SEED_BUTTON": tid_request.seed_button,
+        "SELECT_CORRECTION": tid_request.select_correction,
+    }
+    mismatches = [
+        key for key, expected in expected_settings.items()
+        if snapshot[key] != expected
+    ]
+    if mismatches:
+        raise ValueError("去噪快照与锁定请求的设置不一致：" + "/".join(mismatches))
+    if any(snapshot[key] < 0 for key in ("OP", "F1", "F2", "OP_FIXED", "F1_FIXED", "F2_FIXED", "F3_FIXED")):
+        raise ValueError("去噪快照包含负的帧数或固定延迟")
+
+    minimum = sid_min_advances_for_f3(
+        snapshot["F3_FIXED"],
+        language=tid_request.language,
+        sid_advance_correction=snapshot["SID_CORRECTION"],
+    )
+    candidate = find_earliest_shiny_sid(
+        snapshot["TID"],
+        request.shiny_sid_pid,
+        max_advances=request.sid_chain_search_advances,
+        min_advances=minimum,
+        progress_callback=progress_callback,
+        cancel_callback=cancel_callback,
+    )
+    if candidate is None:
+        raise LookupError(
+            f"在可执行ADV {minimum} 起的搜索范围内，未找到PID {request.shiny_sid_pid:08X}对应的闪光SID"
+        )
+
+    normalized_request = replace(
+        tid_request,
+        mode=1,
+        calibration_check=False,
+        op_fixed_delay=snapshot["OP_FIXED"],
+        f1_fixed_delay=snapshot["F1_FIXED"],
+        f2_fixed_delay=snapshot["F2_FIXED"],
+        f3_fixed_delay=snapshot["F3_FIXED"],
+        op_correction=snapshot["OP_CORRECTION"],
+        target_tid=snapshot["TID"],
+        target_sid=candidate.sid,
+        sid_advance_correction=snapshot["SID_CORRECTION"],
+        op_target_frame=snapshot["OP"],
+        f1_target_frame=snapshot["F1"],
+        f2_target_frame=snapshot["F2"],
+        op_start=0,
+        f1_start=0,
+        f2_start=0,
+        select_correction=snapshot["SELECT_CORRECTION"],
+        sid_random=False,
+        f3_random_range=0,
+        op_rng_range=0,
+        f1_rng_range=0,
+        f2_rng_range=0,
+        same_id=False,
+        sequential_id=False,
+        include_65535=False,
+        single_digit_id=False,
+        additional_target_tids=(),
+        auto_rng=False,
+    )
+    derived = replace(
+        request,
+        tid_request=normalized_request,
+        accept_any_tid=False,
+        any_tid_sixv_sid=False,
+        sid_min_advances=minimum,
+    )
+    derived.validate()
+    plan = build_tid_starter_flow_plan(derived)
+    if plan.earliest_sid_chain_advance != candidate.advance:
+        raise ValueError("派生计划的SID ADV与可执行搜索结果不一致")
+    return derived, candidate
 
 
 @dataclass(frozen=True)
@@ -653,12 +786,133 @@ def enable_any_tid_handoff(template: str, *, require_denoise: bool = True) -> st
                     PRINT TIDFLOW|ID|MATCH=1
                     PRINT TIDFLOW|ID|TID= & $ID
                     PRINT TIDFLOW|ID|SID_ADV= & $adv
+                    PRINT TIDFLOW|ID|SNAPSHOT|TID= & $ID
+                    PRINT TIDFLOW|ID|SNAPSHOT|DIGITS_OK= & $digits_ok
+                    PRINT TIDFLOW|ID|SNAPSHOT|DENOISE_HITS= & $denoise_hit_count
+                    PRINT TIDFLOW|ID|SNAPSHOT|DENOISE_NEED= & $denoise_need_hit
+                    PRINT TIDFLOW|ID|SNAPSHOT|OP= & $OP总帧
+                    PRINT TIDFLOW|ID|SNAPSHOT|F1= & $F1总帧
+                    PRINT TIDFLOW|ID|SNAPSHOT|F2= & $F2总帧
+                    PRINT TIDFLOW|ID|SNAPSHOT|SELECT_CORRECTION= & $select补偿
+                    PRINT TIDFLOW|ID|SNAPSHOT|NX_MODEL= & $NS机型
+                    PRINT TIDFLOW|ID|SNAPSHOT|GENDER= & $gender
+                    PRINT TIDFLOW|ID|SNAPSHOT|SOUND= & $Sound
+                    PRINT TIDFLOW|ID|SNAPSHOT|BUTTON_MODE= & $Button_Mode
+                    PRINT TIDFLOW|ID|SNAPSHOT|SEED_BUTTON= & $Seed_Button
+                    PRINT TIDFLOW|ID|SNAPSHOT|OP_FIXED= & $OP脚本固定延迟
+                    PRINT TIDFLOW|ID|SNAPSHOT|F1_FIXED= & $F1脚本固定延迟
+                    PRINT TIDFLOW|ID|SNAPSHOT|F2_FIXED= & $F2脚本固定延迟
+                    PRINT TIDFLOW|ID|SNAPSHOT|F3_FIXED= & $F3脚本固定延迟
+                    PRINT TIDFLOW|ID|SNAPSHOT|OP_CORRECTION= & $OP修正
+                    PRINT TIDFLOW|ID|SNAPSHOT|SID_CORRECTION= & $SID_ADV修正
+                    PRINT TIDFLOW|ID|SNAPSHOT|OBSERVATION= & $CISHU
+                    PRINT TIDFLOW|ID|SNAPSHOT|DENOISE_TRY= & $denoise_try_count
                     BREAK 2
                 ENDIF
             ENDIF
             # TIDFLOW_ANY_TID_END
 """
     return template.replace(anchor, anchor + block, 1)
+
+
+def enable_starter_success_markers(template: str) -> str:
+    """Require an exact target hit before a TID-flow shiny marker is emitted.
+
+    The 2.0 templates normally stop as soon as the star label is visible. In a
+    TID flow that would report a shiny result before the Seed, frame, and
+    species checks run. The generated TID project therefore records shiny
+    detection and continues through the normal exact-target check.
+    """
+    marker = "# TIDFLOW_TARGET_SHINY_VERIFICATION_V1"
+    if marker in template:
+        return template
+    global_anchor = '$脚本版本 = "2.0"\n'
+    shiny_anchor = "    IF $道具乱数模式 == 0 and @出闪 >= $识图阈值\n"
+    english_shiny_block = (
+        shiny_anchor
+        + '        PRINT ""\n'
+        + "        PRINT 已识别到出闪，脚本停止\n"
+        + "        RETURN 0\n"
+        + "    ENDIF\n"
+    )
+    japanese_shiny_block = (
+        shiny_anchor
+        + "        PRINT 已识别到出闪，脚本停止\n"
+        + "        RETURN 0\n"
+        + "    ENDIF\n"
+    )
+    exact_target_anchor = (
+        "    IF $道具乱数模式 == 0 and $命中差索引 == 0 and "
+        "$本轮消耗帧误差 == 0 and $本轮物种命中 == 1\n"
+    )
+    loop_anchor = "        $本轮流程结果 = 执行RNG启动与目标获取()\n"
+    if template.count(global_anchor) != 1:
+        raise ValueError("御三家模板缺少唯一的用户输入区，拒绝接入目标闪光验证")
+    if template.count(shiny_anchor) != 2:
+        raise ValueError("御三家模板的英/日闪光识别分支数量异常，拒绝接入目标验证")
+    if template.count(english_shiny_block) != 1 or template.count(japanese_shiny_block) != 1:
+        raise ValueError("御三家模板的英/日出闪停止分支结构异常，拒绝接入目标验证")
+    if template.count(exact_target_anchor) != 1:
+        raise ValueError("御三家模板缺少唯一的精确目标命中分支，拒绝接入目标验证")
+    if template.count(loop_anchor) != 1:
+        raise ValueError("御三家模板缺少唯一的主循环目标获取入口，拒绝接入目标验证")
+
+    template = template.replace(
+        global_anchor,
+        global_anchor
+        + marker
+        + "\n$TID连续流程目标验证 = 1\n$TIDFLOW本轮出闪 = 0\n",
+        1,
+    )
+
+    def shiny_replacement(*, include_blank_line: bool) -> str:
+        return (
+            shiny_anchor
+            + "        IF $TID连续流程目标验证 == 0\n"
+            + ('            PRINT ""\n' if include_blank_line else "")
+            + "            PRINT 已识别到出闪，脚本停止\n"
+            + "            RETURN 0\n"
+            + "        ENDIF\n"
+            + "        $TIDFLOW本轮出闪 = 1\n"
+            + "    ENDIF\n"
+        )
+    template = template.replace(
+        english_shiny_block,
+        shiny_replacement(include_blank_line=True),
+        1,
+    ).replace(
+        japanese_shiny_block,
+        shiny_replacement(include_blank_line=False),
+        1,
+    )
+    template = template.replace(
+        loop_anchor,
+        "        $TIDFLOW本轮出闪 = 0\n" + loop_anchor,
+        1,
+    )
+    target_replacement = (
+        exact_target_anchor
+        +
+        "        IF $TID连续流程目标验证 == 1 and $TIDFLOW本轮出闪 == 1\n"
+        "            PRINT 已识别到出闪，脚本停止\n"
+        "            PRINT TIDFLOW|STARTER|TARGET_SHINY=1\n"
+        "        ENDIF\n"
+    )
+    template = template.replace(exact_target_anchor, target_replacement, 1)
+    non_target_anchor = "    IF $命中差索引 == 0 and $本轮消耗帧误差 == 0 and $本轮物种命中 == 0\n"
+    if template.count(non_target_anchor) != 1:
+        raise ValueError("御三家模板缺少唯一的非目标物种分支，拒绝接入闪光停止保护")
+    template = template.replace(
+        non_target_anchor,
+        "    IF $TID连续流程目标验证 == 1 and $TIDFLOW本轮出闪 == 1\n"
+        "        PRINT TIDFLOW|STARTER|NON_TARGET_SHINY=1\n"
+        "        PRINT 识别到闪光但没有精确命中本轮御三家目标，停止连续流程\n"
+        "        RETURN 0\n"
+        "    ENDIF\n\n"
+        + non_target_anchor,
+        1,
+    )
+    return template
 
 
 def write_tid_starter_flow_bundle(
@@ -727,7 +981,7 @@ def write_tid_starter_flow_bundle(
         encoding="utf-8",
     )
     if plan.starter_run_plan is not None:
-        write_configured_project(
+        starter_main = write_configured_project(
             starter_source_dir,
             starter_dir,
             plan.starter_run_plan,
@@ -747,6 +1001,10 @@ def write_tid_starter_flow_bundle(
             ),
             template_name=plan.request.starter_template_name,
             precalibration_store_path=precalibration_store_path,
+        )
+        starter_main.write_text(
+            enable_starter_success_markers(starter_main.read_text(encoding="utf-8")),
+            encoding="utf-8",
         )
     elif starter_dir.exists():
         shutil.rmtree(starter_dir)
@@ -792,6 +1050,10 @@ def write_resolved_exhaustive_starter_project(
         ),
         template_name=resolved.request.starter_template_name,
         precalibration_store_path=precalibration_store_path,
+    )
+    main_path.write_text(
+        enable_starter_success_markers(main_path.read_text(encoding="utf-8")),
+        encoding="utf-8",
     )
     (starter_dir.parent / "resolved_identity.json").write_text(
         json.dumps(resolved.to_dict(), ensure_ascii=False, indent=2),

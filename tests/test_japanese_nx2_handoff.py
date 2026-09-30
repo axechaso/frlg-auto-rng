@@ -18,7 +18,8 @@ from rng.sid_reverse import sid_at_advance
 from rng.tenlines import HELD_BUTTON_OFFSETS, get_contiguous_seed_list, load_frlg_seed_data
 from rng.tenlines_utils import get_seed_time
 from run_tid_starter_flow import (
-    ID_MARKER, STARTER_SHINY_MARKER, parse_id_identity, run_exhaustive_flow,
+    ID_MARKER, STARTER_SHINY_MARKER, STARTER_STRUCTURED_SHINY_MARKER,
+    parse_id_identity, run_exhaustive_flow,
 )
 
 
@@ -109,6 +110,7 @@ class JapaneseNx2HandoffTests(unittest.TestCase):
                 self.calls = []
                 self.messages = []
                 self.stage_lines = []
+                self.stop_requested = False
 
             def output(self, message):
                 self.messages.append(message)
@@ -120,7 +122,7 @@ class JapaneseNx2HandoffTests(unittest.TestCase):
                     assert required_marker == ID_MARKER
                 elif number == 3:
                     assert Path(main_path).is_file()
-                    self.stage_lines = [STARTER_SHINY_MARKER]
+                    self.stage_lines = [STARTER_SHINY_MARKER, STARTER_STRUCTURED_SHINY_MARKER]
                 return 0
 
         for version, family in (("火红", "fr"), ("叶绿", "lg")):

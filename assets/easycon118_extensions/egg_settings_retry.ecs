@@ -154,7 +154,7 @@ FUNC 孵蛋测试_检查校正并保存游戏设置($Seed模式: INT, $识图阈
     PRINT 【孵蛋准备】按 Seed模式检查游戏设置
     X
     WAIT 500
-    FOR 5
+    FOR 3
         DOWN
         WAIT 150
     NEXT

@@ -77,6 +77,8 @@ from automation.easycon118 import (
     SHORTCUT_REGISTRATION_EGG_PATH,
     SHORTCUT_REGISTRATION_MAIN_MARKER,
     SHORTCUT_REGISTRATION_MAIN_PATH,
+    SHORTCUT_REGISTRATION_OPTIONS_CURRENT,
+    SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL,
     TOGEPI_HATCH_CYCLE_OVERRIDE_PATH,
     WILD_PID_RETRY_LIMIT_MARKER,
     EggRunRequest,
@@ -678,7 +680,42 @@ ENDFUNC
         self.assertIn("FRLG_STAGE|BEGIN|settings.shortcut|", configured)
         self.assertIn("快捷第一位.IL", configured)
         self.assertIn("重要道具固定顺序", configured)
-        self.assertIn("进入Options前统一夹到顶部", configured)
+        self.assertIn(SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL, configured)
+        self.assertNotIn("进入Options前统一夹到顶部", configured)
+        self.assertNotIn("FOR 8\n        UP", configured)
+        self.assertIn("WAIT 500\n    IF 是否御三家目标() == 1", configured)
+
+    def test_legacy_options_navigation_migrates_to_current_anchor_once(self):
+        original = """\
+    PRINT 背包第一页第一格放神奇糖果，数量不限
+    PRINT Teachy TV登录快捷键
+    PRINT 自行车登录快捷键
+    PRINT 厉害钓竿登录快捷键
+FUNC 检查并校正游戏设置(): INT
+    $游戏设置已修改 = 0
+    $游戏设置目标声音 = 0
+    $游戏设置目标按键 = 0
+
+    # 模式0-9均使用HELP；模式3为STEREO/HELP/START；模式10为日版MONO/HELP/A。
+    X
+    WAIT 500
+    IF 是否御三家目标() == 1
+        RETURN 1
+    ENDIF
+ENDFUNC
+"""
+        legacy = original.replace(
+            SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL,
+            SHORTCUT_REGISTRATION_OPTIONS_CURRENT,
+        )
+        helper = Path(SHORTCUT_REGISTRATION_MAIN_PATH).read_text(encoding="utf-8")
+        migrated = _apply_shortcut_registration_main_text(legacy, helper)
+
+        self.assertIn(SHORTCUT_REGISTRATION_OPTIONS_ORIGINAL, migrated)
+        self.assertNotIn(SHORTCUT_REGISTRATION_OPTIONS_CURRENT, migrated)
+        self.assertEqual(
+            _apply_shortcut_registration_main_text(migrated, helper), migrated
+        )
 
     def test_egg_shortcut_registration_requires_second_row_and_is_idempotent(self):
         original = """\
@@ -686,7 +723,7 @@ FUNC 孵蛋测试_检查校正并保存游戏设置($Seed模式: INT, $识图阈
     PRINT 【孵蛋准备】按 Seed模式检查游戏设置
     X
     WAIT 500
-    FOR 5
+    FOR 3
         DOWN
     NEXT
     RETURN 1
@@ -705,7 +742,39 @@ ENDFUNC
         self.assertIn("$孵蛋库_快捷第二分数 = @快捷第二位", configured)
         self.assertIn("孵蛋测试_检查并登记自行车快捷($识图阈值)", configured)
         self.assertIn("FRLG_STAGE|BEGIN|egg.settings.shortcut|", configured)
-        self.assertIn("进入Options前统一夹到顶部", configured)
+        self.assertNotIn("进入Options前统一夹到顶部", configured)
+        helper_start = configured.index(SHORTCUT_REGISTRATION_EGG_MARKER)
+        helper_end = configured.index("ENDFUNC", helper_start)
+        helper_block = configured[helper_start:helper_end]
+        self.assertNotIn("UP", helper_block)
+        self.assertNotIn("FOR 6", helper_block)
+        self.assertIn("WAIT 1500", helper_block)
+
+    def test_egg_settings_then_shortcut_overlays_keep_latest_options_navigation(self):
+        original = """\
+$孵蛋库_设置结果 = 0
+FUNC 孵蛋测试_检查校正并保存游戏设置($Seed模式: INT, $识图阈值: INT): INT
+    PRINT 原始单次检查
+    RETURN 0
+ENDFUNC
+
+FUNC 孵蛋测试_执行前置准备($Seed模式: INT, $识图阈值: INT): INT
+    RETURN 1
+ENDFUNC
+"""
+        settings_overlay = Path(EGG_SETTINGS_OVERRIDE_PATH).read_text(encoding="utf-8")
+        shortcut_overlay = Path(SHORTCUT_REGISTRATION_EGG_PATH).read_text(encoding="utf-8")
+        settings = _apply_egg_settings_runtime_override_text(original, settings_overlay)
+        configured = _apply_shortcut_registration_egg_text(settings, shortcut_overlay)
+
+        self.assertIn("孵蛋测试_检查并登记自行车快捷($识图阈值)", configured)
+        self.assertIn("WAIT 500\n    FOR 3\n", configured)
+        self.assertNotIn("FOR 5\n        DOWN", configured)
+        self.assertNotIn("进入Options前统一夹到顶部", configured)
+        self.assertEqual(
+            _apply_shortcut_registration_egg_text(configured, shortcut_overlay),
+            configured,
+        )
 
     def test_game_restart_uses_original_flow_with_exit_state_priority(self):
         original = """\
@@ -1450,6 +1519,46 @@ ENDFUNC
         )[0]
         self.assertIn("CALL 孵蛋流程_重开下一轮", retry_branch)
 
+    def test_new_upstream_terminal_retry_policy_is_preserved(self):
+        latest = """\
+FUNC 孵蛋流程_执行孵化与个体反查(): INT
+    IF $孵蛋流程孵化结果 != 1
+        CALL 孵蛋流程_重开下一轮
+        RETURN 2
+    ENDIF
+    IF $孵蛋流程蛋反查结果 == 3
+        CALL 孵蛋流程_重开下一轮
+        RETURN 2
+    # 反查无结果/识图失败仅重试下一轮一次；配置与其他终止原因仍保留现场。
+    ELIF $孵蛋流程蛋反查结果 == 2
+        $反查识图重试结果 = 处理本轮反查识图失败()
+        IF $反查识图重试结果 != 1
+            RETURN 0
+        ENDIF
+        CALL 孵蛋流程_重开下一轮
+        RETURN 2
+    ELIF $孵蛋流程蛋反查结果 != 1
+        IF $本轮反查识图失败原因 != ""
+            $反查识图重试结果 = 处理本轮反查识图失败()
+            IF $反查识图重试结果 != 1
+                RETURN 0
+            ENDIF
+            CALL 孵蛋流程_重开下一轮
+            RETURN 2
+        ENDIF
+        PRINT 蛋个体反查失败，请检查双亲、相性、目标帧或识图配置
+        PRINT 停止前保留当前游戏画面，不关闭或重启游戏
+        RETURN 0
+    ENDIF
+    RETURN 1
+ENDFUNC
+"""
+        self.assertEqual(_apply_egg_terminal_stop_policy_text(latest), latest)
+        self.assertEqual(
+            _apply_egg_terminal_stop_policy_text(_apply_egg_terminal_stop_policy_text(latest)),
+            latest,
+        )
+
     def test_pond_route_waits_after_the_final_down_input(self):
         configured = _apply_egg_pond_settle_delay_text(EGG_POND_SETTLE_ORIGINAL)
 
@@ -1773,7 +1882,7 @@ ENDFUNC
         self.assertIn("FUNC 获取波克比_执行专用骑车", override)
         self.assertNotIn("FUNC 孵蛋测试_执行周期骑车与孵化收尾", override)
 
-    def test_bundled_scheme0_non_target_seed_preserves_parity_counter(self):
+    def test_bundled_scheme0_non_target_seed_does_not_vote_or_interrupt_window(self):
         source_dir = Path(__file__).resolve().parents[1] / "local_assets" / "easycon118"
         template_paths = tuple(source_dir / filename for filename in (
             "NS火叶全自动一键乱数2.0.ecs",
@@ -1789,11 +1898,12 @@ ENDFUNC
             non_target = function.split("IF $命中差索引 != 0", 1)[1].split(
                 "RETURN", 1
             )[0]
-            self.assertIn("保留已有连续计数", non_target)
-            self.assertIn("累计不一致仍为", non_target)
+            self.assertIn("非目标Seed不参与投票，也不打断已有窗口", non_target)
+            self.assertIn("方案0奇偶窗口保留: 非目标Seed", non_target)
             self.assertNotIn("$方案0奇偶失败次数 = 0", non_target)
+            self.assertNotIn("$方案0奇偶失败次数 = $方案0奇偶失败次数 + 1", non_target)
             self.assertIn(
-                "目标Seed累计3次帧奇偶不一致后升级，非目标Seed不打断计数",
+                "最近7个可信目标Seed样本5次奇偶不一致才试验，改善后采用，否则回退",
                 template,
             )
 
@@ -1809,17 +1919,24 @@ ENDFUNC
         self.assertIn(EGG_FORMAL_WAIT_MARKER, template)
         self.assertIn("$孵蛋使用绝对时间轴 = 0", template)
         self.assertIn("$调试日志输出 = 1", template)
-        # The 2.0 mother keeps the ordinary-flow default here. Egg plans are
-        # required to override it to the menu scheme; that generated contract
-        # is covered by test_egg_template_configuration.
+        # Keep the imported 2.0 mother default intact; generated egg plans
+        # apply their selected startup scheme in test_egg_template_configuration.
         self.assertIn("$帧奇偶修正方案 = 0", template)
         self.assertIn("$扩窗层数上限 = 3", template)
         self.assertIn("$扩窗第1层Seed容差 = 25", template)
         self.assertIn("$扩窗第3层帧半宽 = 30000", template)
         self.assertIn(EGG_TRANSIENT_RETRY_OVERRIDE_MARKER, template)
-        self.assertIn(EGG_TERMINAL_STOP_OVERRIDE_MARKER, template)
+        terminal_flow = template.split(
+            "FUNC 孵蛋流程_执行孵化与个体反查(): INT", 1
+        )[1].split("ENDFUNC", 1)[0]
+        has_terminal_policy = EGG_TERMINAL_STOP_OVERRIDE_MARKER in template or (
+            "# 反查无结果/识图失败仅重试下一轮一次；配置与其他终止原因仍保留现场。" in terminal_flow
+            and terminal_flow.count("处理本轮反查识图失败()") == 2
+            and terminal_flow.count("PRINT 停止前保留当前游戏画面，不关闭或重启游戏") == 1
+        )
+        self.assertTrue(has_terminal_policy)
         self.assertIn("FUNC 孵蛋流程_计算两次命中时间(): INT", template)
-        self.assertIn("$Seed启动方案 = 0", template)
+        self.assertIn("$Seed启动方案 = 1", template)
         self.assertIn("FUNC 准备Seed启动原点", template)
         self.assertIn("CALL 关闭游戏", template.split("FUNC 准备Seed启动原点", 1)[1].split("ENDFUNC", 1)[0])
         self.assertIn("PRINT Seed启动方案: 固定用户界面HOME", template)

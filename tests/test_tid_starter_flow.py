@@ -30,6 +30,8 @@ from automation.tid_starter_flow import (
     enable_any_tid_handoff,
     tid_starter_flow_request_from_dict,
     build_tid_starter_flow_plan,
+    derive_sixv_sid_flow_request,
+    enable_starter_success_markers,
     render_lab_bridge_ecs,
     resolve_exhaustive_starter_plan,
     validate_tid_starter_flow_runtime,
@@ -59,6 +61,128 @@ def bridge_save_confirmation_count(text: str) -> int:
 
 
 class TidStarterFlowTests(unittest.TestCase):
+    def test_sixv_sid_mode_is_gated_and_survives_plan_reload(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(
+                language="英文",
+                mode=0,
+                sid_random=True,
+                denoise_need_hit=2,
+            ),
+            version="火红",
+            starter="妙蛙种子",
+            accept_any_tid=True,
+            any_tid_require_denoise=True,
+            any_tid_sixv_sid=True,
+        )
+        plan = build_tid_starter_flow_plan(request)
+        restored = tid_starter_flow_request_from_dict(plan.to_dict()["request"])
+        self.assertTrue(restored.any_tid_sixv_sid)
+        self.assertEqual(restored.shiny_sid_pid, 0x7942EF72)
+        legacy_payload = dict(plan.to_dict()["request"])
+        legacy_payload.pop("any_tid_sixv_sid")
+        self.assertFalse(tid_starter_flow_request_from_dict(legacy_payload).any_tid_sixv_sid)
+        for changes, message in (
+            ({"accept_any_tid": False}, "穷举、连续御三家"),
+            ({"any_tid_require_denoise": False}, "穷举、连续御三家"),
+            ({"tid_request": TidRngRequest(mode=1, sid_random=True)}, "穷举"),
+            ({"sid_chain_search_advances": None}, "有限上限"),
+        ):
+            with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, message):
+                replace(request, **changes).validate()
+
+    def test_sixv_sid_uses_denoised_frames_and_earliest_executable_candidate(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(
+                language="英文",
+                mode=0,
+                nx_model=2,
+                gender=1,
+                sid_random=True,
+                denoise_need_hit=2,
+            ),
+            version="火红",
+            starter="妙蛙种子",
+            accept_any_tid=True,
+            any_tid_require_denoise=True,
+            any_tid_sixv_sid=True,
+        )
+        snapshot = {
+            "TID": 24, "DIGITS_OK": 1, "DENOISE_HITS": 2, "DENOISE_NEED": 2,
+            "OP": 300, "F1": 200, "F2": 1500, "SELECT_CORRECTION": 0,
+            "NX_MODEL": 2, "GENDER": 1, "SOUND": 0, "BUTTON_MODE": 0,
+            "SEED_BUTTON": 0, "OP_FIXED": 100, "F1_FIXED": 500,
+            "F2_FIXED": 800, "F3_FIXED": 14900, "OP_CORRECTION": 3,
+            "SID_CORRECTION": 0, "OBSERVATION": 9, "DENOISE_TRY": 10,
+        }
+        progress = []
+        derived, candidate = derive_sixv_sid_flow_request(
+            request,
+            snapshot,
+            progress_callback=lambda current, total: progress.append((current, total)),
+        )
+
+        self.assertEqual((candidate.sid, candidate.advance), (38441, 8862))
+        self.assertEqual(derived.sid_min_advances, 2279)
+        self.assertEqual(derived.tid_request.target_tid, 24)
+        self.assertEqual(derived.tid_request.target_sid, candidate.sid)
+        self.assertEqual(derived.tid_request.mode, 1)
+        self.assertEqual(derived.tid_request.op_target_frame, 300)
+        self.assertEqual(derived.tid_request.f1_target_frame, 200)
+        self.assertEqual(derived.tid_request.f2_target_frame, 1500)
+        self.assertEqual(derived.tid_request.op_correction, 3)
+        self.assertTrue(progress)
+        self.assertEqual(build_tid_starter_flow_plan(derived).earliest_sid_chain_advance, 8862)
+
+        invalid_snapshots = (
+            {key: value for key, value in snapshot.items() if key != "F2"},
+            {**snapshot, "DENOISE_HITS": 1},
+            {**snapshot, "DIGITS_OK": 0},
+            {**snapshot, "NX_MODEL": 1},
+        )
+        for bad_snapshot in invalid_snapshots:
+            with self.subTest(snapshot=bad_snapshot), self.assertRaises(ValueError):
+                derive_sixv_sid_flow_request(request, bad_snapshot)
+
+    def test_sixv_sid_search_cancellation_is_reported(self):
+        request = TidStarterFlowRequest(
+            tid_request=TidRngRequest(language="英文", mode=0, sid_random=True),
+            version="火红",
+            starter="妙蛙种子",
+            accept_any_tid=True,
+            any_tid_require_denoise=True,
+            any_tid_sixv_sid=True,
+        )
+        snapshot = {
+            "TID": 24, "DIGITS_OK": 1, "DENOISE_HITS": 2, "DENOISE_NEED": 2,
+            "OP": 1, "F1": 1, "F2": 1, "SELECT_CORRECTION": 0,
+            "NX_MODEL": 1, "GENDER": request.tid_request.gender, "SOUND": 0, "BUTTON_MODE": 0,
+            "SEED_BUTTON": 0, "OP_FIXED": 1, "F1_FIXED": 1,
+            "F2_FIXED": 1, "F3_FIXED": 14900, "OP_CORRECTION": 0,
+            "SID_CORRECTION": 0, "OBSERVATION": 1, "DENOISE_TRY": 2,
+        }
+        with self.assertRaisesRegex(InterruptedError, "已取消"):
+            derive_sixv_sid_flow_request(
+                request, snapshot, cancel_callback=lambda: True
+            )
+
+    @unittest.skipUnless(SOURCE_118.is_dir(), "requires starter assets")
+    def test_structured_shiny_marker_is_only_inserted_in_exact_target_branch(self):
+        for template_name in (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME):
+            with self.subTest(template=template_name):
+                source = (SOURCE_118 / template_name).read_text(encoding="utf-8")
+                marked = enable_starter_success_markers(source)
+                self.assertEqual(marked.count("# TIDFLOW_TARGET_SHINY_VERIFICATION_V1"), 1)
+                self.assertEqual(marked.count("TIDFLOW|STARTER|TARGET_SHINY=1"), 1)
+                target = marked.split(
+                    "IF $道具乱数模式 == 0 and $命中差索引 == 0 and $本轮消耗帧误差 == 0 and $本轮物种命中 == 1",
+                    1,
+                )[1].split("ENDIF", 1)[0]
+                self.assertIn("$TIDFLOW本轮出闪 == 1", target)
+                self.assertIn("TIDFLOW|STARTER|TARGET_SHINY=1", target)
+                self.assertIn("TIDFLOW|STARTER|NON_TARGET_SHINY=1", marked)
+                self.assertEqual(enable_starter_success_markers(marked), marked)
+
     def test_old_english_name_page_wait_is_upgraded_idempotently(self):
         legacy = """\
 FUNC EN_切换到目标页
