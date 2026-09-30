@@ -306,7 +306,7 @@ $env:PYTHONIOENCODING = 'utf-8'
 
 推荐顺序：记录快照 → 同步覆盖片段与迁移规则 → 定向脚本测试 → 登记指纹并导入 → 生成验收 → TID 成功结果协议与新建存档 → 去噪 TID 的 6V 闪 SID 接续 → 按钮配色与界面验收 → 完整回归 → 更新交接 → 提交推送。
 
-后续真正实现并完成相应检查后，按既定约定直接提交推送 `origin/main`，触发 GitHub Actions，不创建 PR。`gh` 在本机可能默认指向上游 PyEasyCon，查询本项目 Actions 时显式写 `--repo axechaso/frlg-auto-rng`。认证遇到单次超时按全局 AGENTS 约定用 `gh api user --jq .login` 和退出码复核。
+本轮实施已按既定约定直接提交推送 `origin/main`，触发 GitHub Actions，没有创建 PR。`gh` 在本机可能默认指向上游 PyEasyCon，查询本项目 Actions 时显式写 `--repo axechaso/frlg-auto-rng`。认证遇到单次超时按全局 AGENTS 约定用 `gh api user --jq .login` 和退出码复核。
 
 2026-10-01 用户要求按方案实施。本轮已完成代码修改、缓存导入和离线验收；未操作 Switch、未打包或发布 Release。`local_assets/easycon118` 属于本地忽略资产，Git 推送不会携带它；新设备仍须从受审计原包导入，或另行复制验收后的缓存。
 
@@ -321,16 +321,6 @@ $env:PYTHONIOENCODING = 'utf-8'
 - Git 提交、Actions 结果及仍未完成的实机验证范围。
 
 完成判断：界面颜色明显、状态可辨；最新导航更新能从原包一路保留到最终运行脚本；缓存清单可信；新建存档只采用本轮验证结果；新模式使用已去噪确认的 TID 定向乱数 6V 闪 SID，不把穷举时偶然得到的 SID 当作目标；其他流程的既有功能不因本轮同步回退。
-
-## 12. 2026-10-01 本轮实施与验收记录
-
-- 七个指定顶部控件已使用局部动态属性配色；其他 `quickToggle` 保持原样。新增的去噪后 6V 闪 SID 选项默认关闭，四项前提在界面和后端分别校验，并冻结高级 PID。
-- TID 连续流程现在只接受结构化目标闪光证据；每次修正都会重算最小可执行 SID ADV，并只搜索同一个目标 SID。验证报告匹配当前运行标识后，主窗口才打开独立的新建存档草稿；不保存或保存失败均不会覆盖旧资料。
-- 最新原包指纹为 `b0f0302037b778661ac5087c6d007ab03865f4030fcd6a680c9f2d450afa1392`（33 文件、2,104,874 字节）；导入后脚本为 `04a0cdda3c9ded4dda8fb2192765ed76cc46ed6e963fc6cb737c18f8125ad994`（33 文件、2,105,698 字节）。标签为 1,154 项、13,579,338 字节，方法分布 `1/3/5/11/14 = 17/1/781/1/354`，SHA-256 `4d99ab33920f8812dea403b4ab0680b40aabf1c4eb370e1a6678a193898429ac`；导入清单与实际文件一致。
-- `local_assets/tid_rng137` 的 TID 母本仍为 `116aa90e3874dc4d79a8fc7f4f178dc923bf7021f0e3fc0929716c0e734c98ec`；原包根目录没有同名文件，本轮没有用旁边旧脚本替换。
-- 项目完整自动化回归 `675` 项通过。Python 编译和 `git diff --check` 通过。正式/时间轴缓存主脚本均由 SHA-256 为 `559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260` 的正式 `EasyCon 1.6.4-a+9c86137` 执行 `format` 并返回 0；英文/日文 × NS1/NS2 的 6V 闪 SID 合成工程均通过运行时预检，样本候选为 SID `38441` / ADV `8862`。
-- 原包 42 个 `Tools/check_*.py` 已全部运行，31 项通过、11 项失败。8 项因原包根目录缺少合并 TID 母本而无法读取：`check_easycon_for_bounds.py`、`check_entry_wakeup.py`、`check_home_buffer_lock.py`、`check_nx_op_fixed_delay.py`、`check_tid_mode_roundtrip.py`、`check_tid_name_page_transition.py`、`check_tid_startup_recovery.py`、`check_tid_to_starter_save_test.py`；`check_egg_timeline_mode.py` 只因正式/时间轴函数含两条不同注释而失败，函数动作主体相同；`check_round0_game_settings.py` 仍断言旧的 `FOR 5`；`check_safari_zone_support.py` 仍要求一条原文说明字符串。没有修改原包工具或流程来迎合这些旧断言。
-- 正式 PySide6 入口已在原生 Windows 平台及 1,920×1,080、1,360×840、1,280×800 等窗口尺寸完成截图检查；界面与离线生成验证不代表实机表现。本轮没有连接或操作 Switch，因此新流程的真实命中、菜单动作和保存结果仍待实机验收。
 
 ## 9. TID 流程 SID 验证成功后创建存档
 
@@ -521,3 +511,14 @@ TID 实测表继续只记录其现有 TID/参数/设备上下文，不新增 SID
 实机重点是一条完整的“去噪任意 TID → 定向 SID → 御三家验证 → 新建存档”链，确认第二次建档确实复现同一 TID，以及弹窗中的信息与最终报告一致；SID 失败重试、停止续跑另列验证。当前没有已完成的实机结果，本方案不预先承诺通过。
 
 交接文档必须写清新模式四个前提、默认关闭、会再次新建游戏、默认 6V 闪 PID、同奇偶优先的修正规则、阶段续跑位置，以及“验证用御三家不强制 6V”的边界。最终执行时将本节用例和前述脚本/配色回归一起检查，再按第 8 节约定提交和触发 Actions。
+
+## 12. 2026-10-01 本轮实施与验收记录
+
+- 七个指定顶部控件已使用局部动态属性配色；其他 `quickToggle` 保持原样。新增的去噪后 6V 闪 SID 选项默认关闭，四项前提在界面和后端分别校验，并冻结高级 PID。
+- TID 连续流程现在只接受结构化目标闪光证据；每次修正都会重算最小可执行 SID ADV，并只搜索同一个目标 SID。验证报告匹配当前运行标识后，主窗口才打开独立的新建存档草稿；不保存或保存失败均不会覆盖旧资料。
+- 最新原包指纹为 `b0f0302037b778661ac5087c6d007ab03865f4030fcd6a680c9f2d450afa1392`（33 文件、2,104,874 字节）；导入后脚本为 `04a0cdda3c9ded4dda8fb2192765ed76cc46ed6e963fc6cb737c18f8125ad994`（33 文件、2,105,698 字节）。标签为 1,154 项、13,579,338 字节，方法分布 `1/3/5/11/14 = 17/1/781/1/354`，SHA-256 `4d99ab33920f8812dea403b4ab0680b40aabf1c4eb370e1a6678a193898429ac`；导入清单与实际文件一致。
+- `local_assets/tid_rng137` 的 TID 母本仍为 `116aa90e3874dc4d79a8fc7f4f178dc923bf7021f0e3fc0929716c0e734c98ec`；原包根目录没有同名文件，本轮没有用旁边旧脚本替换。
+- 项目完整自动化回归 `675` 项通过。Python 编译和 `git diff --check` 通过。正式/时间轴缓存主脚本均由 SHA-256 为 `559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260` 的正式 `EasyCon 1.6.4-a+9c86137` 执行 `format` 并返回 0；英文/日文 × NS1/NS2 的 6V 闪 SID 合成工程均通过运行时预检，样本候选为 SID `38441` / ADV `8862`。
+- 原包 42 个 `Tools/check_*.py` 已全部运行，31 项通过、11 项失败。8 项因原包根目录缺少合并 TID 母本而无法读取：`check_easycon_for_bounds.py`、`check_entry_wakeup.py`、`check_home_buffer_lock.py`、`check_nx_op_fixed_delay.py`、`check_tid_mode_roundtrip.py`、`check_tid_name_page_transition.py`、`check_tid_startup_recovery.py`、`check_tid_to_starter_save_test.py`；`check_egg_timeline_mode.py` 只因正式/时间轴函数含两条不同注释而失败，函数动作主体相同；`check_round0_game_settings.py` 仍断言旧的 `FOR 5`；`check_safari_zone_support.py` 仍要求一条原文说明字符串。没有修改原包工具或流程来迎合这些旧断言。
+- 正式 PySide6 入口已在原生 Windows 平台及 1,920×1,080、1,360×840、1,280×800 等窗口尺寸完成截图检查；界面与离线生成验证不代表实机表现。本轮没有连接或操作 Switch，因此新流程的真实命中、菜单动作和保存结果仍待实机验收。
+- 实施代码提交 `9f2b7dd7c202742a34a435ddba4f5fe77d390153` 已推送到 `origin/main`。对应 [GitHub Actions CI](https://github.com/axechaso/frlg-auto-rng/actions/runs/36749212686) 首次运行在 QQ 绑定验证码等待处超时；本地单项复跑通过，随后完整重跑的编译、离线 QQ 集成及仓库单元测试均通过。当前文档记录是这一代码提交之后的交接收尾。
