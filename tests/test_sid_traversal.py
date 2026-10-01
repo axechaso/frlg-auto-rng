@@ -27,7 +27,12 @@ def make_context(*, named=False, max_advances=2000, target_max_advances=3000):
             "location": "Viridian Forest",
             "pokemon": "Pikachu",
         },
-        easycon_options={"seed_startup_scheme": 0, "item_rng_mode": False},
+        easycon_options={
+            "seed_startup_scheme": 0,
+            "item_rng_mode": False,
+            "frame_parity_scheme": 1,
+            "mystery_gift_enabled": False,
+        },
         source_sha256="0" * 64,
         max_advances=max_advances,
         target_max_advances=target_max_advances,

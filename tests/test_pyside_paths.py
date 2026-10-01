@@ -195,6 +195,9 @@ class StartupPathTests(unittest.TestCase):
                 **{key: str(value) for key, value in defaults.items()},
                 "update_source": "auto",
                 "label_supervision": False,
+                "update_precalibration": True,
+                "record_shiny_video": True,
+                "preferred_frame_parity_scheme": 1,
             })
 
     def test_startup_recovers_after_previous_package_is_removed(self):

@@ -350,7 +350,7 @@ index 087f503..b200362 100644
      outdap.Log("正在解析脚本...");
      var diag = runner.Load(file, [.. label.Select(il => il.name)]);
  
-@@ -160,32 +182,148 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+@@ -160,32 +182,150 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
          }
      }
  

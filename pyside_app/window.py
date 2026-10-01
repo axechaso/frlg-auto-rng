@@ -11,8 +11,8 @@ from pathlib import Path
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSignalBlocker, QTimer, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QLabel, QMessageBox, QPushButton,
-    QSpinBox, QTableWidgetItem,
+    QCheckBox, QComboBox, QFileDialog, QLabel, QMessageBox, QPushButton,
+    QSpinBox, QTableWidgetItem, QWidget,
 )
 
 from pyside_preview import FrlgPreviewWindow, Card, SEED_MODE_LABELS
@@ -26,7 +26,9 @@ from automation import (
     AutoSearchRequest, EasyCon118Options, EGG_TEMPLATE_NAME, STANDARD_TEMPLATE_NAME,
     PLANNER_STATIC_CATEGORIES, get_static_targets, probe_easycon_devices,
 )
+from automation.frame_parity import resolve_frame_parity
 from automation.precalibration import update_from_manifest
+from automation.sid_traversal_policy import traversal_availability
 from rng.tenlines_utils import (
     get_ability_name, get_personal, get_species_id, get_species_name,
     get_encounter_species_list, load_frlg_encounters,
@@ -39,7 +41,7 @@ from .jobs import Job
 from .log_history import discover_logs, format_log_size, read_log_preview
 from .path_settings import restore_resource_path
 from .diagnostics import explain_error, parse_integer
-from .profiles import ProfileManager
+from .profiles import ProfileManager, ProfileWheelFilter
 from .services import AppPaths, WildInputs, prepare_wild, prepare_run, display_log_line
 from notifications.qq_service import QQNotificationService, QQSettingsStore
 from easycon_outcome import easycon_log_has_fatal_error
@@ -291,6 +293,10 @@ class FrlgWindow(FrlgPreviewWindow):
         self.devices = ({}, {})
         self.devices_checked = False
         self.run_input_states = None
+        self.preferred_frame_parity_scheme = 1
+        self.manual_profile_draft = None
+        self._settings_values = {}
+        self._settings_invalid = False
         self.record_rows = []
         self.record_store_signature = None
         self.all_history_rows = []
@@ -299,6 +305,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.profiles_available = True
         self.record_store = TidRecordStore(self.paths.user / "tid_records.sqlite3")
         self.profile_selector = self.profile_dialog.findChild(QComboBox)
+        self.profile_mystery_gift = self.profile_dialog.findChild(QCheckBox, "profileMysteryGift")
         self.profile_selector.setEnabled(True)
         self.profile_card = self.profile_selector.parentWidget().parentWidget()
         self.profile_card.findChild(QLabel, "cardSubtitle").setText("选择已有存档，或直接填写当前身份。管理存档与正式工具共用。")
@@ -309,10 +316,6 @@ class FrlgWindow(FrlgPreviewWindow):
         self.summary_symbol = self.overview.findChild(QLabel, "emptySymbol")
         self.sprite_cache = {}
         self.summary_badge = self.overview.findChild(QLabel, "pendingBadge")
-        self.ready_card = next(c for c in self.overview.findChildren(Card)
-                               if c.findChild(QLabel, "cardTitle") and c.findChild(QLabel, "cardTitle").text() == "运行准备")
-        self.ready_values = [self.ready_card.layout.itemAt(i).layout().itemAt(3).widget() for i in range(3)]
-        self.ready_dots = [self.ready_card.layout.itemAt(i).layout().itemAt(0).widget() for i in range(3)]
         self.actions = {}
         self._bind("重新检测", self.detect_devices)
         self._bind("选择脚本包", lambda: self.choose_path("source"))
@@ -329,6 +332,11 @@ class FrlgWindow(FrlgPreviewWindow):
         self._bind_button(self.stop_button, self.stop_run)
         self.qq_notification_button.clicked.connect(self.show_qq_notifications)
         self.profile_selector.currentIndexChanged.connect(self.select_profile)
+        self.profile_mystery_gift.toggled.connect(self._profile_gift_changed)
+        self.profile_wheel_filter = ProfileWheelFilter(self)
+        self.profile_wheel_filter.stepped.connect(self._wheel_select_profile)
+        for widget in (self.profile_chip, *self.profile_chip.findChildren(QWidget), self.profile_selector):
+            widget.installEventFilter(self.profile_wheel_filter)
         self.records_table.itemSelectionChanged.connect(self.record_details)
         self.history_table.itemSelectionChanged.connect(self.history_log_details)
         self.fields["history_workflow"].currentIndexChanged.connect(self.filter_history_logs)
@@ -344,6 +352,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.fields["port"].setPlaceholderText("尚未检测")
         self.fields["video"].setPlaceholderText("尚未检测")
         self._load_settings()
+        self.manual_profile_draft = self._capture_manual_profile_draft()
         try:
             self.profile_store.load()
             self.reload_profiles(apply=True)
@@ -357,6 +366,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self._populate_categories()
         self._set_live_descriptions()
         self._connect_inputs()
+        self.fields["parity"].currentIndexChanged.connect(self._remember_frame_parity_preference)
         self.fields["wild_game"].currentIndexChanged.connect(self._populate_locations)
         self.fields["wild_nx"].currentIndexChanged.connect(self._populate_species)
         self.fields["profile_language"].currentIndexChanged.connect(self._populate_categories)
@@ -381,6 +391,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.pending_output = ""
         self.pending_visible = False
         self._run_id = ""
+        self._run_terminal_handled = False
         self._manual_stop_requested = False
         self._run_notification_sent = False
         self.runtime_issues = {}
@@ -487,8 +498,32 @@ class FrlgWindow(FrlgPreviewWindow):
 
     def _refresh_wild_controls(self):
         super()._refresh_wild_controls()
-        if getattr(self, "live_ready", False):
-            self.traversal_check.setEnabled(False)
+        wild = self.fields["wild_method"].currentIndex() == 0
+        item = self.item_check.isChecked()
+        traversal = self.traversal_check.isChecked()
+        direct = self.fields["wild_search_mode"].currentIndex() == 1
+        try:
+            availability = traversal_availability(
+                method="All Wild Methods" if wild else "Static 1",
+                category=self.fields["wild_category"].currentData() or "",
+                location=self.fields["wild_location"].currentData() or "",
+                game=self.game_code(),
+                pokemon=self.fields["wild_species"].currentData() or "",
+                direct_mode=direct,
+                item_mode=item,
+            )
+        except (ValueError, KeyError, AttributeError):
+            availability = None
+        available = bool(availability and availability.supported)
+        reason = availability.reason if availability else "当前条件尚未就绪。"
+        busy = getattr(self, "running", False) or getattr(self, "job", None) is not None
+        self.traversal_check.setEnabled((available or traversal) and not item and not busy)
+        self.traversal_status.setText(reason)
+        self.traversal_status.setToolTip(reason)
+        self.fields["wild_traversal_max"].setEnabled(traversal and not busy)
+        self.fields["wild_traversal_start"].setEnabled(
+            traversal and self.advanced_check.isChecked() and not busy
+        )
 
     def _populate_categories(self):
         japanese = self.fields["profile_language"].currentIndex() == 1
@@ -594,7 +629,13 @@ class FrlgWindow(FrlgPreviewWindow):
             seed_calibration_scheme=f["seed_calibration"].currentIndex() if advanced else 0,
             seed_startup_scheme=f["seed_startup"].currentIndex() if advanced else 0,
             item_rng_mode=self.item_check.isChecked(), party_empty_slots=f["wild_slots"].value(),
-            debug_log_output=f["output_log"].currentIndex(), frame_parity_scheme=1 - f["parity"].currentIndex() if advanced else 1,
+            debug_log_output=f["output_log"].currentIndex(),
+            frame_parity_scheme=resolve_frame_parity(
+                requested=self.preferred_frame_parity_scheme if advanced else 1,
+                mystery_gift_enabled=self.profile_mystery_gift.isChecked(),
+                is_egg=False,
+            ).effective,
+            mystery_gift_enabled=self.profile_mystery_gift.isChecked(),
             reverse_expansion_layers=f["layers"].value() if advanced else None,
             reverse_expansion_seed_tolerances=tuple(integer(f"expansion_{i}_seed", f"第 {i} 层 Seed 容差") for i in range(1, 4)) if advanced else None,
             reverse_expansion_frame_half_widths=tuple(integer(f"expansion_{i}_adv", f"第 {i} 层帧半宽") for i in range(1, 4)) if advanced else None,
@@ -622,6 +663,8 @@ class FrlgWindow(FrlgPreviewWindow):
             elif key == "history_logs":
                 self.refresh_history_logs()
             self.refresh_state()
+            if hasattr(self, "accessories"):
+                self.accessories.update_input_visibility()
 
     def _refresh_common_settings(self):
         super()._refresh_common_settings()
@@ -643,7 +686,6 @@ class FrlgWindow(FrlgPreviewWindow):
         valid = bool(wild and self.prepared and self.prepared.project and self.prepared.check.ok)
         self.start_button.setEnabled(valid and not busy and bool(self.fields["port"].currentData()) and self.fields["video"].currentData() is not None)
         self.stop_button.setEnabled(self.running)
-        self.traversal_check.setEnabled(False)
         self.footer_status.setText(self.status_text)
         self.summary_badge.setText("已接入正式服务" if wild else "本页生成服务待接入")
         self.summary_context.setText("完成左侧条件后生成")
@@ -871,21 +913,13 @@ class FrlgWindow(FrlgPreviewWindow):
             if not self._confirm_wild_start(prompt):
                 self.set_status("预检通过，等待开始运行。")
                 return
-            self.run_command = command
-            self.running_prepared = prepared
-            self._begin_run_notification()
-            self.decoder.reset()
-            self.pending_output = ""
-            self.pending_visible = False
-            self.log_view.clear()
-            self.process.setWorkingDirectory(str(RESOURCE_ROOT))
-            self.running = True
-            self.refresh_state()
-            self.process.start(command.program, list(command.arguments))
+            self.begin_accepted_run(command, prepared_wild=prepared)
         supervision = self.label_supervision_check.isChecked()
+        accessories = getattr(self, "accessories", None)
+        preview_video = accessories.preview_video_requested() if accessories else False
         self.launch_job(lambda _cancel, _status: prepare_run(
             prepared, port, video, self.devices[1][video], self.paths,
-            label_supervision=supervision,
+            label_supervision=supervision, preview_video=preview_video,
         ), ready, "正在重新核对设备、脚本与正式运行器……")
 
     def _confirm_wild_start(self, prompt: str) -> bool:
@@ -912,19 +946,102 @@ class FrlgWindow(FrlgPreviewWindow):
 
     def _begin_run_notification(self):
         """Start a new notification event for each accepted run."""
+        # This ID deduplicates desktop notifications; RunCommand.run_id binds
+        # the worker, reports and any script input-state session.
         self._run_id = uuid.uuid4().hex
         self._manual_stop_requested = False
         self._run_notification_sent = False
+        self._run_terminal_handled = False
+
+    def begin_accepted_run(
+        self,
+        command,
+        *,
+        prepared_wild=None,
+        prepared_workflow=None,
+    ):
+        self.run_command = command
+        self.running_prepared = prepared_wild
+        self.running_workflow = prepared_workflow
+        self._begin_run_notification()
+        self.decoder.reset()
+        self.pending_output = ""
+        self.pending_visible = False
+        self.log_view.clear()
+        self.running = True
+        self.refresh_state()
+        self.select_page("logs")
+        if prepared_workflow is not None and prepared_workflow.inputs.mode == "script_test":
+            script_path = prepared_workflow.inputs.extra.get("script", "")
+            backend = prepared_workflow.inputs.extra.get("backend", "未知后端")
+        elif prepared_workflow is not None:
+            script_path = str(prepared_workflow.project)
+            backend = prepared_workflow.inputs.extra.get("backend", "兼容运行器")
+        else:
+            script_path = str(prepared_wild.project)
+            backend = "EasyCon 1.6.4-a 兼容运行器"
+        startup = f"正在启动脚本：{script_path}\n所选后端：{backend}\n"
+        self.set_status("正在启动；日志页已就绪。")
+        self._append_log(startup)
+        self.process.setWorkingDirectory(str(RESOURCE_ROOT))
+        try:
+            if hasattr(self, "accessories"):
+                self.accessories.prepare_run(command)
+            if prepared_workflow is not None:
+                self.before_workflow_start(prepared_workflow, command)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._finish_start_failure(f"运行准备失败：{exc}")
+            return
+        self.process.start(command.program, list(command.arguments))
 
     def _process_started(self):
         self.runtime_issues.clear()
-        if not self._run_id:
-            self._run_id = uuid.uuid4().hex
-        self._manual_stop_requested = False
-        self._run_notification_sent = False
         self.running = True
-        self.select_page("logs")
         self.set_status("正在运行；完整日志持续写入工程目录。")
+
+    def apply_script_action_view(self, view):
+        if view is None:
+            return
+        values = self.script_action_values
+        searching = view.phase == "searching"
+        uncertain = (
+            view.phase in {"unsupported", "disconnected", "error", "stale", "unknown"}
+            or view.connection in {"unknown", "disconnected", "error"}
+        )
+        if searching:
+            current = "计算中，无按键输出"
+            direction = "计算中"
+        elif uncertain:
+            current = view.message or "当前按键状态未知"
+            direction = "方向与摇杆未知"
+        else:
+            current = " + ".join(view.snapshot["buttons"]) or "当前无按键输出"
+            direction = (
+                f"十字 {view.snapshot['hat']} · "
+                f"左摇杆 {view.snapshot['left_stick'][0]}, {view.snapshot['left_stick'][1]} · "
+                f"右摇杆 {view.snapshot['right_stick'][0]}, {view.snapshot['right_stick'][1]}"
+            )
+        recent = "—"
+        if view.recent_action and view.recent_action_at:
+            import time
+            if time.monotonic() - view.recent_action_at <= 1.0:
+                recent = f"{view.recent_action_time} · {view.recent_action}"
+        phase_names = {
+            "starting": "切换阶段", "searching": "计算中", "running": "运行中",
+            "stopping": "正在停止", "ended": "已结束", "failed": "失败",
+            "unsupported": "不支持回显", "disconnected": "连接中断",
+            "error": "状态无效", "stale": "状态未知", "unknown": "状态未知",
+            "idle": "等待运行",
+        }
+        stage = view.stage_id.replace("_", " ") if view.stage_id else "脚本"
+        phase = phase_names.get(view.phase, view.phase)
+        if view.source == "mock":
+            phase += " · 模拟状态"
+        values["buttons"].setText(current)
+        values["direction"].setText(direction)
+        values["recent"].setText(recent)
+        values["phase"].setText(f"{stage} · {phase}")
+        values["phase"].setToolTip(view.message)
 
     def _append_log(self, text, *, final=False):
         self.pending_output += text
@@ -947,6 +1064,8 @@ class FrlgWindow(FrlgPreviewWindow):
                 cursor.deletePreviousChar()
             self.pending_visible = False
         for line in pieces:
+            if hasattr(self, "accessories") and self.accessories.consume_input_session_marker(line):
+                continue
             cleaned = display_log_line(line)
             if cleaned is not None:
                 explanation = explain_error(cleaned)
@@ -964,6 +1083,9 @@ class FrlgWindow(FrlgPreviewWindow):
         self._append_log(self.decoder.decode(bytes(self.process.readAllStandardOutput())))
 
     def _process_finished(self, code, _status):
+        if self._run_terminal_handled:
+            return
+        self._run_terminal_handled = True
         self._read_output()
         self._append_log(self.decoder.decode(b"", final=True), final=True)
         self.running = False
@@ -1000,12 +1122,29 @@ class FrlgWindow(FrlgPreviewWindow):
 
     def _process_error(self, error):
         if error == QProcess.ProcessError.FailedToStart:
-            self.running = False
-            self.show_error(f"运行进程无法启动：{self.process.errorString()}")
-            if not self._run_notification_sent:
-                self._run_notification_sent = True
-                self.qq_service.notify_task(self._run_id or uuid.uuid4().hex, "FRLG 乱数任务", "失败",
-                                            target=self.summary_name.text(), detail=self.process.errorString())
+            message = f"运行进程无法启动：{self.process.errorString()}"
+            self._finish_start_failure(message)
+
+    def _finish_start_failure(self, message):
+        if self._run_terminal_handled:
+            return
+        self._run_terminal_handled = True
+        self.running = False
+        self._append_log(f"\n[启动失败] {message}\n")
+        if self.run_command is not None:
+            try:
+                self.run_command.log_path.parent.mkdir(parents=True, exist_ok=True)
+                with self.run_command.log_path.open("a", encoding="utf-8", newline="") as stream:
+                    stream.write(f"\n[启动失败] {message}\n")
+            except OSError as exc:
+                self._append_log(f"[日志写入失败] {exc}\n")
+        if hasattr(self, "accessories"):
+            self.accessories.run_finished("启动失败", phase="failed")
+        self.set_status(message)
+        self.refresh_state()
+        self._notify_run_finished(1, fatal_output=True)
+        if self.closing:
+            self.close()
 
     def stop_run(self):
         if self.running and self.run_command:
@@ -1043,9 +1182,14 @@ class FrlgWindow(FrlgPreviewWindow):
         )
 
     def _load_settings(self):
+        path = self.paths.user / "pyside6_settings.json"
+        if not path.exists():
+            return
         try:
-            values = json.loads((self.paths.user / "pyside6_settings.json").read_text(encoding="utf-8"))
+            values = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(values, dict):
+                self._settings_invalid = True
+                self.settings_load_error = "设置文件顶层必须是 JSON 对象"
                 return
             for key, default, suffix in (
                 ("source", self.paths.source, "_internal/local_assets/easycon118"),
@@ -1058,8 +1202,42 @@ class FrlgWindow(FrlgPreviewWindow):
             source_index = self.fields["update_source"].findData(update_source)
             self.fields["update_source"].setCurrentIndex(max(0, source_index))
             self.label_supervision_check.setChecked(values.get("label_supervision") is True)
-        except (OSError, ValueError, TypeError):
-            pass
+            for key, widget in (
+                ("update_precalibration", self.precalibration_check),
+                ("record_shiny_video", self.record_shiny_video_check),
+            ):
+                value = values.get(key, True)
+                if type(value) is not bool:
+                    self._settings_invalid = True
+                    self.settings_load_error = f"设置字段 {key} 必须是布尔值"
+                    continue
+                with QSignalBlocker(widget):
+                    widget.setChecked(value)
+            parity = values.get("preferred_frame_parity_scheme", 1)
+            if type(parity) is not int or parity not in (0, 1):
+                self._settings_invalid = True
+                self.settings_load_error = "设置字段 preferred_frame_parity_scheme 必须是 0 或 1"
+            else:
+                self.preferred_frame_parity_scheme = parity
+                combo = self.fields["parity"]
+                with QSignalBlocker(combo):
+                    combo.setCurrentIndex(combo.findData(parity))
+            if self._settings_invalid:
+                self.status_text = f"设置文件有无效字段，已保留原文件：{self.settings_load_error}"
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+            self._settings_invalid = True
+            self.settings_load_error = str(exc)
+            self.status_text = f"设置文件读取失败，已保留原文件：{exc}"
+
+    def settings_payload(self):
+        return {
+            **{key: self.fields[key].text() for key in ("source", "ezcon")},
+            "update_source": self.fields["update_source"].currentData() or "auto",
+            "label_supervision": self.label_supervision_check.isChecked(),
+            "update_precalibration": self.precalibration_check.isChecked(),
+            "record_shiny_video": self.record_shiny_video_check.isChecked(),
+            "preferred_frame_parity_scheme": self.preferred_frame_parity_scheme,
+        }
 
     def closeEvent(self, event):
         if hasattr(self, "record_poll_timer"):
@@ -1071,15 +1249,15 @@ class FrlgWindow(FrlgPreviewWindow):
             event.ignore()
             return
         self.qq_service.shutdown()
-        try:
-            write_json_atomic(self.paths.user / "pyside6_settings.json", {
-                **{key: self.fields[key].text() for key in ("source", "ezcon")},
-                "update_source": self.fields["update_source"].currentData() or "auto",
-                "label_supervision": self.label_supervision_check.isChecked(),
-            })
-        except (OSError, ValueError) as exc:
-            if not self.closing:
-                QMessageBox.warning(self, "设置未保存", str(exc))
+        if not self._settings_invalid:
+            try:
+                write_json_atomic(
+                    self.paths.user / "pyside6_settings.json",
+                    self.settings_payload(),
+                )
+            except (OSError, ValueError) as exc:
+                if not self.closing:
+                    QMessageBox.warning(self, "设置未保存", str(exc))
         super().closeEvent(event)
 
     def reload_profiles(self, *, apply=False):
@@ -1092,6 +1270,106 @@ class FrlgWindow(FrlgPreviewWindow):
             profile = self.profile_store.get(selected)
             if profile:
                 self.apply_profile(profile)
+
+    def _capture_manual_profile_draft(self):
+        combo_keys = (
+            "wild_game", "profile_game", "egg_game", "sid_game", "tid_game",
+            "wild_nx", "egg_nx", "sid_nx", "tid_nx", "tid_language",
+        )
+        return {
+            **{key: self.fields[key].currentText() for key in combo_keys},
+            "profile_language": self.fields["profile_language"].currentIndex(),
+            "wild_tid": self.fields["wild_tid"].text(),
+            "wild_sid": self.fields["wild_sid"].text(),
+            "sid_tid": self.fields["sid_tid"].text(),
+            "mystery_gift_enabled": self.profile_mystery_gift.isChecked(),
+        }
+
+    def _restore_manual_profile_draft(self):
+        draft = self.manual_profile_draft
+        if not draft:
+            return
+        self.updating = True
+        for key in (
+            "wild_game", "profile_game", "egg_game", "sid_game", "tid_game",
+            "wild_nx", "egg_nx", "sid_nx", "tid_nx", "tid_language",
+        ):
+            widget = self.fields[key]
+            with QSignalBlocker(widget):
+                widget.setCurrentText(draft[key])
+        for key in ("wild_tid", "wild_sid", "sid_tid"):
+            with QSignalBlocker(self.fields[key]):
+                self.fields[key].setText(draft[key])
+        with QSignalBlocker(self.fields["profile_language"]):
+            self.fields["profile_language"].setCurrentIndex(draft["profile_language"])
+        with QSignalBlocker(self.profile_mystery_gift):
+            self.profile_mystery_gift.setChecked(draft["mystery_gift_enabled"])
+        self.updating = False
+        self._populate_categories()
+        self._refresh_common_settings()
+        self.invalidate()
+
+    def _remember_frame_parity_preference(self, *_):
+        combo = self.fields["parity"]
+        if combo.isEnabled() and combo.currentData() in (0, 1):
+            self.preferred_frame_parity_scheme = int(combo.currentData())
+
+    def _refresh_common_settings(self):
+        super()._refresh_common_settings()
+        if not hasattr(self, "profile_mystery_gift"):
+            return
+        advanced = self.advanced_check.isChecked()
+        applies = self.input_mode in {"wild", "egg"} or (
+            self.input_mode == "tid" and getattr(self, "tid_flow_check", None)
+            and self.tid_flow_check.isChecked()
+        )
+        requested = self.preferred_frame_parity_scheme if advanced else 1
+        gift_enabled = (
+            self.profile_mystery_gift.isChecked()
+            if self.input_mode in {"wild", "egg"}
+            else False
+        )
+        policy = resolve_frame_parity(
+            requested=requested,
+            mystery_gift_enabled=gift_enabled,
+            is_egg=self.input_mode == "egg",
+        )
+        combo = self.fields["parity"]
+        with QSignalBlocker(combo):
+            combo.setCurrentIndex(combo.findData(policy.effective))
+        combo.setEnabled(advanced and applies and not policy.forced)
+        if policy.forced:
+            combo.setToolTip(f"{policy.reason}；有效帧奇偶方案固定为 1，原偏好 {policy.requested} 已保留。")
+        else:
+            combo.setToolTip("选择遭遇帧奇偶调整方案；此设置不改变 SID ADV 奇偶。")
+
+    def _profile_gift_changed(self, *_):
+        if self.updating:
+            return
+        self._refresh_common_settings()
+        self.invalidate()
+        if hasattr(self, "profile_selector"):
+            self._profile_summary()
+
+    def _wheel_select_profile(self, steps):
+        if not steps or self.job or self.running or self.closing or not self.profiles_available:
+            return
+        ids = [profile.profile_id for profile in self.profile_store.profiles]
+        if not ids:
+            return
+        current = self.profile_selector.currentData()
+        if current is None:
+            target_index = 0 if steps > 0 else len(ids) - 1
+        else:
+            try:
+                target_index = ids.index(current) + steps
+            except ValueError:
+                target_index = 0 if steps > 0 else len(ids) - 1
+        target_index = max(0, min(len(ids) - 1, target_index))
+        target_id = ids[target_index]
+        if target_id == current:
+            return
+        self.select_profile_id(target_id, source="wheel")
 
     def apply_profile(self, profile):
         self.updating = True
@@ -1107,20 +1385,99 @@ class FrlgWindow(FrlgPreviewWindow):
                 widget.setCurrentText(value) if isinstance(widget, QComboBox) else widget.setText(value)
         with QSignalBlocker(self.fields["profile_language"]):
             self.fields["profile_language"].setCurrentIndex(profile.language == "日文")
+        with QSignalBlocker(self.profile_mystery_gift):
+            self.profile_mystery_gift.setChecked(profile.mystery_gift_enabled)
         self.updating = False
         if self.live_ready:
             self._populate_categories()
             self._refresh_tid_controls()
+            self._refresh_common_settings()
             self.invalidate()
 
-    def select_profile(self):
-        try:
-            profile = self.profile_store.select(self.profile_selector.currentData())
-            if profile:
-                self.apply_profile(profile)
+    def select_profile_id(self, profile_id, *, source="selector"):
+        previous_id = self.profile_store.selected_profile_id
+        if profile_id == previous_id:
+            with QSignalBlocker(self.profile_selector):
+                self.profile_selector.setCurrentIndex(
+                    self.profile_selector.findData(previous_id)
+                )
             self._profile_summary()
+            return True
+        if self.job or self.running or self.closing:
+            with QSignalBlocker(self.profile_selector):
+                self.profile_selector.setCurrentIndex(self.profile_selector.findData(previous_id))
+            return False
+        selected_profile = self.profile_store.get(profile_id)
+        if profile_id is not None and selected_profile is None:
+            with QSignalBlocker(self.profile_selector):
+                self.profile_selector.setCurrentIndex(
+                    self.profile_selector.findData(previous_id)
+                )
+            self.show_error("要切换的存档不存在")
+            return False
+        if selected_profile is not None:
+            for key, value in (
+                ("wild_game", selected_profile.game),
+                ("profile_game", selected_profile.game),
+                ("egg_game", selected_profile.game),
+                ("wild_nx", selected_profile.switch_name),
+                ("egg_nx", selected_profile.switch_name),
+                ("sid_game", selected_profile.game),
+                ("sid_nx", selected_profile.switch_name),
+                ("tid_game", selected_profile.game),
+                ("tid_nx", selected_profile.switch_name),
+                ("tid_language", selected_profile.language),
+            ):
+                if self.fields[key].findText(value) < 0:
+                    with QSignalBlocker(self.profile_selector):
+                        self.profile_selector.setCurrentIndex(
+                            self.profile_selector.findData(previous_id)
+                        )
+                    self.show_error(f"存档字段无法应用到当前表单：{value}")
+                    return False
+        before_draft = self._capture_manual_profile_draft()
+        old_manual_draft = self.manual_profile_draft
+        if previous_id is None and profile_id is not None:
+            self.manual_profile_draft = before_draft
+        try:
+            profile = self.profile_store.select(profile_id)
+            if profile is not None:
+                self.apply_profile(profile)
+            else:
+                self._restore_manual_profile_draft()
+            with QSignalBlocker(self.profile_selector):
+                self.profile_selector.setCurrentIndex(
+                    self.profile_selector.findData(profile_id)
+                )
+            self._profile_summary()
+            return True
         except (OSError, ValueError) as exc:
-            self.show_error(str(exc))
+            rollback_error = None
+            try:
+                self.profile_store.select(previous_id)
+                self.manual_profile_draft = (
+                    before_draft if previous_id is None else old_manual_draft
+                )
+                if previous_id is not None:
+                    self.apply_profile(self.profile_store.get(previous_id))
+                else:
+                    self._restore_manual_profile_draft()
+            except (OSError, ValueError) as rollback_exc:
+                rollback_error = rollback_exc
+            with QSignalBlocker(self.profile_selector):
+                self.profile_selector.setCurrentIndex(
+                    self.profile_selector.findData(previous_id)
+                )
+            detail = f"切换存档失败：{exc}"
+            if rollback_error is not None:
+                detail += f"；恢复原选择也失败：{rollback_error}"
+            self.show_error(detail)
+            return False
+
+    def select_profile(self, *_):
+        return self.select_profile_id(
+            self.profile_selector.currentData(), source="selector",
+        )
 
     def _profile_summary(self):
         profile = self.profile_store.get(self.profile_selector.currentData())
@@ -1128,12 +1485,16 @@ class FrlgWindow(FrlgPreviewWindow):
         matching = (profile and tid == str(profile.tid) and sid == str(profile.sid)
                     and self.fields["wild_game"].currentText() == profile.game
                     and self.fields["wild_nx"].currentIndex() + 1 == profile.nx_model
-                    and bool(self.fields["profile_language"].currentIndex()) == (profile.language == "日文"))
+                    and bool(self.fields["profile_language"].currentIndex()) == (profile.language == "日文")
+                    and self.profile_mystery_gift.isChecked() == profile.mystery_gift_enabled)
         name = f"{profile.name} · " if matching else ""
-        text = f"{name}{tid} / {sid}" if tid and sid else "未选择 · 手动输入"
+        game = self.fields["wild_game"].currentText()
+        language = "日版" if self.fields["profile_language"].currentIndex() == 1 else "美版"
+        version = f"{game}（{language}）"
+        text = f"{name}{version} · {tid} / {sid}" if tid and sid else f"未选择 · {version} · 手动输入"
         label = self.profile_chip.findChild(QLabel, "chipValue")
         label.setWordWrap(False)
-        label.setText(label.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, max(140, label.width())))
+        label.setText(label.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, self.profile_chip.width() - 24))
         self.profile_chip.setToolTip(text + "\n点击选择或管理存档。")
 
     def manage_profiles(self):

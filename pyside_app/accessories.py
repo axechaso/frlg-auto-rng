@@ -10,6 +10,7 @@ from device_label_overrides import LabelOverrideStore, diagnose_label_log
 from label_incidents import LabelIncidentStore
 from pyside_preview import Card
 from .manual import ControllerWindow, MonitorWindow
+from .run_input_state import RunInputStateClient
 
 
 class Accessories(QObject):
@@ -35,6 +36,12 @@ class Accessories(QObject):
         self.drop.installEventFilter(self)
         self.last_log = ""
         self.ignored_prefix = ""
+        self.input_client = RunInputStateClient(self)
+        self.input_client.changed.connect(self._input_state_changed)
+        self.input_view = self.input_client.model.view()
+        self.input_action_timer = QTimer(self)
+        self.input_action_timer.setInterval(250)
+        self.input_action_timer.timeout.connect(self._refresh_input_action_age)
         for title, action in (("虚拟手柄", self.open_controller), ("监视窗口", self.open_monitor),
             ("手柄键位", self.open_controller_mapping),
             ("制作 / 修复标签", self.open_label_editor),
@@ -55,6 +62,27 @@ class Accessories(QObject):
         self.timer.start()
         self.refresh_labels()
         self.poll_incidents()
+
+    def _input_state_changed(self, view):
+        self.input_view = view
+        self.w.apply_script_action_view(view)
+        if self.controller:
+            self.controller.set_script_observation(view if self.w.running else None)
+
+    def _refresh_input_action_age(self):
+        if self.input_view is not None:
+            self.w.apply_script_action_view(self.input_view)
+
+    def consume_input_session_marker(self, line: str) -> bool:
+        return self.input_client.expect_session(line)
+
+    def update_input_visibility(self):
+        controller_visible = bool(
+            self.controller
+            and (self.controller.isVisible() or self.controller.overlay.isVisible())
+        )
+        visible = getattr(self.w, "current_page", "") == "logs" or controller_visible
+        self.input_client.set_visible(visible)
 
     def device_name(self):
         name = self.w.devices[1].get(self.w.fields["video"].currentData(), "")
@@ -227,6 +255,8 @@ class Accessories(QObject):
     def open_controller(self):
         if self.controller is None:
             self.controller = ControllerWindow(self.w)
+        if self.w.running:
+            self.controller.set_script_observation(self.input_view)
         self.controller.open_overlay()
 
     def open_controller_mapping(self):
@@ -246,6 +276,9 @@ class Accessories(QObject):
         self.monitor.raise_()
         self.monitor.restart()
 
+    def preview_video_requested(self):
+        return bool(self.monitor and self.monitor.isVisible())
+
     def release_for_run(self):
         if self.controller:
             if self.controller.job:
@@ -257,11 +290,28 @@ class Accessories(QObject):
                 return False
         return True
 
+    def prepare_run(self, command):
+        if command is not None:
+            self.input_client.start(
+                command.input_state_url,
+                command.run_id,
+                command.input_session_id,
+                command.input_stage_id,
+            )
+            self.input_action_timer.start()
+            self.update_input_visibility()
+
     def run_started(self):
         if self.monitor and self.monitor.isVisible():
             self.monitor.restart()
 
-    def run_finished(self):
+    def run_finished(self, message="运行已结束", *, phase="ended"):
+        self.input_action_timer.stop()
+        self.input_client.stop(message=message, phase=phase)
+        self.input_view = self.input_client.model.view()
+        self.w.apply_script_action_view(self.input_view)
+        if self.controller:
+            self.controller.set_script_observation(None)
         if self.monitor and self.monitor.isVisible():
             self.monitor.restart()
         self.diagnose()
@@ -334,6 +384,8 @@ class Accessories(QObject):
             progress=status, fingerprint_warning_only=advanced), done, "正在检查官方 Seed 表……")
 
     def close(self):
+        self.input_action_timer.stop()
+        self.input_client.stop()
         if self.monitor:
             self.monitor.close()
         if self.controller:

@@ -1,0 +1,11 @@
+diff --git a/src/EasyCon2.CLI/ConsoleOutAdapter.cs b/src/EasyCon2.CLI/ConsoleOutAdapter.cs
+--- a/src/EasyCon2.CLI/ConsoleOutAdapter.cs
++++ b/src/EasyCon2.CLI/ConsoleOutAdapter.cs
+@@ -45,5 +45,7 @@
+     {
+         LineWritten?.Invoke(message);
++        if (message.Contains("FRLG_STAGE|", StringComparison.Ordinal))
++            return;
+         lock (_tailLock)
+         {
+             _tail.Append(message);

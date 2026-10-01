@@ -443,7 +443,7 @@ ENDFUNC
     def test_old_cached_template_reports_how_to_refresh_held_table_fields(self):
         old_template = "\n".join(
             f"${name} = 0" for name in egg_request_to_user_values(egg_request())
-        ) + "\n# ============================进阶设置\n"
+        ) + "\n# ============================进阶设置\n$出闪录像 = 0\n"
         with self.assertRaisesRegex(ValueError, "local_assets 仍为旧缓存"):
             configure_egg_template_text(
                 old_template,
@@ -502,6 +502,7 @@ ENDFUNC
             " & $孵蛋亲本B性别 & \"，相性 \" & $孵蛋双亲相性"
         )
         template += "\n# ============================进阶设置\n$内部参数 = 1"
+        template += "\n$出闪录像 = 0"
         for name in (
             "扩窗层数上限", "扩窗第1层Seed容差", "扩窗第1层帧半宽",
             "扩窗第2层Seed容差", "扩窗第2层帧半宽",
@@ -532,6 +533,7 @@ ENDFUNC
                 egg_seed_reverse_seed_tolerance=7,
                 egg_seed_reverse_min_advances=700,
                 egg_seed_reverse_max_advances=8700,
+                record_shiny_video=True,
             ),
         )
         self.assertIn('$静态或野生 = "孵蛋"', configured)
@@ -542,6 +544,7 @@ ENDFUNC
         self.assertIn('$Seed校准方案 = 1', configured)
         self.assertIn('$调试日志输出 = 0', configured)
         self.assertIn('$帧奇偶修正方案 = 1', configured)
+        self.assertIn('$出闪录像 = 1', configured)
         self.assertIn('$孵蛋亲本A性别 = "百变怪"', configured)
         self.assertIn('$孵蛋亲本B性别 = "无性别"', configured)
         self.assertIn('$扩窗层数上限 = 1', configured)

@@ -20,7 +20,8 @@ from typing import Any, Mapping
 from app_paths import USER_DATA_ROOT
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+LEGACY_SCHEMA_VERSION = 1
 MARKER_PREFIX = "PRECALIBRATION_UPDATE"
 DEFAULT_STORE_PATH = USER_DATA_ROOT / "precalibration.json"
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -37,15 +38,59 @@ _INT_FIELDS = {
     "FRAME_ENABLED",
     "HELD_PRE",
     "PICKUP_PRE",
+    "PARITY",
+    "GIFT",
 }
-_RECORD_FIELDS = {
-    "seed_ns1",
-    "seed_ns2",
+_SEED_FIELDS = {"seed_ns1", "seed_ns2"}
+_FRAME_FIELDS = {
     "frame_ns1",
     "frame_ns2",
     "held_pre",
     "pickup_pre",
 }
+_RECORD_FIELDS = _SEED_FIELDS | _FRAME_FIELDS
+
+
+@dataclass(frozen=True)
+class PrecalibrationFrameScope:
+    effective_parity_scheme: int
+    mystery_gift_enabled: bool
+
+    def __post_init__(self) -> None:
+        if type(self.effective_parity_scheme) is not int or self.effective_parity_scheme not in (0, 1):
+            raise ValueError("预校准帧作用域奇偶方案必须是0或1")
+        if type(self.mystery_gift_enabled) is not bool:
+            raise ValueError("预校准帧作用域神秘礼物状态必须是布尔值")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "effective_parity_scheme": self.effective_parity_scheme,
+            "mystery_gift_enabled": self.mystery_gift_enabled,
+        }
+
+
+def normalize_frame_scope(
+    value: PrecalibrationFrameScope | Mapping[str, object],
+) -> PrecalibrationFrameScope:
+    if isinstance(value, PrecalibrationFrameScope):
+        return value
+    if not isinstance(value, Mapping):
+        raise ValueError("预校准帧作用域必须是对象")
+    try:
+        return PrecalibrationFrameScope(
+            effective_parity_scheme=value["effective_parity_scheme"],
+            mystery_gift_enabled=value["mystery_gift_enabled"],
+        )
+    except KeyError as exc:
+        raise ValueError(f"预校准帧作用域缺少字段: {exc.args[0]}") from exc
+
+
+def frame_scope_key(value: PrecalibrationFrameScope | Mapping[str, object]) -> str:
+    scope = normalize_frame_scope(value)
+    return (
+        f"parity={scope.effective_parity_scheme};"
+        f"gift={int(scope.mystery_gift_enabled)}"
+    )
 
 
 @dataclass(frozen=True)
@@ -165,8 +210,32 @@ def _empty_store() -> dict[str, Any]:
     return {"schema": SCHEMA_VERSION, "records": {}}
 
 
+def _normalize_storage_record(record: Mapping[str, Any], schema: int) -> dict[str, Any]:
+    if not isinstance(record, Mapping):
+        raise ValueError("预校准记录不是对象，原文件保留")
+    if schema == LEGACY_SCHEMA_VERSION:
+        legacy_frames = {
+            name: record[name] for name in _FRAME_FIELDS if name in record
+        }
+        frames = {}
+    else:
+        frames = record.get("frames", {})
+        legacy_frames = record.get("legacy_frames", {})
+        if not isinstance(frames, dict) or not isinstance(legacy_frames, dict):
+            raise ValueError("预校准记录帧作用域格式无效，原文件保留")
+    normalized = {
+        "context": record.get("context"),
+        **{name: record.get(name) for name in _SEED_FIELDS},
+        "frames": frames,
+        "legacy_frames": legacy_frames,
+    }
+    if "updated_at" in record:
+        normalized["updated_at"] = record["updated_at"]
+    return normalized
+
+
 def load_store(path: str | Path) -> dict[str, Any]:
-    """Load a store without ever replacing a malformed existing file."""
+    """Load schema 1/2 without rewriting the user's file."""
     path = Path(path)
     if not path.is_file():
         return _empty_store()
@@ -174,12 +243,25 @@ def load_store(path: str | Path) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"预校准记录读取失败，原文件保留: {exc}") from exc
-    if not isinstance(payload, dict) or payload.get("schema") != SCHEMA_VERSION:
+    if not isinstance(payload, dict) or payload.get("schema") not in {
+        LEGACY_SCHEMA_VERSION, SCHEMA_VERSION,
+    }:
         raise ValueError("预校准记录格式或版本不支持，原文件保留")
     records = payload.get("records")
     if not isinstance(records, dict):
         raise ValueError("预校准记录缺少records对象，原文件保留")
-    return {"schema": SCHEMA_VERSION, "records": records}
+    schema = payload["schema"]
+    normalized_records = {}
+    try:
+        for key, record in records.items():
+            normalized = _normalize_storage_record(record, schema)
+            record_context = normalize_context(normalized["context"])
+            normalized_records[str(key)] = _validate_storage_record(
+                normalized, record_context,
+            )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"预校准记录格式无效，原文件保留: {exc}") from exc
+    return {"schema": SCHEMA_VERSION, "records": normalized_records}
 
 
 def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
@@ -196,7 +278,9 @@ def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _validate_record(record: Mapping[str, Any], context: PrecalibrationContext) -> dict[str, Any]:
+def _validate_storage_record(
+    record: Mapping[str, Any], context: PrecalibrationContext,
+) -> dict[str, Any]:
     if not isinstance(record, Mapping):
         raise ValueError("预校准记录与当前上下文不一致")
     raw_context = record.get("context")
@@ -208,14 +292,11 @@ def _validate_record(record: Mapping[str, Any], context: PrecalibrationContext) 
         raise ValueError("预校准记录与当前上下文不一致")
     result: dict[str, Any] = {
         "context": context.to_dict(),
-        "seed_ns1": None,
-        "seed_ns2": None,
-        "frame_ns1": None,
-        "frame_ns2": None,
-        "held_pre": None,
-        "pickup_pre": None,
+        **{name: None for name in _SEED_FIELDS},
+        "frames": {},
+        "legacy_frames": {},
     }
-    for name in _RECORD_FIELDS:
+    for name in _SEED_FIELDS:
         value = record.get(name)
         if value is None:
             continue
@@ -223,10 +304,56 @@ def _validate_record(record: Mapping[str, Any], context: PrecalibrationContext) 
             raise ValueError(f"预校准记录字段{name}必须是整数")
         _validate_value(name, value)
         result[name] = value
+    frames = record.get("frames", {})
+    if not isinstance(frames, Mapping):
+        raise ValueError("预校准帧作用域必须是对象")
+    for scope_key, scoped_values in frames.items():
+        if not isinstance(scope_key, str) or not isinstance(scoped_values, Mapping):
+            raise ValueError("预校准帧作用域记录格式无效")
+        for name, value in scoped_values.items():
+            if name not in _FRAME_FIELDS:
+                raise ValueError(f"预校准帧作用域包含未知字段{name}")
+            if value is not None:
+                _validate_value(name, value)
+        result["frames"][scope_key] = {
+            name: value for name, value in scoped_values.items()
+        }
+    legacy_frames = record.get("legacy_frames", {})
+    if not isinstance(legacy_frames, Mapping):
+        raise ValueError("预校准历史帧字段必须是对象")
+    for name, value in legacy_frames.items():
+        if name not in _FRAME_FIELDS:
+            raise ValueError(f"预校准历史帧字段包含未知字段{name}")
+        if value is not None:
+            _validate_value(name, value)
+        result["legacy_frames"][name] = value
     if "updated_at" in record and not isinstance(record["updated_at"], str):
         raise ValueError("预校准记录更新时间格式无效")
     if isinstance(record.get("updated_at"), str):
         result["updated_at"] = record["updated_at"]
+    return result
+
+
+def _validate_record(
+    record: Mapping[str, Any],
+    context: PrecalibrationContext,
+    frame_scope: PrecalibrationFrameScope | Mapping[str, object] | None = None,
+) -> dict[str, Any]:
+    stored = _validate_storage_record(record, context)
+    result = {
+        "context": context.to_dict(),
+        **{name: stored.get(name) for name in _SEED_FIELDS},
+        **{name: None for name in _FRAME_FIELDS},
+        "legacy_frames": dict(stored["legacy_frames"]),
+    }
+    if frame_scope is not None:
+        scope_values = stored["frames"].get(frame_scope_key(frame_scope), {})
+        for name in _FRAME_FIELDS:
+            value = scope_values.get(name)
+            if value is not None:
+                result[name] = value
+    if "updated_at" in stored:
+        result["updated_at"] = stored["updated_at"]
     return result
 
 
@@ -244,6 +371,8 @@ def _validate_value(name: str, value: object) -> None:
 def read_record(
     path: str | Path,
     context: PrecalibrationContext | Mapping[str, object],
+    *,
+    frame_scope: PrecalibrationFrameScope | Mapping[str, object] | None = None,
 ) -> dict[str, Any] | None:
     normalized = normalize_context(context)
     payload = load_store(path)
@@ -254,19 +383,36 @@ def read_record(
         raw = payload["records"].get(_legacy_context_key(normalized))
     if raw is None:
         return None
-    return _validate_record(raw, normalized)
+    return _validate_record(raw, normalized, frame_scope)
 
 
 def update_record(
     path: str | Path,
     context: PrecalibrationContext | Mapping[str, object],
     updates: Mapping[str, object],
+    *,
+    frame_scope: PrecalibrationFrameScope | Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
-    """Merge validated values and atomically persist the context record."""
+    """Merge Seed values and one explicitly scoped frame record."""
     normalized = normalize_context(context)
     unknown = set(updates) - _RECORD_FIELDS
     if unknown:
         raise ValueError("预校准更新包含未知字段: " + ", ".join(sorted(unknown)))
+    frame_updates = set(updates) & _FRAME_FIELDS
+    if frame_updates and frame_scope is None:
+        raise ValueError("写入预校准帧值必须明确提供奇偶/礼物作用域")
+    normalized_scope = normalize_frame_scope(frame_scope) if frame_scope is not None else None
+    path = Path(path)
+    legacy_schema = False
+    if path.is_file():
+        try:
+            raw_payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"预校准记录读取失败，原文件保留: {exc}") from exc
+        legacy_schema = (
+            isinstance(raw_payload, dict)
+            and raw_payload.get("schema") == LEGACY_SCHEMA_VERSION
+        )
     payload = load_store(path)
     key = context_key(normalized)
     old = payload["records"].get(key)
@@ -274,21 +420,46 @@ def update_record(
     if old is None and normalized.seed_startup_scheme == 0:
         legacy_key = _legacy_context_key(normalized)
         old = payload["records"].get(legacy_key)
-    record = _validate_record(old, normalized) if old is not None else {
+    record = _validate_storage_record(old, normalized) if old is not None else {
         "context": normalized.to_dict(),
-        **{name: None for name in _RECORD_FIELDS},
+        **{name: None for name in _SEED_FIELDS},
+        "frames": {},
+        "legacy_frames": {},
     }
-    for name, value in updates.items():
+    for name in _SEED_FIELDS:
+        value = updates.get(name)
         if value is None:
             continue
         _validate_value(name, value)
         record[name] = int(value)
+    if frame_updates:
+        scope_key = frame_scope_key(normalized_scope)
+        scoped = record["frames"].setdefault(scope_key, {})
+        for name in frame_updates:
+            value = updates[name]
+            if value is None:
+                continue
+            _validate_value(name, value)
+            scoped[name] = int(value)
     record["updated_at"] = datetime.now(timezone.utc).isoformat()
     payload["records"][key] = record
     if legacy_key is not None and legacy_key != key:
         payload["records"].pop(legacy_key, None)
-    _write_json_atomic(Path(path), payload)
-    return dict(record)
+    if legacy_schema:
+        _backup_legacy_store(path)
+    _write_json_atomic(path, payload)
+    return _validate_record(record, normalized, normalized_scope)
+
+
+def _backup_legacy_store(path: Path) -> Path:
+    """Save the exact schema 1 bytes under a unique, non-overwriting name."""
+    raw = path.read_bytes()
+    backup = path.with_name(f"{path.name}.schema1-{uuid.uuid4().hex}.bak")
+    with backup.open("xb") as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return backup
 
 
 def parse_marker(text: str) -> dict[str, Any] | None:
@@ -316,7 +487,7 @@ def parse_marker(text: str) -> dict[str, Any] | None:
                 return None
         else:
             marker[key] = value.strip()
-    if marker.get("V") != SCHEMA_VERSION:
+    if marker.get("V") not in {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}:
         return None
     required = {"GAME", "NX", "MODE", "ENTRY", "KIND", "SEED_INDEX", "FRAME_ENABLED"}
     if not required.issubset(marker):
@@ -332,6 +503,9 @@ def parse_marker(text: str) -> dict[str, Any] | None:
         return None
     if marker["FRAME_ENABLED"] not in (0, 1):
         return None
+    if marker["V"] == SCHEMA_VERSION:
+        if marker.get("PARITY") not in (0, 1) or marker.get("GIFT") not in (0, 1):
+            return None
     if marker.get("KIND") == "EGG":
         if "HELD_PRE" not in marker or "PICKUP_PRE" not in marker:
             return None
@@ -350,7 +524,7 @@ def marker_matches_context(
         entry = normalize_entry(marker["ENTRY"])
         kind = normalize_kind(marker["KIND"])
         return (
-            marker.get("V") == SCHEMA_VERSION
+            marker.get("V") in {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}
             and game == normalized.game
             and int(marker["NX"]) == normalized.nx_model
             and int(marker["MODE"]) == normalized.seed_mode
@@ -379,11 +553,13 @@ def marker_updates(
             pickup = int(marker["PICKUP_PRE"])
             _validate_value("held_pre", held)
             _validate_value("pickup_pre", pickup)
+            if marker.get("V") == LEGACY_SCHEMA_VERSION:
+                return {seed_field: seed_index}
             return {seed_field: seed_index, "held_pre": held, "pickup_pre": pickup}
         frame = int(marker["FRAME_PRE"])
         frame_field = "frame_ns1" if normalized.nx_model == 1 else "frame_ns2"
         _validate_value(frame_field, frame)
-        if int(marker["FRAME_ENABLED"]) == 0:
+        if marker.get("V") == LEGACY_SCHEMA_VERSION or int(marker["FRAME_ENABLED"]) == 0:
             return {seed_field: seed_index}
         return {seed_field: seed_index, frame_field: frame}
     except (KeyError, TypeError, ValueError):
@@ -404,7 +580,13 @@ def update_from_log(
     updates = marker_updates(marker, context)
     if updates is None:
         raise ValueError("预校准成功标记与本次生成上下文不一致，未更新记录")
-    return update_record(path, context, updates)
+    frame_scope = None
+    if marker.get("V") == SCHEMA_VERSION:
+        frame_scope = PrecalibrationFrameScope(
+            effective_parity_scheme=marker["PARITY"],
+            mystery_gift_enabled=bool(marker["GIFT"]),
+        )
+    return update_record(path, context, updates, frame_scope=frame_scope)
 
 
 def update_from_manifest(
@@ -427,6 +609,19 @@ def update_from_manifest(
         return None
     if "context" not in config:
         raise ValueError("预校准生成清单缺少上下文，未更新记录")
+    marker = parse_marker(text)
+    if marker is None:
+        raise ValueError("预校准成功标记不完整或格式无效，未更新记录")
+    if marker.get("V") == SCHEMA_VERSION:
+        expected_scope = config.get("frame_scope")
+        if expected_scope is None or normalize_frame_scope(expected_scope).to_dict() != PrecalibrationFrameScope(
+            marker["PARITY"], bool(marker["GIFT"]),
+        ).to_dict():
+            raise ValueError("预校准成功标记的帧作用域与生成清单不一致，未更新记录")
+    elif config.get("frame_scope") is not None:
+        # A V1 manifest/marker pair may still contribute its independently
+        # validated Seed index, but never a frame value in the new schema.
+        pass
     return update_from_log(path, config["context"], text)
 
 
@@ -435,15 +630,17 @@ def build_marker(
     *,
     seed_index: int,
     frame_enabled: bool,
+    frame_scope: PrecalibrationFrameScope | Mapping[str, object] | None = None,
     frame_pre: int = 0,
     held_pre: int | None = None,
     pickup_pre: int | None = None,
 ) -> str:
     """Build the ASCII marker used by tests and diagnostic tooling."""
     normalized = normalize_context(context)
+    scope = normalize_frame_scope(frame_scope) if frame_scope is not None else None
     fields = [
         MARKER_PREFIX,
-        "V=1",
+        f"V={SCHEMA_VERSION if scope is not None else LEGACY_SCHEMA_VERSION}",
         f"GAME={normalized.game.upper()}",
         f"NX={normalized.nx_model}",
         f"MODE={normalized.seed_mode}",
@@ -454,6 +651,11 @@ def build_marker(
         f"FRAME_PRE={int(frame_pre)}",
         f"FRAME_ENABLED={1 if frame_enabled else 0}",
     ]
+    if scope is not None:
+        fields.extend((
+            f"PARITY={scope.effective_parity_scheme}",
+            f"GIFT={int(scope.mystery_gift_enabled)}",
+        ))
     if normalized.kind == "EGG":
         if held_pre is None or pickup_pre is None:
             raise ValueError("孵蛋预校准marker必须包含Held和Pickup")
@@ -465,12 +667,15 @@ __all__ = [
     "DEFAULT_STORE_PATH",
     "MARKER_PREFIX",
     "PrecalibrationContext",
+    "PrecalibrationFrameScope",
     "build_marker",
     "context_key",
+    "frame_scope_key",
     "load_store",
     "marker_matches_context",
     "marker_updates",
     "normalize_context",
+    "normalize_frame_scope",
     "parse_marker",
     "read_record",
     "update_record",

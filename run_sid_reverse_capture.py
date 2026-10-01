@@ -12,6 +12,7 @@ import subprocess
 from process_control import StopFileWatcher, terminate_process_tree
 import sys
 from typing import Callable
+import uuid
 
 from automation.easycon118 import (
     DEFAULT_EZCON_PATH,
@@ -20,6 +21,7 @@ from automation.easycon118 import (
     probe_easycon_devices,
     validate_runtime,
 )
+from automation.input_state_protocol import format_input_session_marker
 from automation.sid_reverse118 import (
     SIDReverseRunRequest,
     write_sid_reverse_plan,
@@ -360,6 +362,22 @@ def _run_easycon(
     return (130 if stop.requested else code), "".join(lines), stopped_for_unique_pid and not stop.requested
 
 
+def _emit_input_session(
+    run_id: str,
+    session_id: str,
+    stage_id: str,
+    state: str,
+    output_callback: Callable[[str], None] | None = None,
+) -> None:
+    try:
+        marker = format_input_session_marker(run_id, session_id, stage_id, state)
+    except ValueError:
+        return
+    _safe_print(marker)
+    if output_callback is not None:
+        output_callback(marker + "\n")
+
+
 def _write_slot_project(
     source_dir: Path,
     output_dir: Path,
@@ -415,8 +433,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port")
     parser.add_argument("--video", type=int)
     parser.add_argument("--preview-port", type=int, default=0)
+    parser.add_argument("--preview-video", action="store_true")
     parser.add_argument("--incident-dir", type=Path)
     parser.add_argument("--run-id", default="")
+    parser.add_argument("--input-session-id", default="")
     parser.add_argument("--workflow", default="sid")
     parser.add_argument("--capture-device-name", default="")
     parser.add_argument("--request-json", type=Path, help="GUI 生成的 SID plan.json")
@@ -489,6 +509,7 @@ def main(argv: list[str] | None = None) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     all_output: list[str] = []
+    active_run_id = args.run_id or uuid.uuid4().hex
     try:
         with log_path.open("w", encoding="utf-8", newline="") as log_file:
             def persist_output(text: str) -> None:
@@ -517,26 +538,48 @@ def main(argv: list[str] | None = None) -> int:
                 for warning in getattr(check, "warnings", ()):
                     if warning.startswith("高级模式指纹警告："):
                         _safe_print(warning, file=sys.stderr)
-                command = build_run_command(
-                    runner,
-                    main_path,
-                    port=port,
-                    video_device=video,
-                    video_type="DSHOW",
-                    preview_port=args.preview_port,
-                    incident_directory=args.incident_dir,
-                    run_id=args.run_id,
-                    workflow=args.workflow,
-                    capture_device_name=args.capture_device_name,
-                    label_supervision=args.incident_dir is not None,
+                stage_id = f"sid_slot_{slot}"
+                session_id = uuid.uuid4().hex
+                _emit_input_session(
+                    active_run_id, session_id, stage_id, "STARTING", persist_output,
                 )
-                code, output, stopped_for_unique_pid = _run_easycon(
-                    command,
-                    main_path.parent,
-                    pokemon_index=slot,
-                    game=game,
-                    output_callback=persist_output,
-                    stop_file=args.stop_file,
+                try:
+                    command = build_run_command(
+                        runner,
+                        main_path,
+                        port=port,
+                        video_device=video,
+                        video_type="DSHOW",
+                        preview_port=args.preview_port,
+                        incident_directory=args.incident_dir,
+                        run_id=active_run_id,
+                        workflow=args.workflow,
+                        capture_device_name=args.capture_device_name,
+                        label_supervision=args.incident_dir is not None,
+                        input_session_id=session_id,
+                        input_stage_id=stage_id,
+                        preview_video=args.preview_video,
+                    )
+                    code, output, stopped_for_unique_pid = _run_easycon(
+                        command,
+                        main_path.parent,
+                        pokemon_index=slot,
+                        game=game,
+                        output_callback=persist_output,
+                        stop_file=args.stop_file,
+                    )
+                except OSError:
+                    _emit_input_session(
+                        active_run_id, session_id, stage_id, "FAILED", persist_output,
+                    )
+                    raise
+                terminal_state = (
+                    "STOPPING" if args.stop_file is not None and args.stop_file.is_file()
+                    else "ENDED" if code == 0 or stopped_for_unique_pid
+                    else "FAILED"
+                )
+                _emit_input_session(
+                    active_run_id, session_id, stage_id, terminal_state, persist_output,
                 )
                 all_output.append(output)
                 if code == 20:

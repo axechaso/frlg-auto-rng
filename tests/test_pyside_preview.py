@@ -433,6 +433,19 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(window.overview.isVisible())
 
+    def test_script_action_card_is_only_shown_on_running_logs_page(self):
+        window = self.window
+        window.show()
+        window.select_page("wild")
+        self.assertFalse(window.run_ready_card.isHidden())
+        self.assertTrue(window.script_action_card.isHidden())
+        window.select_page("logs")
+        self.assertTrue(window.run_ready_card.isHidden())
+        self.assertFalse(window.script_action_card.isHidden())
+        window.select_page("tid")
+        self.assertFalse(window.run_ready_card.isHidden())
+        self.assertTrue(window.script_action_card.isHidden())
+
     def test_collapsing_optional_settings_preserves_edits(self):
         from pyside_preview import Card
         window = self.window

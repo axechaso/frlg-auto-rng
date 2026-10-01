@@ -131,6 +131,10 @@ class RunCommand:
     check: EasyConRuntimeCheck
     run_id: str = ""
     incident_root: Path | None = None
+    input_state_url: str = ""
+    input_session_id: str = ""
+    input_stage_id: str = "run"
+    preview_video: bool = False
 
 
 def validate_wild_inputs(inputs: WildInputs) -> None:
@@ -278,7 +282,8 @@ def rebuild_wild_with_override(prepared: PreparedWild, paths: AppPaths) -> Prepa
 
 
 def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str,
-                paths: AppPaths | None = None, *, label_supervision: bool = False) -> RunCommand:
+                paths: AppPaths | None = None, *, label_supervision: bool = False,
+                preview_video: bool = False) -> RunCommand:
     """Revalidate devices and generated content immediately before execution."""
     if not prepared.project or not prepared.check.ok:
         raise ValueError("请先生成并通过预检")
@@ -303,6 +308,7 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
         sock.bind(("127.0.0.1", 0))
         preview_port = sock.getsockname()[1]
     run_id = uuid.uuid4().hex
+    input_session_id = uuid.uuid4().hex
     log_path = prepared.project.parent / f"easycon-{run_id}.log"
     stop_path = log_path.with_suffix(".stop")
     incident_root = paths.user / "label_incidents" if label_supervision else None
@@ -310,14 +316,18 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
                                 video_type="DSHOW", preview_port=preview_port,
                                 incident_directory=incident_root,
                                 run_id=run_id, workflow="wild", capture_device_name=capture_name,
-                                label_supervision=label_supervision)
+                                label_supervision=label_supervision,
+                                input_session_id=input_session_id, input_stage_id="wild",
+                                preview_video=preview_video)
     worker_command = build_worker_command("easycon-log", (
                  "--log-path", str(log_path), "--cwd", str(prepared.project.parent),
                  "--stop-file", str(stop_path), "--", *command))
     return RunCommand(worker_command[0], tuple(worker_command[1:]), log_path, stop_path,
                       f"http://127.0.0.1:{preview_port}/mjpeg",
                       EasyConRuntimeCheck(True, (), tuple(warnings)), run_id,
-                      incident_root)
+                      incident_root,
+                      f"http://127.0.0.1:{preview_port}/input-state", input_session_id,
+                      "wild", preview_video)
 
 
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")

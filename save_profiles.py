@@ -35,6 +35,7 @@ class SaveProfile:
     sid: int
     nx_model: int
     language: str = "英文"
+    mystery_gift_enabled: bool = False
 
     @classmethod
     def create(
@@ -47,6 +48,7 @@ class SaveProfile:
         *,
         profile_id: str | None = None,
         language: str = "英文",
+        mystery_gift_enabled: bool = False,
     ) -> "SaveProfile":
         normalized_name = str(name).strip()
         if not normalized_name:
@@ -63,6 +65,8 @@ class SaveProfile:
         normalized_language = str(language).strip()
         if normalized_language not in SUPPORTED_LANGUAGES:
             raise ValueError("ROM语言/地区只能是英文（美版）或日文（日版）")
+        if type(mystery_gift_enabled) is not bool:
+            raise ValueError("神秘礼物状态必须是布尔值")
         normalized_id = str(profile_id or uuid.uuid4()).strip()
         if not normalized_id:
             raise ValueError("存档 ID 不能为空")
@@ -74,6 +78,7 @@ class SaveProfile:
             sid=_parse_trainer_id(sid, "SID"),
             nx_model=normalized_nx,
             language=normalized_language,
+            mystery_gift_enabled=mystery_gift_enabled,
         )
 
     @classmethod
@@ -91,6 +96,7 @@ class SaveProfile:
             payload.get("nx_model", ""),
             profile_id=profile_id,
             language=payload.get("language", "英文"),
+            mystery_gift_enabled=payload.get("mystery_gift_enabled", False),
         )
 
     def to_dict(self) -> dict:
@@ -102,6 +108,7 @@ class SaveProfile:
             "sid": self.sid,
             "nx_model": self.nx_model,
             "language": self.language,
+            "mystery_gift_enabled": self.mystery_gift_enabled,
         }
 
     @property
@@ -225,9 +232,11 @@ class SaveProfileStore:
         nx_model,
         *,
         language: str = "英文",
+        mystery_gift_enabled: bool = False,
     ) -> SaveProfile:
         profile = SaveProfile.create(
-            name, game, tid, sid, nx_model, language=language
+            name, game, tid, sid, nx_model, language=language,
+            mystery_gift_enabled=mystery_gift_enabled,
         )
         self._ensure_unique_name(profile.name)
         self._commit([*self.profiles, profile], profile.profile_id)
@@ -243,6 +252,7 @@ class SaveProfileStore:
         nx_model,
         *,
         language: str = "英文",
+        mystery_gift_enabled: bool | None = None,
     ) -> SaveProfile:
         current = self.get(profile_id)
         if current is None:
@@ -255,6 +265,11 @@ class SaveProfileStore:
             nx_model,
             profile_id=current.profile_id,
             language=language,
+            mystery_gift_enabled=(
+                current.mystery_gift_enabled
+                if mystery_gift_enabled is None
+                else mystery_gift_enabled
+            ),
         )
         self._ensure_unique_name(updated.name, excluding_id=current.profile_id)
         index = self.profiles.index(current)
@@ -281,6 +296,7 @@ class SaveProfileStore:
             current.sid,
             current.nx_model,
             language=current.language,
+            mystery_gift_enabled=current.mystery_gift_enabled,
         )
 
     def delete(self, profile_id: str) -> None:

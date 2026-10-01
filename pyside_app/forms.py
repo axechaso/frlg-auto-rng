@@ -84,7 +84,10 @@ class FormReader:
             home_buffer_adaptive_threshold=self.w.home_buffer_check.isChecked(),
             seed_startup_scheme=self.index("seed_startup") if self.w.advanced_check.isChecked() else 0,
             seed_calibration_scheme=self.index("seed_calibration") if self.w.advanced_check.isChecked() else 2,
-            update_precalibration=self.w.precalibration_check.isChecked(), debug_log_output=self.index("output_log"),
+            update_precalibration=self.w.precalibration_check.isChecked(),
+            record_shiny_video=self.w.record_shiny_video_check.isChecked(),
+            mystery_gift_enabled=self.w.profile_mystery_gift.isChecked(),
+            debug_log_output=self.index("output_log"),
             **self.expansion(), **self.egg_seed_reverse())
         request.validate()
         return request
@@ -153,7 +156,13 @@ class FormReader:
             starter_seed_startup_scheme=self.index("seed_startup") if self.w.advanced_check.isChecked() else 0,
             starter_template_name=self.w.current_template(), update_precalibration=self.w.precalibration_check.isChecked(),
             starter_debug_log_output=self.index("output_log"),
-            starter_frame_parity_scheme=1 - self.index("parity") if self.w.advanced_check.isChecked() else 1,
+            starter_frame_parity_scheme=(
+                int(self.f["parity"].currentData())
+                if self.w.advanced_check.isChecked()
+                else 1
+            ),
+            starter_record_shiny_video=self.w.record_shiny_video_check.isChecked(),
+            starter_mystery_gift_enabled=False,
             **expansion)
         flow.validate()
         return flow

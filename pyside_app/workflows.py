@@ -21,6 +21,7 @@ from automation import (
 )
 from automation.tid_calibration import validate_tid_plan_runtime
 from automation.tid_search import progress_supported
+from automation.sid_traversal_policy import validate_traversal_request
 from device_label_overrides import LabelOverrideStore, apply_profile_to_projects
 from sid_traversal import traversal_context, DEFAULT_TARGET_MAX_ADVANCES
 from tid_records import TidRecordContext
@@ -172,18 +173,46 @@ def _prepare_workflow_in_directory(
     elif inputs.mode == "sid_traversal":
         request.validate()
         options = inputs.extra["options"]
+        availability = validate_traversal_request(request, options, inputs.template)
+        save_context = inputs.extra.get("save_context")
+        if not isinstance(save_context, dict):
+            raise ValueError("SID 遍历缺少冻结的存档快照")
+        effective_parity = inputs.extra.get("effective_frame_parity_scheme")
+        if type(effective_parity) is not int or effective_parity != options.frame_parity_scheme:
+            raise ValueError("SID 遍历冻结的有效帧奇偶与选项不一致")
+        mystery_gift_enabled = inputs.extra.get("mystery_gift_enabled")
+        if type(mystery_gift_enabled) is not bool or mystery_gift_enabled != options.mystery_gift_enabled:
+            raise ValueError("SID 遍历冻结的神秘礼物状态与选项不一致")
+        named_rival = inputs.extra.get("named_rival")
+        if type(named_rival) is not bool:
+            raise ValueError("SID 遍历缺少已确认的劲敌取名状态")
+        max_advances = inputs.extra.get("max_advances")
+        if type(max_advances) is not int:
+            raise ValueError("SID 遍历最大 SID ADV 无效")
+        target_max_advances = DEFAULT_TARGET_MAX_ADVANCES
+        source_fingerprint = inspect_script_corpus(inputs.source)["sha256"]
+        precalibration_path = paths.user / "precalibration.json"
         context = traversal_context(tid=request.tid, named_rival=inputs.extra["named_rival"],
             wild_request=asdict(request), easycon_options=asdict(options),
-            source_sha256=inspect_script_corpus(inputs.source)["sha256"],
-            max_advances=inputs.extra["max_advances"], start_advance=inputs.extra.get("start_advance"),
-            target_max_advances=DEFAULT_TARGET_MAX_ADVANCES)
-        payload = {"mode": "sid_traversal", "version": 1, "source": str(inputs.source),
+            source_sha256=source_fingerprint,
+            max_advances=max_advances, start_advance=inputs.extra.get("start_advance"),
+            target_max_advances=target_max_advances, template_name=inputs.template,
+            encounter_kind=availability.encounter_kind, route_key=availability.route_key,
+            static_category=request.category if availability.encounter_kind == "static" else None,
+            save_context=save_context, effective_frame_parity_scheme=effective_parity,
+            mystery_gift_enabled=mystery_gift_enabled)
+        payload = {"mode": "sid_traversal", "version": 2, "source": str(inputs.source),
+            "template_name": inputs.template, "encounter_kind": availability.encounter_kind,
+            "route_key": availability.route_key, "save_context": save_context,
+            "effective_frame_parity_scheme": effective_parity,
+            "verification_protocol": 1, "script_fingerprint": f"sha256:{source_fingerprint}",
+            "precalibration_store_path": str(precalibration_path),
             "request": asdict(request), "easycon_options": asdict(options),
-            "named_rival": inputs.extra["named_rival"], "start_sid_advance": context["start_sid_advance"],
-            "max_advances": inputs.extra["max_advances"], "target_max_advances": DEFAULT_TARGET_MAX_ADVANCES,
+            "named_rival": named_rival, "start_sid_advance": context["start_sid_advance"],
+            "max_advances": max_advances, "target_max_advances": target_max_advances,
             "traversal_context": context}
         write_json_atomic(directory / "traversal.json", payload)
-        project = inputs.source / STANDARD_TEMPLATE_NAME
+        project = inputs.source / inputs.template
         metrics = ("遍历中确定", "—", "—")
         details = f"SID 遍历：TID {request.tid:05d}；起点 {context['start_sid_advance']} / 上限 {context['max_advances']}\n每个 SID 搜索 {request.min_advances}–{DEFAULT_TARGET_MAX_ADVANCES} ADV；只有明确未出闪才推进。"
         from sid_traversal import read_progress
@@ -221,7 +250,7 @@ def _prepare_workflow_in_directory(
 
 
 def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, video, capture_name,
-                         *, label_supervision: bool = False):
+                         *, label_supervision: bool = False, preview_video: bool = False):
     inputs = prepared.inputs
     if not prepared.check.ok:
         raise ValueError("请先通过预检")
@@ -238,16 +267,20 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
         sock.bind(("127.0.0.1", 0))
         preview_port = sock.getsockname()[1]
     tag = uuid.uuid4().hex
+    input_session_id = uuid.uuid4().hex
     incident_root = paths.user / "label_incidents" if label_supervision else None
     log = prepared.directory / f"run-{tag}.log"
     stop = log.with_suffix(".stop")
     common = ["--ezcon", str(inputs.ezcon), "--port", port, "--video", str(video),
-              "--log-path", str(log), "--stop-file", str(stop), "--preview-port", str(preview_port)]
+              "--log-path", str(log), "--stop-file", str(stop), "--preview-port", str(preview_port),
+              "--run-id", tag, "--workflow", inputs.mode, "--capture-device-name", capture_name,
+              "--input-session-id", input_session_id]
+    if type(preview_video) is not bool:
+        raise ValueError("视频预览开关必须是布尔值")
+    if preview_video:
+        common.append("--preview-video")
     if label_supervision:
         common += ["--incident-dir", str(incident_root)]
-    if label_supervision or inputs.mode == "tid":
-        common += ["--run-id", tag, "--workflow", inputs.mode,
-                   "--capture-device-name", capture_name]
     if inputs.advanced:
         common.append("--fingerprint-warnings")
     request = inputs.request
@@ -298,7 +331,10 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
                                    run_id=tag if backend != SCRIPT_TEST_BACKEND_ORIGINAL else None,
                                    workflow=inputs.mode if backend != SCRIPT_TEST_BACKEND_ORIGINAL else None,
                                    capture_device_name=capture_name if backend != SCRIPT_TEST_BACKEND_ORIGINAL else None,
-                                   label_supervision=label_supervision and backend != SCRIPT_TEST_BACKEND_ORIGINAL)
+                                   label_supervision=label_supervision and backend != SCRIPT_TEST_BACKEND_ORIGINAL,
+                                   input_session_id=input_session_id if backend != SCRIPT_TEST_BACKEND_ORIGINAL else None,
+                                   input_stage_id="script_test",
+                                   preview_video=preview_video and backend != SCRIPT_TEST_BACKEND_ORIGINAL)
         args = ["--log-path", str(log), "--cwd", str(prepared.project.parent), "--stop-file", str(stop)]
         if inputs.mode == "egg":
             for marker in ("孵蛋流程完成", "孵蛋流程失败", "孵蛋流程测试完成", "孵蛋流程测试失败"):
@@ -309,6 +345,14 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
                 "script_sha256": hashlib.sha256(prepared.project.read_bytes()).hexdigest(),
                 "backend": backend, "runner": str(runner), "port": port, "video": video, "command": command})
     command = build_worker_command(worker, args)
+    input_state_url = f"http://127.0.0.1:{preview_port}/input-state" if preview_port else ""
+    input_session = input_session_id if input_state_url else ""
     return RunCommand(command[0], tuple(command[1:]), log, stop,
                       f"http://127.0.0.1:{preview_port}/mjpeg" if preview_port else "", check,
-                      tag, incident_root)
+                      tag, incident_root,
+                      input_state_url, input_session,
+                      "script_test" if inputs.mode == "script_test" else "workflow",
+                      preview_video and not (
+                          inputs.mode == "script_test"
+                          and inputs.extra.get("backend") == SCRIPT_TEST_BACKEND_ORIGINAL
+                      ))

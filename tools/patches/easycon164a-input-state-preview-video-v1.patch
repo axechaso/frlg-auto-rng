@@ -1,0 +1,28 @@
+diff --git a/src/EasyCon2.CLI/Program.cs b/src/EasyCon2.CLI/Program.cs
+--- a/src/EasyCon2.CLI/Program.cs
++++ b/src/EasyCon2.CLI/Program.cs
+@@ -101,5 +101,9 @@ var inputStageIdOption = new Option<string>("--input-stage-id")
+ {
+     Description = "本次按键状态阶段 ID",
+     DefaultValueFactory = _ => "run"
+ };
++var previewVideoOption = new Option<bool>("--preview-video")
++{
++    Description = "启用视频监视画面采集"
++};
+ var workflowOption = new Option<string>("--workflow")
+@@ -144,2 +148,3 @@ runScriptCommand.Options.Add(previewPortOption);
+ runScriptCommand.Options.Add(previewPortOption);
++runScriptCommand.Options.Add(previewVideoOption);
+ runScriptCommand.Options.Add(labelSupervisionOption);
+@@ -169,3 +174,4 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+     string inputSessionId = parseResult.GetValue(inputSessionIdOption)!;
+     string inputStageId = parseResult.GetValue(inputStageIdOption)!;
++    bool previewVideo = parseResult.GetValue(previewVideoOption);
+     string workflow = parseResult.GetValue(workflowOption)!;
+@@ -317,4 +323,4 @@
+         // A pure button/timing stage (such as the TID -> lab bridge) may not
+         // reference labels, but it still needs to share the capture preview.
+-        if (runner.NeedILLoad || previewPort > 0)
++        if (runner.NeedILLoad || previewVideo)
+         {

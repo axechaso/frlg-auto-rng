@@ -312,7 +312,7 @@ class ControllerTests(unittest.TestCase):
         active = overlay.grab().toImage()
         self.assertNotEqual(neutral.pixelColor(83, 33), active.pixelColor(83, 33))
         self.assertEqual(active.pixelColor(83, 33).name(), "#00ff00")
-        self.assertNotEqual(neutral.pixelColor(20, 33), active.pixelColor(20, 33))
+        self.assertNotEqual(neutral.pixelColor(16, 33), active.pixelColor(16, 33))
         self.w.release_all()
         self.assertEqual(overlay.grab().toImage(), neutral)
 

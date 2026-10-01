@@ -47,7 +47,7 @@ ENDFUNC
 
         self.assertEqual(
             backend.EXPECTED_COMPAT_PATCH_ID,
-            "easycon164a-label-supervision-v9",
+            "easycon164a-label-supervision-v10-stage-log-filter-input-state-v1",
         )
         self.assertIn("captureTask = Task.Run", additions)
         self.assertIn("latestFrame = frame.Clone()", additions)
@@ -88,6 +88,20 @@ ENDFUNC
         )
         self.assertIn("LabelFaultSupervisor", supervision_additions)
         self.assertIn('"FRLG_STAGE|"', supervision_additions)
+        stage_log_patch = (
+            root / "tools" / "patches" / "easycon164a-stage-log-filter.patch"
+        ).read_text(encoding="utf-8")
+        stage_log_filter = 'if (message.Contains("FRLG_STAGE|", StringComparison.Ordinal))'
+        self.assertIn(stage_log_filter, stage_log_patch)
+        self.assertIn("easycon164a-stage-log-filter.patch", build_script)
+        self.assertLess(
+            stage_log_patch.index("LineWritten?.Invoke(message);"),
+            stage_log_patch.index(stage_log_filter),
+        )
+        self.assertLess(
+            stage_log_patch.index(stage_log_filter),
+            stage_log_patch.index("_tail.Append(message);"),
+        )
         self.assertIn("verify-label", supervision_additions)
         self.assertIn("save-frames-dir", supervision_additions)
         self.assertIn("Math.Ceiling(rawScore)", supervision_additions)
@@ -113,6 +127,35 @@ ENDFUNC
         self.assertIn("-p:PublishSingleFile=false", build_script)
         self.assertNotIn("-p:PublishSingleFile=true", build_script)
         self.assertIn("self-contained onedir", build_script)
+
+    def test_input_state_preview_flag_is_independent_from_status_server(self):
+        root = Path(__file__).resolve().parents[1]
+        input_state_patch = (
+            root / "tools" / "patches" / "easycon164a-input-state-v1.patch"
+        ).read_text(encoding="utf-8")
+        upgrade_patch = (
+            root / "tools" / "patches" / "easycon164a-input-state-preview-video-v1.patch"
+        ).read_text(encoding="utf-8")
+        build_script = (
+            root / "tools" / "build_easycon164a_compat_runner.ps1"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn('Option<bool>("--preview-video")', input_state_patch)
+        self.assertIn('Option<bool>("--preview-video")', upgrade_patch)
+        self.assertIn("if (previewPort > 0)", input_state_patch)
+        self.assertNotIn("if (runner.NeedILLoad || previewVideo)", input_state_patch)
+        self.assertIn("if (runner.NeedILLoad || previewVideo)", upgrade_patch)
+        self.assertIn("$inputStateCoreAlreadyApplied", build_script)
+        self.assertIn("$inputStatePreviewVideoPatch", build_script)
+        self.assertIn(
+            "$inputStatePatchesToApply = @($inputStatePatch, $inputStatePreviewVideoPatch)",
+            build_script,
+        )
+        self.assertIn(
+            "foreach ($inputStatePatchToApply in $inputStatePatchesToApply)",
+            build_script,
+        )
+        self.assertIn(r"parseResult\.GetValue\(previewVideoOption\)", build_script)
 
     def test_default_backend_is_the_pinned_164a_package(self):
         self.assertEqual(
@@ -203,6 +246,16 @@ ENDFUNC
         )
         self.assertNotIn("--label-supervision", command)
         self.assertNotIn("--incident-dir", command)
+
+        preview = backend.build_run_command(
+            "ezcon.exe",
+            "main.ecs",
+            port="COM22",
+            video_device=0,
+            preview_port=43123,
+            preview_video=True,
+        )
+        self.assertIn("--preview-video", preview)
 
         supervised = backend.build_run_command(
             "ezcon.exe",

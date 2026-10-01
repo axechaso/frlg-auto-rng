@@ -20,7 +20,7 @@
   },
   "selection": {"iv_total": 181, "iv_average": 30.17, "rule": "highest_iv_total_then_lowest_advances"},
   "execution": {"seed_mode": 0, "game_settings": {"sound": "mono", "button_mode": "h", "seed_button": "a", "extra_button": "none"}},
-  "route_support": {"level": "baseline_118", "summary": "2.0 普通野生流程基线；仍需按地点完成实机验收。", "can_start": true},
+  "route_support": {"level": "baseline_118", "summary": "2.0 普通野生流程基线；自动路线按现有支持白名单判定。", "can_start": true},
   "warnings": ["已自动选择 Seed 模式 0；运行前必须确认游戏内 SOUND/BUTTON MODE 与该模式一致。"],
   "search_summary": {"matching_outcomes": 3, "reachable_outcomes": 3, "feasible_routes": 2}
 }

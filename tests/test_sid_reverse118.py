@@ -95,6 +95,36 @@ class SIDReverse118Tests(unittest.TestCase):
         self.assertIn("$HOME_BUFFER有效识图阈值 = 95", configured)
         self.assertIn("IF $HOME_BUFFER稳定低分自适应 == 0", configured)
 
+    def test_sid_close_uses_both_nx_labels_and_waits_for_dark_shutdown(self):
+        root = Path(__file__).resolve().parents[1]
+        template = (
+            root
+            / "assets"
+            / "easycon118_extensions"
+            / "NS火叶SID反查-采集测试.ecs"
+        ).read_text(encoding="utf-8")
+        configured = apply_sid_home_buffer_runtime(
+            template,
+            SIDReverseRunRequest(
+                tid=17500,
+                party_count=1,
+                dex_overrides=(18, 0, 0, 0, 0, 0),
+                initial_levels=(46, 1, 1, 1, 1, 1),
+            ),
+        )
+        close_function = configured.split("FUNC SID反查关闭游戏\n", 1)[1].split(
+            "\nFUNC SID反查普通启动并进入存档", 1
+        )[0]
+
+        self.assertIn("正在关闭_暗.IL:>=:95", close_function)
+        self.assertIn(
+            "(@正确退出_NS2 >= 95 or @HOME_BUFFER正确退出_NS2 >= 95)",
+            close_function,
+        )
+        self.assertIn("IF @正在关闭 >= 95 or @正在关闭_暗 >= 95", close_function)
+        self.assertIn("WAIT 2000", close_function)
+        self.assertNotIn("WAIT 100", close_function)
+
     def test_template_uses_effort_aware_ranges_and_shiny_gender_label(self):
         root = Path(__file__).resolve().parents[1]
         template = (

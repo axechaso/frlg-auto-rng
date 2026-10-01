@@ -310,20 +310,20 @@ PRINT "SIDREV|DONE|COUNT=" & $SID反查队内闪光数量
 PRINT SID反查观测采集完成；请把本次日志交给frlg-auto-rng的run_sid_reverse.py
 
 FUNC SID反查关闭游戏
-    PRINT "FRLG_STAGE|BEGIN|sid.close|sid.close|60000|NS火叶SID反查-采集测试.ecs|SID反查关闭游戏|sid.close.classify|manual_prepare_then_restart|OR;主页.IL:>=:95,主页_NS2.IL:>=:95,正确退出.IL:>=:95,HOME_BUFFER正确退出.IL:>=:95,正确退出_NS2.IL:>=:95,HOME_BUFFER正确退出_NS2.IL:>=:95,错误退出.IL:>=:95,错误退出_NS2.IL:>=:95,正在关闭.IL:>=:95|!"
+    PRINT "FRLG_STAGE|BEGIN|sid.close|sid.close|60000|NS火叶SID反查-采集测试.ecs|SID反查关闭游戏|sid.close.classify|manual_prepare_then_restart|OR;主页.IL:>=:95,主页_NS2.IL:>=:95,正确退出.IL:>=:95,HOME_BUFFER正确退出.IL:>=:95,正确退出_NS2.IL:>=:95,HOME_BUFFER正确退出_NS2.IL:>=:95,错误退出.IL:>=:95,错误退出_NS2.IL:>=:95,正在关闭.IL:>=:95,正在关闭_暗.IL:>=:95|!"
     FOR
         IF @主页 < 95 and @主页_NS2 < 95
             HOME 100
             WAIT 1500
         ENDIF
-        IF (@正确退出 >= 95 or @HOME_BUFFER正确退出 >= 95) or (@正确退出_NS2 >= 95 or @HOME_BUFFER正确退出 >= 95)
+        IF (@正确退出 >= 95 or @HOME_BUFFER正确退出 >= 95) or (@正确退出_NS2 >= 95 or @HOME_BUFFER正确退出_NS2 >= 95)
             X
             WAIT 1500
             A
             WAIT 1500
             FOR
-                IF @正在关闭 >= 95
-                    WAIT 100
+                IF @正在关闭 >= 95 or @正在关闭_暗 >= 95
+                    WAIT 2000
                 ELSE
                     BREAK
                 ENDIF

@@ -5,6 +5,7 @@ import codecs
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
 
 from console_output import write_console as _write_console
 from easycon_outcome import easycon_log_has_fatal_error
@@ -21,6 +22,7 @@ def run_logged(
     tid_context: Path | None = None,
     tid_records: Path | None = None,
     stop_file: Path | None = None,
+    on_started: Callable[[], None] | None = None,
 ) -> int:
     if not command:
         raise ValueError("缺少要执行的 EasyCon 命令")
@@ -37,6 +39,8 @@ def run_logged(
             stderr=subprocess.STDOUT,
             bufsize=0,
         )
+        if on_started is not None:
+            on_started()
         assert process.stdout is not None
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         marker_window = ""

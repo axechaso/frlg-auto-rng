@@ -204,6 +204,9 @@ def build_egg_full_config_payload(
     egg_seed_reverse_min_advances=None,
     egg_seed_reverse_max_advances=None,
     seed_mode_auto=False,
+    *,
+    record_shiny_video=True,
+    update_precalibration=True,
 ) -> dict:
     """Validate and build a complete egg-page configuration."""
     parent = build_egg_parent_config_payload(
@@ -238,6 +241,10 @@ def build_egg_full_config_payload(
         raise ValueError("254 步启动模式必须是布尔值")
     if not isinstance(home_buffer_adaptive_threshold, bool):
         raise ValueError("HOME_BUFFER 稳定低分自适应开关必须是布尔值")
+    if type(record_shiny_video) is not bool:
+        raise ValueError("出闪录像开关必须是布尔值")
+    if type(update_precalibration) is not bool:
+        raise ValueError("更新预校准开关必须是布尔值")
     try:
         seed_startup_scheme = int(seed_startup_scheme)
     except (TypeError, ValueError) as exc:
@@ -313,6 +320,8 @@ def build_egg_full_config_payload(
         egg_seed_reverse_seed_tolerance=egg_seed_reverse_seed_tolerance,
         egg_seed_reverse_min_advances=egg_seed_reverse_min_advances,
         egg_seed_reverse_max_advances=egg_seed_reverse_max_advances,
+        record_shiny_video=record_shiny_video,
+        update_precalibration=update_precalibration,
     )
     request.validate()
     return {
@@ -333,6 +342,8 @@ def build_egg_full_config_payload(
         "parent_b_ivs": parent["parent_b_ivs"],
         "start_from_prepared_254": start_from_prepared_254,
         "home_buffer_adaptive_threshold": home_buffer_adaptive_threshold,
+        "record_shiny_video": request.record_shiny_video,
+        "update_precalibration": request.update_precalibration,
         "seed_startup_scheme": seed_startup_scheme,
         "seed_calibration_scheme": seed_calibration_scheme,
         "debug_log_output": request.debug_log_output,
@@ -353,7 +364,12 @@ def build_egg_full_config_payload(
     }
 
 
-def parse_egg_full_config_payload(payload) -> dict:
+def parse_egg_full_config_payload(
+    payload,
+    *,
+    default_record_shiny_video=True,
+    default_update_precalibration=True,
+) -> dict:
     """Validate a saved complete egg-page configuration."""
     if not isinstance(payload, dict):
         raise ValueError("配置文件顶层必须是 JSON 对象")
@@ -390,4 +406,10 @@ def parse_egg_full_config_payload(payload) -> dict:
         payload.get("egg_seed_reverse_min_advances"),
         payload.get("egg_seed_reverse_max_advances"),
         payload.get("seed_mode_auto", False),
+        record_shiny_video=payload.get(
+            "record_shiny_video", default_record_shiny_video,
+        ),
+        update_precalibration=payload.get(
+            "update_precalibration", default_update_precalibration,
+        ),
     )

@@ -23,11 +23,18 @@ from tenlines_seed_updater import (
 
 from .planner import RunPlan
 from .calibration_trust_gates import apply_calibration_trust_gates_text
+from .frame_parity import resolve_frame_parity
 from .precalibration import (
     DEFAULT_STORE_PATH as DEFAULT_PRECALIBRATION_STORE_PATH,
     PrecalibrationContext,
+    PrecalibrationFrameScope,
     normalize_kind as normalize_precalibration_kind,
     read_record as read_precalibration_record,
+)
+from .target_verification import (
+    TargetVerificationSpec,
+    inject_target_verification,
+    validate_injected_target_verification,
 )
 from .seed_common_regions import apply_seed_common_regions
 
@@ -39,7 +46,7 @@ EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
 EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
-EXPECTED_COMPAT_PATCH_ID = "easycon164a-label-supervision-v9"
+EXPECTED_COMPAT_PATCH_ID = "easycon164a-label-supervision-v10-stage-log-filter-input-state-v1"
 EXPECTED_TESSDATA_SHA256 = {
     "frlg_battle.traineddata": "7abcaef4936727b33717656b38fd5b5027823e1cafec21abb06cc8ef1f7ff758",
     "FRLG_EN_ALL.traineddata": "3272f23a6f259518813025d89be77d706574ccdf163132ccf6f5be15ca19cfa0",
@@ -245,6 +252,8 @@ PREVIOUS_SCRIPT_SHA256S += (
 PREVIOUS_SCRIPT_SHA256S += (
     # September 27 source corpus before the October 1 four-file upstream sync.
     "eb18777c634b7c5ab10c0f5a930fe29d65b1fdca7d18edb10b461c733dd30bbb",
+    # October 2 source corpus with the upstream wild/egg timing updates.
+    "abedc36a98710f02b02b79f0af10f6221e3e0a04f3f0f6e107d5c9887ce2661e",
 )
 EXPECTED_SCRIPT_SHA256 = "b0f0302037b778661ac5087c6d007ab03865f4030fcd6a680c9f2d450afa1392"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
@@ -410,6 +419,8 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # October 1 materialization preserves the updated wild-lookup helper,
     # bounded upstream egg retry policy, and reviewed shortcut overlays.
     "04a0cdda3c9ded4dda8fb2192765ed76cc46ed6e963fc6cb737c18f8125ad994",
+    # October 2 materialization after importing the updated upstream corpus.
+    "2cd606b7d04c3517b250680858ebf1ef3b042aef18685608775345b073b7d94f",
 )
 
 
@@ -1827,6 +1838,7 @@ class EasyCon118Options:
     # shiny species differs from the requested target.
     record_shiny_video: bool = False
     stop_on_non_target_shiny: bool = True
+    mystery_gift_enabled: bool = False
 
 
 EGG_PARENT_GENDERS = frozenset({"雄", "雌", "无性别", "百变怪"})
@@ -1881,6 +1893,8 @@ class EggRunRequest:
     egg_seed_reverse_seed_tolerance: int | None = None
     egg_seed_reverse_min_advances: int | None = None
     egg_seed_reverse_max_advances: int | None = None
+    record_shiny_video: bool = False
+    mystery_gift_enabled: bool = False
 
     @property
     def nx_model(self) -> int:
@@ -1934,8 +1948,12 @@ class EggRunRequest:
             self.reverse_expansion_seed_tolerances,
             self.reverse_expansion_frame_half_widths,
         )
-        if not isinstance(self.update_precalibration, bool):
+        if type(self.update_precalibration) is not bool:
             raise ValueError("更新预校准开关必须是布尔值")
+        if type(self.record_shiny_video) is not bool:
+            raise ValueError("出闪录像开关必须是布尔值")
+        if type(self.mystery_gift_enabled) is not bool:
+            raise ValueError("神秘礼物状态必须是布尔值")
         for name, value in (
             ("Seed预校准索引_NS1", self.precalibration_seed_ns1),
             ("Seed预校准索引_NS2", self.precalibration_seed_ns2),
@@ -2196,9 +2214,13 @@ def _load_plan_precalibration(
     if not isinstance(options.update_precalibration, bool):
         raise ValueError("更新预校准开关必须是布尔值")
     context = _plan_precalibration_context(plan, options, template_name)
+    frame_scope = PrecalibrationFrameScope(
+        effective_parity_scheme=options.frame_parity_scheme,
+        mystery_gift_enabled=options.mystery_gift_enabled,
+    )
     frame_enabled = _precalibration_frame_enabled(context)
     loaded = (
-        read_precalibration_record(store_path, context)
+        read_precalibration_record(store_path, context, frame_scope=frame_scope)
         if options.update_precalibration
         else None
     )
@@ -2219,6 +2241,7 @@ def _load_plan_precalibration(
     manifest = {
         "enabled": bool(options.update_precalibration),
         "context": context.to_dict(),
+        "frame_scope": frame_scope.to_dict(),
         "source_path": str(store_path),
         "frame_enabled": frame_enabled,
         "loaded": loaded,
@@ -2232,8 +2255,12 @@ def _load_egg_precalibration(
     store_path: Path,
 ) -> tuple[EggRunRequest, dict[str, Any]]:
     context = _egg_precalibration_context(request, template_name)
+    frame_scope = PrecalibrationFrameScope(
+        effective_parity_scheme=1,
+        mystery_gift_enabled=request.mystery_gift_enabled,
+    )
     loaded = (
-        read_precalibration_record(store_path, context)
+        read_precalibration_record(store_path, context, frame_scope=frame_scope)
         if request.update_precalibration
         else None
     )
@@ -2253,6 +2280,7 @@ def _load_egg_precalibration(
     manifest = {
         "enabled": bool(request.update_precalibration),
         "context": context.to_dict(),
+        "frame_scope": frame_scope.to_dict(),
         "source_path": str(store_path),
         "frame_enabled": True,
         "loaded": loaded,
@@ -2307,15 +2335,20 @@ def _apply_seed_precalibration_globals(
     return configured
 
 
-def _precalibration_marker_head(context: PrecalibrationContext) -> str:
+def _precalibration_marker_head(
+    context: PrecalibrationContext,
+    frame_scope: PrecalibrationFrameScope,
+) -> str:
     return (
-        "PRECALIBRATION_UPDATE|V=1"
+        "PRECALIBRATION_UPDATE|V=2"
         f"|GAME={context.game.upper()}"
         f"|NX={context.nx_model}"
         f"|MODE={context.seed_mode}"
         f"|STARTUP={context.seed_startup_scheme}"
         f"|ENTRY={context.entry}"
         f"|KIND={context.kind}"
+        f"|PARITY={frame_scope.effective_parity_scheme}"
+        f"|GIFT={int(frame_scope.mystery_gift_enabled)}"
         "|SEED_INDEX="
     )
 
@@ -2326,6 +2359,7 @@ def _apply_regular_precalibration_runtime_text(
     config: dict[str, Any],
 ) -> str:
     context = PrecalibrationContext(**config["context"])
+    frame_scope = PrecalibrationFrameScope(**config["frame_scope"])
     text = _apply_seed_precalibration_globals(
         text,
         seed_ns1=options.precalibration_seed_ns1,
@@ -2378,7 +2412,7 @@ def _apply_regular_precalibration_runtime_text(
     if not config["enabled"]:
         return text
     marker_line = (
-        f'        PRINT "{_precalibration_marker_head(context)}" & '
+        f'        PRINT "{_precalibration_marker_head(context, frame_scope)}" & '
         '$Seed累计修正索引 & "|FRAME_PRE=" & $消耗帧实际执行修正量 & '
         f'"|FRAME_ENABLED={1 if frame_enabled else 0}"'
     )
@@ -2433,8 +2467,9 @@ def _apply_egg_precalibration_runtime_text(
     if not config["enabled"]:
         return text
     context = PrecalibrationContext(**config["context"])
+    frame_scope = PrecalibrationFrameScope(**config["frame_scope"])
     marker_line = (
-        f'    PRINT "{_precalibration_marker_head(context)}" & '
+        f'    PRINT "{_precalibration_marker_head(context, frame_scope)}" & '
         '$Seed累计修正索引 & "|FRAME_PRE=0|FRAME_ENABLED=1|HELD_PRE=" & '
         '$孵蛋Held执行修正帧 & "|PICKUP_PRE=" & $孵蛋Pickup执行修正帧'
     )
@@ -2466,11 +2501,7 @@ def _validate_runtime_output_mode(value: int) -> int:
 
 
 def _validate_frame_parity_scheme(value: int) -> int:
-    try:
-        value = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("奇偶调整方案只能是0（F1/F2）或1（菜单）") from exc
-    if value not in {0, 1}:
+    if type(value) is not int or value not in {0, 1}:
         raise ValueError("奇偶调整方案只能是0（F1/F2）或1（菜单）")
     return value
 
@@ -2578,6 +2609,15 @@ def plan_to_user_values(
         raise ValueError("正式版 Seed校准方案只能是0（原始12轮众数）或1（实验锁定细调）")
     debug_log_output = _validate_runtime_output_mode(options.debug_log_output)
     frame_parity_scheme = _validate_frame_parity_scheme(options.frame_parity_scheme)
+    if type(options.mystery_gift_enabled) is not bool:
+        raise ValueError("神秘礼物状态必须是布尔值")
+    parity_policy = resolve_frame_parity(
+        requested=frame_parity_scheme,
+        mystery_gift_enabled=options.mystery_gift_enabled,
+        is_egg=False,
+    )
+    if parity_policy.effective != frame_parity_scheme:
+        raise ValueError("当前存档开启神秘礼物，生成计划的有效帧奇偶必须为方案 1")
     reverse_expansion_to_ecs_values(options)
     is_wild = _is_wild(plan)
     if not isinstance(options.item_rng_mode, bool):
@@ -2994,6 +3034,11 @@ def validate_generated_project_consistency(
             "生成项目 HOME_BUFFER 控制器与脚本入口不一致: "
             f"应为 {expected_controller}"
         )
+    verification = manifest.get("target_verification")
+    if verification is not None:
+        validate_injected_target_verification(
+            Path(project_main).read_text(encoding="utf-8"), verification,
+        )
     user_values = plan_to_user_values(plan, options)
     shiny_values = _shiny_strategy_to_ecs_values(options, is_wild=_is_wild(plan))
     for name in shiny_values:
@@ -3033,6 +3078,7 @@ def validate_generated_egg_project_consistency(
         "species_id", "compatibility", "parent_a_gender", "parent_b_gender",
         "parent_a_ivs", "parent_b_ivs", "seed_startup_scheme",
         "seed_calibration_scheme", "debug_log_output",
+        "record_shiny_video",
         "reverse_expansion_layers", "reverse_expansion_seed_tolerances",
         "reverse_expansion_frame_half_widths",
         "egg_seed_reverse_seed_tolerance", "egg_seed_reverse_min_advances",
@@ -3066,6 +3112,10 @@ def validate_generated_egg_project_consistency(
     _assert_configured_all_values(
         project_main,
         reverse_expansion_to_ecs_values(request),
+    )
+    _assert_configured_all_values(
+        project_main,
+        {"出闪录像": int(request.record_shiny_video)},
     )
 
 
@@ -3391,6 +3441,10 @@ def configure_egg_template_text(template_text: str, request: EggRunRequest) -> s
         template_text,
         egg_request_to_user_values(request),
         optional_names={"Seed校准方案", "调试日志输出", "帧奇偶修正方案"},
+    )
+    configured = _configure_all_values(
+        configured,
+        {"出闪录像": int(request.record_shiny_video)},
     )
     configured = _configure_all_values(
         configured,
@@ -5030,6 +5084,7 @@ def write_configured_project(
     copy_assets: bool = True,
     template_name: str | None = None,
     precalibration_store_path: str | Path | None = None,
+    target_verification: TargetVerificationSpec | dict[str, Any] | None = None,
 ) -> Path:
     """Create an EasyCon CLI project with ``main.ecs``, ``lib`` and labels."""
     options = options or EasyCon118Options()
@@ -5103,6 +5158,8 @@ def write_configured_project(
             options,
             precalibration,
         )
+    if target_verification is not None:
+        configured = inject_target_verification(configured, target_verification)
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
     wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)
@@ -5148,6 +5205,11 @@ def write_configured_project(
         "plan": plan.to_dict(),
         "easycon118_options": asdict(options),
         "precalibration": precalibration,
+        "target_verification": (
+            TargetVerificationSpec(**target_verification).to_dict()
+            if isinstance(target_verification, dict)
+            else target_verification.to_dict() if target_verification is not None else None
+        ),
         "labels": {
             "expected_count": EXPECTED_LABEL_COUNT,
             "expected_methods": EXPECTED_LABEL_METHODS,
@@ -5583,6 +5645,9 @@ def build_run_command(
     workflow: str | None = None,
     capture_device_name: str | None = None,
     label_supervision: bool = False,
+    input_session_id: str | None = None,
+    input_stage_id: str = "run",
+    preview_video: bool = False,
 ) -> list[str]:
     if video_device < 0:
         raise ValueError("采集卡序号不能为负数")
@@ -5592,6 +5657,11 @@ def build_run_command(
         raise ValueError(f"不支持的视频类型: {video_type}")
     if preview_port < 0 or preview_port > 65535:
         raise ValueError("预览端口必须为 0 或 1-65535")
+    if type(preview_video) is not bool:
+        raise ValueError("视频预览开关必须是布尔值")
+    for name, value in (("input_session_id", input_session_id), ("input_stage_id", input_stage_id)):
+        if value is not None and (not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value)):
+            raise ValueError(f"{name} 格式无效")
     ezcon_path = Path(ezcon_path).resolve()
     project_main = Path(project_main).resolve()
     command = [
@@ -5609,16 +5679,21 @@ def build_run_command(
         command.append("--verbose")
     if preview_port:
         command.extend(["--preview-port", str(preview_port)])
+    if preview_video:
+        command.append("--preview-video")
     if label_supervision:
         command.append("--label-supervision")
     if label_supervision and incident_directory is not None:
         command.extend(["--incident-dir", str(Path(incident_directory).resolve())])
-    if label_supervision and run_id:
+    if run_id:
         command.extend(["--run-id", run_id])
-    if label_supervision and workflow:
+    if workflow:
         command.extend(["--workflow", workflow])
-    if label_supervision and capture_device_name:
+    if capture_device_name:
         command.extend(["--capture-device-name", capture_device_name])
+    if input_session_id:
+        command.extend(["--input-session-id", input_session_id])
+        command.extend(["--input-stage-id", input_stage_id])
     return command
 
 

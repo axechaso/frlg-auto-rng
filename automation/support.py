@@ -89,7 +89,7 @@ def get_route_support(
     if area is None:
         return RouteSupport(
             RouteSupportLevel.BASELINE_118,
-            "2.0 普通野生流程基线；仍需按地点完成实机验收。",
+            "2.0 普通野生流程基线；自动路线按现有支持白名单判定。",
             True,
         )
 

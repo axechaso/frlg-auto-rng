@@ -876,6 +876,7 @@ class FrlgPreviewWindow(QMainWindow):
         self.precalibration_check.setProperty("emphasisRole", "toggle")
         self.precalibration_check.setToolTip("正式版仅在完整命中后保存，按游戏/主机/Seed 模式/启动/模板/流程隔离；TID、SID 阶段不参与。")
         self.precalibration_check.setAccessibleName("命中后更新预校准")
+        self.precalibration_check.setChecked(True)
         self.label_supervision_check = _button("标签故障保护", "quickToggle", enabled=True)
         self.label_supervision_check.setProperty("emphasis", "true")
         self.label_supervision_check.setProperty("accent", "green")
@@ -1080,16 +1081,43 @@ class FrlgPreviewWindow(QMainWindow):
         layout.addWidget(summary)
 
         ready = Card("运行准备", "运行前需要确认以下三项。")
+        self.ready_values = []
+        self.ready_dots = []
         for title, detail in (("单片机", "尚未检测"), ("采集卡", "尚未检测"), ("EasyCon", "尚未校验")):
             row = QHBoxLayout()
             dot = _label("●")
             dot.setStyleSheet("color: #b6c0cf; font-size: 11px;")
+            self.ready_dots.append(dot)
             row.addWidget(dot)
             row.addWidget(_label(title, name="chipValue"))
             row.addStretch(1)
-            row.addWidget(_label(detail, role="muted"))
+            value = _label(detail, role="muted")
+            self.ready_values.append(value)
+            row.addWidget(value)
             ready.layout.addLayout(row)
+        self.run_ready_card = ready
         layout.addWidget(ready)
+
+        actions = Card("脚本操作", "运行期间只读显示脚本发送的控制状态。")
+        self.script_action_card = actions
+        self.script_action_values = {}
+        for key, title, detail in (
+            ("buttons", "当前按键", "等待脚本运行"),
+            ("direction", "方向 / 摇杆", "状态未知"),
+            ("recent", "最近操作", "—"),
+            ("phase", "执行状态", "等待运行"),
+        ):
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            row.addWidget(_label(title, role="muted"))
+            row.addStretch(1)
+            value = _label(detail, role="muted")
+            value.setWordWrap(True)
+            value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.script_action_values[key] = value
+            row.addWidget(value, 1)
+            actions.layout.addLayout(row)
+        layout.addWidget(actions)
         layout.addStretch(1)
         return panel
 
@@ -1109,6 +1137,12 @@ class FrlgPreviewWindow(QMainWindow):
         self._adapt_workspace()
 
     def _adapt_workspace(self) -> None:
+        if hasattr(self, "profile_chip"):
+            width = 350 if self.width() >= 1180 else 218
+            if self.profile_chip.width() != width:
+                self.profile_chip.setFixedWidth(width)
+                if hasattr(self, "profile_store"):
+                    self._profile_summary()
         if hasattr(self, "quick_layout"):
             self._layout_quick_settings()
         if hasattr(self, "qq_notification_button"):
@@ -1120,6 +1154,9 @@ class FrlgPreviewWindow(QMainWindow):
         wide = self.width() >= 1180 and getattr(self, "current_page", "sid") not in {"tid_records", "history_logs"}
         self.overview_scroll.setVisible(wide)
         self.overview_button.setVisible(not wide)
+        on_logs = getattr(self, "current_page", "sid") == "logs"
+        self.run_ready_card.setVisible(not on_logs)
+        self.script_action_card.setVisible(on_logs)
         self.footer_status.setVisible(self.width() >= 1180)
         tid_page = getattr(self, "current_page", "sid") == "tid"
         self.tid_refresh_button.setVisible(tid_page)
@@ -1345,6 +1382,10 @@ class FrlgPreviewWindow(QMainWindow):
         selector = _combo("未选择（手动输入）")
         selector.setEnabled(False)
         profile.layout.addWidget(selector)
+        self.profile_mystery_gift = QCheckBox("当前存档已开启神秘礼物")
+        self.profile_mystery_gift.setObjectName("profileMysteryGift")
+        self.profile_mystery_gift.setToolTip("只记录当前存档状态；开启时普通遭遇的有效帧奇偶方案强制为 1。")
+        profile.layout.addWidget(self.profile_mystery_gift)
         self._form(profile, [
             ("profile_game", "游戏版本", _combo("火红", "叶绿")),
             ("profile_language", "ROM 语言 / 地区", _combo("英文（美版）", "日文（日版）")),
@@ -1441,7 +1482,7 @@ class FrlgPreviewWindow(QMainWindow):
             ("出闪后自动抓捕", False),
             ("麻痹", False),
             ("点到为止", False),
-            ("出闪录像", False),
+            ("出闪录像", True),
             ("非目标闪光停止", True),
         )):
             button = _button(title, "quickToggle", enabled=True)
@@ -1459,6 +1500,7 @@ class FrlgPreviewWindow(QMainWindow):
                 grid.addWidget(button, 1, 0)
             else:
                 grid.addWidget(button, 1, 1, 1, 2)
+        self.record_shiny_video_check = self.capture_checks[3]
         for column in range(3):
             grid.setColumnStretch(column, 1)
         capture.layout.addLayout(grid)
@@ -1470,7 +1512,7 @@ class FrlgPreviewWindow(QMainWindow):
         self._form(self.item_options, [("wild_slots", "队伍空位", self._spin(1, 1, 5))])
         layout.addWidget(self.item_options)
 
-        self.traversal_options = Card("SID 遍历", "仅野生可用，与道具乱数互斥。", collapsible=True)
+        self.traversal_options = Card("SID 遍历", "野生与已支持定点路线可用；与道具乱数及指定 Seed/帧数互斥。", collapsible=True)
         self.traversal_check = self._check("SID 遍历模式")
         self.traversal_options.layout.addWidget(self.traversal_check)
         self._form(self.traversal_options, [
@@ -1478,7 +1520,9 @@ class FrlgPreviewWindow(QMainWindow):
             ("wild_traversal_start", "高级起点（ADV）", _line(placeholder="留空沿用路线默认起点")),
         ], 2)
         self.fields["wild_traversal_start"].setToolTip("生成时确认劲敌取名。未取名从奇数 1901、取名从偶数 1900 开始，每次 +2；自定义起点必须同奇偶并使用独立断点。")
-        self.traversal_options.layout.addWidget(_label("断点读取尚未接入；此处未检查本机 SID 遍历进度。", role="muted"))
+        self.traversal_status = _label("请先选择完整的遭遇方式、类别和目标。", role="muted")
+        self.traversal_status.setObjectName("traversalAvailability")
+        self.traversal_options.layout.addWidget(self.traversal_status)
         layout.addWidget(self.traversal_options)
         self.fields["wild_method"].currentIndexChanged.connect(self._refresh_wild_type)
         self.fields["wild_species"].currentIndexChanged.connect(self._refresh_wild_controls)
@@ -1512,17 +1556,30 @@ class FrlgPreviewWindow(QMainWindow):
 
     def _refresh_wild_controls(self) -> None:
         wild = self.fields["wild_method"].currentIndex() == 0
-        if not wild:
-            self.item_check.setChecked(False)
-            self.traversal_check.setChecked(False)
+        sender = self.sender()
+        if not wild and self.item_check.isChecked():
+            with QSignalBlocker(self.item_check):
+                self.item_check.setChecked(False)
         if self.item_check.isChecked() and self.traversal_check.isChecked():
-            self.item_check.setChecked(False)
+            if sender is self.traversal_check:
+                self.item_check.setChecked(False)
+            else:
+                self.traversal_check.setChecked(False)
         item, traversal = self.item_check.isChecked(), self.traversal_check.isChecked()
-        self.item_check.setEnabled(wild)
-        self.traversal_check.setEnabled(wild and not item)
+        direct = self.fields["wild_search_mode"].currentIndex() == 1
+        if direct:
+            reason = "指定 Seed/帧数模式不能用于逐 SID 遍历。"
+        elif item:
+            reason = "道具乱数与 SID 遍历互斥。"
+        else:
+            reason = "正式运行页会在生成前核对当前路线支持范围。"
+        self.item_check.setEnabled(wild and not traversal)
+        self.traversal_check.setEnabled((traversal or not direct) and not item)
+        self.traversal_status.setText(reason)
+        self.traversal_status.setToolTip(reason)
         self.fields["wild_slots"].setEnabled(wild and item)
-        self.fields["wild_traversal_max"].setEnabled(wild and traversal)
-        self.fields["wild_traversal_start"].setEnabled(wild and traversal and self.advanced_check.isChecked())
+        self.fields["wild_traversal_max"].setEnabled(traversal)
+        self.fields["wild_traversal_start"].setEnabled(traversal and self.advanced_check.isChecked())
         self.capture_checks[4].setEnabled(wild)
         direct = self.fields["wild_search_mode"].currentIndex() == 1
         self.fields["wild_direct_seed"].setEnabled(direct)
@@ -1685,9 +1742,10 @@ class FrlgPreviewWindow(QMainWindow):
         ], 1)
         layout.addWidget(self.entry_options)
         self.advanced_options = Card("高级反查设置", "奇偶调整保留在这里；三类反查窗口分别进入独立页面配置。孵蛋固定使用菜单奇偶。")
-        self._form(self.advanced_options, [
-            ("parity", "奇偶调整", _combo("方案 1：菜单调整", "方案 0：F1 +1 / F2 -1")),
-        ], 1)
+        parity = _combo("方案 1：菜单调整", "方案 0：F1 +1 / F2 -1")
+        parity.setItemData(0, 1)
+        parity.setItemData(1, 0)
+        self._form(self.advanced_options, [("parity", "奇偶调整", parity)], 1)
         self.reverse_config_dialogs = {
             "wild": self._build_reverse_config_dialog(
                 "野生 / 定点反查",

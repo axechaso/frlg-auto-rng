@@ -156,6 +156,7 @@ class QtDiagnosticTests(unittest.TestCase):
             timer.setSingleShot(True)
             timer.timeout.connect(loop.quit)
             timer.start(10000)
+            w._begin_run_notification()
             w.process.start(sys.executable, arguments)
             loop.exec()
             timer.stop()

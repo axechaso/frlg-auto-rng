@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QCheckBox, QComboBox, QCompleter, QFileDialog, QLa
 from app_paths import RESOURCE_ROOT
 from assets.game_text import SPECIES_EN_TO_ZH
 from automation import STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME, resolve_script_test_entry
+from automation.sid_traversal_policy import validate_traversal_request
 from automation.tid_starter_save import TID_STARTER_SAVE_NAME
 from automation.precalibration import update_from_manifest
 from rng.tenlines_utils import get_species_name
@@ -139,17 +140,35 @@ class CompleteWindow(FrlgWindow):
                 raise ValueError("请先确认 SID 遍历的劲敌取名状态")
             base = self.collect_inputs()
             request = base.request
-            if request.direct_mode or "Wild" not in request.method:
-                raise ValueError("SID 遍历需要野生筛选搜索模式")
+            if request.direct_mode:
+                raise ValueError("SID 遍历需要筛选搜索模式，不能使用指定 Seed/帧数")
+            if base.options.item_rng_mode:
+                raise ValueError("道具乱数与 SID 遍历互斥，请先关闭道具乱数")
             if request.min_advances > DEFAULT_TARGET_MAX_ADVANCES:
                 raise ValueError(f"SID 遍历目标最低 ADV 不能大于 {DEFAULT_TARGET_MAX_ADVANCES}")
             options = replace(base.options, continue_capture_after_shiny=False, item_rng_mode=False, party_empty_slots=1)
+            availability = validate_traversal_request(request, options, base.template_name)
             start_text = f["wild_traversal_start"].text().strip()
             start = r.integer("wild_traversal_start") if self.advanced_check.isChecked() and start_text else None
             sid_traversal_start_advance(self.named_rival, start)
             mode = "sid_traversal"
+            selected_profile = self.profile_store.get(self.profile_selector.currentData())
+            save_context = {
+                "source": "saved" if selected_profile is not None else "manual",
+                "profile_id": selected_profile.profile_id if selected_profile else None,
+                "profile_name": selected_profile.name if selected_profile else None,
+                "game": request.game,
+                "tid": request.tid,
+                "sid": request.sid,
+                "language": self.fields["profile_language"].currentText(),
+                "nx_model": self.fields["wild_nx"].currentIndex() + 1,
+                "mystery_gift_enabled": options.mystery_gift_enabled,
+            }
             extra = {"options": options, "named_rival": self.named_rival, "start_advance": start,
-                "max_advances": f["wild_traversal_max"].value(), "progress_dir": self.paths.user / "sid_traversal_progress"}
+                "max_advances": f["wild_traversal_max"].value(), "progress_dir": self.paths.user / "sid_traversal_progress",
+                "encounter_kind": availability.encounter_kind, "route_key": availability.route_key,
+                "save_context": save_context, "effective_frame_parity_scheme": options.frame_parity_scheme,
+                "mystery_gift_enabled": options.mystery_gift_enabled}
         else:
             raise ValueError("当前不是独立工作流")
         video = f["video"].currentData()
@@ -168,7 +187,8 @@ class CompleteWindow(FrlgWindow):
     def _refresh_wild_controls(self):
         super()._refresh_wild_controls()
         if getattr(self, "migration_ready", False):
-            self.traversal_check.setEnabled(self.fields["wild_method"].currentIndex() == 0 and not self.item_check.isChecked() and not self.running)
+            enabled = self.traversal_check.isEnabled() and not self.running and self.job is None
+            self.traversal_check.setEnabled(enabled)
             if self.traversal_check.isChecked():
                 self.capture_checks[0].setChecked(False)
             self.capture_checks[0].setEnabled(not self.traversal_check.isChecked() and not self.running)
@@ -178,9 +198,12 @@ class CompleteWindow(FrlgWindow):
         if not getattr(self, "migration_ready", False):
             return
         busy = self.running or self.job is not None
+        self.profile_selector.setEnabled(self.profiles_available and not busy)
+        self.profile_chip.setEnabled(not busy)
         if "监视窗口" in self.actions:
             self.actions["监视窗口"].setEnabled(self.job is None)
-        self.traversal_check.setEnabled(not busy and self.fields["wild_method"].currentIndex() == 0 and not self.item_check.isChecked())
+        self._refresh_wild_controls()
+        self.traversal_check.setEnabled(self.traversal_check.isEnabled() and not busy)
         self.footer_status.setText(self.status_text)
         if self.is_workflow_mode():
             self.search_button.setEnabled(not busy)
@@ -209,12 +232,10 @@ class CompleteWindow(FrlgWindow):
             else:
                 self.summary_name.setText("暂无方案")
                 self.summary_note.setText("填写参数后生成或预检。")
-            self.ready_values[2].setText("预检通过" if valid else "运行前预检")
             labels = self.overview.findChildren(QLabel, "metricLabel")
             if self.traversal_check.isChecked() and self.input_mode == "wild":
                 for label, text in zip(labels, ("候选 SID", "建档 ADV", "状态")):
                     label.setText(text)
-            self.ready_dots[2].setStyleSheet(f"color: {'#22a785' if valid else '#b6c0cf'};")
             if self.workflow_summary:
                 title, context, metrics, note = self.workflow_summary
                 self.summary_name.setText(title)
@@ -343,23 +364,12 @@ class CompleteWindow(FrlgWindow):
             if not self._confirm_wild_start(prompt):
                 self.set_status("预检通过，等待开始运行。")
                 return
-            self.running_workflow = prepared
-            self.running_prepared = None
-            self.run_command = command
-            self._begin_run_notification()
-            self.decoder.reset()
-            self.pending_output = ""
-            self.pending_visible = False
-            self.log_view.clear()
-            self.running = True
-            self.process.setWorkingDirectory(str(RESOURCE_ROOT))
-            self.before_workflow_start(prepared, command)
-            self.refresh_state()
-            self.process.start(command.program, list(command.arguments))
+            self.begin_accepted_run(command, prepared_workflow=prepared)
         supervision = self.label_supervision_check.isChecked()
+        preview_video = self.accessories.preview_video_requested()
         self.launch_job(lambda cancel, status: prepare_workflow_run(
             prepared, self.paths, port, video, prepared.inputs.capture_name,
-            label_supervision=supervision,
+            label_supervision=supervision, preview_video=preview_video,
         ),
                         ready, "正在重新核对设备与工程……")
 
@@ -456,6 +466,8 @@ class CompleteWindow(FrlgWindow):
                     except (OSError, TypeError, ValueError, KeyError):
                         profile_report = None
         super()._process_finished(code, status)
+        if hasattr(self, "accessories"):
+            self.accessories.run_finished()
         if prepared and self.run_command:
             if prepared.inputs.mode == "egg" and code == 0 and prepared.inputs.request.update_precalibration:
                 try:
@@ -540,14 +552,12 @@ class CompleteWindow(FrlgWindow):
                 self.tid_state.poll_timer.stop()
             if hasattr(self, "accessories"):
                 self.accessories.timer.stop()
-            try:
-                write_json_atomic(self.paths.user / "pyside6_settings.json", {
-                    **{key: self.fields[key].text() for key in ("source", "ezcon", "sid_source", "tid_source")},
-                    "update_source": self.fields["update_source"].currentData() or "auto",
-                    "label_supervision": self.label_supervision_check.isChecked(),
-                })
-            except OSError:
-                pass  # Base close already reports settings write failures.
+
+    def settings_payload(self):
+        return {
+            **super().settings_payload(),
+            **{key: self.fields[key].text() for key in ("sid_source", "tid_source")},
+        }
 
     def _load_settings(self):
         super()._load_settings()
@@ -623,6 +633,8 @@ class CompleteWindow(FrlgWindow):
             egg_seed_reverse_min_advances=request.egg_seed_reverse_min_advances,
             egg_seed_reverse_max_advances=request.egg_seed_reverse_max_advances,
             seed_mode_auto=self.fields["egg_seed_mode"].currentIndex() == 0,
+            record_shiny_video=request.record_shiny_video,
+            update_precalibration=request.update_precalibration,
             **parent, **self.reader.expansion())
 
     def save_egg(self, full):
@@ -641,14 +653,28 @@ class CompleteWindow(FrlgWindow):
             return
         try:
             payload = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-            config = (parse_egg_full_config_payload if full else parse_egg_parent_config_payload)(payload)
+            if full:
+                config = parse_egg_full_config_payload(
+                    payload,
+                    default_record_shiny_video=self.record_shiny_video_check.isChecked(),
+                    default_update_precalibration=self.precalibration_check.isChecked(),
+                )
+            else:
+                config = parse_egg_parent_config_payload(payload)
             self.apply_egg_config(config, full)
         except (OSError, ValueError, TypeError) as exc:
             self.show_error(str(exc))
 
     def apply_egg_config(self, config, full):
         # Parse and validate the entire file before changing any fields.
-        config = (parse_egg_full_config_payload if full else parse_egg_parent_config_payload)(config)
+        if full:
+            config = parse_egg_full_config_payload(
+                config,
+                default_record_shiny_video=self.record_shiny_video_check.isChecked(),
+                default_update_precalibration=self.precalibration_check.isChecked(),
+            )
+        else:
+            config = parse_egg_parent_config_payload(config)
         self.fields["egg_species"].setText(SPECIES_EN_TO_ZH.get(get_species_name(config["egg_species_id"]), str(config["egg_species_id"])))
         compatibility_index = self.fields["egg_compatibility"].findData(config["compatibility"])
         if compatibility_index < 0:
@@ -669,6 +695,8 @@ class CompleteWindow(FrlgWindow):
             )
             self.fields["egg_start"].setCurrentIndex(int(config["start_from_prepared_254"]))
             self.home_buffer_check.setChecked(config["home_buffer_adaptive_threshold"])
+            self.record_shiny_video_check.setChecked(config["record_shiny_video"])
+            self.precalibration_check.setChecked(config["update_precalibration"])
             for key, source in (("seed_startup", "seed_startup_scheme"), ("seed_calibration", "seed_calibration_scheme"), ("output_log", "debug_log_output")):
                 self.fields[key].setCurrentIndex(config[source])
             # Load current script defaults first, then overlay every value that

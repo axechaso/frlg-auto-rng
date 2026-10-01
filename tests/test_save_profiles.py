@@ -15,11 +15,17 @@ class SaveProfileTests(unittest.TestCase):
         self.assertEqual(profile.switch_name, "Switch 2")
         self.assertEqual(profile.language, "英文")
         self.assertEqual(profile.language_name, "美版")
+        self.assertFalse(profile.mystery_gift_enabled)
 
         japanese = SaveProfile.create(
             "日版档", "火红", 1, 2, 1, language="日文"
         )
         self.assertEqual(japanese.language_name, "日版")
+
+        with_gift = SaveProfile.create(
+            "已开礼物", "叶绿", 1, 2, 1, mystery_gift_enabled=True
+        )
+        self.assertTrue(with_gift.mystery_gift_enabled)
 
         invalid = (
             (("", "火红", 1, 2, 1), "名称"),
@@ -32,16 +38,21 @@ class SaveProfileTests(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 with self.assertRaisesRegex(ValueError, message):
                     SaveProfile.create(*arguments)
+        with self.assertRaisesRegex(ValueError, "布尔值"):
+            SaveProfile.create("错误", "火红", 1, 2, 1, mystery_gift_enabled="false")
 
     def test_store_round_trips_selection_edit_duplicate_and_delete(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "save_profiles.json"
             store = SaveProfileStore(path)
-            first = store.add("主存档", "火红", 12345, 54321, 1)
+            first = store.add("主存档", "火红", 12345, 54321, 1,
+                              mystery_gift_enabled=True)
             second = store.duplicate(first.profile_id)
             self.assertEqual(second.name, "主存档 副本")
+            self.assertTrue(second.mystery_gift_enabled)
             updated = store.update(
-                second.profile_id, "叶绿存档", "叶绿", 7, 8, 2
+                second.profile_id, "叶绿存档", "叶绿", 7, 8, 2,
+                mystery_gift_enabled=False,
             )
             self.assertEqual(updated.switch_name, "Switch 2")
             store.select(first.profile_id)
@@ -84,6 +95,23 @@ class SaveProfileTests(unittest.TestCase):
 
         self.assertEqual(store.profiles[0].language, "英文")
         self.assertEqual(store.profiles[0].language_name, "美版")
+        self.assertFalse(store.profiles[0].mystery_gift_enabled)
+
+    def test_legacy_invalid_mystery_gift_is_rejected_without_rewriting(self):
+        payload = {
+            "version": 1,
+            "profiles": [{"id": "legacy", "name": "旧档", "game": "火红",
+                          "tid": 1, "sid": 2, "nx_model": 1,
+                          "mystery_gift_enabled": "false"}],
+            "selected_profile_id": "legacy",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "save_profiles.json"
+            original = json.dumps(payload, ensure_ascii=False)
+            path.write_text(original, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "布尔值"):
+                SaveProfileStore(path).load()
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
 
     def test_store_rejects_duplicate_names_and_invalid_documents(self):
         with tempfile.TemporaryDirectory() as temp_dir:

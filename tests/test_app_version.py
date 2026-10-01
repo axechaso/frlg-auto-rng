@@ -5,8 +5,8 @@ import app_version
 
 class AppVersionTests(unittest.TestCase):
     def test_release_contract(self):
-        self.assertEqual(app_version.APP_VERSION, "0.9.4.1")
-        self.assertEqual(app_version.APP_VERSION_CODE, 2026092701)
+        self.assertEqual(app_version.APP_VERSION, "0.9.4.2")
+        self.assertEqual(app_version.APP_VERSION_CODE, 2026100201)
         self.assertEqual(app_version.UPDATE_SCHEMA, 1)
         self.assertEqual(app_version.GITHUB_REPOSITORY, "axechaso/frlg-auto-rng")
         self.assertEqual(
@@ -16,8 +16,8 @@ class AppVersionTests(unittest.TestCase):
         self.assertEqual(
             app_version.version_payload(),
             {
-                "version": "0.9.4.1",
-                "version_code": 2026092701,
+                "version": "0.9.4.2",
+                "version_code": 2026100201,
                 "update_schema": 1,
                 "repository": "axechaso/frlg-auto-rng",
             },

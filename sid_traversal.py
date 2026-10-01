@@ -1,4 +1,4 @@
-"""Persistent checkpoints for wild SID traversal.
+"""Persistent checkpoints for wild and supported static SID traversal.
 
 SID traversal is deliberately separate from the ordinary SID reverse-capture
 flow.  A traversal candidate is a destructive, real-console attempt, so the
@@ -20,7 +20,7 @@ import uuid
 from rng.sid_reverse import sid_at_advance
 
 
-SCHEMA = 2
+SCHEMA = 3
 DEFAULT_START_ADVANCE = 1901
 NAMED_RIVAL_START_ADVANCE = 1900
 SID_ADVANCE_STEP = 2
@@ -63,6 +63,14 @@ def traversal_context(
     max_advances: int,
     start_advance: int | None = None,
     target_max_advances: int = DEFAULT_TARGET_MAX_ADVANCES,
+    template_name: str = "NS火叶全自动一键乱数2.0.ecs",
+    encounter_kind: str = "wild",
+    route_key: str | None = None,
+    static_category: str | None = None,
+    save_context: dict | None = None,
+    effective_frame_parity_scheme: int = 1,
+    mystery_gift_enabled: bool = False,
+    verification_protocol: int = 1,
 ) -> dict:
     """Build the immutable identity used to isolate progress files.
 
@@ -81,6 +89,24 @@ def traversal_context(
         raise ValueError("SID 遍历低帧目标搜索上限必须大于 0")
     if not isinstance(wild_request, dict) or not isinstance(easycon_options, dict):
         raise ValueError("SID 遍历请求和 EasyCon 选项必须是对象")
+    if encounter_kind not in {"wild", "static"}:
+        raise ValueError("SID 遍历遭遇类型无效")
+    if type(effective_frame_parity_scheme) is not int or effective_frame_parity_scheme not in (0, 1):
+        raise ValueError("SID 遍历有效帧奇偶方案必须是0或1")
+    if type(mystery_gift_enabled) is not bool:
+        raise ValueError("SID 遍历神秘礼物状态必须是布尔值")
+    if type(verification_protocol) is not int or verification_protocol != 1:
+        raise ValueError("SID 遍历目标证明协议不受支持")
+    if save_context is not None and not isinstance(save_context, dict):
+        raise ValueError("SID 遍历存档快照必须是对象")
+    if mystery_gift_enabled and effective_frame_parity_scheme != 1:
+        raise ValueError("神秘礼物已开启时，SID 遍历帧奇偶必须使用方案 1")
+    option_parity = easycon_options.get("frame_parity_scheme")
+    if option_parity != effective_frame_parity_scheme:
+        raise ValueError("SID 遍历有效帧奇偶与 EasyCon 选项不一致")
+    option_gift = easycon_options.get("mystery_gift_enabled")
+    if option_gift is not None and option_gift is not mystery_gift_enabled:
+        raise ValueError("SID 遍历存档礼物状态与 EasyCon 选项不一致")
     source_sha256 = str(source_sha256).lower()
     if len(source_sha256) != 64 or any(c not in "0123456789abcdef" for c in source_sha256):
         raise ValueError("SID 遍历缺少有效的脚本指纹")
@@ -116,6 +142,14 @@ def traversal_context(
         "start_sid_advance": resolved_start,
         "max_advances": max_advances,
         "target_max_advances": target_max_advances,
+        "template_name": str(template_name),
+        "encounter_kind": encounter_kind,
+        "route_key": None if route_key is None else str(route_key),
+        "static_category": None if static_category is None else str(static_category),
+        "save_context": json_primitives(save_context or {}),
+        "effective_frame_parity_scheme": effective_frame_parity_scheme,
+        "mystery_gift_enabled": mystery_gift_enabled,
+        "verification_protocol": verification_protocol,
         "wild_request": json_primitives(wild_request),
         "easycon_options": json_primitives(easycon_options),
         "source_sha256": source_sha256,
@@ -189,6 +223,28 @@ def _validate_state(state: dict, context: dict) -> None:
         raise ValueError("SID 遍历命中 ADV 无效")
     if hit_advance is not None and int(hit_advance) % step != parity:
         raise ValueError("SID 遍历命中 ADV 与奇偶约束不一致")
+    if type(state.get("tested_non_shiny_count", 0)) is not int or state.get("tested_non_shiny_count", 0) < 0:
+        raise ValueError("SID 遍历实测非闪计数无效")
+    if type(state.get("skipped_count", 0)) is not int or state.get("skipped_count", 0) < 0:
+        raise ValueError("SID 遍历窗口跳过计数无效")
+    candidate_phase = state.get("candidate_phase", "idle")
+    if candidate_phase not in {
+        "idle", "searching", "generating", "running", "validating", "paused",
+        "search_work_limit", "search_cancelled", "non_target_shiny", "missing_proof",
+        "runner_failed", "generation_error", "stopped",
+    }:
+        raise ValueError("SID 遍历候选阶段无效")
+    attempt_id = state.get("attempt_id")
+    if attempt_id is not None and (
+        not isinstance(attempt_id, str)
+        or len(attempt_id) != 32
+        or any(character not in "0123456789abcdef" for character in attempt_id)
+    ):
+        raise ValueError("SID 遍历尝试 ID 无效")
+    for key in ("target_snapshot", "last_candidate", "hit_evidence"):
+        value = state.get(key)
+        if value is not None and not isinstance(value, dict):
+            raise ValueError(f"SID 遍历 {key} 必须是对象")
 
 
 def read_progress(directory: str | Path, context: dict) -> dict | None:
@@ -261,9 +317,16 @@ class SIDTraversalSession:
             "current_sid_advance": None,
             "current_sid": None,
             "attempt_count": 0,
+            "attempt_id": None,
+            "candidate_phase": "idle",
+            "target_snapshot": None,
+            "last_candidate": None,
+            "tested_non_shiny_count": 0,
+            "skipped_count": 0,
             "last_result": None,
             "hit_sid": None,
             "hit_sid_advance": None,
+            "hit_evidence": None,
         }
 
     def __enter__(self):
@@ -329,6 +392,9 @@ class SIDTraversalSession:
             current_sid_advance=advance,
             current_sid=sid_at_advance(int(self.context["tid"]), advance),
             attempt_count=int(self.state.get("attempt_count", 0)) + 1,
+            attempt_id=uuid.uuid4().hex,
+            candidate_phase="searching",
+            target_snapshot=None,
             last_result="started",
             hit_sid=None,
             hit_sid_advance=None,
@@ -336,32 +402,98 @@ class SIDTraversalSession:
         self.save()
         return int(self.state["current_sid"])
 
-    def complete_non_shiny(self, result: str = "non-shiny") -> int:
-        """Advance exactly once after a confirmed non-shiny completion."""
+    def set_candidate_target(self, target: dict) -> None:
+        if self.current_sid_advance is None:
+            raise ValueError("没有正在进行的 SID 候选")
+        if not isinstance(target, dict):
+            raise ValueError("SID 遍历候选目标必须是对象")
+        try:
+            normalized = json.loads(json.dumps(target, ensure_ascii=False))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("SID 遍历候选目标包含不可序列化字段") from exc
+        self.state.update(target_snapshot=normalized)
+        self.save()
+
+    def set_candidate_phase(self, phase: str) -> None:
+        if self.current_sid_advance is None:
+            raise ValueError("没有正在进行的 SID 候选")
+        if phase not in {"searching", "generating", "running", "validating"}:
+            raise ValueError("SID 遍历候选阶段无效")
+        self.state.update(status="running", candidate_phase=phase)
+        self.save()
+
+    def _advance_candidate(self, outcome: str, result: str) -> int:
         current = self.current_sid_advance
         if current is None:
             raise ValueError("没有正在进行的 SID 候选")
+        if outcome not in {"tested_non_shiny", "window_skipped"}:
+            raise ValueError("SID 遍历候选结果类型无效")
         step = int(self.context.get("sid_advance_step", SID_ADVANCE_STEP))
         next_advance = current + step
         exhausted = next_advance > int(self.context["max_advances"])
         self.state.update(
             status="exhausted" if exhausted else "running",
             next_sid_advance=next_advance,
+            last_candidate={
+                "sid_advance": current,
+                "sid": self.state.get("current_sid"),
+                "attempt_id": self.state.get("attempt_id"),
+                "target": self.state.get("target_snapshot"),
+                "outcome": outcome,
+                "result": str(result),
+            },
             current_sid_advance=None,
             current_sid=None,
+            attempt_id=None,
+            candidate_phase="idle",
+            target_snapshot=None,
             last_result=str(result),
+            last_outcome=outcome,
+            tested_non_shiny_count=(
+                int(self.state.get("tested_non_shiny_count", 0)) + 1
+                if outcome == "tested_non_shiny"
+                else int(self.state.get("tested_non_shiny_count", 0))
+            ),
+            skipped_count=(
+                int(self.state.get("skipped_count", 0)) + 1
+                if outcome == "window_skipped"
+                else int(self.state.get("skipped_count", 0))
+            ),
         )
         if exhausted:
             self.completed = True
         self.save()
         return self.next_sid_advance
 
+    def complete_non_shiny(self, result: str = "non-shiny") -> int:
+        """Advance exactly once after a verified target non-shiny result."""
+        return self._advance_candidate("tested_non_shiny", result)
+
+    def skip_candidate(self, reason: str) -> int:
+        """Advance after the complete search window had no executable target."""
+        return self._advance_candidate("window_skipped", reason)
+
     def pause(self, result: str = "paused") -> None:
         """Keep the current candidate for the next invocation."""
-        self.state.update(status="paused", last_result=str(result))
+        result_text = str(result)
+        phase = {
+            "search-work-limit": "search_work_limit",
+            "search-cancelled": "search_cancelled",
+            "non-target-shiny": "non_target_shiny",
+            "missing-proof": "missing_proof",
+            "runner-failed": "runner_failed",
+            "stopped": "stopped",
+        }.get(result_text, "paused")
+        self.state.update(status="paused", candidate_phase=phase, last_result=result_text)
         self.save()
 
-    def hit(self, sid: int | None = None, result: str = "shiny") -> None:
+    def hit(
+        self,
+        sid: int | None = None,
+        result: str = "shiny",
+        *,
+        evidence: dict | None = None,
+    ) -> None:
         current = self.current_sid_advance
         if current is None:
             raise ValueError("没有正在进行的 SID 候选")
@@ -375,6 +507,19 @@ class SIDTraversalSession:
             hit_sid=expected,
             hit_sid_advance=current,
             last_result=str(result),
+            candidate_phase="idle",
+            hit_evidence=(
+                json.loads(json.dumps(evidence, ensure_ascii=False))
+                if evidence is not None else None
+            ),
+            last_candidate={
+                "sid_advance": current,
+                "sid": expected,
+                "attempt_id": self.state.get("attempt_id"),
+                "target": self.state.get("target_snapshot"),
+                "outcome": "verified_shiny",
+                "result": str(result),
+            },
         )
         self.completed = True
         self.save()

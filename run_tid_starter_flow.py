@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 from typing import TextIO
+import uuid
 
 from console_output import write_console
 from device_label_overrides import (
@@ -41,6 +42,7 @@ from automation.tid_calibration import (
 from automation.tid_rng137 import validate_tid_runtime, verify_tid_package, write_configured_tid_project
 
 from automation.easycon118 import build_run_command, prepare_compat_runner, validate_runtime
+from automation.input_state_protocol import format_input_session_marker
 from automation.precalibration import (
     DEFAULT_STORE_PATH as DEFAULT_PRECALIBRATION_STORE_PATH,
     update_from_manifest as update_precalibration_from_manifest,
@@ -136,8 +138,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tid-context", type=Path)
     parser.add_argument("--tid-records", type=Path)
     parser.add_argument("--preview-port", type=int, default=0)
+    parser.add_argument("--preview-video", action="store_true")
     parser.add_argument("--incident-dir", type=Path)
     parser.add_argument("--run-id", default="")
+    parser.add_argument("--input-session-id", default="")
     parser.add_argument("--workflow", default="tid")
     parser.add_argument("--capture-device-name", default="")
     parser.add_argument("--calibrate-first", action="store_true")
@@ -167,8 +171,10 @@ class FlowRunner:
         preview_port: int = 0,
         incident_directory: Path | None = None,
         run_id: str = "",
+        input_session_id: str = "",
         workflow: str = "tid",
         capture_device_name: str = "",
+        preview_video: bool = False,
     ) -> None:
         self.runner_path = runner_path
         self.port = port
@@ -178,8 +184,10 @@ class FlowRunner:
         self.preview_port = preview_port
         self.incident_directory = incident_directory
         self.run_id = run_id
+        self.input_session_id = input_session_id
         self.workflow = workflow
         self.capture_device_name = capture_device_name
+        self.preview_video = preview_video
         self.current_process: subprocess.Popen[str] | None = None
         self.stop_requested = False
         self.stage_lines: list[str] = []
@@ -198,6 +206,7 @@ class FlowRunner:
         self.id_snapshot: dict[str, int] | None = None
         self.sixv_state: dict[str, object] | None = None
         self.sixv_state_path: Path | None = None
+        self.active_input_session: tuple[str, str] | None = None
 
     def output(self, message: str) -> None:
         self.log.write(message + "\n")
@@ -213,10 +222,21 @@ class FlowRunner:
         process = self.current_process
         if process is None or process.poll() is not None:
             return
+        self._emit_input_session("STOPPING")
         try:
             terminate_process_tree(process)
         except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
             self.output(f"[停止警告] 子进程未退出，等待工具清理本次进程树：{exc}")
+
+    def _emit_input_session(self, state: str) -> None:
+        if self.active_input_session is None:
+            return
+        session_id, stage_id = self.active_input_session
+        try:
+            marker = format_input_session_marker(self.run_id, session_id, stage_id, state)
+        except ValueError:
+            return
+        self.output(marker)
 
     def run_stage(
         self,
@@ -238,6 +258,11 @@ class FlowRunner:
         self.output("")
         self.output(f"========== 第{number}阶段：{name} ==========")
         self.output(f"脚本：{main_path}")
+        stage_id = f"tid_stage_{number}"
+        session_id = uuid.uuid4().hex
+        self.active_input_session = (session_id, stage_id)
+        self.stage_lines = []
+        self._emit_input_session("STARTING")
         command = build_run_command(
             self.runner_path,
             main_path,
@@ -250,10 +275,12 @@ class FlowRunner:
             workflow=self.workflow,
             capture_device_name=self.capture_device_name,
             label_supervision=self.incident_directory is not None,
+            input_session_id=session_id,
+            input_stage_id=stage_id,
+            preview_video=self.preview_video,
         )
         flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         marker_seen = required_marker is None
-        self.stage_lines = []
         try:
             self.current_process = subprocess.Popen(
                 command,
@@ -266,6 +293,7 @@ class FlowRunner:
                 bufsize=1,
                 creationflags=flags,
             )
+            self._emit_input_session("RUNNING")
             assert self.current_process.stdout is not None
             if self.stop_requested:
                 self.request_stop()
@@ -279,6 +307,7 @@ class FlowRunner:
                     self.request_stop()
             exit_code = self.current_process.wait()
         except OSError as exc:
+            self._emit_input_session("FAILED")
             self.output(f"[流程错误] 第{number}阶段无法启动：{exc}")
             return 2
         finally:
@@ -287,17 +316,22 @@ class FlowRunner:
             self.current_process = None
 
         if self.stop_requested:
+            self._emit_input_session("STOPPING")
             self.output("[流程停止] 已收到用户停止请求。")
             return 130
         if exit_code != 0:
+            self._emit_input_session("FAILED")
             self.output(f"[流程错误] 第{number}阶段退出码：{exit_code}")
             return exit_code or 1
         if not marker_seen:
+            self._emit_input_session("FAILED")
             self.output(
                 f"[流程错误] 第{number}阶段正常退出，但没有看到成功标记：{required_marker}"
             )
             return 3
         self.output(f"[流程完成] 第{number}阶段已完成。")
+        self._emit_input_session("ENDED")
+        self.active_input_session = None
         return 0
 
 
@@ -1331,8 +1365,10 @@ def main() -> int:
             preview_port=args.preview_port,
             incident_directory=args.incident_dir,
             run_id=args.run_id,
+            input_session_id=args.input_session_id,
             workflow=args.workflow,
             capture_device_name=args.capture_device_name,
+            preview_video=args.preview_video,
         )
         if hasattr(signal, "SIGBREAK"):
             signal.signal(signal.SIGBREAK, flow.request_stop)

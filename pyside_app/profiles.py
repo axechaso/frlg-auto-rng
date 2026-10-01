@@ -1,7 +1,7 @@
 """Qt editor for the existing, validated SaveProfileStore."""
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QEvent, QObject, QTimer, Signal
 from PySide6.QtWidgets import (
-    QGridLayout, QHBoxLayout, QListWidget, QMessageBox, QVBoxLayout,
+    QCheckBox, QGridLayout, QHBoxLayout, QListWidget, QMessageBox, QVBoxLayout,
 )
 from pyside_chrome import ThemedDialog as QDialog
 from pyside_preview import Card, FrlgPreviewWindow, _button, _combo, _line
@@ -32,12 +32,14 @@ class ProfileManager(QDialog):
         self.tid, self.sid = _line(), _line()
         self.tid.setPlaceholderText("TID：0–65535")
         self.sid.setPlaceholderText("SID：0–65535")
+        self.mystery_gift = QCheckBox("神秘礼物已开启")
         for entries in ((('存档名称', self.name),), (('游戏版本', self.game), ('ROM 语言 / 地区', self.language), ('主机', self.nx)), (('当前 TID', self.tid), ('当前 SID', self.sid))):
             row = QGridLayout()
             row.setSpacing(12)
             for column, (label, widget) in enumerate(entries):
                 FrlgPreviewWindow._field(row, 0, column, label, widget)
             card.layout.addLayout(row)
+        card.layout.addWidget(self.mystery_gift)
         actions = QHBoxLayout()
         self.action_buttons = {}
         for title, handler in (("新建", self.new), ("保存", self.save), ("复制", self.duplicate), ("删除", self.delete)):
@@ -53,8 +55,11 @@ class ProfileManager(QDialog):
         self.list.currentRowChanged.connect(self.select)
         self.refresh()
 
-    def prefill_new(self, *, name, game, language, nx_model, tid, sid):
+    def prefill_new(self, *, name, game, language, nx_model, tid, sid,
+                    mystery_gift_enabled=False):
         """Start an isolated create-only draft with no selected profile ID."""
+        if type(mystery_gift_enabled) is not bool:
+            raise ValueError("神秘礼物状态必须是布尔值")
         self.setWindowTitle("创建存档")
         self.profile_id = None
         self.list.setCurrentRow(-1)
@@ -69,12 +74,16 @@ class ProfileManager(QDialog):
         self.nx.setCurrentIndex(int(nx_model) - 1)
         self.tid.setText(f"{int(tid):05d}")
         self.sid.setText(f"{int(sid):05d}")
+        self.mystery_gift.setChecked(mystery_gift_enabled)
 
     def refresh(self):
         selected = self.profile_id or self.store.selected_profile_id
         self.list.blockSignals(True)
         self.list.clear()
-        self.list.addItems([f"{p.name} · {p.game} · {p.tid:05d} / {p.sid:05d}" for p in self.store.profiles])
+        self.list.addItems([
+            f"{p.name} · {p.game} · {p.tid:05d} / {p.sid:05d} · 神秘礼物{'开' if p.mystery_gift_enabled else '关'}"
+            for p in self.store.profiles
+        ])
         self.list.blockSignals(False)
         index = next((i for i, p in enumerate(self.store.profiles) if p.profile_id == selected), -1)
         self.list.setCurrentRow(index)
@@ -92,6 +101,7 @@ class ProfileManager(QDialog):
         self.nx.setCurrentIndex(profile.nx_model - 1)
         self.tid.setText(f"{profile.tid:05d}")
         self.sid.setText(f"{profile.sid:05d}")
+        self.mystery_gift.setChecked(profile.mystery_gift_enabled)
 
     def new(self):
         self.profile_id = None
@@ -99,6 +109,7 @@ class ProfileManager(QDialog):
         self.name.clear()
         self.tid.clear()
         self.sid.clear()
+        self.mystery_gift.setChecked(False)
 
     def mutate(self, operation):
         try:
@@ -114,9 +125,15 @@ class ProfileManager(QDialog):
             values = (self.name.text(), self.game.currentText(), self.tid.text(), self.sid.text(), self.nx.currentIndex() + 1)
             language = "日文" if self.language.currentIndex() else "英文"
             if self.profile_id:
-                profile = self.store.update(self.profile_id, *values, language=language)
+                profile = self.store.update(
+                    self.profile_id, *values, language=language,
+                    mystery_gift_enabled=self.mystery_gift.isChecked(),
+                )
             else:
-                profile = self.store.add(*values, language=language)
+                profile = self.store.add(
+                    *values, language=language,
+                    mystery_gift_enabled=self.mystery_gift.isChecked(),
+                )
             self.profile_id = profile.profile_id
         self.mutate(commit)
         if self.close_after_save and self.profile_id:
@@ -134,3 +151,43 @@ class ProfileManager(QDialog):
                 self.store.delete(self.profile_id)
                 self.profile_id = None
             self.mutate(commit)
+
+
+class ProfileWheelFilter(QObject):
+    """Translate wheel input on profile controls into bounded selection steps."""
+
+    stepped = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.remainder = 0
+        self.timer = QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(300)
+        self.timer.timeout.connect(self.reset)
+
+    def reset(self):
+        self.remainder = 0
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Leave:
+            self.reset()
+            return False
+        if event.type() != QEvent.Type.Wheel:
+            return False
+        angle = event.angleDelta().y()
+        pixel = event.pixelDelta().y()
+        if angle:
+            delta, divisor = angle, 120
+        elif pixel:
+            delta, divisor = pixel, 40
+        else:
+            return False
+        self.remainder += delta
+        steps = int(self.remainder / divisor)
+        if steps:
+            self.remainder -= steps * divisor
+            self.stepped.emit(-steps)
+        self.timer.start()
+        event.accept()
+        return True

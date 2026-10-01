@@ -1,0 +1,563 @@
+diff --git b/src/EasyCon.Device/InputStateBuffer.cs b/src/EasyCon.Device/InputStateBuffer.cs
+new file mode 100644
+index 0000000..938d351
+--- /dev/null
++++ b/src/EasyCon.Device/InputStateBuffer.cs
+@@ -0,0 +1,155 @@
++using System.Collections.Concurrent;
++using System.Diagnostics;
++using System.Linq;
++using System.Text.Json.Serialization;
++using System.Threading;
++
++namespace EasyDevice;
++
++public static class InputStateBuffer
++{
++    private const int Capacity = 512;
++    private static readonly long StartedAt = Stopwatch.GetTimestamp();
++    private static readonly ConcurrentQueue<InputTransition> History = new();
++    private static long _sequence;
++    private static InputTransition? _latest;
++    private static InputStateIdentity? _identity;
++    private static string _connection = "unknown";
++
++    public static void Configure(string runId, string sessionId, string stageId, string source)
++    {
++        if (string.IsNullOrWhiteSpace(runId) || string.IsNullOrWhiteSpace(sessionId) ||
++            string.IsNullOrWhiteSpace(stageId))
++            throw new ArgumentException("Input state identity must not be empty");
++        if (source is not ("device_report" or "mock"))
++            throw new ArgumentException("Input state source is invalid", nameof(source));
++
++        while (History.TryDequeue(out _)) { }
++        Interlocked.Exchange(ref _sequence, 0);
++        Volatile.Write(ref _latest, new InputTransition(0, 0, InputReport.Neutral));
++        Volatile.Write(ref _connection, "unknown");
++        Volatile.Write(ref _identity, new InputStateIdentity(runId, sessionId, stageId, source));
++    }
++
++    public static void SetConnection(string state)
++    {
++        if (state is not ("connected" or "disconnected" or "error" or "unknown"))
++            throw new ArgumentException("Input state connection is invalid", nameof(state));
++        Volatile.Write(ref _connection, state);
++    }
++
++    public static void Publish(ushort button, byte hat, byte lx, byte ly, byte rx, byte ry)
++    {
++        var snapshot = new InputReport(button, hat, lx, ly, rx, ry);
++        var previous = Volatile.Read(ref _latest);
++        if (previous is not null && previous.Snapshot == snapshot)
++        {
++            Volatile.Write(ref _connection, "connected");
++            return;
++        }
++
++        var sequence = Interlocked.Increment(ref _sequence);
++        var transition = new InputTransition(
++            sequence,
++            (long)Stopwatch.GetElapsedTime(StartedAt).TotalMilliseconds,
++            snapshot);
++        Volatile.Write(ref _latest, transition);
++        History.Enqueue(transition);
++        while (History.Count > Capacity)
++            History.TryDequeue(out _);
++        Volatile.Write(ref _connection, "connected");
++    }
++
++    public static InputStateResponse Read(long afterSequence, bool deviceConnected)
++    {
++        var identity = Volatile.Read(ref _identity)
++            ?? new InputStateIdentity("", "", "", "device_report");
++        var latest = Volatile.Read(ref _latest);
++        var history = History.ToArray();
++        var firstSequence = history.Length == 0 ? (latest?.Sequence ?? 0) + 1 : history[0].Sequence;
++        var gap = afterSequence < firstSequence - 1;
++        if (history.Length > 256 && afterSequence < history[^256].Sequence - 1)
++            gap = true;
++        var events = gap
++            ? Array.Empty<InputStateEventPayload>()
++            : history
++                .Where(item => item.Sequence > afterSequence)
++                .TakeLast(256)
++                .Select(item => new InputStateEventPayload(
++                    item.Sequence, item.AtMs, ToPayload(item.Snapshot)))
++                .ToArray();
++
++        return new InputStateResponse(
++            1,
++            identity.RunId,
++            identity.SessionId,
++            identity.StageId,
++            (long)Stopwatch.GetElapsedTime(StartedAt).TotalMilliseconds,
++            latest?.Sequence ?? 0,
++            identity.Source,
++            Volatile.Read(ref _connection) == "error"
++                ? "error"
++                : deviceConnected ? "connected" : "disconnected",
++            ToPayload(latest?.Snapshot ?? InputReport.Neutral),
++            events,
++            gap);
++    }
++
++    private static InputStateSnapshotPayload ToPayload(InputReport report)
++    {
++        var buttons = Enum.GetValues<SwitchButton>()
++            .Where(button => (report.Button & (ushort)button) != 0)
++            .Select(button => button.ToString())
++            .ToArray();
++        var hat = ((SwitchHAT)report.Hat) switch
++        {
++            SwitchHAT.TOP => "TOP",
++            SwitchHAT.TOP_RIGHT => "TOP_RIGHT",
++            SwitchHAT.RIGHT => "RIGHT",
++            SwitchHAT.BOTTOM_RIGHT => "DOWN_RIGHT",
++            SwitchHAT.BOTTOM => "DOWN",
++            SwitchHAT.BOTTOM_LEFT => "DOWN_LEFT",
++            SwitchHAT.LEFT => "LEFT",
++            SwitchHAT.TOP_LEFT => "TOP_LEFT",
++            _ => "CENTER",
++        };
++        return new InputStateSnapshotPayload(
++            buttons,
++            hat,
++            [report.LX, report.LY],
++            [report.RX, report.RY]);
++    }
++
++    private sealed record InputStateIdentity(string RunId, string SessionId, string StageId, string Source);
++    private readonly record struct InputReport(ushort Button, byte Hat, byte LX, byte LY, byte RX, byte RY)
++    {
++        public static InputReport Neutral => new(
++            0, (byte)SwitchHAT.CENTER, SwitchStick.STICK_CENTER, SwitchStick.STICK_CENTER,
++            SwitchStick.STICK_CENTER, SwitchStick.STICK_CENTER);
++    }
++    private sealed record InputTransition(long Sequence, long AtMs, InputReport Snapshot);
++}
++
++public sealed record InputStateSnapshotPayload(
++    [property: JsonPropertyName("buttons")] string[] Buttons,
++    [property: JsonPropertyName("hat")] string Hat,
++    [property: JsonPropertyName("left_stick")] byte[] LeftStick,
++    [property: JsonPropertyName("right_stick")] byte[] RightStick);
++
++public sealed record InputStateEventPayload(
++    [property: JsonPropertyName("seq")] long Sequence,
++    [property: JsonPropertyName("at_ms")] long AtMs,
++    [property: JsonPropertyName("snapshot")] InputStateSnapshotPayload Snapshot);
++
++public sealed record InputStateResponse(
++    [property: JsonPropertyName("protocol")] int Protocol,
++    [property: JsonPropertyName("run_id")] string RunId,
++    [property: JsonPropertyName("session_id")] string SessionId,
++    [property: JsonPropertyName("stage_id")] string StageId,
++    [property: JsonPropertyName("server_ms")] long ServerMs,
++    [property: JsonPropertyName("seq")] long Sequence,
++    [property: JsonPropertyName("source")] string Source,
++    [property: JsonPropertyName("connection")] string Connection,
++    [property: JsonPropertyName("snapshot")] InputStateSnapshotPayload Snapshot,
++    [property: JsonPropertyName("events")] InputStateEventPayload[] Events,
++    [property: JsonPropertyName("history_gap")] bool HistoryGap);
+diff --git a/src/EasyCon.Device/NintendoSwitchPriv.cs b/src/EasyCon.Device/NintendoSwitchPriv.cs
+index 9a00c8e..15b6782 100644
+--- a/src/EasyCon.Device/NintendoSwitchPriv.cs
++++ b/src/EasyCon.Device/NintendoSwitchPriv.cs
+@@ -42,6 +42,12 @@ public partial class NintendoSwitch
+             if (DateTime.Now < _nextSendTime)
+                 Thread.Sleep((int)(_nextSendTime - DateTime.Now).TotalMilliseconds);
+             sleep = int.MaxValue;
++            ushort sentButton = 0;
++            byte sentHat = (byte)SwitchHAT.CENTER;
++            byte sentLX = SwitchStick.STICK_CENTER;
++            byte sentLY = SwitchStick.STICK_CENTER;
++            byte sentRX = SwitchStick.STICK_CENTER;
++            byte sentRY = SwitchStick.STICK_CENTER;
+             lock (this)
+             {
+                 if (_reset)
+@@ -78,10 +84,25 @@ public partial class NintendoSwitch
+ 
+                 System.Diagnostics.Debug.WriteLine($"[Send {DateTime.Now:ss.fff}] {_report}");
+ 
+-                WriteReport(_report.GetBytes());
++                try
++                {
++                    WriteReport(_report.GetBytes());
++                    sentButton = _report.Button;
++                    sentHat = _report.HAT;
++                    sentLX = _report.LX;
++                    sentLY = _report.LY;
++                    sentRX = _report.RX;
++                    sentRY = _report.RY;
++                }
++                catch
++                {
++                    InputStateBuffer.SetConnection("error");
++                    throw;
++                }
+                 _nextSendTime = DateTime.Now.AddMilliseconds(MINIMAL_INTERVAL);
+                 _ewh.Reset();
+             }
++            InputStateBuffer.Publish(sentButton, sentHat, sentLX, sentLY, sentRX, sentRY);
+         }
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/EasyCon2.CLI/MjpegPreviewServer.cs b/src/EasyCon2.CLI/MjpegPreviewServer.cs
+index 7f4f52d..b43a7aa 100644
+--- a/src/EasyCon2.CLI/MjpegPreviewServer.cs
++++ b/src/EasyCon2.CLI/MjpegPreviewServer.cs
+@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
+ using System.Net;
+ using System.Net.Sockets;
+ using System.Text;
++using System.Text.Json;
++using EasyDevice;
+ 
+ internal readonly record struct MjpegPreviewFrame(long Sequence, byte[] Jpeg);
+ 
+@@ -10,18 +11,23 @@ internal sealed class MjpegPreviewServer : IAsyncDisposable
+     private const string Boundary = "easycon-frame";
+     private readonly int _port;
+     private readonly Func<MjpegPreviewFrame?> _frameProvider;
++    private readonly Func<long, InputStateResponse>? _inputStateProvider;
+     private readonly CancellationTokenSource _stop = new();
+     private readonly ConcurrentDictionary<int, Task> _clients = new();
+     private TcpListener? _listener;
+     private Task? _listenTask;
+     private int _nextClientId;
+ 
+-    public MjpegPreviewServer(int port, Func<MjpegPreviewFrame?> frameProvider)
++    public MjpegPreviewServer(
++        int port,
++        Func<MjpegPreviewFrame?> frameProvider,
++        Func<long, InputStateResponse>? inputStateProvider = null)
+     {
+         if (port is < 1 or > 65535)
+             throw new ArgumentOutOfRangeException(nameof(port));
+         _port = port;
+         _frameProvider = frameProvider;
++        _inputStateProvider = inputStateProvider;
+     }
+ 
+     public void Start()
+@@ -104,12 +110,45 @@ internal sealed class MjpegPreviewServer : IAsyncDisposable
+             {
+                 var stream = client.GetStream();
+                 var path = await ReadPathAsync(stream, token);
+-                if (path == "/health")
++                var queryIndex = path?.IndexOf('?') ?? -1;
++                var route = queryIndex >= 0 ? path![..queryIndex] : path;
++                if (route == "/health")
+                 {
+                     await WriteTextResponseAsync(stream, "200 OK", "ok\n", token);
+                     return;
+                 }
+-                if (path != "/mjpeg")
++                if (route == "/capabilities" && _inputStateProvider is not null)
++                {
++                    await WriteJsonResponseAsync(
++                        stream,
++                        "200 OK",
++                        JsonSerializer.SerializeToUtf8Bytes(new { input_state_protocol = 1 }),
++                        token);
++                    return;
++                }
++                if (route == "/input-state" && _inputStateProvider is not null)
++                {
++                    if (!TryReadAfterSequence(path!, out var afterSequence))
++                    {
++                        await WriteTextResponseAsync(stream, "400 Bad Request", "invalid after_seq\n", token);
++                        return;
++                    }
++                    try
++                    {
++                        var state = _inputStateProvider(afterSequence);
++                        await WriteJsonResponseAsync(
++                            stream,
++                            "200 OK",
++                            JsonSerializer.SerializeToUtf8Bytes(state),
++                            token);
++                    }
++                    catch (Exception)
++                    {
++                        await WriteTextResponseAsync(stream, "503 Service Unavailable", "input state unavailable\n", token);
++                    }
++                    return;
++                }
++                if (route != "/mjpeg")
+                 {
+                     await WriteTextResponseAsync(stream, "404 Not Found", "not found\n", token);
+                     return;
+@@ -170,6 +209,39 @@ internal sealed class MjpegPreviewServer : IAsyncDisposable
+         }
+     }
+ 
++    private static bool TryReadAfterSequence(string path, out long sequence)
++    {
++        sequence = 0;
++        var queryIndex = path.IndexOf('?');
++        if (queryIndex < 0)
++            return true;
++        foreach (var item in path[(queryIndex + 1)..].Split('&', StringSplitOptions.RemoveEmptyEntries))
++        {
++            var pair = item.Split('=', 2, StringSplitOptions.None);
++            if (Uri.UnescapeDataString(pair[0]) != "after_seq")
++                continue;
++            return pair.Length == 2 && long.TryParse(
++                Uri.UnescapeDataString(pair[1]),
++                System.Globalization.NumberStyles.None,
++                System.Globalization.CultureInfo.InvariantCulture,
++                out sequence) && sequence >= 0;
++        }
++        return true;
++    }
++
++    private static async Task WriteJsonResponseAsync(
++        NetworkStream stream,
++        string status,
++        byte[] payload,
++        CancellationToken token)
++    {
++        var headers = Encoding.ASCII.GetBytes(
++            $"HTTP/1.1 {status}\r\nConnection: close\r\n" +
++            $"Content-Type: application/json; charset=utf-8\r\nContent-Length: {payload.Length}\r\n\r\n");
++        await stream.WriteAsync(headers, token);
++        await stream.WriteAsync(payload, token);
++    }
++
+     private static async Task WriteTextResponseAsync(
+         NetworkStream stream,
+         string status,
+diff --git a/src/EasyCon2.CLI/Program.cs b/src/EasyCon2.CLI/Program.cs
+index 84624d6..40f4821 100644
+--- a/src/EasyCon2.CLI/Program.cs
++++ b/src/EasyCon2.CLI/Program.cs
+@@ -96,6 +96,16 @@ var runIdOption = new Option<string>("--run-id")
+     Description = "本次工作流运行 ID",
+     DefaultValueFactory = _ => Guid.NewGuid().ToString("N")
+ };
++var inputSessionIdOption = new Option<string>("--input-session-id")
++{
++    Description = "本次按键状态子进程会话 ID",
++    DefaultValueFactory = _ => Guid.NewGuid().ToString("N")
++};
++var inputStageIdOption = new Option<string>("--input-stage-id")
++{
++    Description = "本次按键状态阶段 ID",
++    DefaultValueFactory = _ => "run"
++};
+ var workflowOption = new Option<string>("--workflow")
+ {
+     Description = "本次运行所属工作流",
+@@ -135,6 +145,8 @@ runScriptCommand.Options.Add(previewPortOption);
+ runScriptCommand.Options.Add(labelSupervisionOption);
+ runScriptCommand.Options.Add(incidentDirectoryOption);
+ runScriptCommand.Options.Add(runIdOption);
++runScriptCommand.Options.Add(inputSessionIdOption);
++runScriptCommand.Options.Add(inputStageIdOption);
+ runScriptCommand.Options.Add(workflowOption);
+ runScriptCommand.Options.Add(captureDeviceNameOption);
+ runScriptCommand.Options.Add(captureStaleMsOption);
+@@ -154,6 +166,8 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+     bool labelSupervision = parseResult.GetValue(labelSupervisionOption);
+     string incidentDirectory = parseResult.GetValue(incidentDirectoryOption)!;
+     string runId = parseResult.GetValue(runIdOption)!;
++    string inputSessionId = parseResult.GetValue(inputSessionIdOption)!;
++    string inputStageId = parseResult.GetValue(inputStageIdOption)!;
+     string workflow = parseResult.GetValue(workflowOption)!;
+     string captureDeviceName = parseResult.GetValue(captureDeviceNameOption)!;
+     int captureStaleMs = parseResult.GetValue(captureStaleMsOption);
+@@ -184,6 +198,44 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+     long latestFrameCapturedTicks = 0;
+     long previewSequence = 0;
+     byte[]? previewJpeg = null;
++    bool inputSessionTerminal = false;
++
++    void EmitInputSession(string state)
++    {
++        Console.WriteLine(
++            $"FRLG_INPUT_SESSION|V=1|RUN={runId}|SESSION={inputSessionId}|STAGE={inputStageId}|STATE={state}|END=1");
++        if (state is "ENDED" or "FAILED" or "STOPPING")
++            inputSessionTerminal = true;
++    }
++
++    MjpegPreviewFrame? CapturePreviewFrame()
++    {
++        Mat snapshot;
++        long sequence;
++        lock (latestFrameLock)
++        {
++            if (latestFrame is null || latestFrame.Empty())
++                return null;
++            if (previewJpeg is not null && previewSequence == latestFrameSequence)
++                return new MjpegPreviewFrame(previewSequence, previewJpeg);
++            snapshot = latestFrame.Clone();
++            sequence = latestFrameSequence;
++        }
++        using (snapshot)
++        using (var previewFrame = new Mat())
++        {
++            Cv2.Resize(snapshot, previewFrame, new Size(640, 360), 0, 0, InterpolationFlags.Area);
++            Cv2.ImEncode(".jpg", previewFrame, out var jpeg);
++            var bytes = jpeg.ToArray();
++            lock (latestFrameLock)
++            {
++                previewSequence = sequence;
++                previewJpeg = bytes;
++            }
++            return new MjpegPreviewFrame(sequence, bytes);
++        }
++    }
++
+     outdap.Log("正在解析脚本...");
+     var diag = runner.Load(file, [.. label.Select(il => il.name)]);
+ 
+@@ -200,6 +252,9 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+     }
+ 
+     bool isMock = COM.Equals("mock", StringComparison.OrdinalIgnoreCase);
++    InputStateBuffer.Configure(runId, inputSessionId, inputStageId, isMock ? "mock" : "device_report");
++    if (isMock)
++        InputStateBuffer.SetConnection("connected");
+ 
+     if (runner.HasKeyAction)
+     {
+@@ -227,15 +282,38 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+             };
+             if (NS.TryConnect(COM) != NintendoSwitch.ConnectResult.Success)
+             {
++                InputStateBuffer.SetConnection("error");
+                 outdap.Error("单片机连接失败！！");
+                 return;
+             }
++            InputStateBuffer.SetConnection("connected");
+             outdap.Info("单片机连接成功.");
+         }
+     }
+ 
+     try
+     {
++        EmitInputSession("STARTING");
++        if (previewPort > 0)
++        {
++            try
++            {
++                previewServer = new MjpegPreviewServer(
++                    previewPort,
++                    CapturePreviewFrame,
++                    afterSequence => InputStateBuffer.Read(
++                        afterSequence,
++                        isMock || NS.IsConnected()));
++                previewServer.Start();
++                outdap.Info($"本机状态与监视回环已启动：http://127.0.0.1:{previewPort}");
++            }
++            catch (Exception ex)
++            {
++                previewServer = null;
++                outdap.Warn($"本机状态/监视回环启动失败，脚本继续运行：{ex.Message}");
++            }
++        }
++
+         // A pure button/timing stage (such as the TID -> lab bridge) may not
+         // reference labels, but it still needs to share the capture preview.
+         if (runner.NeedILLoad || previewPort > 0)
+@@ -305,54 +383,6 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+             var actualFrame = await firstFrame.Task;
+             outdap.Info(
+                 $"采集卡实际画面：{actualFrame.Width}x{actualFrame.Height}（请求 1920x1080）");
+-            if (previewPort > 0)
+-            {
+-                MjpegPreviewFrame? CapturePreviewFrame()
+-                {
+-                    Mat snapshot;
+-                    long sequence;
+-                    lock (latestFrameLock)
+-                    {
+-                        if (latestFrame is null || latestFrame.Empty())
+-                            return null;
+-                        if (previewJpeg is not null && previewSequence == latestFrameSequence)
+-                            return new MjpegPreviewFrame(previewSequence, previewJpeg);
+-                        snapshot = latestFrame.Clone();
+-                        sequence = latestFrameSequence;
+-                    }
+-                    using (snapshot)
+-                    using (var previewFrame = new Mat())
+-                    {
+-                        Cv2.Resize(
+-                            snapshot,
+-                            previewFrame,
+-                            new Size(640, 360),
+-                            0,
+-                            0,
+-                            InterpolationFlags.Area);
+-                        Cv2.ImEncode(".jpg", previewFrame, out var jpeg);
+-                        var bytes = jpeg.ToArray();
+-                        lock (latestFrameLock)
+-                        {
+-                            previewSequence = sequence;
+-                            previewJpeg = bytes;
+-                        }
+-                        return new MjpegPreviewFrame(sequence, bytes);
+-                    }
+-                }
+-
+-                try
+-                {
+-                    previewServer = new MjpegPreviewServer(previewPort, CapturePreviewFrame);
+-                    previewServer.Start();
+-                    outdap.Info($"监视回环已启动：http://127.0.0.1:{previewPort}/mjpeg");
+-                }
+-                catch (Exception ex)
+-                {
+-                    previewServer = null;
+-                    outdap.Warn($"监视回环启动失败，脚本继续运行：{ex.Message}");
+-                }
+-            }
+         }
+ 
+         Mat CloneLatestFrame()
+@@ -428,6 +458,7 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+             : Task.Run(() => supervisor.MonitorAsync(monitorCancellation.Token));
+         try
+         {
++            EmitInputSession("RUNNING");
+             runner.Run(outdap, gamePad, ocr, externalGetters, runCancellation.Token);
+         }
+         catch (Exception) when (supervisor?.HasIncident == true && runCancellation.IsCancellationRequested)
+@@ -442,6 +473,7 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+         }
+         if (supervisor?.HasIncident == true)
+         {
++            EmitInputSession("FAILED");
+             if (supervisor.IncidentTask is not null)
+                 await supervisor.IncidentTask;
+             labelFaultExitCode = 20;
+@@ -450,20 +482,25 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+         else
+         {
+             outdap.Info("脚本运行完成");
++            EmitInputSession(cancellationToken.IsCancellationRequested ? "STOPPING" : "ENDED");
+         }
+     }
+     catch (ScriptException ex)
+     {
++        EmitInputSession("FAILED");
+         outdap.Warn($"!!运行出错!!{ex.Message}: 行{ex.Address}");
+     }
+     catch (Exception exx)
+     {
++        EmitInputSession("FAILED");
+         Console.Error.WriteLine();
+         Console.Error.WriteLine(exx);
+         outdap.Error($"!!意外错误!!{exx.GetBaseException().Message}");
+     }
+     finally
+     {
++        if (!inputSessionTerminal)
++            EmitInputSession(cancellationToken.IsCancellationRequested ? "STOPPING" : "FAILED");
+         supervisor?.Dispose();
+         if (previewServer is not null)
+         {

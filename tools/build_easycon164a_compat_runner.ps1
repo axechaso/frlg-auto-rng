@@ -1,13 +1,16 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$source = Join-Path $root ".build\easycon164a-clean"
+$source = Join-Path $root ".build\easycon164a-input-state-v1-source"
 $output = Join-Path $root "runtime_backend\easycon164a-cli-gui-rounding-selfcontained"
 $buildRoot = [IO.Path]::GetFullPath((Join-Path $root ".build"))
 $patch = Join-Path $PSScriptRoot "patches\easycon164a-cli-gui-rounding-next.patch"
 $labelSupervisionPatch = Join-Path $PSScriptRoot "patches\easycon164a-label-supervision.patch"
 $labelSupervisionV8Patch = Join-Path $PSScriptRoot "patches\easycon164a-label-supervision-v8.patch"
 $labelSupervisionV9Patch = Join-Path $PSScriptRoot "patches\easycon164a-label-supervision-v9.patch"
+$stageLogFilterPatch = Join-Path $PSScriptRoot "patches\easycon164a-stage-log-filter.patch"
+$inputStatePatch = Join-Path $PSScriptRoot "patches\easycon164a-input-state-v1.patch"
+$inputStatePreviewVideoPatch = Join-Path $PSScriptRoot "patches\easycon164a-input-state-preview-video-v1.patch"
 $commit = "9c86137c7e63bff842175470895727a5fa9bab52"
 $sourceCommitMarker = Join-Path $source ".easycon-source-commit"
 $assemblyName = "EasyCon2.CLI.PreviewV5"
@@ -75,7 +78,7 @@ $patchAlreadyApplied = (
     (Select-String -LiteralPath $mockGamePadSource -Pattern 'public void Reset\(\)' -Quiet) -and
     (Test-Path -LiteralPath $previewSource) -and
     (Select-String -LiteralPath $programSource -Pattern 'previewPortOption' -Quiet) -and
-    (Select-String -LiteralPath $programSource -Pattern 'runner\.NeedILLoad \|\| previewPort > 0' -Quiet) -and
+    (Select-String -LiteralPath $programSource -Pattern 'runner\.NeedILLoad \|\| (previewPort > 0|previewVideo)' -Quiet) -and
     (Select-String -LiteralPath $programSource -Pattern 'latestFrame = frame.Clone\(\)' -Quiet) -and
     (Select-String -LiteralPath $previewSource -Pattern 'class MjpegPreviewServer' -Quiet)
 )
@@ -136,6 +139,50 @@ if (-not $labelSupervisionV9AlreadyApplied) {
     if ($LASTEXITCODE -ne 0) { throw "EasyCon label supervision v9 patch failed" }
 }
 
+$stageLogFilterApplied = Select-String -LiteralPath (Join-Path $source "src\EasyCon2.CLI\ConsoleOutAdapter.cs") -Pattern 'message\.Contains\("FRLG_STAGE\|"' -Quiet
+if (-not $stageLogFilterApplied) {
+    git -c "safe.directory=$source" -C $source apply --ignore-space-change --ignore-whitespace --check $stageLogFilterPatch
+    if ($LASTEXITCODE -ne 0) {
+        throw "EasyCon stage log filter patch does not apply cleanly; the source may be partially patched"
+    }
+    git -c "safe.directory=$source" -C $source apply --ignore-space-change --ignore-whitespace $stageLogFilterPatch
+    if ($LASTEXITCODE -ne 0) { throw "EasyCon stage log filter patch failed" }
+}
+
+$inputStateBufferSource = Join-Path $source "src\EasyCon.Device\InputStateBuffer.cs"
+$deviceLoopSource = Join-Path $source "src\EasyCon.Device\NintendoSwitchPriv.cs"
+$inputStateCoreAlreadyApplied = (
+    (Test-Path -LiteralPath $inputStateBufferSource) -and
+    (Select-String -LiteralPath $deviceLoopSource -Pattern 'InputStateBuffer\.Publish\(sentButton' -Quiet) -and
+    (Select-String -LiteralPath $previewSource -Pattern 'route == "/input-state"' -Quiet) -and
+    (Select-String -LiteralPath $previewSource -Pattern 'route == "/capabilities"' -Quiet) -and
+    (Select-String -LiteralPath $programSource -Pattern 'inputSessionIdOption' -Quiet) -and
+    (Select-String -LiteralPath $programSource -Pattern 'InputStateBuffer\.Configure' -Quiet)
+)
+if (-not $inputStateCoreAlreadyApplied) {
+    $inputStatePatchesToApply = @($inputStatePatch, $inputStatePreviewVideoPatch)
+} else {
+    $inputStatePreviewVideoAlreadyApplied = (
+        (Select-String -LiteralPath $programSource -Pattern 'previewVideoOption' -Quiet) -and
+        (Select-String -LiteralPath $programSource -Pattern 'runScriptCommand\.Options\.Add\(previewVideoOption\)' -Quiet) -and
+        (Select-String -LiteralPath $programSource -Pattern 'parseResult\.GetValue\(previewVideoOption\)' -Quiet) -and
+        (Select-String -LiteralPath $programSource -Pattern 'runner\.NeedILLoad \|\| previewVideo' -Quiet)
+    )
+    if ($inputStatePreviewVideoAlreadyApplied) {
+        $inputStatePatchesToApply = @()
+    } else {
+        $inputStatePatchesToApply = @($inputStatePreviewVideoPatch)
+    }
+}
+foreach ($inputStatePatchToApply in $inputStatePatchesToApply) {
+    git -c "safe.directory=$source" -C $source apply --ignore-space-change --ignore-whitespace --check $inputStatePatchToApply
+    if ($LASTEXITCODE -ne 0) {
+        throw "EasyCon input state patch does not apply cleanly; the source may be partially patched"
+    }
+    git -c "safe.directory=$source" -C $source apply --ignore-space-change --ignore-whitespace $inputStatePatchToApply
+    if ($LASTEXITCODE -ne 0) { throw "EasyCon input state patch failed" }
+}
+
 $project = Join-Path $source "src\EasyCon2.CLI\EasyCon2.CLI.csproj"
 dotnet restore $project -r win-x64 -p:DefaultTargetFramework=net9.0 -p:LtsTargetFramework=net9.0
 if ($LASTEXITCODE -ne 0) { throw "NuGet restore failed" }
@@ -145,6 +192,7 @@ dotnet publish $project -c Release --no-restore -r win-x64 -t:Rebuild `
     -p:LtsTargetFramework=net9.0 `
     -p:PublishSingleFile=false `
     -p:SelfContained=true `
+    -p:IncludeSourceRevisionInInformationalVersion=false `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -o $staging
@@ -161,7 +209,9 @@ if ($LASTEXITCODE -ne 0 -or $stagedVersion -ne "1.6.4-a+$commit") {
 
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 Get-ChildItem -LiteralPath $staging -File -Recurse | ForEach-Object {
-    $relativePath = [IO.Path]::GetRelativePath($staging, $_.FullName)
+    # Keep this compatible with the Windows PowerShell runtime used by some
+    # build hosts; every file is already guaranteed to be below $staging.
+    $relativePath = $_.FullName.Substring($staging.Length).TrimStart('\', '/')
     Copy-ChangedFile $_.FullName (Join-Path $output $relativePath)
 }
 $runner = Join-Path $output $runnerFilename
@@ -174,8 +224,8 @@ $manifest = [ordered]@{
     source_repository = "https://github.com/EasyConNS/EasyCon.git"
     source_commit = $commit
     source_version = "1.6.4-a"
-    patch_id = "easycon164a-label-supervision-v9"
-    description = "Run EasyCon 1.6.4-a native label checks and optionally supervise ECS stage markers and script-bounded retry failures; when enabled, save complete fault bundles, lock and reset gamepad input on faults, and capture three fresh verification frames without a second capture-device owner."
+    patch_id = "easycon164a-label-supervision-v10-stage-log-filter-input-state-v1"
+    description = "Run EasyCon 1.6.4-a native label checks, optionally supervise ECS stage markers and retries, and expose bounded read-only gamepad report state over loopback without changing the report sequence."
     build_target = "net9.0/win-x64 self-contained onedir"
     filename = $runnerFilename
     bytes = $length

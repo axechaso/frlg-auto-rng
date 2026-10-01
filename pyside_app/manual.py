@@ -45,6 +45,8 @@ class ControllerWindow(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, False)
         self.controller = self.native = self.job = None
         self.pressed = set()
+        self.observing = False
+        self.observed_snapshot = None
         self.keyboard_pressed = {}
         self.mouse_pressed = set()
         self.shutting_down = False
@@ -110,8 +112,30 @@ class ControllerWindow(QDialog):
         QApplication.instance().aboutToQuit.connect(self.release_all)
 
     def refresh_keys(self):
-        self.pad.refresh(self.mapping, self.pressed)
+        if self.observing and self.observed_snapshot is not None:
+            pressed = set(self.observed_snapshot["buttons"])
+            if self.observed_snapshot["hat"] != "CENTER":
+                pressed.add(self.observed_snapshot["hat"])
+            self.pad.refresh(self.mapping, pressed)
+            self.pad.set_input_snapshot(self.observed_snapshot)
+        else:
+            self.pad.refresh(self.mapping, self.pressed)
+            self.pad.set_input_snapshot(None)
         self.overlay.update()
+
+    def set_script_observation(self, view):
+        self.observing = view is not None
+        self.observed_snapshot = dict(view.snapshot) if view is not None else None
+        self.connect_button.setEnabled(not self.observing)
+        if self.observing:
+            self.keyboard_active = False
+            self.keyboard.stop()
+            self.status.setText(f"脚本只读观察 · {view.message}")
+        else:
+            self.keyboard_active = True
+            if not self.controller:
+                self.status.setText("手柄未连接")
+        self.refresh_keys()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -135,16 +159,23 @@ class ControllerWindow(QDialog):
             self.host.set_status(text)
 
     def open_overlay(self):
-        if self.host.running or self.host.job:
-            self.host.set_status("请先停止自动运行或等待当前任务完成，再打开手柄浮窗。")
+        if self.host.job and not self.host.running:
+            self.host.set_status("请等待设备任务完成，再打开手柄浮窗。")
             return
+        if self.host.running:
+            accessories = getattr(self.host, "accessories", None)
+            view = getattr(accessories, "input_view", None)
+            self.set_script_observation(view)
         self.overlay_only = True
         self.overlay_requested = True
         self.shutting_down = False
         self.hide()
-        self.start_keyboard()
+        if not self.observing:
+            self.start_keyboard()
         self.overlay.show_control()
         self.overlay.raise_()
+        if self.observing:
+            return
         port = self.host.fields["port"].currentData()
         if self.controller and (not self.controller.is_connected or self.controller.port_name != port):
             self.disconnect()
@@ -152,11 +183,15 @@ class ControllerWindow(QDialog):
             self.toggle_connection()
 
     def mouse_press(self, key):
+        if self.observing:
+            return
         self.pad.setFocus()
         self.mouse_pressed.add(key)
         self.press(key)
 
     def mouse_release(self, key):
+        if self.observing:
+            return
         self.mouse_pressed.discard(key)
         if key not in self.keyboard_pressed.values():
             self.release(key)
@@ -166,6 +201,8 @@ class ControllerWindow(QDialog):
         self.show()
 
     def toggle_connection(self):
+        if self.observing:
+            return
         if self.controller:
             self.disconnect()
             return
@@ -225,6 +262,9 @@ class ControllerWindow(QDialog):
             self.toggle_connection()
 
     def disconnect(self):
+        if self.observing:
+            self.refresh_keys()
+            return
         self.release_all()
         if self.controller:
             try:
@@ -258,7 +298,7 @@ class ControllerWindow(QDialog):
         self.controller.set_stick(getattr(self.native, prefix), axis(x), axis(y))
 
     def press(self, key):
-        if not self.controller or not self.controller.is_connected or key in self.pressed:
+        if self.observing or not self.controller or not self.controller.is_connected or key in self.pressed:
             return
         try:
             self.pressed.add(key)
@@ -274,6 +314,8 @@ class ControllerWindow(QDialog):
         self.refresh_keys()
 
     def release(self, key):
+        if self.observing:
+            return
         if key not in self.pressed:
             return
         self.pressed.discard(key)
@@ -290,6 +332,12 @@ class ControllerWindow(QDialog):
         self.refresh_keys()
 
     def release_all(self):
+        if self.observing:
+            self.pressed.clear()
+            self.keyboard_pressed.clear()
+            self.mouse_pressed.clear()
+            self.refresh_keys()
+            return
         self.keyboard.reset()
         self.pressed.clear()
         self.keyboard_pressed.clear()
@@ -320,6 +368,8 @@ class ControllerWindow(QDialog):
         return active in windows or (active is None and receiver in windows)
 
     def keyboard_transition(self, token, key, down):
+        if self.observing:
+            return
         if down:
             self.keyboard_pressed[token] = key
             self.press(key)
@@ -438,10 +488,14 @@ class ControllerOverlay(QWidget):
             self.move(bounds.x() + bounds.width() // 2, bounds.y() + (bounds.height() - 100) // 2)
 
     def set_active(self, active):
-        self.controller.release_all()
-        self.controller.keyboard_active = active
+        if not self.controller.observing:
+            self.controller.release_all()
+        self.controller.keyboard_active = active and not self.controller.observing
         self.setWindowOpacity(1.0 if active else 0.5)
-        self.controller.key_status.setText("浮窗键盘已启用：可切换到其他窗口操作；左键暂停，Esc 退出。" if active else "浮窗键盘已暂停，所有按键已释放；左键浮窗可重新启用。")
+        if self.controller.observing:
+            self.controller.status.setText("脚本只读观察；浮窗输入已禁用。")
+        else:
+            self.controller.key_status.setText("浮窗键盘已启用：可切换到其他窗口操作；左键暂停，Esc 退出。" if active else "浮窗键盘已暂停，所有按键已释放；左键浮窗可重新启用。")
         self.update()
 
     def show_control(self):
@@ -471,19 +525,35 @@ class ControllerOverlay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.drawPixmap(0, 0, self.assets.get("JoyCon", QPixmap()))
-        pressed = self.controller.pressed
+        observed = self.controller.observed_snapshot if self.controller.observing else None
+        pressed = set(observed["buttons"]) if observed is not None else self.controller.pressed
+        hat = observed["hat"] if observed is not None else None
         # Coordinates, shapes, colors and layers follow EasyCon 1.6.4-a's
         # JCPainter, using its original JoyCon images without modification.
         for prefix, x, y, click in (("LS", 11, 21, "LCLICK"), ("RS", 63, 52, "RCLICK")):
-            sx = int(prefix + "_RIGHT" in pressed) - int(prefix + "_LEFT" in pressed)
-            sy = int(prefix + "_DOWN" in pressed) - int(prefix + "_UP" in pressed)
+            if observed is not None:
+                axis_x, axis_y = observed["left_stick" if prefix == "LS" else "right_stick"]
+                sx, sy = (axis_x - 128) / 127, (axis_y - 128) / 127
+                length = (sx * sx + sy * sy) ** 0.5
+                if length > 1:
+                    sx, sy = sx / length, sy / length
+            else:
+                sx = int(prefix + "_RIGHT" in pressed) - int(prefix + "_LEFT" in pressed)
+                sy = int(prefix + "_DOWN" in pressed) - int(prefix + "_UP" in pressed)
             painter.setPen(QPen(QColor("black"), 1))
             painter.setBrush(QColor(0, 255, 0, 200) if sx or sy else QColor(0, 0, 0, 50))
             painter.drawEllipse(QRectF(x + 2, y + 2, 21, 21))
             painter.setPen(QPen(QColor("black"), 1))
             painter.setBrush(QColor("#00ff00" if click in pressed else "#323232"))
-            painter.drawEllipse(QRectF(x + (0 if sx < 0 else 10 if sx > 0 else 5), y + (0 if sy < 0 else 10 if sy > 0 else 5), 15, 15))
-        dx, dy = self.controller.direction_vector()
+            painter.drawEllipse(QRectF(x + 5 + sx * 3, y + 5 + sy * 3, 15, 15))
+        if hat is not None:
+            dx, dy = {
+                "CENTER": (0, 0), "TOP": (0, -1), "TOP_RIGHT": (1, -1),
+                "RIGHT": (1, 0), "DOWN_RIGHT": (1, 1), "DOWN": (0, 1),
+                "DOWN_LEFT": (-1, 1), "LEFT": (-1, 0), "TOP_LEFT": (-1, -1),
+            }[hat]
+        else:
+            dx, dy = self.controller.direction_vector()
         painter.setPen(QPen(QColor("black"), 1))
         for active, x, y in ((dy < 0, 21, 55), (dy > 0, 21, 67), (dx < 0, 15, 61), (dx > 0, 27, 61)):
             painter.setBrush(QColor("#00ff00" if active else "#323232"))

@@ -21,7 +21,9 @@ from automation.easycon118 import (
 from automation.planner import AutoSearchRequest, search_best_plan
 from automation.precalibration import (
     PrecalibrationContext,
+    PrecalibrationFrameScope,
     build_marker,
+    context_key,
     read_record,
     update_from_log,
     update_from_manifest,
@@ -100,11 +102,18 @@ class PrecalibrationStoreTests(unittest.TestCase):
             path = Path(directory) / "precalibration.json"
             scheme0 = PrecalibrationContext("fr", 1, 1, "FORMAL", "WILD", 0)
             scheme1 = PrecalibrationContext("fr", 1, 1, "FORMAL", "WILD", 1)
-            update_record(path, scheme0, {"seed_ns1": -4, "frame_ns1": 12})
+            frame_scope = PrecalibrationFrameScope(1, False)
+            update_record(
+                path, scheme0, {"seed_ns1": -4, "frame_ns1": 12},
+                frame_scope=frame_scope,
+            )
             self.assertIsNone(read_record(path, scheme1))
-            update_record(path, scheme1, {"seed_ns1": 7, "frame_ns1": -8})
-            self.assertEqual(read_record(path, scheme0)["seed_ns1"], -4)
-            self.assertEqual(read_record(path, scheme1)["seed_ns1"], 7)
+            update_record(
+                path, scheme1, {"seed_ns1": 7, "frame_ns1": -8},
+                frame_scope=frame_scope,
+            )
+            self.assertEqual(read_record(path, scheme0, frame_scope=frame_scope)["seed_ns1"], -4)
+            self.assertEqual(read_record(path, scheme1, frame_scope=frame_scope)["seed_ns1"], 7)
 
     def test_legacy_record_is_visible_only_to_startup_scheme_zero(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -140,7 +149,11 @@ class PrecalibrationStoreTests(unittest.TestCase):
             )
             scheme0 = PrecalibrationContext("fr", 2, 3, "TIMELINE", "STATIC", 0)
             scheme1 = PrecalibrationContext("fr", 2, 3, "TIMELINE", "STATIC", 1)
-            self.assertEqual(read_record(path, scheme0)["frame_ns2"], 33)
+            old = read_record(path, scheme0)
+            self.assertEqual(old["seed_ns2"], 5)
+            self.assertIsNone(old["frame_ns2"])
+            self.assertEqual(old["legacy_frames"]["frame_ns2"], 33)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["schema"], 1)
             self.assertIsNone(read_record(path, scheme1))
 
     def test_flow_types_and_nx_fields_are_isolated(self):
@@ -149,12 +162,13 @@ class PrecalibrationStoreTests(unittest.TestCase):
             static = PrecalibrationContext("fr", 1, 1, "FORMAL", "STATIC", 0)
             starter = PrecalibrationContext("fr", 1, 1, "FORMAL", "STARTER", 0)
             nx2 = PrecalibrationContext("fr", 2, 1, "FORMAL", "STARTER", 0)
+            scope = PrecalibrationFrameScope(1, False)
             update_record(path, static, {"seed_ns1": 1})
-            update_record(path, starter, {"seed_ns1": 2, "frame_ns1": 20})
-            update_record(path, nx2, {"seed_ns2": 3, "frame_ns2": 30})
+            update_record(path, starter, {"seed_ns1": 2, "frame_ns1": 20}, frame_scope=scope)
+            update_record(path, nx2, {"seed_ns2": 3, "frame_ns2": 30}, frame_scope=scope)
             self.assertEqual(read_record(path, static)["seed_ns1"], 1)
-            self.assertEqual(read_record(path, starter)["seed_ns1"], 2)
-            self.assertEqual(read_record(path, nx2)["seed_ns2"], 3)
+            self.assertEqual(read_record(path, starter, frame_scope=scope)["seed_ns1"], 2)
+            self.assertEqual(read_record(path, nx2, frame_scope=scope)["seed_ns2"], 3)
 
     def test_marker_mismatch_and_malformed_store_never_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -193,6 +207,54 @@ class PrecalibrationStoreTests(unittest.TestCase):
             self.assertIsNone(update_from_log(path, context, "普通运行日志"))
             self.assertFalse(path.exists())
 
+    def test_frame_scope_isolated_while_seed_values_are_shared(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "precalibration.json"
+            context = PrecalibrationContext("fr", 2, 3, "TIMELINE", "STATIC", 0)
+            off = PrecalibrationFrameScope(0, False)
+            gift = PrecalibrationFrameScope(1, True)
+            update_record(path, context, {"seed_ns2": 17, "frame_ns2": -4}, frame_scope=off)
+            update_record(path, context, {"frame_ns2": 29}, frame_scope=gift)
+            self.assertEqual(read_record(path, context, frame_scope=off)["seed_ns2"], 17)
+            self.assertEqual(read_record(path, context, frame_scope=off)["frame_ns2"], -4)
+            self.assertEqual(read_record(path, context, frame_scope=gift)["seed_ns2"], 17)
+            self.assertEqual(read_record(path, context, frame_scope=gift)["frame_ns2"], 29)
+            self.assertIsNone(read_record(path, context)["frame_ns2"])
+
+    def test_schema_one_write_backups_exact_bytes_and_keeps_old_frames_historical(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "precalibration.json"
+            context = PrecalibrationContext("fr", 1, 1, "FORMAL", "WILD", 0)
+            legacy_record = {
+                "context": context.to_dict(), "seed_ns1": 3, "frame_ns1": -7,
+            }
+            payload = {"schema": 1, "records": {context_key(context): legacy_record}}
+            original = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            path.write_bytes(original)
+            scope = PrecalibrationFrameScope(1, False)
+            update_record(path, context, {"seed_ns1": 4, "frame_ns1": 22}, frame_scope=scope)
+            backups = list(path.parent.glob("precalibration.json.schema1-*.bak"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), original)
+            migrated = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(migrated["schema"], 2)
+            stored = migrated["records"][context_key(context)]
+            self.assertEqual(stored["legacy_frames"]["frame_ns1"], -7)
+            self.assertEqual(stored["frames"]["parity=1;gift=0"]["frame_ns1"], 22)
+
+    def test_legacy_marker_updates_seed_but_never_scoped_frames(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "precalibration.json"
+            context = PrecalibrationContext("fr", 1, 1, "FORMAL", "WILD", 0)
+            marker = build_marker(
+                context, seed_index=8, frame_enabled=True, frame_pre=99,
+            )
+            updated = update_from_log(path, context, marker)
+            self.assertEqual(updated["seed_ns1"], 8)
+            self.assertIsNone(updated["frame_ns1"])
+            stored = json.loads(path.read_text(encoding="utf-8"))["records"][context_key(context)]
+            self.assertEqual(stored["frames"], {})
+
 @unittest.skipUnless(SOURCE_118.is_dir(), "requires materialized EasyCon assets")
 class PrecalibrationGenerationTests(unittest.TestCase):
     def test_formal_static_loads_seed_but_disables_frame_reuse(self):
@@ -200,7 +262,10 @@ class PrecalibrationGenerationTests(unittest.TestCase):
             root = Path(directory)
             store = root / "precalibration.json"
             context = PrecalibrationContext("fr", 1, 1, "FORMAL", "STATIC", 0)
-            update_record(store, context, {"seed_ns1": -6, "frame_ns1": 91})
+            update_record(
+                store, context, {"seed_ns1": -6, "frame_ns1": 91},
+                frame_scope=PrecalibrationFrameScope(1, False),
+            )
             main = write_configured_project(
                 SOURCE_118,
                 root / "project",
@@ -213,7 +278,7 @@ class PrecalibrationGenerationTests(unittest.TestCase):
             manifest = json.loads((main.parent / "plan.json").read_text(encoding="utf-8"))
             self.assertIn("$Seed预校准索引_NS1 = -6", text)
             self.assertIn("$消耗帧预校准修正_NS1 = 0", text)
-            self.assertIn("|ENTRY=FORMAL|KIND=STATIC|SEED_INDEX=", text)
+            self.assertIn("|ENTRY=FORMAL|KIND=STATIC|PARITY=1|GIFT=0|SEED_INDEX=", text)
             self.assertIn('"|FRAME_ENABLED=0"', text)
             self.assertIn(STANDARD_HOME_BUFFER_OVERRIDE_MARKER, text)
             self.assertNotIn(EGG_HOME_BUFFER_OVERRIDE_MARKER, text)
@@ -229,7 +294,10 @@ class PrecalibrationGenerationTests(unittest.TestCase):
             root = Path(directory)
             store = root / "precalibration.json"
             context = PrecalibrationContext("fr", 1, 1, "TIMELINE", "STATIC", 1)
-            update_record(store, context, {"seed_ns1": 8, "frame_ns1": -17})
+            update_record(
+                store, context, {"seed_ns1": 8, "frame_ns1": -17},
+                frame_scope=PrecalibrationFrameScope(1, False),
+            )
             main = write_configured_project(
                 SOURCE_118,
                 root / "project",
@@ -302,10 +370,12 @@ class PrecalibrationGenerationTests(unittest.TestCase):
             root = Path(directory)
             store = root / "precalibration.json"
             context = PrecalibrationContext("fr", 1, 1, "TIMELINE", "EGG", 1)
+            frame_scope = PrecalibrationFrameScope(1, False)
             update_record(
                 store,
                 context,
                 {"seed_ns1": 9, "held_pre": -12, "pickup_pre": 21},
+                frame_scope=frame_scope,
             )
             main = write_configured_egg_project(
                 SOURCE_118,
@@ -322,11 +392,12 @@ class PrecalibrationGenerationTests(unittest.TestCase):
             self.assertIn("$Seed预校准索引_NS1 = 9", text)
             self.assertIn("$孵蛋Held动态预校准帧 = -12", text)
             self.assertIn("$孵蛋Pickup动态预校准帧 = 21", text)
-            self.assertIn("|ENTRY=TIMELINE|KIND=EGG|SEED_INDEX=", text)
+            self.assertIn("|ENTRY=TIMELINE|KIND=EGG|PARITY=1|GIFT=0|SEED_INDEX=", text)
             marker = build_marker(
                 context,
                 seed_index=10,
                 frame_enabled=True,
+                frame_scope=frame_scope,
                 held_pre=-13,
                 pickup_pre=22,
             )
@@ -338,7 +409,7 @@ class PrecalibrationGenerationTests(unittest.TestCase):
     def test_egg_formal_and_timeline_projects_match_selected_parameters(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            request = make_egg_request()
+            request = make_egg_request(record_shiny_video=True)
             for template_name in (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME):
                 with self.subTest(template_name=template_name):
                     main = write_configured_egg_project(
@@ -352,6 +423,17 @@ class PrecalibrationGenerationTests(unittest.TestCase):
                         request,
                         template_name=template_name,
                     )
+                    text = main.read_text(encoding="utf-8")
+                    self.assertIn("$出闪录像 = 1", text)
+
+                    tampered = text.replace("$出闪录像 = 1", "$出闪录像 = 0", 1)
+                    main.write_text(tampered, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "出闪录像"):
+                        validate_generated_egg_project_consistency(
+                            main,
+                            request,
+                            template_name=template_name,
+                        )
 
 
 if __name__ == "__main__":

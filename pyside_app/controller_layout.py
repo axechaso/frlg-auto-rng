@@ -87,6 +87,7 @@ class ControllerLayout(QWidget):
         super().__init__(parent)
         self.editing = editing
         self.controls = {}
+        self.input_snapshot = None
         self.setMinimumSize(650, 376)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, False)
@@ -135,6 +136,10 @@ class ControllerLayout(QWidget):
                 button.style().polish(button)
                 button.update()
 
+    def set_input_snapshot(self, snapshot):
+        self.input_snapshot = snapshot
+        self.update()
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -159,6 +164,19 @@ class ControllerLayout(QWidget):
         p.setBrush(QColor("#d8e1f1"))
         for x, y in ((180, 184), (494, 312)):
             p.drawEllipse(QRectF(x - 49, y - 49, 98, 98))
+        if self.input_snapshot is not None:
+            for name, center_x, center_y in (
+                ("left_stick", 180, 184), ("right_stick", 494, 312),
+            ):
+                axis_x, axis_y = self.input_snapshot[name]
+                dx, dy = (axis_x - 128) / 127, (axis_y - 128) / 127
+                length = (dx * dx + dy * dy) ** 0.5
+                if length > 1:
+                    dx, dy = dx / length, dy / length
+                knob_x, knob_y = center_x + dx * 31, center_y + dy * 31
+                p.setPen(QPen(QColor("#35536e"), 2))
+                p.setBrush(QColor("#55a58a"))
+                p.drawEllipse(QRectF(knob_x - 9, knob_y - 9, 18, 18))
         p.drawRoundedRect(QRectF(265, 297, 34, 74), 5, 5)
         p.drawRoundedRect(QRectF(245, 317, 74, 34), 5, 5)
         if self.editing:

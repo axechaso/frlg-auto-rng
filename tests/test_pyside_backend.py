@@ -236,7 +236,7 @@ class PySideBackendTests(unittest.TestCase):
             w.detect_devices()
             self.wait_until(lambda: w.job is None)
         self.assertFalse(w.start_button.isEnabled())
-        self.assertEqual(w.ready_values[0].text(), "未发现串口")
+        self.assertEqual(w.footer_status.text(), "设备检测完成，串口或采集卡尚未就绪。")
 
     def test_changed_input_rejects_stale_background_result(self):
         w = self.window
@@ -278,6 +278,28 @@ class PySideBackendTests(unittest.TestCase):
         self.assertEqual(w.fields["profile_language"].currentIndex(), 1)
         self.assertEqual(w.fields["egg_nx"].currentText(), "Switch 2")
         self.assertEqual(w.profile_store.get(profile.profile_id).tid, 7)
+
+    def test_profile_chip_shows_game_version_without_mystery_gift(self):
+        from PySide6.QtWidgets import QLabel
+
+        w = self.window
+        w.profile_store.add(
+            "x", "火红", 0, 38448, 1,
+            language="英文", mystery_gift_enabled=True,
+        )
+        w.reload_profiles(apply=True)
+        w._profile_summary()
+        label = w.profile_chip.findChild(QLabel, "chipValue")
+        self.assertEqual(w.profile_chip.width(), 350)
+        self.assertEqual(label.text(), "x · 火红（美版） · 0 / 38448")
+        self.assertNotIn("神秘礼物", w.profile_chip.toolTip())
+
+        w.show()
+        w.resize(900, 620)
+        self.app.processEvents()
+        self.assertEqual(w.profile_chip.width(), 218)
+        self.assertIn("火红（美版）", w.profile_chip.toolTip())
+        self.assertNotIn("神秘礼物", label.text())
 
     def test_japanese_profile_drives_wild_static_starter_request_and_runtime(self):
         w = self.window
@@ -444,7 +466,11 @@ class PySideBackendTests(unittest.TestCase):
         code = f"import sys,time; b={payload!r}; sys.stdout.buffer.write(b[:2]); sys.stdout.buffer.flush(); time.sleep(.05); sys.stdout.buffer.write(b[2:]); sys.stdout.buffer.flush()"
         arguments = ("-u", str(RESOURCE_ROOT / "run_easycon_logged.py"), "--log-path", str(log), "--cwd", str(self.root), "--stop-file", str(stop), "--", sys.executable, "-u", "-c", code)
         w.run_command = RunCommand(sys.executable, arguments, log, stop, "", EasyConRuntimeCheck(True, (), ()))
-        w.process.start(sys.executable, list(arguments))
+        prepared = SimpleNamespace(
+            project=self.root / "main.ecs",
+            inputs=SimpleNamespace(options=SimpleNamespace(update_precalibration=False)),
+        )
+        w.begin_accepted_run(w.run_command, prepared_wild=prepared)
         self.wait_until(lambda: log.is_file() and w.process.state().value == 0)
         self.app.processEvents()
         self.assertIn("你好", w.log_view.toPlainText())
@@ -506,7 +532,8 @@ class PySideBackendTests(unittest.TestCase):
             self.assertTrue(w.stop_button.isEnabled())
             self.wait_until(lambda: not w.running)
         prepare.assert_called_once_with(
-            checked, "COM4", 3, "Capture", w.paths, label_supervision=False,
+            checked, "COM4", 3, "Capture", w.paths,
+            label_supervision=False, preview_video=False,
         )
         prompt = confirm.call_args.args[0]
         self.assertIn("运行前必须确认", prompt)

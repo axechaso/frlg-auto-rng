@@ -53,6 +53,7 @@ from .easycon118 import (
     validate_runtime,
     write_configured_project,
 )
+from .frame_parity import resolve_frame_parity
 from .planner import AutoSearchRequest, RunPlan
 from .seed_modes import settings_to_seed_mode
 from .support import get_route_support
@@ -113,6 +114,8 @@ class TidStarterFlowRequest:
     update_precalibration: bool = False
     starter_debug_log_output: int = 1
     starter_frame_parity_scheme: int = 1
+    starter_record_shiny_video: bool = False
+    starter_mystery_gift_enabled: bool = False
     starter_reverse_expansion_layers: int | None = None
     starter_reverse_expansion_seed_tolerances: tuple[int, int, int] | None = None
     starter_reverse_expansion_frame_half_widths: tuple[int, int, int] | None = None
@@ -135,10 +138,21 @@ class TidStarterFlowRequest:
             raise ValueError("御三家脚本模板只能选择正式版或时间轴版入口")
         if not isinstance(self.update_precalibration, bool):
             raise ValueError("御三家更新预校准开关必须是布尔值")
+        if type(self.starter_record_shiny_video) is not bool:
+            raise ValueError("御三家出闪录像开关必须是布尔值")
+        if type(self.starter_mystery_gift_enabled) is not bool:
+            raise ValueError("御三家神秘礼物状态必须是布尔值")
         if self.starter_debug_log_output not in {0, 1}:
             raise ValueError("御三家输出日志模式只能是0（精简）或1（完整调试）")
         if self.starter_frame_parity_scheme not in {0, 1}:
             raise ValueError("御三家奇偶调整方案只能是0（F1/F2）或1（菜单）")
+        policy = resolve_frame_parity(
+            requested=self.starter_frame_parity_scheme,
+            mystery_gift_enabled=self.starter_mystery_gift_enabled,
+            is_egg=False,
+        )
+        if policy.effective != self.starter_frame_parity_scheme:
+            raise ValueError("御三家神秘礼物状态要求有效帧奇偶方案为 1")
         expansion = EasyCon118Options(
             reverse_expansion_layers=self.starter_reverse_expansion_layers,
             reverse_expansion_seed_tolerances=self.starter_reverse_expansion_seed_tolerances,
@@ -281,6 +295,8 @@ def tid_starter_flow_request_from_dict(payload: dict[str, object]) -> TidStarter
         update_precalibration=payload.get("update_precalibration", False),
         starter_debug_log_output=int(payload.get("starter_debug_log_output", 1)),
         starter_frame_parity_scheme=int(payload.get("starter_frame_parity_scheme", 1)),
+        starter_record_shiny_video=payload.get("starter_record_shiny_video", False),
+        starter_mystery_gift_enabled=payload.get("starter_mystery_gift_enabled", False),
         starter_reverse_expansion_layers=(
             None
             if payload.get("starter_reverse_expansion_layers") is None
@@ -995,6 +1011,8 @@ def write_tid_starter_flow_bundle(
                 precalibration_context_kind="STARTER",
                 debug_log_output=plan.request.starter_debug_log_output,
                 frame_parity_scheme=plan.request.starter_frame_parity_scheme,
+                record_shiny_video=plan.request.starter_record_shiny_video,
+                mystery_gift_enabled=plan.request.starter_mystery_gift_enabled,
                 reverse_expansion_layers=plan.request.starter_reverse_expansion_layers,
                 reverse_expansion_seed_tolerances=plan.request.starter_reverse_expansion_seed_tolerances,
                 reverse_expansion_frame_half_widths=plan.request.starter_reverse_expansion_frame_half_widths,
@@ -1044,6 +1062,8 @@ def write_resolved_exhaustive_starter_project(
             precalibration_context_kind="STARTER",
             debug_log_output=resolved.request.starter_debug_log_output,
             frame_parity_scheme=resolved.request.starter_frame_parity_scheme,
+            record_shiny_video=resolved.request.starter_record_shiny_video,
+            mystery_gift_enabled=resolved.request.starter_mystery_gift_enabled,
             reverse_expansion_layers=resolved.request.starter_reverse_expansion_layers,
             reverse_expansion_seed_tolerances=resolved.request.starter_reverse_expansion_seed_tolerances,
             reverse_expansion_frame_half_widths=resolved.request.starter_reverse_expansion_frame_half_widths,
