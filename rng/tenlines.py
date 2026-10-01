@@ -1,4 +1,8 @@
-"""One-to-one Python port of ten-lines C++ searcher/initial_seed/calibration."""
+"""Ten Lines calculations with result-preserving local search optimizations.
+
+The pinned original is covered by tests/fixtures/frlg-compute-reference.json;
+see docs/FRLG_SEARCH_PERFORMANCE.md for the optimized paths and their scope.
+"""
 
 from itertools import product
 from typing import List, Tuple, Optional, Dict
@@ -145,9 +149,9 @@ def get_gender(pid, gender_ratio):
 
 def get_hidden_power(ivs):
     # C++ uses order[6] = { 0, 1, 2, 5, 3, 4 } to remap IV indices
-    order = [0, 1, 2, 5, 3, 4]
-    h = sum((ivs[order[i]] & 1) << i for i in range(6))
-    p = sum(((ivs[order[i]] >> 1) & 1) << i for i in range(6))
+    hp, atk, defense, spa, spd, speed = ivs
+    h = (hp & 1) | ((atk & 1) << 1) | ((defense & 1) << 2) | ((speed & 1) << 3) | ((spa & 1) << 4) | ((spd & 1) << 5)
+    p = ((hp & 2) >> 1) | (atk & 2) | ((defense & 2) << 1) | ((speed & 2) << 2) | ((spa & 2) << 3) | ((spd & 2) << 4)
     type_val = h * 15 // 63
     power = 30 + p * 40 // 63
     return type_val, power
@@ -208,6 +212,18 @@ class SearcherFilter:
             return True
         return nature in self.natures
 
+    def compare_pid(self, nature, shiny, ability):
+        """Only properties independent of the wild encounter slot."""
+        if not self.compare_nature(nature):
+            return False
+        if self.shiny is not None and self.shiny != 255:
+            if self.shiny == 3:
+                if shiny not in (1, 2):
+                    return False
+            elif shiny != self.shiny:
+                return False
+        return self.ability is None or ability == self.ability
+
     def compare_state(
         self,
         ivs,
@@ -254,14 +270,19 @@ def iter_iv_combinations(iv_min, iv_max, iv_total=None):
         yield from product(*(range(lo, hi + 1) for lo, hi in zip(iv_min, iv_max)))
         return
 
+    suffix_min, suffix_max = [0] * 7, [0] * 7
+    for index in range(5, -1, -1):
+        suffix_min[index] = suffix_min[index + 1] + iv_min[index]
+        suffix_max[index] = suffix_max[index + 1] + iv_max[index]
+
     def visit(index, remaining, prefix):
         if index == 5:
             value = remaining
             if iv_min[index] <= value <= iv_max[index]:
                 yield tuple(prefix + [value])
             return
-        rest_min = sum(iv_min[index + 1:])
-        rest_max = sum(iv_max[index + 1:])
+        rest_min = suffix_min[index + 1]
+        rest_max = suffix_max[index + 1]
         lower = max(iv_min[index], remaining - rest_max)
         upper = min(iv_max[index], remaining - rest_min)
         for value in range(upper, lower - 1, -1):
@@ -282,6 +303,9 @@ def search_static(iv_min, iv_max, method, tsv, gender_ratio=127,
             ivs = (hp, atk & 7, 0, 0, 0, 0)
         else:
             ivs = (hp, atk, def_, spa, spd, spe)
+        hp_type, hp_power = get_hidden_power(ivs)
+        if filter_obj and filter_obj.hp_type is not None and hp_type != filter_obj.hp_type:
+            continue
         seeds = recover_pokerng_iv(hp, atk, def_, spa, spd, spe, method)
         for seed in seeds:
             rng = seed
@@ -292,19 +316,17 @@ def search_static(iv_min, iv_max, method, tsv, gender_ratio=127,
             rng = pokerngr_next(rng); pid_low = rng >> 16
             pid = (pid_high << 16) | pid_low
             nature = pid % 25
-            if filter_obj and not filter_obj.compare_nature(nature):
-                continue
-            state_seed = pokerngr_next(rng)
             ability = pid & 1
-            gender = get_gender(pid, gender_ratio)
             shiny = get_shiny(pid, tsv)
-            hp_type, hp_power = get_hidden_power(ivs)
+            if filter_obj and not filter_obj.compare_pid(nature, shiny, ability):
+                continue
+            gender = get_gender(pid, gender_ratio)
             if filter_obj and not filter_obj.compare_state(
                     ivs, nature, shiny, gender, hp_type,
                     ability=ability):
                 continue
             yield {
-                "seed": state_seed, "pid": pid, "ivs": ivs,
+                "seed": pokerngr_next(rng), "pid": pid, "ivs": ivs,
                 "ability": ability, "gender": gender, "nature": nature,
                 "shiny": shiny, "hidden_type": hp_type, "hidden_power": hp_power,
             }
@@ -420,6 +442,9 @@ def search_wild(iv_min, iv_max, method, tsv, encounter_slots,
         if cancel_check is not None and cancel_check():
             return
         ivs = (hp, atk, def_, spa, spd, spe)
+        hp_type, hp_power = get_hidden_power(ivs)
+        if filter_obj and filter_obj.hp_type is not None and hp_type != filter_obj.hp_type:
+            continue
         seeds = recover_pokerng_iv(hp, atk, def_, spa, spd, spe, method)
         for seed in seeds:
             rng = seed
@@ -430,7 +455,9 @@ def search_wild(iv_min, iv_max, method, tsv, encounter_slots,
             rng = pokerngr_next(rng); pid_low = rng >> 16
             pid = (pid_high << 16) | pid_low
             nature = pid % 25
-            if filter_obj and not filter_obj.compare_nature(nature):
+            ability = pid & 1
+            shiny = get_shiny(pid, tsv)
+            if filter_obj and not filter_obj.compare_pid(nature, shiny, ability):
                 continue
             rng = pokerngr_next(rng); next_rng = rng >> 16
             rng = pokerngr_next(rng); next_rng2 = rng >> 16
@@ -450,10 +477,7 @@ def search_wild(iv_min, iv_max, method, tsv, encounter_slots,
                         min_lv = slot_info.get("min_level", 1)
                         max_lv = slot_info.get("max_level", 1)
                         level = min_lv + (next_rng2 % (max_lv - min_lv + 1))
-                        ability = pid & 1
                         gender = get_gender(pid, gender_ratio)
-                        shiny = get_shiny(pid, tsv)
-                        hp_type, hp_power = get_hidden_power(ivs)
                         if filter_obj is None or filter_obj.compare_state(
                                 ivs, nature, shiny, gender, hp_type, enc_slot,
                                 ability=ability):
@@ -484,9 +508,20 @@ def build_sorted_initial_seeds():
     if sorted_initial_seeds_table is not None:
         return sorted_initial_seeds_table
     data = []
-    for seed in range(0x10000):
-        dist = pokerng_distance(seed, 0)
-        data.append((dist, seed))
+    # Walk the complete low-16-bit cycle once. After 2**16 advances the
+    # low word is unchanged, and the high word increases by an odd step:
+    # ((JUMP_TABLE[16].mult - 1) * low + add) >> 16, modulo 2**16.
+    # Its modular inverse gives the remaining whole cycles needed to reach
+    # the 16-bit seed (high word zero), without 65536 separate 32-bit walks.
+    state = 0
+    mult, add = JUMP_TABLE[16]
+    for low_distance in range(0x10000):
+        seed = state & 0xFFFF
+        high_step = (((mult - 1) * seed + add) >> 16) & 0xFFFF
+        cycles = (-(state >> 16) * pow(high_step, -1, 0x10000)) & 0xFFFF
+        distance_from_zero = low_distance | (cycles << 16)
+        data.append((-distance_from_zero & 0xFFFFFFFF, seed))
+        state = pokerng_next(state)
     data.sort(key=lambda x: x[0])
     sorted_initial_seeds_table = data
     return sorted_initial_seeds_table
@@ -965,10 +1000,11 @@ def calibration_wild_pybind(seeds, initial_advances, max_advances, offset, metho
     return results
 
 
-def get_contiguous_seed_list(seed_data, setting_key, game_version, held_button):
+def get_contiguous_seed_list(seed_data, setting_key, game_version, held_button, initial_seed=None):
     """1:1 port of C++ get_contiguous_seed_list().
     Returns list of {initial_seed, seed_time} dicts for the given setting key,
-    with held_button offset applied."""
+    with held_button offset applied. An exact seed uses the parsed reverse
+    index, preserving the original occurrence order and duplicate times."""
     seed_map, contiguous = seed_data
     if setting_key not in contiguous:
         return []
@@ -979,8 +1015,12 @@ def get_contiguous_seed_list(seed_data, setting_key, game_version, held_button):
         if bm == button_mode and hb == held_button:
             hb_offset = off
             break
+    entries = contiguous[setting_key]
+    if initial_seed is not None:
+        unoffset_seed = (initial_seed - hb_offset) & 0xFFFF
+        entries = (entry for entry in seed_map.get(unoffset_seed, ()) if entry['key'] == setting_key)
     result = []
-    for entry in contiguous[setting_key]:
+    for entry in entries:
         result.append({
             "initial_seed": (entry["initial_seed"] + hb_offset) & 0xFFFF,
             "seed_time": entry["seed_time"],

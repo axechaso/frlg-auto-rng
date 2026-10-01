@@ -1,0 +1,102 @@
+{
+  "request": {
+    "game": "fr_nx",
+    "tid": 0,
+    "sid": 38448,
+    "method": "All Wild Methods",
+    "category": "Grass",
+    "location": "Cerulean Cave 1F",
+    "pokemon": "Golbat",
+    "max_advances": 10000,
+    "min_advances": 0,
+    "iv_min": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "iv_max": [
+      31,
+      31,
+      31,
+      31,
+      31,
+      31
+    ],
+    "shiny": "Star/Square",
+    "nature": "Any",
+    "gender": "Any",
+    "ability": "Any",
+    "hidden_type": "Any",
+    "initial_seed_result_count": 1,
+    "max_iv_combinations": 25000000,
+    "seed_mode": null,
+    "direct_mode": false,
+    "direct_seed": null,
+    "direct_advances": null,
+    "dunsparce_three_segment": false
+  },
+  "target": {
+    "target_seed": "1054FF81",
+    "method": "Wild 4",
+    "pokemon": "Golbat",
+    "level": 46,
+    "pid": "0C319A01",
+    "shiny": "Square",
+    "nature": "Docile",
+    "ability": "Inner Focus",
+    "ivs": {
+      "hp": 28,
+      "attack": 31,
+      "defense": 31,
+      "sp_attack": 26,
+      "sp_defense": 25,
+      "speed": 24
+    },
+    "hidden_type": "Water",
+    "hidden_power": 43,
+    "gender": "F"
+  },
+  "initial_seed": {
+    "seed": "BFBD",
+    "advances": 212,
+    "total_frames": 2987,
+    "total_time": "00:00:50.003",
+    "seed_time": 44393,
+    "settings": {
+      "sound": "mono",
+      "button_mode": "h",
+      "seed_button": "start",
+      "extra_button": "blackout_r"
+    }
+  },
+  "selection": {
+    "iv_total": 165,
+    "iv_average": 27.5,
+    "rule": "highest_iv_total_then_lowest_advances"
+  },
+  "execution": {
+    "seed_mode": 8,
+    "game_settings": {
+      "sound": "mono",
+      "button_mode": "h",
+      "seed_button": "start",
+      "extra_button": "blackout_r"
+    }
+  },
+  "route_support": {
+    "level": "baseline_118",
+    "summary": "2.0 普通野生流程基线；仍需按地点完成实机验收。",
+    "can_start": true
+  },
+  "warnings": [
+    "已自动选择 Seed 模式 8；运行前必须确认游戏内 SOUND/BUTTON MODE 与该模式一致。"
+  ],
+  "search_summary": {
+    "matching_outcomes": 68,
+    "reachable_outcomes": 68,
+    "feasible_routes": 1
+  }
+}

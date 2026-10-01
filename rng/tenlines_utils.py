@@ -2,6 +2,7 @@ import json
 import math
 import os
 from dataclasses import dataclass, field
+from functools import lru_cache
 from itertools import chain
 from typing import Iterable, Iterator, List, Tuple, Optional
 
@@ -813,16 +814,29 @@ def search_targets(
     ))
 
 
-def _count_iv_combinations(iv_min, iv_max, iv_total):
-    counts = {0: 1}
+@lru_cache(maxsize=64)
+def _iv_total_counts(iv_min, iv_max):
+    """All tier sizes for immutable bounds; never cache mutable search results."""
+    counts = [1]
     for lower, upper in zip(iv_min, iv_max):
-        next_counts = {}
-        for subtotal, count in counts.items():
-            for value in range(lower, upper + 1):
-                new_total = subtotal + value
-                next_counts[new_total] = next_counts.get(new_total, 0) + count
+        if lower > upper:
+            return ()
+        next_counts = [0] * (len(counts) + upper)
+        window = 0
+        for total in range(len(next_counts)):
+            added, removed = total - lower, total - upper - 1
+            if 0 <= added < len(counts):
+                window += counts[added]
+            if 0 <= removed < len(counts):
+                window -= counts[removed]
+            next_counts[total] = window
         counts = next_counts
-    return counts.get(iv_total, 0)
+    return tuple(counts)
+
+
+def _count_iv_combinations(iv_min, iv_max, iv_total):
+    counts = _iv_total_counts(tuple(iv_min), tuple(iv_max))
+    return counts[iv_total] if 0 <= iv_total < len(counts) else 0
 
 
 def search_target_tiers(*, max_iv_combinations=25_000_000, **kwargs):

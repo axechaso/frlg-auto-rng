@@ -352,8 +352,8 @@ def select_seed_mode_for_seed(
                 settings.setting_key,
                 game,
                 settings.extra_button,
+                initial_seed=seed_value,
             )
-            if entry["initial_seed"] == seed_value
         ]
         if matching_times:
             candidates.append((
