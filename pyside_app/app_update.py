@@ -1,4 +1,4 @@
-"""PySide6 controller for verified whole-package application updates."""
+"""PySide6 controller for verified incremental application updates."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from app_updater import (
     UpdateError,
     check_for_update,
     is_frozen_build,
+    plan_incremental_update,
     prepare_update,
     write_install_request,
 )
@@ -34,6 +35,7 @@ class AppUpdateController(QObject):
         self.frozen = is_frozen_build() if frozen is None else bool(frozen)
         self.executable = Path(sys.executable).resolve()
         self.candidate: UpdateCandidate | None = None
+        self.incremental_plan = None
         self.button = window.actions["检查程序更新"]
         self.source_combo = window.fields["update_source"]
         self.source_combo.currentIndexChanged.connect(self._source_changed)
@@ -60,6 +62,7 @@ class AppUpdateController(QObject):
 
     def _source_changed(self, *_args) -> None:
         self.candidate = None
+        self.incremental_plan = None
         labels = {
             "auto": "自动（GitHub 优先）",
             "github": "GitHub",
@@ -80,23 +83,33 @@ class AppUpdateController(QObject):
         return labels[0]
 
     @staticmethod
-    def description(candidate: UpdateCandidate) -> str:
+    def description(candidate: UpdateCandidate, plan=None) -> str:
         manifest = candidate.manifest
         size_mib = manifest.bytes / (1024 * 1024)
         notes = manifest.notes.strip() or "本版未提供额外更新说明。"
         source = (
-            f"Gitee（{len(candidate.parts)} 个分卷）"
+            ("Gitee（增量更新）" if candidate.incremental else f"Gitee（{len(candidate.parts)} 个分卷）")
             if candidate.source == "gitee"
             else "GitHub"
         )
+        if plan is not None:
+            download = (
+                f"增量下载：{plan.download_bytes / (1024 * 1024):.1f} MiB\n"
+                f"复用本地文件：{len(plan.reuse)}/{len(plan.manifest.files)}\n"
+                f"完整包大小：{size_mib:.1f} MiB（供比较）"
+            )
+            action = "将仅下载所需数据包，组装并校验新版后退出安装。是否继续？"
+        else:
+            download = f"下载大小：{size_mib:.1f} MiB"
+            action = "此版本未提供增量资源，将下载完整绿色版、校验后退出并安装。是否继续？"
         return (
             f"当前版本：{APP_VERSION}\n"
             f"新版本：{manifest.version}\n"
             f"发布时间：{candidate.published_at}\n"
             f"下载来源：{source}\n"
-            f"下载大小：{size_mib:.1f} MiB\n\n"
+            f"{download}\n\n"
             f"{notes}\n\n"
-            "将下载完整绿色版、校验后退出并安装。是否继续？"
+            f"{action}"
         )
 
     def check(self, *, force: bool = True) -> None:
@@ -127,6 +140,7 @@ class AppUpdateController(QObject):
     def _checked(self, result: UpdateCheckResult, *, manual: bool) -> None:
         self.status.setText(result.message)
         self.candidate = result.candidate
+        self.incremental_plan = None
         if result.status == "error":
             if manual:
                 QMessageBox.warning(self.w, "程序更新检查失败", result.message)
@@ -141,15 +155,32 @@ class AppUpdateController(QObject):
                 "当前任务结束后可手动更新。"
             )
             return
+        if result.candidate.incremental is not None:
+            self.status.setText("正在比对本地文件，计算增量下载大小……")
+            self.w.launch_job(
+                lambda cancel, status: plan_incremental_update(
+                    result.candidate, install_dir=self.executable.parent,
+                    updates_root=self.w.paths.user / "updates", cancelled=cancel, status=status,
+                ),
+                lambda plan: self._offer_update(result.candidate, plan),
+                "正在计算增量下载大小……",
+            )
+            return
+        self._offer_update(result.candidate)
+
+    def _offer_update(self, candidate: UpdateCandidate, plan=None) -> None:
+        self.incremental_plan = plan
+        if plan is not None:
+            self.status.setText(f"增量更新需下载 {plan.download_bytes / (1024 * 1024):.1f} MiB。")
         if (
             QMessageBox.question(
                 self.w,
                 "发现程序更新",
-                self.description(result.candidate),
+                self.description(candidate, plan),
             )
             == QMessageBox.StandardButton.Yes
         ):
-            self.download(result.candidate)
+            self.download(candidate)
 
     def download(self, candidate: UpdateCandidate | None = None) -> None:
         candidate = candidate or self.candidate
@@ -170,10 +201,11 @@ class AppUpdateController(QObject):
 
             def progress(received: int, total: int) -> None:
                 nonlocal last_percent
-                percent = min(100, int(received * 100 / total)) if total else 0
+                percent = min(100, int(received * 100 / total)) if total else 100
                 if percent != last_percent:
                     last_percent = percent
-                    status(f"正在下载完整绿色版：{percent}%")
+                    kind = "增量数据包" if candidate.incremental else "完整绿色版"
+                    status(f"正在下载{kind}：{percent}%（{received / (1024 * 1024):.1f}/{total / (1024 * 1024):.1f} MiB）")
 
             try:
                 return (
@@ -185,6 +217,8 @@ class AppUpdateController(QObject):
                         progress=progress,
                         cancelled=cancel,
                         allow_gitee_fallback=source == "auto",
+                        incremental_plan=self.incremental_plan,
+                        status=status,
                     ),
                 )
             except UpdateCancelled as exc:

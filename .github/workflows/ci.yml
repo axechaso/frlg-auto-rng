@@ -78,10 +78,12 @@ jobs:
           run_tid_starter_flow.py
           app_version.py
           app_updater.py
+          incremental_update.py
           update_installer.py
           updater_entry.py
           package_entry.py
           tools/create_update_manifest.py
+          tools/verify_incremental_release.py
           tools/stage_release_assets.py
           tools/verify_windows_upgrade.py
           tools/verify_frozen_workers.py
@@ -166,6 +168,7 @@ jobs:
           tests.test_package_entry
           tests.test_worker_commands
           tests.test_app_updater
+          tests.test_incremental_update
           tests.test_update_installer
           tests.test_update_manifest_tool
           tests.test_windows_release_scripts

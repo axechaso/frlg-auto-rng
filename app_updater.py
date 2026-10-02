@@ -1,4 +1,4 @@
-"""Safe discovery and staging for frozen whole-package updates."""
+"""Verified incremental staging with legacy whole-package update compatibility."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from typing import Callable
 
 import certifi
 import truststore
+import incremental_update
 
 from app_version import (
     APP_VERSION_CODE,
@@ -100,6 +101,8 @@ class UpdateCandidate:
     tag_name: str = ""
     source: str = "github"
     parts: tuple[UpdatePackagePart, ...] = ()
+    incremental: incremental_update.Manifest | None = None
+    incremental_urls: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -407,6 +410,8 @@ def _candidate_to_json(candidate: UpdateCandidate | None) -> dict[str, object] |
         "tag_name": candidate.tag_name,
         "source": candidate.source,
         "parts": [asdict(part) for part in candidate.parts],
+        "incremental": asdict(candidate.incremental) if candidate.incremental else None,
+        "incremental_urls": dict(candidate.incremental_urls),
     }
 
 
@@ -429,7 +434,9 @@ def _candidate_from_json(value: object) -> UpdateCandidate | None:
         package_url = _validate_https_url(value.get("package_url"), "缓存下载地址")
         if raw_parts not in (None, []):
             raise UpdateError("GitHub 更新缓存不应包含分卷")
-        return UpdateCandidate(manifest, package_url, published_at, tag_name)
+        return _restore_incremental(
+            UpdateCandidate(manifest, package_url, published_at, tag_name), value,
+        )
     if source != "gitee" or value.get("package_url") is not None:
         raise UpdateError("更新缓存来源无效")
     if not isinstance(raw_parts, list) or not raw_parts:
@@ -456,9 +463,70 @@ def _candidate_from_json(value: object) -> UpdateCandidate | None:
         parts.append(UpdatePackagePart(name, digest, size, url))
     if total != manifest.bytes:
         raise UpdateError("Gitee 更新缓存分卷总大小无效")
-    return UpdateCandidate(
-        manifest, None, published_at, tag_name, "gitee", tuple(parts),
+    return _restore_incremental(
+        UpdateCandidate(manifest, None, published_at, tag_name, "gitee", tuple(parts)), value,
     )
+
+
+def _incremental_asset_url(candidate: UpdateCandidate, asset: dict, name: str) -> str:
+    if candidate.source == "gitee":
+        return _validated_gitee_asset_url(asset, name, candidate.tag_name)
+    url = _validated_asset_url(asset, name)
+    expected = f"/{GITHUB_REPOSITORY}/releases/download/{candidate.tag_name}/{name}"
+    if urllib.parse.unquote(urllib.parse.urlparse(url).path) != expected:
+        raise UpdateError("增量资产与 Release 版本不一致")
+    return url
+
+
+def _restore_incremental(candidate: UpdateCandidate, value: dict) -> UpdateCandidate:
+    from dataclasses import replace
+
+    data = value.get("incremental")
+    if data is None:
+        return candidate
+    try:
+        metadata = incremental_update.parse_manifest(data)
+    except incremental_update.IncrementalError as exc:
+        raise UpdateError(str(exc)) from exc
+    if (
+        metadata.version != candidate.manifest.version
+        or candidate.tag_name != f"v{metadata.version}"
+        or metadata.version_code != candidate.manifest.version_code
+        or metadata.package_sha256 != candidate.manifest.sha256
+        or metadata.unpacked_bytes != candidate.manifest.unpacked_bytes
+    ):
+        raise UpdateError("增量清单与完整更新清单不一致")
+    urls = value.get("incremental_urls")
+    if not isinstance(urls, dict) or set(urls) != {bundle.name for bundle in metadata.bundles}:
+        raise UpdateError("增量清单缺少数据包下载地址")
+    verified = tuple((bundle.name, _incremental_asset_url(
+        candidate, {"name": bundle.name, "browser_download_url": urls[bundle.name]}, bundle.name,
+    )) for bundle in metadata.bundles)
+    return replace(candidate, incremental=metadata, incremental_urls=verified)
+
+
+def _attach_incremental(candidate: UpdateCandidate, assets: dict, opener: Callable) -> UpdateCandidate:
+    name = incremental_update.MANIFEST_NAME
+    if name not in assets:
+        return candidate  # Releases published before incremental support.
+    url = _incremental_asset_url(candidate, assets[name], name)
+    request = urllib.request.Request(url, headers={"User-Agent": "FRLG-Auto-RNG-Updater"})
+    with _open(opener, request, 15.0) as response:
+        payload = _read_response(response, incremental_update.MAX_MANIFEST_BYTES)
+    data = _read_json_object(payload, "增量更新清单")
+    try:
+        metadata = incremental_update.parse_manifest(data)
+    except incremental_update.IncrementalError as exc:
+        raise UpdateError(str(exc)) from exc
+    urls = {}
+    for bundle in metadata.bundles:
+        asset = assets.get(bundle.name)
+        if asset is None:
+            raise UpdateError(f"Release 缺少增量数据包：{bundle.name}")
+        if "size" in asset and asset["size"] != bundle.bytes:
+            raise UpdateError(f"增量数据包大小与 Release 不一致：{bundle.name}")
+        urls[bundle.name] = _incremental_asset_url(candidate, asset, bundle.name)
+    return _restore_incremental(candidate, {"incremental": data, "incremental_urls": urls})
 
 
 def _response_header(response: object, name: str) -> str | None:
@@ -575,7 +643,7 @@ def fetch_gitee_candidate(
     with _open(opener, manifest_request, 12.0) as response:
         manifest_payload = _read_response(response, 256 * 1024)
     manifest, parts = parse_gitee_manifest(manifest_payload)
-    return candidate_from_gitee_release(release, manifest, parts)
+    return _attach_incremental(candidate_from_gitee_release(release, manifest, parts), assets, opener)
 
 
 def check_for_update(
@@ -683,7 +751,7 @@ def check_for_update(
             with _open(opener, manifest_request, 12.0) as response:
                 manifest_payload = _read_response(response, 256 * 1024)
             manifest = parse_manifest(manifest_payload)
-            candidate = candidate_from_release(release, manifest)
+            candidate = _attach_incremental(candidate_from_release(release, manifest), assets, opener)
             if manifest.version_code > current_version_code:
                 result = UpdateCheckResult(
                     "available", f"发现新版本 {manifest.version}。", candidate
@@ -981,6 +1049,101 @@ def _probe_staged_version(stage_dir: Path, manifest: UpdateManifest) -> None:
         raise UpdateError("新版程序内嵌版本与更新清单不一致")
 
 
+def _check_cancelled(cancelled: Callable[[], bool] | None) -> None:
+    if cancelled is not None and cancelled():
+        raise UpdateCancelled("程序更新已取消")
+
+
+def plan_incremental_update(
+    candidate: UpdateCandidate, *, install_dir: Path, updates_root: Path,
+    cancelled: Callable[[], bool] | None = None,
+    status: Callable[[str], None] | None = None,
+) -> incremental_update.Plan | None:
+    if candidate.incremental is None:
+        return None
+    try:
+        return incremental_update.plan_update(
+            candidate.incremental, Path(install_dir), Path(updates_root) / "bundles",
+            cancelled=lambda: _check_cancelled(cancelled), status=status or (lambda text: None),
+        )
+    except incremental_update.IncrementalError as exc:
+        raise UpdateError(str(exc)) from exc
+
+
+def _download_incremental_bundles(
+    candidate: UpdateCandidate, plan: incremental_update.Plan, cache: Path, *,
+    opener: Callable, progress: Callable[[int, int], None] | None,
+    cancelled: Callable[[], bool] | None,
+) -> None:
+    cache.mkdir(parents=True, exist_ok=True)
+    check_cancel = lambda: _check_cancelled(cancelled)
+    missing = [bundle for bundle in plan.needed if not incremental_update.matches(
+        incremental_update.local_file(cache, bundle.name), bundle.bytes, bundle.sha256, check_cancel,
+    )]
+    total = sum(bundle.bytes for bundle in missing)
+    received = 0
+    urls = dict(candidate.incremental_urls)
+    if progress:
+        progress(0, total)
+    for bundle in missing:
+        check_cancel()
+        destination = cache / bundle.name
+        partial = cache / f"{bundle.name}.{uuid.uuid4().hex}.part"
+        request = urllib.request.Request(urls[bundle.name], headers={"User-Agent": "FRLG-Auto-RNG-Updater"})
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            with _open(opener, request, 30.0) as response, partial.open("xb") as output:
+                while chunk := response.read(DOWNLOAD_CHUNK_BYTES):
+                    check_cancel()
+                    size += len(chunk)
+                    if size > bundle.bytes:
+                        raise UpdateError(f"增量数据包下载大小超出清单：{bundle.name}")
+                    digest.update(chunk)
+                    output.write(chunk)
+                    received += len(chunk)
+                    if progress:
+                        progress(received, total)
+            if size != bundle.bytes or digest.hexdigest() != bundle.sha256:
+                raise UpdateError(f"增量数据包大小或 SHA-256 校验失败：{bundle.name}")
+            partial.replace(destination)
+        except urllib.error.HTTPError as exc:
+            raise UpdateSourceUnavailable(
+                f"增量数据包下载失败：{candidate.source} HTTP {exc.code}；{request.full_url}"
+            ) from exc
+        finally:
+            partial.unlink(missing_ok=True)
+    if progress:
+        progress(total, total)
+
+
+def _prepare_incremental(
+    candidate: UpdateCandidate, plan: incremental_update.Plan, install_dir: Path,
+    updates_root: Path, stage_dir: Path, *, opener: Callable,
+    progress: Callable[[int, int], None] | None, cancelled: Callable[[], bool] | None,
+    status: Callable[[str], None], allow_gitee_fallback: bool,
+) -> None:
+    cache = updates_root / "bundles"
+    try:
+        _download_incremental_bundles(candidate, plan, cache, opener=opener, progress=progress, cancelled=cancelled)
+    except (OSError, urllib.error.URLError, UpdateSourceUnavailable) as exc:
+        if candidate.source != "github" or not allow_gitee_fallback:
+            raise UpdateError(f"{candidate.source} 增量更新下载失败：{exc}") from exc
+        status("GitHub 下载失败，正在检查 Gitee 增量备用源……")
+        _check_cancelled(cancelled)
+        mirror = fetch_gitee_candidate(opener=opener)
+        if not _same_package(candidate.manifest, mirror.manifest) or mirror.incremental != candidate.incremental:
+            raise UpdateError("Gitee 备用源增量清单与 GitHub 不一致") from exc
+        _download_incremental_bundles(mirror, plan, cache, opener=opener, progress=progress, cancelled=cancelled)
+    try:
+        incremental_update.stage_update(
+            plan, install_dir, cache, stage_dir,
+            cancelled=lambda: _check_cancelled(cancelled), status=status,
+        )
+    except incremental_update.IncrementalError as exc:
+        raise UpdateError(str(exc)) from exc
+
+
 def prepare_update(
     candidate: UpdateCandidate,
     *,
@@ -994,6 +1157,8 @@ def prepare_update(
     cancel_event: object | None = None,
     version_probe: Callable[[Path], dict[str, object]] | None = None,
     allow_gitee_fallback: bool = True,
+    incremental_plan: incremental_update.Plan | None = None,
+    status: Callable[[str], None] | None = None,
 ) -> PreparedUpdate:
     install_dir = Path(install_dir).resolve()
     updates_root = Path(updates_root).resolve()
@@ -1011,18 +1176,44 @@ def prepare_update(
     stage_dir = install_dir.parent / f".frlg-update-stage-{request_id}"
     if stage_dir.exists():
         raise UpdateError("更新暂存目录已存在")
-    needed = required_free_space(candidate.manifest)
+    report = status or (lambda text: None)
+    if candidate.incremental is not None:
+        if incremental_plan is None:
+            incremental_plan = plan_incremental_update(
+                candidate, install_dir=install_dir, updates_root=updates_root,
+                cancelled=cancelled, status=report,
+            )
+        if incremental_plan.manifest != candidate.incremental:
+            raise UpdateError("增量下载计划与当前候选不一致，请重新检查更新")
+        needed = candidate.manifest.unpacked_bytes + max(256 * 1024 * 1024, candidate.manifest.unpacked_bytes // 10)
+    else:
+        needed = required_free_space(candidate.manifest)
     if shutil.disk_usage(install_dir.parent).free < needed:
         raise UpdateError("安装盘剩余空间不足，无法安全保留回滚副本")
     updates_root.mkdir(parents=True, exist_ok=True)
+    if candidate.incremental is not None:
+        same_volume = updates_root.stat().st_dev == install_dir.parent.stat().st_dev
+        cache_needed = incremental_plan.download_bytes + (needed if same_volume else 64 * 1024 * 1024)
+        if shutil.disk_usage(updates_root).free < cache_needed:
+            raise UpdateError("更新缓存盘剩余空间不足")
     download_dir = updates_root / "downloads" / str(candidate.manifest.version_code)
     package_path = download_dir / candidate.manifest.package
-    if package_path.is_file():
+    if candidate.incremental is not None:
+        report(
+            f"增量更新：复用 {len(incremental_plan.reuse)}/{len(candidate.incremental.files)} 个文件，"
+            f"需下载 {incremental_plan.download_bytes / (1024 * 1024):.1f} MiB"
+        )
+        _prepare_incremental(
+            candidate, incremental_plan, install_dir, updates_root, stage_dir,
+            opener=opener, progress=progress, cancelled=cancelled,
+            status=report, allow_gitee_fallback=allow_gitee_fallback,
+        )
+    elif package_path.is_file():
         actual_size = package_path.stat().st_size
-        digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
+        digest = incremental_update.digest_file(package_path, lambda: _check_cancelled(cancelled))
         if actual_size != candidate.manifest.bytes or digest != candidate.manifest.sha256:
             package_path.unlink()
-    if not package_path.is_file():
+    if candidate.incremental is None and not package_path.is_file():
         download_package(
             candidate,
             package_path,
@@ -1031,10 +1222,13 @@ def prepare_update(
             cancelled=cancelled,
             allow_gitee_fallback=allow_gitee_fallback,
         )
-    if cancelled is not None and cancelled():
-        raise UpdateCancelled("程序更新已取消")
-    safe_extract(package_path, stage_dir, candidate.manifest)
+    if candidate.incremental is None:
+        _check_cancelled(cancelled)
+        report("正在解压并校验完整更新包……")
+        safe_extract(package_path, stage_dir, candidate.manifest)
     try:
+        _check_cancelled(cancelled)
+        report("正在验证新版程序版本……")
         if version_probe is not None:
             probed = version_probe(stage_dir)
             if not isinstance(probed, dict):
