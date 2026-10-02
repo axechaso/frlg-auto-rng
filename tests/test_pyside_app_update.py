@@ -127,6 +127,29 @@ class PySideAppUpdateTests(unittest.TestCase):
         )
         self.assertEqual(saved["update_source"], "gitee")
 
+    def test_incremental_check_compares_files_before_prompt_and_shows_actual_bytes(self):
+        from dataclasses import replace
+        from PySide6.QtWidgets import QMessageBox
+
+        chosen = replace(candidate(), incremental=object())
+        plan = SimpleNamespace(download_bytes=2 * 1024 * 1024, reuse={"runtime.dll"}, manifest=SimpleNamespace(files=[1, 2]))
+        self.window.app_update.frozen = True
+        with (
+            patch("pyside_app.app_update.check_for_update", return_value=UpdateCheckResult("available", "available", chosen)),
+            patch("pyside_app.app_update.plan_incremental_update", return_value=plan) as compare,
+            patch("pyside_app.app_update.prepare_update") as prepare,
+            patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as question,
+        ):
+            self.window.actions["检查程序更新"].click()
+            self.wait_until(lambda: self.window.job is None)
+            compare.assert_called_once()
+            prepare.assert_not_called()
+            self.assertIn("增量下载：2.0 MiB", question.call_args.args[2])
+            self.assertIn("复用本地文件：1/2", question.call_args.args[2])
+            self.assertIs(self.window.app_update.incremental_plan, plan)
+        self.window.fields["update_source"].setCurrentIndex(2)
+        self.assertIsNone(self.window.app_update.incremental_plan)
+
     def test_label_supervision_defaults_off_and_persists_opt_in(self):
         self.assertFalse(self.window.label_supervision_check.isChecked())
         self.window.label_supervision_check.setChecked(True)

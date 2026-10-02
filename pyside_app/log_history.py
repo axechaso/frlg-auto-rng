@@ -9,6 +9,7 @@ from pathlib import Path
 
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _WORKFLOW_NAMES = {
+    "audio_observer": "声音观察",
     "wild": "野生 / 静态",
     "egg": "孵蛋",
     "sid": "SID 查找",

@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -113,3 +114,29 @@ class UpdateManifestToolTests(unittest.TestCase):
                 (root / "update-manifest.json").read_text(encoding="utf-8")
             )
             self.assertEqual(manifest["notes"], expected)
+
+    def test_cli_builds_identical_incremental_assets_for_both_sources(self):
+        from incremental_update import MANIFEST_NAME, verify_release_assets
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            unpacked = root / "release"
+            contents = {"FRLG-Auto-RNG.exe": b"main", "FRLG-Auto-RNG-Updater.exe": b"updater", "_internal/data": b"data"}
+            package = root / f"FRLG-Auto-RNG-{APP_VERSION}-windows-x64.zip"
+            with zipfile.ZipFile(package, "w") as archive:
+                for name, value in contents.items():
+                    path = unpacked / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(value)
+                    archive.writestr(name, value)
+            incremental = root / "incremental"
+            gitee = root / "gitee"
+            with patch.object(sys, "stdout", io.StringIO()):
+                self.assertEqual(main([
+                    "--package", str(package), "--unpacked-root", str(unpacked),
+                    "--gitee-assets-dir", str(gitee), "--incremental-assets-dir", str(incremental),
+                ]), 0)
+            manifest = json.loads((root / "update-manifest.json").read_text(encoding="utf-8"))
+            metadata = verify_release_assets(package, manifest, incremental)
+            for name in [MANIFEST_NAME, *(bundle.name for bundle in metadata.bundles)]:
+                self.assertEqual((gitee / name).read_bytes(), (incremental / name).read_bytes())
