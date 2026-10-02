@@ -1655,7 +1655,7 @@ class FrlgPreviewWindow(QMainWindow):
         for index, value in enumerate(("auto", "github", "gitee")):
             update_source.setItemData(index, value)
         self._form(runtime, [("update_source", "程序更新源", update_source)], 1)
-        self._actions(runtime, "选择脚本包", "选择 ezcon.exe", "检查/更新 Seed 表", "检查程序更新", "手柄键位", columns=2)
+        self._actions(runtime, "选择脚本包", "选择 ezcon.exe", "检查/更新 Seed 表", "检查程序更新", "手柄键位", "声音判闪试用", columns=2)
         runtime.layout.addWidget(_label("源码模式不使用程序自更新。", role="muted"))
         layout.addWidget(runtime)
         layout.addWidget(self._path_card("SID 查找脚本", "2.0 自动乱数脚本包（SID 独立路径）", "sid_source"))
@@ -2221,7 +2221,7 @@ class FrlgPreviewWindow(QMainWindow):
         self._form(history, [
             ("history_workflow", "流程", _combo(
                 "全部", "野生 / 静态", "孵蛋", "SID 查找", "TID 乱数",
-                "SID 遍历", "脚本测试", "其他",
+                "SID 遍历", "脚本测试", "声音观察", "其他",
             )),
             ("history_search", "搜索", _line(placeholder="文件名或完整路径")),
         ])
