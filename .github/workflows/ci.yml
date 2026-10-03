@@ -49,6 +49,19 @@ jobs:
           run_pyside6_gui.py
           pyside_app/services.py
           pyside_app/log_history.py
+          pyside_app/history_model.py
+          pyside_app/history_controller.py
+          pyside_app/run_input_state.py
+          pyside_app/guide_overlay.py
+          pyside_app/page_guides.py
+          pyside_app/label_repair_prompt.py
+          pyside_app/repair_preview.py
+          pyside_app/label_editor.py
+          pyside_app/label_canvas.py
+          assets/pyside_preview/guide_steps.py
+          label_incidents.py
+          label_verification.py
+          device_label_overrides.py
           pyside_app/path_settings.py
           pyside_app/jobs.py
           pyside_app/profiles.py
@@ -88,6 +101,9 @@ jobs:
           sid_traversal.py
           tenlines_seed_updater.py
           automation/easycon118.py
+          automation/target_verification.py
+          automation/sid_traversal_policy.py
+          automation/frame_parity.py
           automation/calibration_trust_gates.py
           automation/precalibration.py
           automation/seed_common_regions.py
@@ -108,6 +124,10 @@ jobs:
           rng/tenlines_utils.py
           tools/qq_notify_test/app.py
           tools/qq_notify_test/client.py
+          tools/benchmark_history_logs.py
+          tools/verify_acceptance_plans.py
+          tools/verify_easycon_protocol.py
+          tools/verify_guide_layouts.py
 
       - name: Run offline QQ notification integration tests
         run: >-
@@ -132,6 +152,7 @@ jobs:
           tests.test_pyside_services
           tests.test_pyside_backend
           tests.test_pyside_paths
+          tests.test_pyside_diagnostics
           tests.test_pyside_remaining
           tests.test_pyside_app_update
           tests.test_pyside_controller
@@ -160,6 +181,20 @@ jobs:
           tests.test_process_control
           tests.test_precalibration
           tests.test_sid_traversal
+          tests.test_target_verification
+          tests.test_sid_traversal_policy
+          tests.test_run_input_state
+          tests.test_frame_parity
+          tests.test_pyside_defaults
+          tests.test_log_history
+          tests.test_history_async
+          tests.test_label_wait_stages
+          tests.test_label_incidents
+          tests.test_label_verification
+          tests.test_device_label_overrides
+          tests.test_label_repair_prompt
+          tests.test_label_editor_flow
+          tests.test_page_guides
           tests.test_tid_starter_save
           tests.test_tid_starter_flow
           tests.test_japanese_nx2_handoff
@@ -172,3 +207,41 @@ jobs:
           tests.test_update_manifest_tool
           tests.test_windows_release_scripts
           tests.test_pyside_release_upgrade
+
+  input-protocol:
+    name: Production C# input protocol / .NET 9
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install protocol client dependencies
+        run: python -m pip install -r requirements-pyside6.txt -r requirements-pyside-preview.txt
+      - name: Link production patched state source and real enums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git clone https://github.com/EasyConNS/EasyCon.git .build/protocol-source
+          if ($LASTEXITCODE -ne 0) { throw 'clone failed' }
+          git -C .build/protocol-source checkout --detach 9c86137c7e63bff842175470895727a5fa9bab52
+          if ($LASTEXITCODE -ne 0) { throw 'pinned checkout failed' }
+          $patchRoot = (Resolve-Path tools/patches).Path
+          git -C .build/protocol-source apply --include=src/EasyCon.Device/InputStateBuffer.cs "$patchRoot/easycon164a-input-state-v1.patch"
+          if ($LASTEXITCODE -ne 0) { throw 'production state patch failed' }
+          git -C .build/protocol-source apply "$patchRoot/easycon164a-input-state-json-v2.patch"
+          if ($LASTEXITCODE -ne 0) { throw 'numeric arrays patch failed' }
+          New-Item -ItemType Directory -Path .tmp -Force | Out-Null
+          $protocolSource = (Resolve-Path .build/protocol-source).Path
+          dotnet run --project tools/EasyConInputStateProtocolCheck -p:EasyConSource="$protocolSource" -- .tmp/production-state.json
+          if ($LASTEXITCODE -ne 0) { throw 'production serialization failed' }
+          python tools/verify_easycon_protocol.py --samples .tmp/production-state.json
+          if ($LASTEXITCODE -ne 0) { throw 'production parser rejected samples' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-input-state-protocol
+          path: .tmp/production-state.json

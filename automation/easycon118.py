@@ -46,7 +46,7 @@ EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
 EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
-EXPECTED_COMPAT_PATCH_ID = "easycon164a-label-supervision-v10-stage-log-filter-input-state-v1"
+EXPECTED_COMPAT_PATCH_ID = "easycon164a-label-supervision-v10-stage-log-filter-input-state-v2"
 EXPECTED_TESSDATA_SHA256 = {
     "frlg_battle.traineddata": "7abcaef4936727b33717656b38fd5b5027823e1cafec21abb06cc8ef1f7ff758",
     "FRLG_EN_ALL.traineddata": "3272f23a6f259518813025d89be77d706574ccdf163132ccf6f5be15ca19cfa0",
@@ -5742,7 +5742,21 @@ def prepare_compat_runner(
     if manifest.get("source_commit") != EXPECTED_COMPAT_SOURCE_COMMIT:
         raise ValueError("兼容运行器不是从已锁定的 EasyCon 1.6.4-a commit 构建")
     if manifest.get("patch_id") != EXPECTED_COMPAT_PATCH_ID:
-        raise ValueError("兼容运行器补丁标识不一致")
+        raise ValueError("兼容运行器补丁标识不一致；请重建或更新兼容运行器以支持按键回显")
+    dll_records = manifest.get("files")
+    if not isinstance(dll_records, dict):
+        raise ValueError("兼容运行器缺少程序集摘要清单，请重新构建")
+    for name in ("EasyCon.Device.dll", "EasyCon2.CLI.PreviewV5.dll"):
+        dll = runner_path.parent / name
+        record = dll_records.get(name)
+        if not dll.is_file():
+            raise FileNotFoundError(f"兼容运行器缺少程序集 {name}，请重新构建")
+        if not isinstance(record, dict) or not isinstance(record.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", record["sha256"]):
+            raise ValueError(f"兼容运行器程序集摘要记录无效: {name}")
+        actual = hashlib.sha256(dll.read_bytes()).hexdigest()
+        if actual != record["sha256"]:
+            record_fingerprint_mismatch(f"兼容运行器程序集 {name} 指纹不一致: {actual}",
+                                        warning_only=fingerprint_warning_only, warnings=warnings)
     runner_sha256 = hashlib.sha256(runner_path.read_bytes()).hexdigest()
     if manifest.get("sha256") != runner_sha256:
         record_fingerprint_mismatch(

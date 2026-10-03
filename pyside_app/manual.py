@@ -605,6 +605,7 @@ class FrameReader:
         self.source = source
         self.stop = threading.Event()
         self.frame = None
+        self.latest = (0, None)
         self.status = "正在连接画面……"
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
@@ -628,6 +629,7 @@ class FrameReader:
                                     buffer = buffer[end + 2:]
                                     if not frame.isNull():
                                         self.frame = frame
+                                        self.latest = (self.latest[0]+1, frame)
                                         self.status = "运行器共享画面"
                                 if len(buffer) > 8 * 1024 * 1024:
                                     buffer = b""
@@ -647,6 +649,7 @@ class FrameReader:
                     if ok:
                         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         self.frame = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format.Format_RGB888).copy()
+                        self.latest = (self.latest[0]+1, self.frame)
                         self.status = "采集卡实时画面"
                     else:
                         self.status = "没有收到画面，请重连"
@@ -703,6 +706,9 @@ class MonitorWindow(QDialog):
         self.timer.start()
 
     def current_source(self):
+        repair = getattr(getattr(self.host,"accessories",None),"repair_preview",None)
+        if repair and repair.url:
+            return repair.url
         if self.host.running:
             url = self.host.run_command.preview_url if self.host.run_command else ""
             if not url:

@@ -52,6 +52,10 @@ class ProfileManager(QDialog):
         done = _button("完成", enabled=True)
         done.clicked.connect(self.accept)
         layout.addWidget(done)
+        if parent is not None and hasattr(parent,"page_guides"):
+            guide = _button("存档管理引导",enabled=True)
+            guide.clicked.connect(lambda: parent.page_guides.start("profile",child=self))
+            layout.addWidget(guide)
         self.list.currentRowChanged.connect(self.select)
         self.refresh()
 

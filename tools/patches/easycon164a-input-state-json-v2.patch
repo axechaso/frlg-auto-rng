@@ -1,0 +1,25 @@
+diff --git a/src/EasyCon.Device/InputStateBuffer.cs b/src/EasyCon.Device/InputStateBuffer.cs
+--- a/src/EasyCon.Device/InputStateBuffer.cs
++++ b/src/EasyCon.Device/InputStateBuffer.cs
+@@ -123,8 +123,8 @@ public static class InputStateBuffer
+         return new InputStateSnapshotPayload(
+             buttons,
+             hat,
+-            [report.LX, report.LY],
+-            [report.RX, report.RY]);
++            new int[] { report.LX, report.LY },
++            new int[] { report.RX, report.RY });
+     }
+ 
+     private sealed record InputStateIdentity(string RunId, string SessionId, string StageId, string Source);
+@@ -140,8 +140,8 @@ public static class InputStateBuffer
+ public sealed record InputStateSnapshotPayload(
+     [property: JsonPropertyName("buttons")] string[] Buttons,
+     [property: JsonPropertyName("hat")] string Hat,
+-    [property: JsonPropertyName("left_stick")] byte[] LeftStick,
+-    [property: JsonPropertyName("right_stick")] byte[] RightStick);
++    [property: JsonPropertyName("left_stick")] int[] LeftStick,
++    [property: JsonPropertyName("right_stick")] int[] RightStick);
+ 
+ public sealed record InputStateEventPayload(
+     [property: JsonPropertyName("seq")] long Sequence,

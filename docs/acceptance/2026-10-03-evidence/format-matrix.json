@@ -1,0 +1,64 @@
+{
+  "runtime": "------------------------------------------\n----    EasyCon CLI Runner v0.0.1     ----\n---- 仅供内部测试，不代表最终发布表现 ----\n------------------------------------------\n1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52",
+  "scripts": {
+    "count": 33,
+    "bytes": 2106377,
+    "sha256": "2cd606b7d04c3517b250680858ebf1ef3b042aef18685608775345b073b7d94f",
+    "template": "NS火叶全自动一键乱数2.0.ecs",
+    "templates": [
+      "NS火叶全自动一键乱数2.0.ecs",
+      "NS火叶全自动一键乱数2.0-时间轴.ecs"
+    ]
+  },
+  "matrix": [
+    {
+      "entry": "NS火叶全自动一键乱数2.0.ecs",
+      "route": "wild",
+      "format_exit": 0,
+      "sha256": "47c69aff926cc2b1087d2d0a7d99c1f1413f5f905165a8a8e59a6218d9630780",
+      "injection": "V2",
+      "fixture": "deterministic offline plan; no device or RNG hit claim"
+    },
+    {
+      "entry": "NS火叶全自动一键乱数2.0.ecs",
+      "route": "starter-en",
+      "format_exit": 0,
+      "sha256": "9f25ab461dc41bcb9ee26778faa1a436d55725efbfc61e5fedf823da3aa026d9",
+      "injection": "V2",
+      "fixture": "deterministic offline plan; no device or RNG hit claim"
+    },
+    {
+      "entry": "NS火叶全自动一键乱数2.0.ecs",
+      "route": "starter-jp",
+      "format_exit": 0,
+      "sha256": "c3357a9a72bd5cd1f65b6148c336c0ec61540ac865d785aa3768a20240a641d5",
+      "injection": "V2",
+      "fixture": "deterministic offline plan; no device or RNG hit claim"
+    },
+    {
+      "entry": "NS火叶全自动一键乱数2.0-时间轴.ecs",
+      "route": "wild",
+      "format_exit": 0,
+      "sha256": "00fc2b996d6e50a9691e5c7371212f1a452c4c5c44ecd6515bb02ec552e83d44",
+      "injection": "V2",
+      "fixture": "deterministic offline plan; no device or RNG hit claim"
+    },
+    {
+      "entry": "NS火叶全自动一键乱数2.0-时间轴.ecs",
+      "route": "starter-en",
+      "format_exit": 0,
+      "sha256": "fc73a17ab83eb3f13edf324c271c2798890e95e8d68ddf609d9a169f38536fc7",
+      "injection": "V2",
+      "fixture": "deterministic offline plan; no device or RNG hit claim"
+    },
+    {
+      "entry": "NS火叶全自动一键乱数2.0-时间轴.ecs",
+      "route": "starter-jp",
+      "format_exit": 0,
+      "sha256": "d528b8bf19bc66dfcda4afa5dde3baac540e1f9f08b9734729b60d05ae0b3ff4",
+      "injection": "V2",
+      "fixture": "deterministic offline plan; no device or RNG hit claim"
+    }
+  ],
+  "gift_rejected": true
+}

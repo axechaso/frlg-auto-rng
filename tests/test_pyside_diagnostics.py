@@ -133,14 +133,12 @@ class QtDiagnosticTests(unittest.TestCase):
         self.assertIn("错误退出", w.status_text)
 
     def test_runtime_popup_keeps_technical_details(self):
-        from PySide6.QtWidgets import QMessageBox
-        messages = []
-        def inspect(dialog):
-            messages.append((dialog.text(), dialog.detailedText()))
-        with patch.object(QMessageBox, "exec", inspect):
-            self.w.show_error(ROI_ERROR)
-        self.assertIn("采集画面不可用", messages[0][0])
-        self.assertEqual(messages[0][1], ROI_ERROR)
+        self.w.show_error(ROI_ERROR)
+        dialog = self.w.accessories.repair_prompts.dialog
+        self.assertIsNotNone(dialog)
+        self.assertIn("采集画面不可用", dialog.detail_label.text())
+        self.assertIn(ROI_ERROR, dialog.detail_label.text())
+        self.assertTrue(dialog.isVisible())
 
     def test_real_logged_child_preserves_raw_file_and_next_run_clears_diagnosis(self):
         from PySide6.QtCore import QEventLoop, QTimer

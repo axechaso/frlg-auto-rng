@@ -32,6 +32,10 @@ class LabelCanvas(QWidget):
         self._zoom = 1.0
         self.update()
 
+    @property
+    def image_size(self):
+        return self._image.size()
+
     def set_overlays(self, search_range: QRect, target: QRect) -> None:
         self._range = QRect(search_range)
         self._target = QRect(target)

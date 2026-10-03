@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QStyleOption,
     QStyledItemDelegate,
     QTableWidget,
+    QTableView,
     QTableWidgetItem,
     QTabWidget,
     QToolTip,
@@ -55,6 +56,13 @@ from assets.game_text import (
 
 
 WINDOW_TITLE = "火红 / 叶绿全自动乱数 · PySide6 界面初版"
+
+
+def sync_toggle_text(button):
+    title = button.property("toggleTitle")
+    if title:
+        button.setText(f"✓ {title}" if button.isChecked() else title)
+
 NAV_ITEMS = (
     ("sid", "SID 查找", "闪光个体反查 SID"),
     ("tid", "TID 乱数", "建档与御三家计划"),
@@ -833,6 +841,8 @@ class FrlgPreviewWindow(QMainWindow):
         titles.addWidget(self.page_title)
         titles.addWidget(self.page_description)
         top.addLayout(titles, 1)
+        self.guide_button = _button("本页引导", enabled=True)
+        top.addWidget(self.guide_button)
         self.profile_chip = self._chip("存档信息", "未选择 · 手动输入", "profileChip")
         self.profile_chip.clicked.connect(lambda: self.profile_dialog.show())
         top.addWidget(self.profile_chip)
@@ -849,6 +859,12 @@ class FrlgPreviewWindow(QMainWindow):
         self.qq_notification_button.setToolTip("配置 QQ 机器人、绑定接收方并查看通知规则")
         top.addWidget(self.qq_notification_button)
         header_layout.addLayout(top)
+        hint = QHBoxLayout()
+        self.guide_hint = _button("第一次使用？查看本页引导", enabled=True)
+        self.guide_hint_close = _button("关闭提示", enabled=True)
+        hint.addWidget(self.guide_hint, 1)
+        hint.addWidget(self.guide_hint_close)
+        header_layout.addLayout(hint)
 
         banner = QFrame()
         banner.setObjectName("previewBanner")
@@ -876,7 +892,6 @@ class FrlgPreviewWindow(QMainWindow):
         self.precalibration_check.setProperty("emphasisRole", "toggle")
         self.precalibration_check.setToolTip("正式版仅在完整命中后保存，按游戏/主机/Seed 模式/启动/模板/流程隔离；TID、SID 阶段不参与。")
         self.precalibration_check.setAccessibleName("命中后更新预校准")
-        self.precalibration_check.setChecked(True)
         self.label_supervision_check = _button("标签故障保护", "quickToggle", enabled=True)
         self.label_supervision_check.setProperty("emphasis", "true")
         self.label_supervision_check.setProperty("accent", "green")
@@ -890,7 +905,9 @@ class FrlgPreviewWindow(QMainWindow):
                               (self.label_supervision_check, 124)):
             button.setCheckable(True)
             button.setFixedSize(width, 36)
-            button.toggled.connect(lambda checked, b=button, title=button.text(): b.setText(f"✓ {title}" if checked else title))
+            button.setProperty("toggleTitle", button.text())
+            button.toggled.connect(lambda _checked, b=button: sync_toggle_text(b))
+        self.precalibration_check.setChecked(True)
         calibration = _combo(*(label for label, _ in SEED_CALIBRATION_CHOICES[:2]))
         startup = _combo(*(label for label, _ in SEED_STARTUP_CHOICES))
         self.quick_seed_groups = []
@@ -1491,7 +1508,8 @@ class FrlgPreviewWindow(QMainWindow):
             button.setMinimumWidth(0)
             button.setFixedHeight(36)
             button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-            button.toggled.connect(lambda checked, b=button, text=title: b.setText(f"✓ {text}" if checked else text))
+            button.setProperty("toggleTitle", title)
+            button.toggled.connect(lambda _checked, b=button: sync_toggle_text(b))
             button.setChecked(checked)
             self.capture_checks.append(button)
             if index < 3:
@@ -1703,7 +1721,13 @@ class FrlgPreviewWindow(QMainWindow):
         ], 1)
         self.fields["output_log"].setToolTip("控制生成的 2.0 脚本（普通、孵蛋、御三家阶段）；不等同直接脚本页的 EasyCon 详细日志。")
         layout.addWidget(options)
+        self.label_repair_prompt_check = QCheckBox("最终识别故障后提示检查与修复")
+        self.label_repair_prompt_check.setChecked(True)
+        self.label_repair_prompt_check.setToolTip("只在当前运行最终失败并安全退出后提示；与标签故障保护开关分别保存。")
+        layout.addWidget(self.label_repair_prompt_check)
         runtime = Card("EasyCon 1.6.4-a 与设备", "所有页面共用；设备、文件及更新服务尚未接入。")
+        self.common_device_hint = _label("串口与采集卡位于主窗口顶部；请先检测并核对实际设备。",role="muted")
+        runtime.layout.addWidget(self.common_device_hint)
         self._form(runtime, [
             ("source", "2.0 自动乱数脚本包", _line(placeholder="路径选择尚未接入")),
             ("ezcon", "ezcon.exe", _line(placeholder="要求 1.6.4-a+9c86137")),
@@ -1714,6 +1738,9 @@ class FrlgPreviewWindow(QMainWindow):
         self._form(runtime, [("update_source", "程序更新源", update_source)], 1)
         self._actions(runtime, "选择脚本包", "选择 ezcon.exe", "检查/更新 Seed 表", "检查程序更新", "手柄键位", columns=2)
         runtime.layout.addWidget(_label("源码模式不使用程序自更新。", role="muted"))
+        self.qq_guide_entry = _button("QQ 通知与绑定教程",enabled=True)
+        self.qq_guide_entry.clicked.connect(lambda: getattr(self,"show_qq_notifications",lambda:None)())
+        runtime.layout.addWidget(self.qq_guide_entry)
         layout.addWidget(runtime)
         layout.addWidget(self._path_card("SID 查找脚本", "2.0 自动乱数脚本包（SID 独立路径）", "sid_source"))
         layout.addWidget(self._path_card("TID 1.3.7 脚本包", "脚本包（TID 独立路径）", "tid_source"))
@@ -2284,18 +2311,25 @@ class FrlgPreviewWindow(QMainWindow):
             ("history_search", "搜索", _line(placeholder="文件名或完整路径")),
         ])
         self._actions(history, "刷新历史日志", "打开日志文件", "打开所在文件夹")
-        self.history_table = self._table(
-            ("时间", "流程", "文件", "大小", "位置"), height=250,
-        )
-        self.history_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        from pyside_app.history_model import HistoryLogModel
+        self.history_table = QTableView()
+        self.history_table.setModel(HistoryLogModel(self.history_table))
+        self.history_table.setMinimumHeight(250)
+        self.history_table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        self.history_table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.history_table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+        self.history_table.setSortingEnabled(True)
+        self.history_table.horizontalHeader().setSortIndicator(0, Qt.SortOrder.DescendingOrder)
         for column, width in enumerate((155, 100, 330, 80, 85)):
             self.history_table.setColumnWidth(column, width)
         history.layout.addWidget(self.history_table)
+        self.history_status = _label("尚未加载历史日志", role="muted")
+        history.layout.addWidget(self.history_status)
         layout.addWidget(history)
 
         preview = Card(
             "日志内容",
-            "默认显示完整日志；超大文件显示末尾 4 MiB，原文件仍可直接打开。",
+            "后台读取末尾，默认最多 256 KiB / 3000 行；加载更多上限 1 MiB，原文件可直接打开。",
         )
         preview.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.history_log_view = QPlainTextEdit()
@@ -2305,6 +2339,9 @@ class FrlgPreviewWindow(QMainWindow):
         self.history_log_view.setMinimumHeight(220)
         self.history_log_view.setPlainText("点击“刷新历史日志”读取过往记录。")
         preview.layout.addWidget(self.history_log_view, 1)
+        self.history_more_button = _button("加载更多（上限 1 MiB）")
+        self.history_more_button.setEnabled(False)
+        preview.layout.addWidget(self.history_more_button)
         layout.addWidget(preview, 1)
         return page
 

@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$source = Join-Path $root ".build\easycon164a-input-state-v1-source"
+$source = Join-Path $root ".build\easycon164a-input-state-v2-source"
 $output = Join-Path $root "runtime_backend\easycon164a-cli-gui-rounding-selfcontained"
 $buildRoot = [IO.Path]::GetFullPath((Join-Path $root ".build"))
 $patch = Join-Path $PSScriptRoot "patches\easycon164a-cli-gui-rounding-next.patch"
@@ -11,6 +11,7 @@ $labelSupervisionV9Patch = Join-Path $PSScriptRoot "patches\easycon164a-label-su
 $stageLogFilterPatch = Join-Path $PSScriptRoot "patches\easycon164a-stage-log-filter.patch"
 $inputStatePatch = Join-Path $PSScriptRoot "patches\easycon164a-input-state-v1.patch"
 $inputStatePreviewVideoPatch = Join-Path $PSScriptRoot "patches\easycon164a-input-state-preview-video-v1.patch"
+$inputStateJsonPatch = Join-Path $PSScriptRoot "patches\easycon164a-input-state-json-v2.patch"
 $commit = "9c86137c7e63bff842175470895727a5fa9bab52"
 $sourceCommitMarker = Join-Path $source ".easycon-source-commit"
 $assemblyName = "EasyCon2.CLI.PreviewV5"
@@ -184,6 +185,21 @@ foreach ($inputStatePatchToApply in $inputStatePatchesToApply) {
 }
 
 $project = Join-Path $source "src\EasyCon2.CLI\EasyCon2.CLI.csproj"
+$jsonV2Applied = (
+    (Select-String -LiteralPath $inputStateBufferSource -SimpleMatch '[property: JsonPropertyName("left_stick")] int[] LeftStick' -Quiet) -and
+    (Select-String -LiteralPath $inputStateBufferSource -SimpleMatch '[property: JsonPropertyName("right_stick")] int[] RightStick' -Quiet) -and
+    (Select-String -LiteralPath $inputStateBufferSource -SimpleMatch 'new int[] { report.LX, report.LY }' -Quiet) -and
+    (Select-String -LiteralPath $inputStateBufferSource -SimpleMatch 'new int[] { report.RX, report.RY }' -Quiet)
+)
+if (-not $jsonV2Applied) {
+    git -c "safe.directory=$source" -C $source apply --check $inputStateJsonPatch
+    if ($LASTEXITCODE -ne 0) {
+        git -c "safe.directory=$source" -C $source diff -- src/EasyCon.Device/InputStateBuffer.cs
+        throw "Input-state JSON v2 patch cannot apply cleanly; preserve and inspect the source differences"
+    }
+    git -c "safe.directory=$source" -C $source apply $inputStateJsonPatch
+    if ($LASTEXITCODE -ne 0) { throw "Input-state JSON v2 patch failed" }
+}
 dotnet restore $project -r win-x64 -p:DefaultTargetFramework=net9.0 -p:LtsTargetFramework=net9.0
 if ($LASTEXITCODE -ne 0) { throw "NuGet restore failed" }
 
@@ -207,31 +223,62 @@ if ($LASTEXITCODE -ne 0 -or $stagedVersion -ne "1.6.4-a+$commit") {
     throw "Staged compatibility runner failed its version check: $stagedVersion"
 }
 
-New-Item -ItemType Directory -Force -Path $output | Out-Null
-Get-ChildItem -LiteralPath $staging -File -Recurse | ForEach-Object {
-    # Keep this compatible with the Windows PowerShell runtime used by some
-    # build hosts; every file is already guaranteed to be below $staging.
-    $relativePath = $_.FullName.Substring($staging.Length).TrimStart('\', '/')
-    Copy-ChangedFile $_.FullName (Join-Path $output $relativePath)
+$verification = Join-Path $buildRoot "protocol-verification-$PID"
+New-Item -ItemType Directory -Force -Path $verification | Out-Null
+$samples = Join-Path $verification "assembly-samples.json"
+dotnet run --project (Join-Path $PSScriptRoot "EasyConInputStateProtocolCheck\EasyConInputStateProtocolCheck.csproj") -p:EasyConDir=$staging -- $samples
+if ($LASTEXITCODE -ne 0) { throw "Published Device assembly protocol verification failed" }
+$python = Join-Path $root ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $python)) { $python = "python" }
+& $python (Join-Path $PSScriptRoot "verify_easycon_protocol.py") --runner $stagedRunner --samples $samples --output $verification
+if ($LASTEXITCODE -ne 0) { throw "Staged runner HTTP/PRINT/GUI verification failed; current runner preserved" }
+$hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stagedRunner).Hash.ToLowerInvariant()
+$length = (Get-Item -LiteralPath $stagedRunner).Length
+$files = [ordered]@{}
+foreach ($name in @("EasyCon.Device.dll", "$assemblyName.dll")) {
+    $file = Join-Path $staging $name
+    $files[$name] = @{ sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant(); bytes = (Get-Item -LiteralPath $file).Length }
 }
-$runner = Join-Path $output $runnerFilename
-if (-not (Test-Path -LiteralPath $runner)) {
-    throw "Compatibility runner was not copied to $runner"
-}
-$hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $runner).Hash.ToLowerInvariant()
-$length = (Get-Item -LiteralPath $runner).Length
 $manifest = [ordered]@{
     source_repository = "https://github.com/EasyConNS/EasyCon.git"
     source_commit = $commit
     source_version = "1.6.4-a"
-    patch_id = "easycon164a-label-supervision-v10-stage-log-filter-input-state-v1"
+    patch_id = "easycon164a-label-supervision-v10-stage-log-filter-input-state-v2"
     description = "Run EasyCon 1.6.4-a native label checks, optionally supervise ECS stage markers and retries, and expose bounded read-only gamepad report state over loopback without changing the report sequence."
     build_target = "net9.0/win-x64 self-contained onedir"
     filename = $runnerFilename
     bytes = $length
     sha256 = $hash
+    files = $files
 }
-$manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output "build-manifest.json") -Encoding utf8
+$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $staging "build-manifest.json") -Encoding utf8
+
+$outputFull = [IO.Path]::GetFullPath($output)
+$backendRoot = [IO.Path]::GetFullPath((Join-Path $root "runtime_backend"))
+if (-not $outputFull.StartsWith($backendRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+    -not $staging.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Runner swap paths are outside the intended workspace"
+}
+$active = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($outputFull + '\', [StringComparison]::OrdinalIgnoreCase) }
+if ($active) { throw "Current compatibility runner is active; stop it before updating. Staged output is preserved at $staging" }
+$oldTessdata = Join-Path $output "Tessdata"
+if (Test-Path -LiteralPath $oldTessdata) {
+    $stagedTessdata = Join-Path $staging 'Tessdata'
+    New-Item -ItemType Directory -Path $stagedTessdata -Force | Out-Null
+    Get-ChildItem -LiteralPath $oldTessdata | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $stagedTessdata -Recurse -Force
+    }
+}
+$backup = $outputFull + ".before-json-v2-" + [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
+New-Item -ItemType Directory -Force -Path $backendRoot | Out-Null
+try {
+    if (Test-Path -LiteralPath $outputFull) { Move-Item -LiteralPath $outputFull -Destination $backup }
+    Move-Item -LiteralPath $staging -Destination $outputFull
+} catch {
+    if ((Test-Path -LiteralPath $backup) -and -not (Test-Path -LiteralPath $outputFull)) { Move-Item -LiteralPath $backup -Destination $outputFull }
+    throw
+}
+$runner = Join-Path $output $runnerFilename
 
 Write-Host "Built: $runner"
 Write-Host "SHA256: $hash"

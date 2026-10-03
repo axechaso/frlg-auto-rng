@@ -1,0 +1,13 @@
+{
+  "machine": "Windows-10-10.0.19045-SP0",
+  "wait_method": "qt-event-loop",
+  "logs": 5001,
+  "large_log_bytes": 104897600,
+  "entry_ms": 11926.636300002428,
+  "cold_complete_ms": 12183.802800002013,
+  "warm_entry_ms": 10382.04290000067,
+  "heartbeat_p95_ms": 932.9435999970883,
+  "heartbeat_max_ms": 11962.594200002059,
+  "preview_characters": 4194340,
+  "big_log_unchanged": true
+}

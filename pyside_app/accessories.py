@@ -22,6 +22,8 @@ class Accessories(QObject):
         self.incidents = LabelIncidentStore(window.paths.user / "label_incidents")
         self.active_incident_id = None
         self.loaded_incidents: set[str] = set()
+        from .label_repair_prompt import LabelRepairPrompts
+        self.repair_prompts = LabelRepairPrompts(self)
         self.card = window.label_issues.parentWidget()
         while not isinstance(self.card, Card):
             self.card = self.card.parentWidget()
@@ -280,6 +282,8 @@ class Accessories(QObject):
         return bool(self.monitor and self.monitor.isVisible())
 
     def release_for_run(self):
+        if hasattr(self,"repair_preview") and not self.repair_preview.stop():
+            return False
         if self.controller:
             if self.controller.job:
                 raise ValueError("虚拟手柄正在连接，请待连接结束后开始运行。")
@@ -349,7 +353,7 @@ class Accessories(QObject):
             for incident_id in tuple(self.loaded_incidents):
                 try:
                     self.incidents.set_status(
-                        incident_id, "resolved", note="加载该设备覆盖的运行已正常完成。",
+                        incident_id, "loaded", note="加载覆盖的运行退出码为 0；原故障阶段尚无绑定成功证据，待人工核对复测。",
                     )
                 except (OSError, ValueError, FileNotFoundError):
                     continue
@@ -384,6 +388,10 @@ class Accessories(QObject):
             progress=status, fingerprint_warning_only=advanced), done, "正在检查官方 Seed 表……")
 
     def close(self):
+        if not self.repair_prompts.close():
+            return False
+        if hasattr(self,"repair_preview") and not self.repair_preview.stop():
+            return False
         self.input_action_timer.stop()
         self.input_client.stop()
         if self.monitor:

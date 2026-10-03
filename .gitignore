@@ -30,6 +30,9 @@ rng/dev/
 .env
 .venv/
 .build/
+runtime_backend/*.before-json-v2-*/
+tools/EasyConInputStateProtocolCheck/bin/
+tools/EasyConInputStateProtocolCheck/obj/
 .worktrees/
 .tools/
 local_assets/

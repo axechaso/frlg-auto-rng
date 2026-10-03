@@ -101,7 +101,7 @@ class PySidePreviewInteractionTests(unittest.TestCase):
             self.assertEqual(window.result_panel.toPlainText(), "Preserved result")
         self.assertEqual(window.records_table.rowCount(), 0)
         self.assertEqual(window.records_table.columnCount(), 14)
-        self.assertEqual(window.history_table.columnCount(), 5)
+        self.assertEqual(window.history_table.model().columnCount(), 5)
         self.assertEqual(
             [window.records_table.horizontalHeaderItem(i).text() for i in range(14)],
             ["TID", "游戏", "机型", "语言", "声音", "按键模式", "Seed 启动键", "OP", "F1", "F2", "出现次数", "主角名称", "OP 修正（ms）", "最近记录时间"],
@@ -404,6 +404,9 @@ class PySidePreviewInteractionTests(unittest.TestCase):
             scroll = window.stack.currentWidget()
             self.assertEqual(scroll.horizontalScrollBar().maximum(), 0, page)
             bar = scroll.verticalScrollBar()
+            # Wrapped page text can settle on the event after activation.
+            from PySide6.QtTest import QTest
+            QTest.qWait(30)
             bar.setValue(bar.maximum())
             self.app.processEvents()
             self.assertEqual(bar.value(), bar.maximum(), page)

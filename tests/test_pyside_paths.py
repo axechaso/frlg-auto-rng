@@ -197,6 +197,7 @@ class StartupPathTests(unittest.TestCase):
                 "label_supervision": False,
                 "update_precalibration": True,
                 "record_shiny_video": True,
+                "label_repair_prompt": True,
                 "preferred_frame_parity_scheme": 1,
             })
 

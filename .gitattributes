@@ -8,4 +8,4 @@
 *.py text eol=lf
 
 # Unified-diff context lines intentionally end with one space.
-*.patch -whitespace
+*.patch text eol=lf -whitespace

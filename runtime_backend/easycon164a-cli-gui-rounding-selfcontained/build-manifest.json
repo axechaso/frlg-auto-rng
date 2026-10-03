@@ -1,11 +1,21 @@
-{
-  "source_repository": "https://github.com/EasyConNS/EasyCon.git",
-  "source_commit": "9c86137c7e63bff842175470895727a5fa9bab52",
-  "source_version": "1.6.4-a",
-  "patch_id": "easycon164a-label-supervision-v10-stage-log-filter-input-state-v1",
-  "description": "Run EasyCon 1.6.4-a native label checks, optionally supervise ECS stage markers and retries, and expose bounded read-only gamepad report state over loopback without changing the report sequence.",
-  "build_target": "net9.0/win-x64 self-contained onedir",
-  "filename": "EasyCon2.CLI.PreviewV5.exe",
-  "bytes": 156672,
-  "sha256": "0f959a351238292b19a1255891f30eb410071486afa642e5caff2b4dff8cd140"
+﻿{
+    "source_repository":  "https://github.com/EasyConNS/EasyCon.git",
+    "source_commit":  "9c86137c7e63bff842175470895727a5fa9bab52",
+    "source_version":  "1.6.4-a",
+    "patch_id":  "easycon164a-label-supervision-v10-stage-log-filter-input-state-v2",
+    "description":  "Run EasyCon 1.6.4-a native label checks, optionally supervise ECS stage markers and retries, and expose bounded read-only gamepad report state over loopback without changing the report sequence.",
+    "build_target":  "net9.0/win-x64 self-contained onedir",
+    "filename":  "EasyCon2.CLI.PreviewV5.exe",
+    "bytes":  156672,
+    "sha256":  "0f959a351238292b19a1255891f30eb410071486afa642e5caff2b4dff8cd140",
+    "files":  {
+                  "EasyCon.Device.dll":  {
+                                             "bytes":  59904,
+                                             "sha256":  "5e315514976c3e4715edec688f7a1c5322f6274b70e353eaed9feab33620c4c7"
+                                         },
+                  "EasyCon2.CLI.PreviewV5.dll":  {
+                                                     "bytes":  96256,
+                                                     "sha256":  "617bba1e4e40f0e85a1161c598cf1ffb7469ff8447157da1730171024b1a5f0a"
+                                                 }
+              }
 }

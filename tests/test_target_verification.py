@@ -6,6 +6,7 @@ from automation.target_verification import (
     inject_target_verification,
     parse_target_verification,
     validate_injected_target_verification,
+    _event_line,
 )
 
 
@@ -68,6 +69,31 @@ class TargetVerificationTests(unittest.TestCase):
         self.assertIsNone(parse_target_verification(event, run_id="run-1", attempt_id="other"))
         self.assertIsNone(parse_target_verification(event + "\n" + event, run_id="run-1", attempt_id="attempt-1"))
         self.assertIsNone(parse_target_verification(event.replace("SHINY=1", "SHINY=true"), run_id="run-1", attempt_id="attempt-1"))
+
+    def test_generated_print_terminates_with_a_separate_string_operand(self):
+        for shiny in ("0", "1"):
+            self.assertTrue(_event_line(self.spec, "TARGET", shiny=shiny).endswith(shiny + ' & "|END=1"'))
+
+    def test_real_cli_prefix_is_accepted_but_quoted_or_malformed_events_are_not(self):
+        event = "SIDTRAVERSAL|V=1|RUN=run-1|ATTEMPT=attempt-1|ROUND=4|EVENT=TARGET|SEED_MATCH=1|ADV_MATCH=1|SPECIES_MATCH=1|SHINY=1|END=1"
+        wrapped = "\ufeff\x1b[32m[01:23:45.678] " + event + "\x1b[0m"
+        self.assertIsNotNone(parse_target_verification(wrapped, run_id="run-1", attempt_id="attempt-1"))
+        for invalid in ("引用：" + event, event + '"', "[99:23:45.678] " + event, "\n\ufeff" + event, wrapped + "\n" + event):
+            self.assertIsNone(parse_target_verification(invalid, run_id="run-1", attempt_id="attempt-1"))
+
+    def test_old_injection_requires_regeneration_and_corrupt_new_events_are_rejected(self):
+        injected = inject_target_verification(self.template, self.spec)
+        with self.assertRaisesRegex(ValueError, "重新生成"):
+            inject_target_verification(injected.replace(MARKER, "# SIDTRAVERSAL_TARGET_VERIFICATION_V1"), self.spec)
+        with self.assertRaises(ValueError):
+            validate_injected_target_verification(injected.replace('|END=1"', '|END=1""', 1), self.spec)
+
+    def test_unrelated_round_updates_are_not_evidence_exit_anchors(self):
+        source = 'FUNC unrelated\n    $循环计数 += 1\nENDFUNC\n' + self.template + 'ENDFUNC\nFUNC other\n    $循环计数 += 1\nENDFUNC\n'
+        injected = inject_target_verification(source,self.spec)
+        self.assertIn('FUNC unrelated\n    $循环计数 += 1\nENDFUNC',injected)
+        self.assertIn('FUNC other\n    $循环计数 += 1\nENDFUNC',injected)
+        validate_injected_target_verification(injected,self.spec)
 
 
 if __name__ == "__main__":

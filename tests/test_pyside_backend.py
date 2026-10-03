@@ -156,14 +156,20 @@ class PySideBackendTests(unittest.TestCase):
         log.write_text("\x1b[32m孵蛋历史日志\x1b[0m\n", encoding="utf-8")
 
         self.window.select_page("history_logs")
+        from PySide6.QtTest import QTest
+        while self.window.history_controller.busy:
+            QTest.qWait(10)
 
         self.assertEqual(self.window.current_page, "history_logs")
-        self.assertEqual(self.window.history_table.rowCount(), 1)
-        self.assertEqual(self.window.history_table.item(0, 1).text(), "孵蛋")
+        model = self.window.history_table.model()
+        self.assertEqual(model.rowCount(), 1)
+        self.assertEqual(model.data(model.index(0, 1)), "孵蛋")
         self.assertIn("孵蛋历史日志", self.window.history_log_view.toPlainText())
         self.assertNotIn("\x1b[", self.window.history_log_view.toPlainText())
         self.window.fields["history_workflow"].setCurrentText("TID 乱数")
-        self.assertEqual(self.window.history_table.rowCount(), 0)
+        while self.window.history_controller.busy:
+            QTest.qWait(10)
+        self.assertEqual(model.rowCount(), 0)
 
     def test_history_page_stays_available_while_easycon_is_running(self):
         self.window.running = True

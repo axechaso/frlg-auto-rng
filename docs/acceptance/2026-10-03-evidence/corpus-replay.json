@@ -1,0 +1,106 @@
+{
+  "source": {
+    "count": 33,
+    "bytes": 2105553,
+    "sha256": "abedc36a98710f02b02b79f0af10f6221e3e0a04f3f0f6e107d5c9887ce2661e",
+    "template": "NS火叶全自动一键乱数2.0.ecs",
+    "templates": [
+      "NS火叶全自动一键乱数2.0.ecs",
+      "NS火叶全自动一键乱数2.0-时间轴.ecs"
+    ]
+  },
+  "replayed": {
+    "count": 33,
+    "bytes": 2106377,
+    "sha256": "2cd606b7d04c3517b250680858ebf1ef3b042aef18685608775345b073b7d94f",
+    "template": "NS火叶全自动一键乱数2.0.ecs",
+    "templates": [
+      "NS火叶全自动一键乱数2.0.ecs",
+      "NS火叶全自动一键乱数2.0-时间轴.ecs"
+    ]
+  },
+  "cache": {
+    "count": 33,
+    "bytes": 2106377,
+    "sha256": "2cd606b7d04c3517b250680858ebf1ef3b042aef18685608775345b073b7d94f",
+    "template": "NS火叶全自动一键乱数2.0.ecs",
+    "templates": [
+      "NS火叶全自动一键乱数2.0.ecs",
+      "NS火叶全自动一键乱数2.0-时间轴.ecs"
+    ]
+  },
+  "file_count": 33,
+  "changed_files": [
+    {
+      "file": "NS火叶全自动一键乱数2.0.ecs",
+      "source_bytes": 447845,
+      "runtime_bytes": 448246,
+      "source_sha256": "c9947718698ced950a5bad167a07d7421018c8c9c3cea027c9b1bea992dcc183",
+      "runtime_sha256": "13407b151af416991ead92585092e0f525a57ec63b5962cf6d0db77a670799c0",
+      "diff": [
+        "--- source",
+        "+++ materialized",
+        "@@ -4492,7 +4492,7 @@",
+        "             NEXT",
+        "         ENDIF",
+        "         A",
+        "-        WAIT 700",
+        "+        WAIT 1500",
+        "         # 道具菜单固定为 USE / REGISTER / CANCEL，向下一项登记。",
+        "         DOWN",
+        "         WAIT 300"
+      ]
+    },
+    {
+      "file": "NS火叶全自动一键乱数2.0-时间轴.ecs",
+      "source_bytes": 451451,
+      "runtime_bytes": 451852,
+      "source_sha256": "899f4274e62adc2367a89f046f0e97fbb05dd17916766c5dda5f2c41aff3071f",
+      "runtime_sha256": "0e979be61dc230db9e2637db7d3a55eeb4738cc43285de6296f34ed270bef739",
+      "diff": [
+        "--- source",
+        "+++ materialized",
+        "@@ -4513,7 +4513,7 @@",
+        "             NEXT",
+        "         ENDIF",
+        "         A",
+        "-        WAIT 700",
+        "+        WAIT 1500",
+        "         # 道具菜单固定为 USE / REGISTER / CANCEL，向下一项登记。",
+        "         DOWN",
+        "         WAIT 300"
+      ]
+    },
+    {
+      "file": "lib/17_获取_野生目标.ecs",
+      "source_bytes": 39557,
+      "runtime_bytes": 39578,
+      "source_sha256": "9d08b97c0a4f11ebf3e0163d470f206bc616c376ec4f548aea19c437f0e84980",
+      "runtime_sha256": "40a3eea399462c9ef0c20b4131f309154277e08499dc3ec10b642fdf853b52de",
+      "diff": []
+    },
+    {
+      "file": "lib/27_孵蛋测试流程.ecs",
+      "source_bytes": 55079,
+      "runtime_bytes": 55080,
+      "source_sha256": "fed374520ed43bd4a0d2a1a7156cc1f41983441dee837cb8ee6e107ef9a1c890",
+      "runtime_sha256": "6f55fc8a99c0b69d7641e09b8ac15d807ccfbfa073bff9def0d9ee60907492f5",
+      "diff": [
+        "--- source",
+        "+++ materialized",
+        "@@ -634,7 +634,7 @@",
+        "         DOWN",
+        "         WAIT 150",
+        "         A",
+        "-        WAIT 700",
+        "+        WAIT 1500",
+        "         DOWN",
+        "         WAIT 300",
+        "         A"
+      ]
+    }
+  ],
+  "replay_mismatches": [],
+  "source_unchanged": true,
+  "active_cache_modified": false
+}

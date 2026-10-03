@@ -47,7 +47,7 @@ ENDFUNC
 
         self.assertEqual(
             backend.EXPECTED_COMPAT_PATCH_ID,
-            "easycon164a-label-supervision-v10-stage-log-filter-input-state-v1",
+            "easycon164a-label-supervision-v10-stage-log-filter-input-state-v2",
         )
         self.assertIn("captureTask = Task.Run", additions)
         self.assertIn("latestFrame = frame.Clone()", additions)
@@ -365,7 +365,11 @@ ENDFUNC
                 "source_commit": backend.EXPECTED_COMPAT_SOURCE_COMMIT,
                 "patch_id": backend.EXPECTED_COMPAT_PATCH_ID,
                 "sha256": hashlib.sha256(b"compat-runner").hexdigest(),
+                "files": {},
             }
+            for name in ("EasyCon.Device.dll", "EasyCon2.CLI.PreviewV5.dll"):
+                (runner_dir / name).write_bytes(b"assembly")
+                manifest["files"][name] = {"sha256": hashlib.sha256(b"assembly").hexdigest()}
             runner.with_name("build-manifest.json").write_text(
                 json.dumps(manifest), encoding="utf-8"
             )
@@ -437,9 +441,12 @@ ENDFUNC
                     "source_commit": backend.EXPECTED_COMPAT_SOURCE_COMMIT,
                     "patch_id": backend.EXPECTED_COMPAT_PATCH_ID,
                     "sha256": "0" * 64,
+                    "files": {name: {"sha256": "0" * 64} for name in ("EasyCon.Device.dll", "EasyCon2.CLI.PreviewV5.dll")},
                 }),
                 encoding="utf-8",
             )
+            for name in ("EasyCon.Device.dll", "EasyCon2.CLI.PreviewV5.dll"):
+                (runner_dir / name).write_bytes(b"modified-assembly")
             completed = subprocess.CompletedProcess(
                 [], 0, stdout=backend.EXPECTED_EZCON_VERSION + "\n", stderr=""
             )
@@ -465,7 +472,7 @@ ENDFUNC
                 )
 
             self.assertEqual(result, runner.resolve())
-            self.assertEqual(len(warnings), 6)
+            self.assertEqual(len(warnings), 8)
             self.assertTrue(all(message.startswith("高级模式指纹警告：") for message in warnings))
 
 

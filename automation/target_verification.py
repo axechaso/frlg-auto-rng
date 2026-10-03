@@ -7,7 +7,10 @@ import re
 from typing import Any, Mapping
 
 
-MARKER = "# SIDTRAVERSAL_TARGET_VERIFICATION_V1"
+MARKER = "# SIDTRAVERSAL_TARGET_VERIFICATION_V2"
+_LEGACY_MARKER = "# SIDTRAVERSAL_TARGET_VERIFICATION_V1"
+_ANSI_COLOR = re.compile(r"\x1b\[[0-9;]*m")
+_TIMESTAMP = re.compile(r"^\[(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{3}\]\s*")
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PID_RE = re.compile(r"^[0-9A-Fa-f]{8}$")
 _SEED_RE = re.compile(r"^[0-9A-Fa-f]{4,8}$")
@@ -79,7 +82,7 @@ def _event_line(spec: TargetVerificationSpec, event: str, *, shiny: str) -> str:
         + event
         + '|SEED_MATCH=1|ADV_MATCH=1|SPECIES_MATCH=1|SHINY=" & '
         + shiny
-        + '|END=1"'
+        + ' & "|END=1"'
     )
 
 
@@ -89,12 +92,15 @@ def inject_target_verification(
 ) -> str:
     """Continue past the first star label and emit evidence at exact hit branches."""
     resolved = spec_from_mapping(spec)
+    if _LEGACY_MARKER in template:
+        raise ValueError("该方案使用旧版结果标记，请重新生成后继续；遍历断点仍保留")
     expected_values = (
         f'$SID遍历运行ID = "{resolved.run_id}"',
         f'$SID遍历尝试ID = "{resolved.attempt_id}"',
     )
     if MARKER in template:
         if all(template.count(value) == 1 for value in expected_values):
+            validate_injected_target_verification(template, resolved)
             return template
         raise ValueError("主脚本已有 SID 目标证明，但运行或尝试身份不一致")
 
@@ -179,9 +185,24 @@ def inject_target_verification(
         + "    ENDIF\n"
     )
     completion_anchor = "    $循环计数 += 1\n"
-    if template.count(completion_anchor) != 1:
+    # Other calibration and retry functions also advance the round counter.
+    # Restrict the evidence exit to the exact target branch's own function.
+    start = template.index(non_target_anchor)
+    end = template.find("\nENDFUNC", start)
+    if end == -1:
+        end = len(template)
+    region = template[start:end+1]
+    exits = list(re.finditer(r"(?m)^    \$循环计数 \+= 1\n", region))
+    if len(exits) != 1:
         raise ValueError("主脚本目标循环缺少唯一收尾锚点")
-    return template.replace(completion_anchor, incomplete + completion_anchor, 1)
+    offset = start + exits[0].start()
+    return template[:offset] + incomplete + template[offset:]
+
+
+def normalize_protocol_line(line: str) -> str:
+    """Remove only EasyCon's known SGR and one valid timestamp wrapper."""
+    clean = _ANSI_COLOR.sub("", line).strip()
+    return _TIMESTAMP.sub("", clean, count=1)
 
 
 def parse_target_verification(
@@ -192,7 +213,8 @@ def parse_target_verification(
 ) -> dict[str, Any] | None:
     if not isinstance(text, str):
         return None
-    matching_lines = [line.strip() for line in text.splitlines() if line.strip().startswith("SIDTRAVERSAL|")]
+    lines = (normalize_protocol_line(line) for line in text.removeprefix("\ufeff").splitlines())
+    matching_lines = [line for line in lines if line.startswith("SIDTRAVERSAL|")]
     if len(matching_lines) != 1:
         return None
     match = _EVENT_RE.fullmatch(matching_lines[0])
@@ -216,6 +238,8 @@ def validate_injected_target_verification(
     spec: TargetVerificationSpec | Mapping[str, object],
 ) -> None:
     resolved = spec_from_mapping(spec)
+    if _LEGACY_MARKER in text:
+        raise ValueError("该方案使用旧版结果标记，请重新生成后继续；遍历断点仍保留")
     if MARKER not in text or text.count(MARKER) != 1:
         raise ValueError("生成工程缺少唯一 SID 目标证明注入标记")
     for value in (
@@ -224,6 +248,17 @@ def validate_injected_target_verification(
     ):
         if text.count(value) != 1:
             raise ValueError("生成工程 SID 目标证明运行/尝试身份不一致")
+    for shiny in ("0", "1"):
+        expected = _event_line(resolved, "TARGET", shiny=shiny)
+        if sum(line.strip() == expected.strip() for line in text.splitlines()) != 1:
+            raise ValueError("生成工程 SID 目标证明事件语句不完整，请重新生成后继续")
+    prefix = f'SIDTRAVERSAL|V=1|RUN={resolved.run_id}|ATTEMPT={resolved.attempt_id}|ROUND=" & $循环计数 & "|EVENT='
+    for suffix in (
+        'NON_TARGET_SHINY|SEED_MATCH=1|ADV_MATCH=1|SPECIES_MATCH=0|SHINY=1|END=1"',
+        'INCOMPLETE|SEED_MATCH=0|ADV_MATCH=0|SPECIES_MATCH=0|SHINY=1|END=1"',
+    ):
+        if sum(line.strip() == 'PRINT "' + prefix + suffix for line in text.splitlines()) != 1:
+            raise ValueError("生成工程 SID 非目标/不完整证明事件语句异常")
 
 
 __all__ = [
@@ -231,6 +266,7 @@ __all__ = [
     "TargetVerificationSpec",
     "inject_target_verification",
     "parse_target_verification",
+    "normalize_protocol_line",
     "spec_from_mapping",
     "validate_injected_target_verification",
 ]

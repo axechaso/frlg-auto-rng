@@ -103,6 +103,8 @@ class CompleteWindow(FrlgWindow):
         self.tid_state = TidState(self)
         self.app_update = AppUpdateController(self)
         self.accessories = Accessories(self)
+        from .page_guides import PageGuides
+        self.page_guides = PageGuides(self)
         self.refresh_state()
 
     def extra_checks(self):
@@ -393,6 +395,7 @@ class CompleteWindow(FrlgWindow):
         report = None
         profile_report = None
         current_run_id = self.run_command.run_id if self.run_command else ""
+        current_log_path = self.run_command.log_path if self.run_command else None
         stopped_by_user = self._manual_stop_requested
         window_closing = self.closing
         if prepared and self.run_command:
@@ -502,6 +505,9 @@ class CompleteWindow(FrlgWindow):
         self.refresh_state()
         if hasattr(self, "accessories"):
             self.accessories.run_finished()
+            self.accessories.repair_prompts.after_exit(code, current_run_id,
+                log_path=current_log_path, text=self.log_view.toPlainText(),
+                cancelled=stopped_by_user or window_closing)
             self.tid_state.poll()
         if profile_report is not None and not self.closing:
             QTimer.singleShot(0, lambda payload=profile_report: self._show_verified_profile_draft(payload))
@@ -538,6 +544,8 @@ class CompleteWindow(FrlgWindow):
         dialog.exec()
 
     def closeEvent(self, event):
+        if hasattr(self, "page_guides"):
+            self.page_guides.minimize()
         if hasattr(self, "app_update"):
             self.app_update.close()
         if hasattr(self, "tid_state"):
