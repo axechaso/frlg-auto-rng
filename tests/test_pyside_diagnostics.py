@@ -115,6 +115,12 @@ class QtDiagnosticTests(unittest.TestCase):
         w.traversal_check.setChecked(True)
         w.fields["wild_tid"].setText("12345")
         w.fields["wild_sid"].setText("54321")
+        # This parser test supplies unrelated advanced options explicitly;
+        # public CI has no user ECS assets from which to read those defaults.
+        for i in range(1,4):
+            w.fields[f"expansion_{i}_seed"].setText("1")
+            w.fields[f"expansion_{i}_adv"].setText("100")
+        w.fields["togepi_reverse_adv"].setText("1000")
         self.assertIsNone(w.collect_workflow().extra["start_advance"])
         w.fields["wild_traversal_start"].setText("abc")
         with self.assertRaisesRegex(ValueError, "高级起点.*abc.*整数"):

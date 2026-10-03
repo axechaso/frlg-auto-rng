@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
 from pyside_app.migration import CompleteWindow
@@ -95,3 +96,13 @@ class PageGuideTests(unittest.TestCase):
         self.w.page_guides.update_status()
         self.assertIn("参数已冻结",self.w.page_guides.overlay.state.text())
         self.w.running=False
+
+    def test_escape_closes_only_the_tutorial_and_keeps_stop_visible(self):
+        self.w.page_guides.start("sid")
+        overlay=self.w.page_guides.overlay
+        self.assertTrue(self.w.stop_button.isVisible())
+        with patch.object(self.w,"stop_run") as stop:
+            QTest.keyClick(overlay,Qt.Key.Key_Escape)
+            stop.assert_not_called()
+        self.assertIsNone(self.w.page_guides.active_page)
+        self.assertFalse(overlay.isVisible())

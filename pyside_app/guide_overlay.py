@@ -65,6 +65,7 @@ class GuideOverlay(QDialog):
         self.buttons["暂时收起"].clicked.connect(controller.minimize)
         self.buttons["本页不再提示"].clicked.connect(controller.opt_out)
         self.spot = Spotlight(host)
+        self.destroyed.connect(self.spot.deleteLater)
         self.anchor = None
         self.timer = QTimer(self)
         self.timer.setInterval(100)

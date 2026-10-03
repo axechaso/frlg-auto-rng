@@ -103,7 +103,7 @@ class PageGuides:
 
     def status(self, step, anchor):
         if self.w.running:
-            return "正在运行：参数已冻结；停止按钮和紧急停止快捷键仍可使用。"
+            return "正在运行：参数已冻结；底部停止按钮仍可使用，Esc 只收起本教程。"
         if anchor is None or not anchor.isVisible() or (self.overlay and anchor.window() is not self.overlay.host):
             return "此控件在当前模式/窗口中不可见；请使用原页面入口。"
         if step.completion_check == "devices":

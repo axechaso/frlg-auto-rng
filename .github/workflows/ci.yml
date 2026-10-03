@@ -136,6 +136,8 @@ jobs:
           tests.test_qq_notification_service
 
       - name: Run repository-independent unit tests
+        # test_label_wait_stages requires ignored, audited user mother assets;
+        # it remains mandatory in the full local regression / acceptance.
         run: >-
           python -m unittest -v
           tests.test_auto_planner.PlannerSelectionTests
@@ -188,7 +190,6 @@ jobs:
           tests.test_pyside_defaults
           tests.test_log_history
           tests.test_history_async
-          tests.test_label_wait_stages
           tests.test_label_incidents
           tests.test_label_verification
           tests.test_device_label_overrides
