@@ -100,11 +100,13 @@ class CompleteWindow(FrlgWindow):
         from .tid_state import TidState
         from .accessories import Accessories
         from .app_update import AppUpdateController
+        from .audio_observer import AudioObserverController
         self.tid_state = TidState(self)
         self.app_update = AppUpdateController(self)
         self.accessories = Accessories(self)
         from .page_guides import PageGuides
         self.page_guides = PageGuides(self)
+        self.audio_observer = AudioObserverController(self)
         self.refresh_state()
 
     def extra_checks(self):
@@ -204,6 +206,8 @@ class CompleteWindow(FrlgWindow):
         self.profile_chip.setEnabled(not busy)
         if "监视窗口" in self.actions:
             self.actions["监视窗口"].setEnabled(self.job is None)
+        if hasattr(self, "audio_observer"):
+            self.actions["声音判闪试用"].setEnabled(True)
         self._refresh_wild_controls()
         self.traversal_check.setEnabled(self.traversal_check.isEnabled() and not busy)
         self.footer_status.setText(self.status_text)
@@ -546,6 +550,10 @@ class CompleteWindow(FrlgWindow):
     def closeEvent(self, event):
         if hasattr(self, "page_guides"):
             self.page_guides.minimize()
+        if hasattr(self, "audio_observer") and not self.audio_observer.close():
+            event.ignore()
+            QTimer.singleShot(100, self.close)
+            return
         if hasattr(self, "app_update"):
             self.app_update.close()
         if hasattr(self, "tid_state"):

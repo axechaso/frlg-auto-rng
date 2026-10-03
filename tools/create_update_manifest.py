@@ -8,6 +8,8 @@ import json
 import shutil
 from pathlib import Path
 
+from incremental_update import create_assets, verify_release_assets
+
 from app_version import (
     APP_VERSION,
     APP_VERSION_CODE,
@@ -157,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     notes.add_argument("--notes")
     notes.add_argument("--notes-file", type=Path)
     parser.add_argument("--gitee-assets-dir", type=Path)
+    parser.add_argument("--incremental-assets-dir", type=Path)
     args = parser.parse_args(argv)
     if args.notes_file is not None:
         release_notes = args.notes_file.read_text(encoding="utf-8")
@@ -165,6 +168,12 @@ def main(argv: list[str] | None = None) -> int:
     manifest = create_manifest(args.package, args.unpacked_root, notes=release_notes)
     if args.gitee_assets_dir is not None:
         create_gitee_release_assets(args.package, manifest, args.gitee_assets_dir)
+    if args.incremental_assets_dir is not None:
+        create_assets(args.unpacked_root, manifest, args.incremental_assets_dir)
+        verify_release_assets(args.package, manifest, args.incremental_assets_dir)
+        if args.gitee_assets_dir is not None:
+            for path in args.incremental_assets_dir.iterdir():
+                shutil.copy2(path, args.gitee_assets_dir / path.name)
     print(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
     return 0
 

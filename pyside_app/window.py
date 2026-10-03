@@ -45,6 +45,7 @@ from .profiles import ProfileManager, ProfileWheelFilter
 from .services import AppPaths, WildInputs, prepare_wild, prepare_run, display_log_line
 from notifications.qq_service import QQNotificationService, QQSettingsStore
 from easycon_outcome import easycon_log_has_fatal_error
+from audio_observer import LOG_PREFIX
 from .qq_notifications import QQNotificationDialog
 
 
@@ -1063,16 +1064,7 @@ class FrlgWindow(FrlgPreviewWindow):
         bar = self.log_view.verticalScrollBar()
         following = bar.value() >= bar.maximum() - 2
         old = bar.value()
-        if self.pending_visible:
-            cursor = self.log_view.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.End)
-            # BlockUnderCursor can include the preceding paragraph separator;
-            # deleting another character then clips the previous complete line.
-            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
-            cursor.removeSelectedText()
-            if self.log_view.document().blockCount() > 1:
-                cursor.deletePreviousChar()
-            self.pending_visible = False
+        self._remove_pending_log_line()
         for line in pieces:
             if hasattr(self, "accessories") and self.accessories.consume_input_session_marker(line):
                 continue
@@ -1089,6 +1081,32 @@ class FrlgWindow(FrlgPreviewWindow):
             self.pending_visible = True
         bar.setValue(bar.maximum() if following else old)
 
+    def _remove_pending_log_line(self):
+        if self.pending_visible:
+            cursor = self.log_view.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            # BlockUnderCursor can include the preceding paragraph separator;
+            # deleting another character then clips the previous complete line.
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+            if self.log_view.document().blockCount() > 1:
+                cursor.deletePreviousChar()
+            self.pending_visible = False
+
+    def append_observation_log(self, line):
+        """Render a side observation without feeding stdout/checkpoint parsers."""
+        line = " ".join(str(line).split())
+        if not line.startswith(LOG_PREFIX):
+            raise ValueError("观察日志缺少来源标记")
+        bar = self.log_view.verticalScrollBar()
+        following, old = bar.value() >= bar.maximum() - 2, bar.value()
+        self._remove_pending_log_line()
+        self.log_view.appendPlainText(line)
+        if self.pending_output:
+            self.log_view.appendPlainText(self.pending_output.rstrip("\r"))
+            self.pending_visible = True
+        bar.setValue(bar.maximum() if following else old)
+
     def _read_output(self):
         self._append_log(self.decoder.decode(bytes(self.process.readAllStandardOutput())))
 
@@ -1099,7 +1117,8 @@ class FrlgWindow(FrlgPreviewWindow):
         self._read_output()
         self._append_log(self.decoder.decode(b"", final=True), final=True)
         self.running = False
-        fatal_output = easycon_log_has_fatal_error(self.log_view.toPlainText())
+        flow_text = "\n".join(line for line in self.log_view.toPlainText().splitlines() if not line.startswith(LOG_PREFIX))
+        fatal_output = easycon_log_has_fatal_error(flow_text)
         prepared = getattr(self, "running_prepared", None)
         if code == 0 and not fatal_output and prepared and prepared.inputs.options.update_precalibration and self.run_command:
             try:

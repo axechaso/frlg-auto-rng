@@ -43,6 +43,7 @@ jobs:
           tid_session.py
           process_control.py
           console_output.py
+          audio_observer.py
           worker_commands.py
           pyside_preview.py
           pyside_chrome.py
@@ -73,6 +74,7 @@ jobs:
           pyside_app/tid_state.py
           pyside_app/results.py
           pyside_app/accessories.py
+          pyside_app/audio_observer.py
           pyside_app/app_update.py
           pyside_app/manual.py
           pyside_app/monitor_view.py
@@ -91,10 +93,12 @@ jobs:
           run_tid_starter_flow.py
           app_version.py
           app_updater.py
+          incremental_update.py
           update_installer.py
           updater_entry.py
           package_entry.py
           tools/create_update_manifest.py
+          tools/verify_incremental_release.py
           tools/stage_release_assets.py
           tools/verify_windows_upgrade.py
           tools/verify_frozen_workers.py
@@ -147,6 +151,8 @@ jobs:
           tests.test_easycon164a_backend
           tests.test_easycon_logged
           tests.test_console_output
+          tests.test_audio_observer
+          tests.test_pyside_audio_observer
           tests.test_home_buffer_recovery
           tests.test_label_matcher
           tests.test_pyside_preview
@@ -204,6 +210,7 @@ jobs:
           tests.test_package_entry
           tests.test_worker_commands
           tests.test_app_updater
+          tests.test_incremental_update
           tests.test_update_installer
           tests.test_update_manifest_tool
           tests.test_windows_release_scripts

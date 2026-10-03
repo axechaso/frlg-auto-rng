@@ -26,6 +26,7 @@ $BuildRoot = (Resolve-Path -LiteralPath $BuildRoot).Path
 $Package = Join-Path $BuildRoot "FRLG-Auto-RNG-$AppVersion-windows-x64.zip"
 $Manifest = Join-Path $BuildRoot "update-manifest.json"
 $ShaFile = Join-Path $BuildRoot "$([IO.Path]::GetFileName($Package)).sha256"
+$IncrementalDirectory = Join-Path $BuildRoot "incremental-release-assets"
 foreach ($path in @($Package, $Manifest, $ShaFile)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "缺少发布资产：$path"
@@ -94,6 +95,10 @@ try {
     if ($shaText -ne "$hash  $([IO.Path]::GetFileName($Package))") {
         throw "SHA-256 文件内容不一致"
     }
+    $incrementalJson = (& python -m tools.verify_incremental_release --package $Package --manifest $Manifest --assets-dir $IncrementalDirectory | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "增量更新资源校验失败" }
+    $incrementalNames = @($incrementalJson | ConvertFrom-Json)
+    $incrementalFiles = @($incrementalNames | ForEach-Object { Join-Path $IncrementalDirectory $_ })
 
     $ciJson = (& gh run list --repo $Repository --commit $head --limit 20 --json databaseId,headSha,status,conclusion | Out-String) | ConvertFrom-Json
     $successful = @($ciJson | Where-Object {
@@ -110,7 +115,7 @@ try {
         [IO.Path]::GetFileName($Package),
         "update-manifest.json",
         [IO.Path]::GetFileName($ShaFile)
-    )
+    ) + $incrementalNames
     if ($DryRun) {
         Write-Host "DRY RUN：将创建草稿 $Tag 并上传 $($assetNames -join ', ')"
         return
@@ -121,6 +126,11 @@ try {
     try {
         & gh release upload $Tag $Package $Manifest $ShaFile --repo $Repository
         if ($LASTEXITCODE -ne 0) { throw "上传 Release 资产失败；草稿已保留" }
+        for ($offset = 0; $offset -lt $incrementalFiles.Count; $offset += 20) {
+            $batch = @($incrementalFiles | Select-Object -Skip $offset -First 20)
+            & gh release upload $Tag @batch --repo $Repository
+            if ($LASTEXITCODE -ne 0) { throw "上传增量资产失败；草稿已保留" }
+        }
         $release = Get-ReleaseByTag $Tag
         if (-not $release) { throw "创建后找不到 Release：$Tag；草稿已保留" }
         $actual = @($release.assets | ForEach-Object { $_.name })
@@ -130,6 +140,12 @@ try {
         foreach ($asset in $release.assets) {
             if ($asset.name -eq [IO.Path]::GetFileName($Package) -and $asset.size -ne (Get-Item -LiteralPath $Package).Length) {
                 throw "Release ZIP 大小回读不一致；草稿已保留"
+            }
+            if ($incrementalNames -contains $asset.name) {
+                $localAsset = Join-Path $IncrementalDirectory $asset.name
+                if ($asset.size -ne (Get-Item -LiteralPath $localAsset).Length) {
+                    throw "Release 增量资产大小回读不一致：$($asset.name)；草稿已保留"
+                }
             }
         }
         & gh api "repos/$Repository/releases/$($release.id)" -X PATCH -f draft=false -f make_latest=true
