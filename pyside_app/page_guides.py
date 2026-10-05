@@ -31,7 +31,7 @@ class PageGuides:
         except (OSError, ValueError, UnicodeError) as exc:
             self.error = f"引导进度读取失败，原文件保留：{exc}"
         self.menu = QMenu(window.guide_button)
-        for title, callback in (("开始 / 继续", self.start_current), ("重新开始", lambda: self.start(window.current_page, restart=True)), ("引导目录与设置教程", self.directory)):
+        for title, callback in (("开始 / 继续", self.start_current), ("重新开始", self.restart_current), ("顶部功能与 Seed 模式", self.start_controls), ("引导目录与设置教程", self.directory)):
             self.menu.addAction(title, callback)
         window.guide_button.setMenu(self.menu)
         window.guide_hint.clicked.connect(self.start_current)
@@ -44,7 +44,7 @@ class PageGuides:
 
     def anchors(self):
         registry = dict(self.w.fields)
-        for name in ("profile_chip", "profile_selector", "profile_mystery_gift", "qq_notification_button", "common_device_hint", "qq_guide_entry", "advanced_check", "advanced_scope", "sid_ack", "tid_flow_check", "traversal_check", "search_button", "start_button", "stop_button", "overview", "records_table", "log_view", "result_panel", "script_action_card", "label_incident_open", "history_table", "history_status", "history_log_view"):
+        for name in ("profile_chip", "profile_selector", "profile_mystery_gift", "qq_notification_button", "common_device_hint", "qq_guide_entry", "advanced_check", "advanced_scope", "home_buffer_check", "precalibration_check", "label_supervision_check", "sid_ack", "tid_flow_check", "tid_auto_rng_check", "traversal_check", "item_check", "record_shiny_video_check", "search_button", "start_button", "stop_button", "overview", "records_table", "log_view", "result_panel", "script_action_card", "label_incident_open", "history_table", "history_status", "history_log_view"):
             registry[name] = getattr(self.w, name)
         registry["sid_party"] = self.w.sid_party_widgets[0][0]
         registry["egg_parent_widgets"] = self.w.egg_parent_widgets[0][0]
@@ -64,11 +64,17 @@ class PageGuides:
     def start_current(self):
         self.start(self.w.current_page)
 
+    def start_controls(self):
+        self.start("controls")
+
+    def restart_current(self):
+        self.start(self.active_page or self.w.current_page, restart=True, child=self.child if self.active_page else None)
+
     def start(self, page, *, restart=False, child=None):
         self.minimize()
         self.child = child
         if page == "script_test" and not self.w.advanced_check.isChecked():
-            QMessageBox.information(self.w, "高级页引导", "请主动在共通设置开启高级模式后打开脚本测试页。")
+            QMessageBox.information(self.w, "高级页引导", "请先在主窗口顶部打开“高级模式”，再从左侧进入“脚本测试”页。")
             return
         self.active_page = page
         self.active_steps = tuple(s for s in GUIDES[page] if self._visible(s))
@@ -76,7 +82,7 @@ class PageGuides:
         previous = record.get("step_id", "") if not restart else ""
         self.index = next((i for i,s in enumerate(self.active_steps) if s.step_id == previous), 0)
         if previous and not any(s.step_id == previous for s in self.active_steps):
-            self.w.guide_hint.setText("教程步骤已更新，已回到当前可用的首步。")
+            self.w.guide_hint.setText("教程内容有更新，已从当前适用的第一步开始；你的功能设置没有改变。")
         self.render()
 
     def render(self):
@@ -85,7 +91,7 @@ class PageGuides:
         host = self.child or {"profile":self.w.profile_dialog,"common":self.w.settings_dialog,"advanced":self.w.advanced_dialog}.get(self.active_page,self.w)
         # Never open a settings window on the user's behalf.
         if not host.isVisible():
-            self.w.guide_hint.setText("请先点击原设置入口打开窗口，再点击“本窗口引导”。")
+            self.w.guide_hint.setText("请先打开这个功能的设置窗口，再点里面的“本窗口引导”。")
             self.active_page = None
             return
         ancestor = anchor.parentWidget() if anchor else None
@@ -103,21 +109,35 @@ class PageGuides:
 
     def status(self, step, anchor):
         if self.w.running:
-            return "正在运行：参数已冻结；底部停止按钮仍可使用，Esc 只收起本教程。"
+            return "脚本正在运行，参数暂时不能修改。要停止请点底部“停止 EasyCon”；Esc 只收起教程。"
         if anchor is None or not anchor.isVisible() or (self.overlay and anchor.window() is not self.overlay.host):
-            return "此控件在当前模式/窗口中不可见；请使用原页面入口。"
+            return "这项在当前模式下没有显示。请先选择对应功能，或打开它的设置窗口，再看这一步。"
         if step.completion_check == "devices":
-            return "实际设备已检测，请继续核对选择。" if self.w.devices_checked else "尚未检测设备；阅读进度不会标记设备已连接。"
+            return "已完成检测，请核对串口和采集卡，并确认监视画面正常。" if self.w.devices_checked else "尚未检测设备。请到主窗口顶部点“重新检测”，再选串口和采集卡；看教程不会自动连接。"
         if step.completion_check == "plan":
             prepared = getattr(self.w,"workflow",None) or self.w.prepared
-            return "方案已生成，仍须核对预检与运行要求。" if prepared else "尚未生成方案；请点击原生成按钮。"
+            return "方案已生成。先按运行要求准备好游戏，再点“开始运行”。" if prepared else "还没有方案。请先点“搜索并生成方案”；教程的“下一步”不会生成脚本。"
         if step.completion_check == "scene":
-            return "已由你确认现场。" if self.child.scene_confirm.isChecked() else "须由你确认是预期页面；错误页面先修复启动位置。"
+            return "你已勾选现场确认，接下来检查标签；勾选不会改变游戏画面。" if self.child.scene_confirm.isChecked() else "先确认截图和游戏都在正确页面，再勾选现场确认；页面不对时不要制作标签。"
+        if self.active_page == "controls":
+            if step.step_id == "calibration":
+                if self.w.input_mode == "tid":
+                    return "TID 建档不使用此选项；接续御三家时实际校准固定为 0，不以此处显示值为准。"
+                if self.w.input_mode == "sid":
+                    return "SID 采集不使用这里的 Seed 校准；HOME_BUFFER 的低分自适应仍由独立开关控制。"
+            if step.step_id == "startup" and self.w.input_mode in {"sid", "tid"}:
+                return "这里只设置连续御三家等 2.0 流程的启动；TID 建档、SID 采集沿用各自启动操作。"
+            if hasattr(anchor, "isChecked"):
+                state = "开启" if anchor.isChecked() else "关闭"
+                return f"当前：{state}。阅读教程不会切换开关；需要改动时请手动操作，生成脚本的选项要重新生成才生效。"
+            if hasattr(anchor, "currentText"):
+                edit = "可在空闲时手动修改" if anchor.isEnabled() else "当前不可修改；要手动选择需先开启高级模式，运行中仍不能修改"
+                return f"当前显示：{anchor.currentText()}。{edit}。"
         if self.active_page == "wild":
-            return f"当前分支：{self.w.fields['wild_method'].currentText()} / {self.w.fields['wild_category'].currentText()}；可用范围与准备要求以实际页面和方案为准。"
+            return f"已选：{self.w.fields['wild_method'].currentText()} / {self.w.fields['wild_category'].currentText()}。请照本次方案准备队伍、道具和站位。"
         if self.active_page == "egg":
-            return f"当前准备入口：{self.w.fields['egg_start'].currentText()}；阅读进度不构成实机准备完成证明。"
-        return "阅读说明；下一步仅推进教程，不执行业务操作。"
+            return f"当前选择：{self.w.fields['egg_start'].currentText()}。请确认游戏已做好对应准备，不确定时先完成完整准备。"
+        return "“下一步”只翻到下一段说明，不会自动填写、保存或运行。"
 
     def update_status(self):
         if self.active_page and self.overlay:
@@ -175,12 +195,13 @@ class PageGuides:
         self.minimize()
         record = self.state["pages"].get(page,{})
         visible = not record.get("opt_out",False)
-        self.w.guide_hint.setText(self.error or "第一次使用？查看本页引导（可收起后继续）")
+        self.w.guide_hint.setText(self.error or "不知道从哪开始？点这里看本页用法；顶部开关和 Seed 模式在“本页引导”菜单中")
         self.w.guide_hint.setVisible(visible)
         self.w.guide_hint_close.setVisible(visible)
 
     def directory(self):
         menu = QMenu(self.w.guide_button)
+        menu.addAction("顶部功能与 Seed 模式", self.start_controls)
         for page, title, _ in __import__("pyside_preview").NAV_ITEMS:
             menu.addAction(title, lambda p=page: self.start(p) if p==self.w.current_page else self.explain_page(p))
         for page,title in (("profile","存档信息 / 管理"),("common","共通设置"),("advanced","高级设置"),("label","标签制作与修复")):
@@ -189,5 +210,5 @@ class PageGuides:
         menu.exec(self.w.guide_button.mapToGlobal(self.w.guide_button.rect().bottomLeft()))
 
     def explain_page(self,page):
-        message = "请主动开启高级模式，再打开脚本测试页。" if page=="script_test" else "请点击原页面或设置入口，再从“本页引导 / 本窗口引导”继续。"
+        message = "请先在主窗口顶部打开“高级模式”，再从左侧进入“脚本测试”页。" if page=="script_test" else "先从左侧打开想了解的页面；如果要看设置说明，先打开对应设置窗口，再点“本页引导”或“本窗口引导”。"
         QMessageBox.information(self.w,"功能引导",message)

@@ -103,15 +103,33 @@ class GuideOverlay(QDialog):
         self.spot.safe = QRect(stop.mapTo(self.host, QPoint()), stop.size()).adjusted(-5,-5,5,5) if stop.window() is self.host else QRect()
         # Keep the card away from the explained control and the bottom stop bar.
         left,right = 18,self.host.width()-self.width()-18
-        bottom=max(12,self.host.height()-self.height()-100)
+        reserve = 100 if not self.spot.safe.isEmpty() else 18
+        bottom=max(12,self.host.height()-self.height()-reserve)
         choices=[(left,bottom),(right,bottom),(left,14),(right,14)]
         choices.sort(key=lambda p: abs(p[0]+self.width()/2-rect.center().x()),reverse=True)
         position=next((p for p in choices if not QRect(*p,self.width(),self.height()).intersects(rect)),None)
-        if position is None and rect.left()>190:
-            # A full-width table may leave only the sidebar beside it. Use a
-            # narrow, scrollable card there; the table and stop bar stay clear.
-            self.resize(min(210,rect.left()-30),self.height())
-            position=(14,bottom)
+        if position is None:
+            # Small settings dialogs have no stop bar. Use the free band above
+            # or below a field, instead of covering it with the 300px card.
+            bands = ((14, rect.top()-12), (rect.bottom()+12, self.host.height()-reserve))
+            for start,end in sorted(bands,key=lambda band:band[1]-band[0],reverse=True):
+                if end-start>=210:
+                    self.resize(self.width(),min(self.height(),end-start))
+                    candidate=QRect(left,start,self.width(),self.height())
+                    if candidate.bottom()<=end and not candidate.intersects(rect):
+                        position=(left,start)
+                        break
+        if position is None:
+            # A table or middle-of-dialog field may leave only a narrow side
+            # band. The body stays scrollable, as on the main-window sidebar.
+            bands=((14,rect.left()-12),(rect.right()+12,self.host.width()-18))
+            for start,end in sorted(bands,key=lambda band:band[1]-band[0],reverse=True):
+                if end-start>=200:
+                    self.resize(min(self.width(),end-start),self.height())
+                    candidate=QRect(start,bottom,self.width(),self.height())
+                    if candidate.right()<=end and not candidate.intersects(rect):
+                        position=(start,bottom)
+                        break
         x,y=position or (left,14)
         self.move(self.host.mapToGlobal(QPoint(max(10,x), y)))
         self.spot.update()

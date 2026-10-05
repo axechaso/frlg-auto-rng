@@ -34,6 +34,26 @@ def main(output):
         w.advanced_check.setChecked(True);w.show();settle()
         for width,height in ((1280,800),(1920,1080)):
             w.resize(width,height);settle()
+            for advanced in (False, True):
+                w.advanced_check.setChecked(advanced);settle()
+                for flow in ("sid", "tid", "wild", "egg"):
+                    w.select_page(flow);settle();w.page_guides.start_controls();settle()
+                    for i in range(len(w.page_guides.active_steps)):
+                        w.page_guides.index=i;w.page_guides.render();settle()
+                        guide=w.page_guides.overlay
+                        assert guide.isVisible()
+                        assert w.stop_button.isVisible()
+                        target=guide.spot.target
+                        assert not target.isEmpty(), ("controls",flow,advanced,i)
+                        assert not guide.geometry().intersects(target.translated(w.mapToGlobal(w.rect().topLeft()))), ("controls",flow,advanced,i)
+                        step=w.page_guides.active_steps[i].step_id
+                        if flow=="egg" and step in ("adaptive","calibration","startup"):
+                            base=f"{width}x{height}-controls-{step}-advanced-{int(advanced)}"
+                            w.grab().save(str(output/(base+".png")))
+                            guide.grab().save(str(output/(base+"-card.png")))
+                        report.append({"size":[width,height],"page":"controls","flow":flow,"advanced":advanced,"step":step,"anchor_visible":True,"stop_visible":True,"device_pixel_ratio":w.devicePixelRatioF()})
+                    w.page_guides.minimize()
+            w.advanced_check.setChecked(True);settle()
             for page,_,_ in NAV_ITEMS:
                 w.select_page(page);settle();w.page_guides.start(page,restart=True);settle()
                 guide=w.page_guides.overlay
@@ -44,16 +64,27 @@ def main(output):
                     target=guide.spot.target
                     if not target.isEmpty():
                         assert not guide.geometry().intersects(target.translated(w.mapToGlobal(w.rect().topLeft()))), (page,i)
-                    if i==0 or i==len(w.page_guides.active_steps)-1:
+                    if i==0 or i==len(w.page_guides.active_steps)-1 or w.page_guides.active_steps[i].step_id=="seed_modes":
                         base=f"{width}x{height}-{page}-{i}"
                         w.grab().save(str(output/(base+".png")))
                         guide.grab().save(str(output/(base+"-card.png")))
                     report.append({"size":[width,height],"page":page,"step":w.page_guides.active_steps[i].step_id,"anchor_visible":not target.isEmpty(),"stop_visible":True,"device_pixel_ratio":w.devicePixelRatioF()})
                 w.page_guides.minimize()
+            w.select_page("wild");settle()
             for page,dialog in (("profile",w.profile_dialog),("common",w.settings_dialog),("advanced",w.advanced_dialog)):
                 dialog.show();settle();w.page_guides.start(page);settle()
-                dialog.grab().save(str(output/f"{width}x{height}-{page}.png"))
-                w.page_guides.overlay.grab().save(str(output/f"{width}x{height}-{page}-card.png"))
+                for i in range(len(w.page_guides.active_steps)):
+                    w.page_guides.index=i;w.page_guides.render();settle()
+                    guide=w.page_guides.overlay
+                    assert guide.isVisible()
+                    target=guide.spot.target
+                    assert not target.isEmpty(), (page,i)
+                    assert not guide.geometry().intersects(target.translated(dialog.mapToGlobal(dialog.rect().topLeft()))), (page,i)
+                    step=w.page_guides.active_steps[i].step_id
+                    if i==0 or step in ("entry","parity","output_log"):
+                        dialog.grab().save(str(output/f"{width}x{height}-{page}-{step}.png"))
+                        guide.grab().save(str(output/f"{width}x{height}-{page}-{step}-card.png"))
+                    report.append({"size":[width,height],"page":page,"step":step,"anchor_visible":True,"device_pixel_ratio":dialog.devicePixelRatioF()})
                 w.page_guides.minimize();dialog.hide()
         w.close()
         for _ in range(100):
