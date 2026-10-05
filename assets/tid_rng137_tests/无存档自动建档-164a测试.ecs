@@ -1,0 +1,560 @@
+# 无存档自动建档独立测试；EasyCon 1.6.4-a+9c86137。
+# 将本文件放在当前原包根目录，与 ImgLabel 同级。
+# 启动位置：NS主页选中火红/叶绿，游戏已关闭；采集画面1920x1080。
+# 真实操作：新游戏 -> 预设姓名 -> 语速FAST -> 首次保存 -> 可选重启检查。
+# 只在“无存档>=95且存档<95”时建档。有存档/双命中则保留现场停止。
+# 不删除存档、不输入目标TID/SID、不领取御三家、不回填正式乱数参数。
+# 第一轮默认NS1。日版只改“测试ROM语言”为1，不改机型。
+
+# ===== 测试配置 =====
+$测试ROM语言 = 0 # 0=美版英文，1=日版；火红/叶绿共用。
+$测试NS机型 = 1 # 1=NS1，2=NS2；不自动猜测。
+$测试主角性别 = 0 # 0=男，1=女；主角和劲敌均选择第一个预设姓名。
+$测试OP基础等待MS = 30600 # 未扣机型差的实际固定等待，不是RNG advance。
+$测试OP初始修正MS = 0
+$测试OP按键 = 0 # 0=A，1=X(游戏Start)，2=L；默认A。
+$测试HOME_BUFFER延迟MS = 1200
+$测试关闭等待MS = 1500
+$测试建档后重启验证 = 1 # 0=保存操作后保留游戏画面；1=重启检查有存档入口。
+
+# ===== 内部状态；不修改正式脚本的校准数据 =====
+$测试OP修正MS = 0
+$测试OP修正次数 = 0
+$测试OP修正上限 = 10
+$测试OP实际等待MS = 0
+$测试OP结果 = 0
+$测试运行结果 = 0
+$测试验证阶段 = 0
+$测试存档分 = 0
+$测试无存档分 = 0
+$测试采样序号 = 0
+$测试采样起点 = 0
+$测试采样截止 = 0
+$测试采样剩余 = 0
+$测试FAST分 = 0
+$测试MID分 = 0
+$测试SLOW分 = 0
+$测试语速状态 = -1
+$测试语速重试 = 0
+$测试主页分 = 0
+$测试普通退出分 = 0
+$测试BUFFER退出分 = 0
+$测试错误退出分 = 0
+$测试关闭分 = 0
+$测试关闭暗分 = 0
+$测试主页稳定次数 = 0
+$测试主页尝试 = 0
+$测试关闭尝试 = 0
+$测试HB尝试 = 0
+$测试确认索引 = 0
+$测试B索引 = 0
+$测试开场等待MS = 0
+$测试开场A等待 = [1000, 1000, 2500, 1000, 1000]
+$测试开场B等待 = [1000, 500, 1000, 2000, 1500, 500, 1000, 3000, 3000]
+
+IF $测试ROM语言 != 0 and $测试ROM语言 != 1
+    PRINT 测试配置错误：ROM语言只能填0或1；未发送按键
+    RETURN
+ENDIF
+IF $测试NS机型 != 1 and $测试NS机型 != 2
+    PRINT 测试配置错误：NS机型只能填1或2；未发送按键
+    RETURN
+ENDIF
+IF $测试主角性别 != 0 and $测试主角性别 != 1
+    PRINT 测试配置错误：主角性别只能填0或1；未发送按键
+    RETURN
+ENDIF
+IF $测试OP按键 < 0 or $测试OP按键 > 2
+    PRINT 测试配置错误：OP按键只能填0/1/2；未发送按键
+    RETURN
+ENDIF
+IF $测试建档后重启验证 != 0 and $测试建档后重启验证 != 1
+    PRINT 测试配置错误：重启验证只能填0或1；未发送按键
+    RETURN
+ENDIF
+IF $测试OP基础等待MS + $测试OP初始修正MS < 750 or $测试HOME_BUFFER延迟MS < 100 or $测试HOME_BUFFER延迟MS > 3000 or $测试关闭等待MS < 500 or $测试关闭等待MS > 3000
+    PRINT 测试配置错误：启动等待超出允许范围；未发送按键
+    RETURN
+ENDIF
+
+PRINT ========================
+PRINT 无存档自动建档独立测试
+PRINT ========================
+PRINT ROM语言： & $测试ROM语言 & "；NS机型：" & $测试NS机型 & "；主角性别：" & $测试主角性别
+PRINT OP后存档/无存档门槛固定95，不使用低分自适应
+PRINT 请确认NS主页选中目标游戏且已关闭；本测试会真实创建基础存档
+PRINT 创建的是临时基础身份，不是目标TID/SID；不会进入御三家流程
+$测试OP修正MS = $测试OP初始修正MS
+
+# 沿用TID入口的单片机唤醒，不移动人物。
+FOR 5
+    LCLICK DOWN
+    WAIT 120
+    LCLICK UP
+    WAIT 100
+NEXT
+
+$测试OP结果 = 测试_启动并判断存档()
+IF $测试OP结果 == 1
+    PRINT 【停止】检测到已有存档，未发送新游戏/保存按键
+    RETURN
+ELIF $测试OP结果 == -1
+    PRINT 【停止】存档与无存档同时达到95，状态冲突；保留画面
+    RETURN
+ELIF $测试OP结果 != 2
+    PRINT 【停止】未确认无存档；保留当前画面，不创建存档
+    RETURN
+ENDIF
+
+PRINT 【第2段：创建新游戏】只确认NEW GAME，不按有存档流程的DOWN
+CALL 测试_创建新游戏
+
+PRINT 【第3段：语速设置】打开OPTION，确认并设置FAST
+$测试运行结果 = 测试_设置语速并首次保存()
+IF $测试运行结果 != 1
+    PRINT 【停止】语速界面未确认，不执行保存或重启；保留画面
+    RETURN
+ENDIF
+
+IF $测试建档后重启验证 == 0
+    PRINT 【测试结束】FAST已确认，首次保存操作已执行；未自动确认落盘
+    PRINT 请手动重启检查是否出现有存档入口；当前游戏画面保留
+    RETURN
+ENDIF
+
+PRINT 【第5段：重启检查】关闭并重开，只检查已有存档，不再次建档
+$测试验证阶段 = 1
+$测试运行结果 = 测试_关闭游戏(0)
+IF $测试运行结果 != 1
+    PRINT 【停止】保存操作后无法确认关闭；未继续验证
+    RETURN
+ENDIF
+$测试OP结果 = 测试_启动并判断存档()
+IF $测试OP结果 == 1
+    PRINT 【测试通过】保存前已确认FAST；重启后确认有存档入口
+    PRINT 当前停在标题菜单，不读取/登记这份临时TID/SID，不继续正式乱数
+ELIF $测试OP结果 == 2
+    PRINT 【测试失败】重启仍是无存档；不再次建档、不继续按键，保留画面
+ELIF $测试OP结果 == -1
+    PRINT 【验证停止】两标签同时命中，不能确认保存结果；保留画面
+ELSE
+    PRINT 【验证停止】OP或启动识图未确认，不能确认保存结果；保留画面
+ENDIF
+RETURN
+
+# 0=两者都未过95，1=只有存档过95，2=只有无存档过95，-1=双命中。
+FUNC 测试_判定存档状态($有存档分: INT, $无存档分: INT): INT
+    IF $有存档分 >= 95 and $无存档分 >= 95
+        RETURN -1
+    ELIF $有存档分 >= 95
+        RETURN 1
+    ELIF $无存档分 >= 95
+        RETURN 2
+    ENDIF
+    RETURN 0
+ENDFUNC
+
+# 复用母本OP释放后的400/450/500ms采样窗口，不提前发送DOWN/A。
+FUNC 测试_OP后检测存档(): INT
+    $测试采样起点 = TIME()
+    $测试采样截止 = 400
+    $测试OP结果 = 0
+    FOR $测试采样序号 = 1 TO 3
+        $测试采样剩余 = $测试采样截止 - (TIME() - $测试采样起点)
+        IF $测试采样剩余 > 0
+            WAIT $测试采样剩余
+        ENDIF
+        $测试存档分 = @存档
+        $测试无存档分 = @无存档
+        $测试OP结果 = 测试_判定存档状态($测试存档分, $测试无存档分)
+        PRINT "BOOTSTRAP_OP|阶段=" & $测试验证阶段 & "|采样=" & $测试采样序号 & "|存档=" & $测试存档分 & "|无存档=" & $测试无存档分 & "|门槛=95|状态=" & $测试OP结果
+        IF $测试OP结果 != 0
+            BREAK
+        ENDIF
+        $测试采样截止 += 50
+    NEXT
+    $测试采样剩余 = 500 - (TIME() - $测试采样起点)
+    IF $测试采样剩余 > 0
+        WAIT $测试采样剩余
+    ENDIF
+    RETURN $测试OP结果
+ENDFUNC
+
+FUNC 测试_增加OP等待(): INT
+    IF $测试OP修正次数 >= $测试OP修正上限
+        PRINT OP自动修正已达10次，保留当前画面，不再重启
+        RETURN 0
+    ENDIF
+    $测试OP修正MS += 50
+    $测试OP修正次数 += 1
+    PRINT 两标签均未通过，按OP过早处理：下轮等待增加50ms；累计修正= & $测试OP修正MS & "ms，次数=" & $测试OP修正次数 & "/" & $测试OP修正上限
+    RETURN 1
+ENDFUNC
+
+FUNC 测试_启动并判断存档(): INT
+    FOR
+        $测试运行结果 = 测试_进入HOME_BUFFER()
+        IF $测试运行结果 != 1
+            RETURN 0
+        ENDIF
+        $测试OP实际等待MS = $测试OP基础等待MS + $测试OP修正MS
+        IF $测试NS机型 == 2
+            $测试OP实际等待MS -= 750
+        ENDIF
+        PRINT 【第1段：启动及OP】实际等待 & $测试OP实际等待MS & "ms；机型=" & $测试NS机型
+        WAIT 1500
+        A DOWN
+        WAIT 50
+        A UP
+        WAIT $测试OP实际等待MS
+        IF $测试OP按键 == 0
+            A DOWN
+            WAIT 3000
+            A UP
+        ELIF $测试OP按键 == 1
+            X DOWN
+            WAIT 3000
+            X UP
+        ELSE
+            L DOWN
+            WAIT 3000
+            L UP
+        ENDIF
+        $测试OP结果 = 测试_OP后检测存档()
+        IF $测试OP结果 != 0
+            RETURN $测试OP结果
+        ENDIF
+        $测试运行结果 = 测试_增加OP等待()
+        IF $测试运行结果 != 1
+            RETURN 0
+        ENDIF
+        $测试运行结果 = 测试_关闭游戏(0)
+        IF $测试运行结果 != 1
+            RETURN 0
+        ENDIF
+    NEXT
+    RETURN 0
+ENDFUNC
+
+FUNC 测试_读取NS标签
+    IF $测试NS机型 == 2
+        $测试主页分 = @主页_NS2
+        $测试普通退出分 = @正确退出_NS2
+        $测试BUFFER退出分 = @HOME_BUFFER正确退出_NS2
+        $测试错误退出分 = @错误退出_NS2
+    ELSE
+        $测试主页分 = @主页
+        $测试普通退出分 = @正确退出
+        $测试BUFFER退出分 = @HOME_BUFFER正确退出
+        $测试错误退出分 = @错误退出
+    ENDIF
+    $测试关闭分 = @正在关闭
+    $测试关闭暗分 = @正在关闭_暗
+ENDFUNC
+
+FUNC 测试_确认主页已关闭(): INT
+    $测试主页稳定次数 = 0
+    FOR $测试主页尝试 = 1 TO 20
+        CALL 测试_读取NS标签
+        IF $测试关闭分 >= 95 or $测试关闭暗分 >= 95
+            $测试主页稳定次数 = 0
+            WAIT 2000
+        ELIF $测试主页分 >= 95 and $测试普通退出分 < 90 and $测试BUFFER退出分 < 90 and $测试错误退出分 < 90
+            $测试主页稳定次数 += 1
+            IF $测试主页稳定次数 >= 3
+                RETURN 1
+            ENDIF
+            WAIT 150
+        ELSE
+            $测试主页稳定次数 = 0
+            WAIT 150
+        ENDIF
+    NEXT
+    PRINT "BOOTSTRAP_HOME_FAIL|主页=" & $测试主页分 & "|普通=" & $测试普通退出分 & "|BUFFER=" & $测试BUFFER退出分 & "|错误=" & $测试错误退出分 & "|关闭=" & $测试关闭分 & "|暗关闭=" & $测试关闭暗分
+    PRINT 未确认NS主页且游戏已关闭；不发送启动A。检查当前画面/机型/标签
+    RETURN 0
+ENDFUNC
+
+# 已经在主页=1只用于HOME_BUFFER试探；OP后的重开/保存后的检查传0。
+FUNC 测试_关闭游戏($已经在主页: INT): INT
+    IF $已经在主页 == 0
+        HOME DOWN
+        WAIT 100
+        HOME UP
+        WAIT $测试关闭等待MS
+    ENDIF
+    FOR $测试关闭尝试 = 1 TO 3
+        CALL 测试_读取NS标签
+        IF $测试错误退出分 >= 95
+            B DOWN
+            WAIT 50
+            B UP
+            WAIT $测试关闭等待MS
+        ELIF $测试普通退出分 >= 95 or $测试BUFFER退出分 >= 95
+            X DOWN
+            WAIT 50
+            X UP
+            WAIT $测试关闭等待MS
+            A DOWN
+            WAIT 50
+            A UP
+            WAIT $测试关闭等待MS
+            $测试运行结果 = 测试_确认主页已关闭()
+            RETURN $测试运行结果
+        ELSE
+            WAIT 250
+        ENDIF
+    NEXT
+    PRINT "BOOTSTRAP_CLOSE_FAIL|主页=" & $测试主页分 & "|普通=" & $测试普通退出分 & "|BUFFER=" & $测试BUFFER退出分 & "|错误=" & $测试错误退出分
+    PRINT 未确认可关闭的运行中游戏；停止并保留画面
+    RETURN 0
+ENDFUNC
+
+FUNC 测试_进入HOME_BUFFER(): INT
+    FOR $测试HB尝试 = 1 TO 20
+        $测试运行结果 = 测试_确认主页已关闭()
+        IF $测试运行结果 != 1
+            RETURN 0
+        ENDIF
+        A DOWN
+        WAIT 50
+        A UP
+        WAIT 1500
+        A DOWN
+        WAIT 50
+        A UP
+        WAIT $测试HOME_BUFFER延迟MS
+        HOME DOWN
+        WAIT 100
+        HOME UP
+        WAIT 1500
+        CALL 测试_读取NS标签
+        PRINT "BOOTSTRAP_HOME_BUFFER|尝试=" & $测试HB尝试 & "|延迟=" & $测试HOME_BUFFER延迟MS & "|BUFFER=" & $测试BUFFER退出分 & "|普通=" & $测试普通退出分 & "|错误=" & $测试错误退出分
+        IF $测试BUFFER退出分 >= 95 and $测试错误退出分 < 95
+            RETURN 1
+        ENDIF
+        IF $测试普通退出分 >= 95
+            $测试HOME_BUFFER延迟MS -= 50
+        ELIF $测试错误退出分 < 95
+            $测试HOME_BUFFER延迟MS += 50
+        ENDIF
+        $测试运行结果 = 测试_关闭游戏(1)
+        IF $测试运行结果 != 1
+            RETURN 0
+        ENDIF
+        IF $测试HOME_BUFFER延迟MS < 100 or $测试HOME_BUFFER延迟MS > 3000
+            PRINT HOME_BUFFER试探超出100-3000ms；停止
+            RETURN 0
+        ENDIF
+    NEXT
+    PRINT HOME_BUFFER试探已达20次；停止
+    RETURN 0
+ENDFUNC
+
+FUNC 测试_创建新游戏
+    # 对应母本选择NEW GAME后的公共开场；无存档不先按DOWN。
+    A DOWN
+    WAIT 1000
+    A UP
+    WAIT 550
+    FOR $测试确认索引 = 0 TO 4
+        A DOWN
+        WAIT 50
+        A UP
+        $测试开场等待MS = $测试开场A等待[$测试确认索引]
+        WAIT $测试开场等待MS
+    NEXT
+    A DOWN
+    WAIT 3000
+    A UP
+    WAIT 2500
+    PRINT 【创建进度】推进开场说明与大木博士对话
+    FOR $测试B索引 = 0 TO 8
+        B DOWN
+        WAIT 50
+        B UP
+        $测试开场等待MS = $测试开场B等待[$测试B索引]
+        WAIT $测试开场等待MS
+    NEXT
+    IF $测试ROM语言 == 1
+        FOR 2
+            B DOWN
+            WAIT 50
+            B UP
+            WAIT 3000
+        NEXT
+    ENDIF
+    PRINT 【创建进度】选择主角性别
+    IF $测试主角性别 == 1
+        LS DOWN
+        WAIT 50
+        LS RESET
+        WAIT 500
+    ENDIF
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 2000
+
+    # 跳过“自定义姓名”，选择第一项预设姓名；不进入键盘。
+    PRINT 【创建进度】选择主角预设姓名
+    LS DOWN
+    WAIT 50
+    LS RESET
+    WAIT 500
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 2000
+    A DOWN
+    WAIT 500
+    A UP
+    WAIT 2000
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 2500
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 1000
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 1500
+
+    PRINT 【创建进度】选择劲敌预设姓名
+    LS DOWN
+    WAIT 50
+    LS RESET
+    WAIT 500
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 1500
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 1500
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 2500
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 1000
+    IF $测试ROM语言 == 1
+        A DOWN
+        WAIT 50
+        A UP
+        WAIT 1000
+    ENDIF
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 5500
+    PRINT 【创建进度】已执行进入房间操作；下一步用语速标签确认菜单位置
+ENDFUNC
+
+# 只接纳唯一最高且达到95的文字速度；未知/平票不猜测。
+FUNC 测试_判定语速($FAST: INT, $MID: INT, $SLOW: INT): INT
+    IF $FAST >= 95 and $FAST > $MID and $FAST > $SLOW
+        RETURN 0
+    ELIF $MID >= 95 and $MID > $FAST and $MID > $SLOW
+        RETURN 1
+    ELIF $SLOW >= 95 and $SLOW > $FAST and $SLOW > $MID
+        RETURN 2
+    ENDIF
+    RETURN -1
+ENDFUNC
+
+FUNC 测试_读取语速
+    IF $测试ROM语言 == 1
+        $测试FAST分 = @日版TEXT_SPEED_FAST
+        $测试MID分 = @日版TEXT_SPEED_MID
+        $测试SLOW分 = @日版TEXT_SPEED_SLOW
+    ELSE
+        $测试FAST分 = @TEXT_SPEED_FAST
+        $测试MID分 = @TEXT_SPEED_MID
+        $测试SLOW分 = @TEXT_SPEED_SLOW
+    ENDIF
+    $测试语速状态 = 测试_判定语速($测试FAST分, $测试MID分, $测试SLOW分)
+    PRINT "BOOTSTRAP_TEXT|语言=" & $测试ROM语言 & "|FAST=" & $测试FAST分 & "|MID=" & $测试MID分 & "|SLOW=" & $测试SLOW分 & "|状态=" & $测试语速状态
+ENDFUNC
+
+FUNC 测试_设置语速并首次保存(): INT
+    X DOWN
+    WAIT 50
+    X UP
+    WAIT 500
+    # 未领取宝可梦的新游戏菜单：BAG/主角/SAVE/OPTION/EXIT。
+    FOR 3
+        LS DOWN
+        WAIT 50
+        LS RESET
+        WAIT 100
+    NEXT
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 1500
+    FOR $测试语速重试 = 1 TO 3
+        CALL 测试_读取语速
+        IF $测试语速状态 >= 0
+            BREAK
+        ENDIF
+        WAIT 250
+    NEXT
+    IF $测试语速状态 < 0
+        RETURN 0
+    ENDIF
+    IF $测试语速状态 == 1
+        LS RIGHT
+        WAIT 50
+        LS RESET
+        WAIT 500
+    ELIF $测试语速状态 == 2
+        LS LEFT
+        WAIT 50
+        LS RESET
+        WAIT 500
+    ENDIF
+    FOR $测试语速重试 = 1 TO 3
+        CALL 测试_读取语速
+        IF $测试语速状态 == 0
+            BREAK
+        ENDIF
+        WAIT 250
+    NEXT
+    IF $测试语速状态 != 0
+        PRINT FAST设置后未通过95分确认
+        RETURN 0
+    ENDIF
+    PRINT 文字速度已确认FAST；不修改声音、战斗动画、按键设置
+    B DOWN
+    WAIT 50
+    B UP
+    WAIT 1500
+
+    # OPTION退出后光标仍在OPTION：向上一项即SAVE。
+    LS UP
+    WAIT 50
+    LS RESET
+    WAIT 100
+    PRINT 【第4段：首次保存】只确认首次保存，不执行覆盖旧存档的上键确认
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 2500
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 8000
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 2000
+    PRINT 首次保存按键已执行；是否成功以重启检查或人工检查为准
+    RETURN 1
+ENDFUNC

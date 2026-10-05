@@ -33,6 +33,8 @@ rng/dev/
 runtime_backend/*.before-json-v2-*/
 tools/EasyConInputStateProtocolCheck/bin/
 tools/EasyConInputStateProtocolCheck/obj/
+tools/EasyCon164aTidBootstrapCheck/bin/
+tools/EasyCon164aTidBootstrapCheck/obj/
 .worktrees/
 .tools/
 local_assets/
