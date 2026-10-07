@@ -47,6 +47,10 @@ STATIC_POKEMON_MAP: dict = game_text["static_pokemon_map"]
 # ── 地点 ──
 LOCATION_EN_TO_ZH: dict = game_text["location_en_to_zh"]
 LOCATION_ZH_TO_EN: dict = {v: k for k, v in LOCATION_EN_TO_ZH.items()}
+_LOCATION_INPUTS = {
+    name.casefold(): canonical
+    for name, canonical in {**{k: k for k in LOCATION_EN_TO_ZH}, **LOCATION_ZH_TO_EN}.items()
+}
 
 # ── 游戏设置 ──
 SOUND_ZH_TO_EN: dict = game_text["sound_zh_to_en"]
@@ -117,12 +121,14 @@ ALL_STATS: list = game_text["all_stats"]
 
 def location_to_zh(en_name: str) -> str:
     """英文地点名 → 中文"""
-    return LOCATION_EN_TO_ZH.get(en_name, en_name)
+    canonical = location_to_en(en_name)
+    return LOCATION_EN_TO_ZH.get(canonical, en_name)
 
 
 def location_to_en(zh_name: str) -> str:
-    """中文地点名 → 英文"""
-    return LOCATION_ZH_TO_EN.get(zh_name, zh_name)
+    """规范中文或英文地点名 → Ten Lines 规范英文名，不兼容旧房间名。"""
+    name = zh_name.strip()
+    return _LOCATION_INPUTS.get(name.casefold(), name)
 
 
 def species_to_zh(en_name: str) -> str:

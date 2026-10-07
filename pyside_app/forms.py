@@ -10,8 +10,8 @@ from automation import (
     select_seed_mode_for_seed,
 )
 from automation.tid_search import parse_target_tids
-from assets.game_text import SPECIES_ZH_TO_EN, LOCATION_ZH_TO_EN
-from rng.tenlines_utils import get_species_id
+from assets.game_text import SPECIES_ZH_TO_EN, location_to_en
+from rng.tenlines_utils import get_species_id, load_frlg_encounters
 from rng.sid_reverse import parse_pid_hex
 from .diagnostics import parse_integer
 
@@ -97,14 +97,20 @@ class FormReader:
             raise ValueError("请确认队伍顺序、宝可梦资料、努力值和糖果位置")
         count = self.f["sid_count"].value()
         rows = self.w.sid_party_widgets
+        game = "fr_nx" if self.index("sid_game") == 0 else "lg_nx"
+        locations = tuple(location_to_en(row[3].text()) if i < count else "" for i, row in enumerate(rows))
+        available = {location for location, _category in load_frlg_encounters(game)}
+        for i, row in enumerate(rows[:count]):
+            if row[2].currentIndex() == 1 and locations[i] not in available:
+                raise ValueError(f"队伍第 {i + 1} 只 · 相遇地点不在当前地点列表中，请从匹配结果重新选择")
         request = SIDReverseRunRequest(tid=self.integer("sid_tid"), party_count=count,
-            game="fr_nx" if self.index("sid_game") == 0 else "lg_nx", nx_model=self.index("sid_nx") + 1,
+            game=game, nx_model=self.index("sid_nx") + 1,
             max_candies=self.f["sid_candies"].value(), recognition_threshold=self.f["sid_threshold"].value(),
             home_buffer_adaptive_threshold=self.w.home_buffer_check.isChecked(),
             dex_overrides=tuple(species_id(row[0].text()) if i < count else 0 for i, row in enumerate(rows)),
             initial_levels=tuple(parse_integer(row[1].text(), f"队伍第 {i + 1} 只 · 初始等级") if i < count else 1 for i, row in enumerate(rows)),
             source_types=tuple(row[2].currentIndex() if i < count else 0 for i, row in enumerate(rows)),
-            locations=tuple(LOCATION_ZH_TO_EN.get(row[3].text().strip(), row[3].text().strip()) if i < count else "" for i, row in enumerate(rows)),
+            locations=locations,
             effort_values=tuple(tuple(s.value() for s in row[4:]) if i < count else (0,) * 6 for i, row in enumerate(rows)))
         request.validate()
         return request

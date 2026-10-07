@@ -38,6 +38,10 @@ from tid_records import TidRecordStore
 from tid_session import write_json_atomic
 
 from .jobs import Job
+from .location_picker import (
+    configure_location_combo, refresh_location_search_roles,
+    selected_location, sorted_location_items,
+)
 from .history_controller import HistoryController
 from .path_settings import restore_resource_path
 from .diagnostics import explain_error, parse_integer
@@ -292,6 +296,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.updating = False
         self.status_text = "请选择目标条件，搜索并生成方案。"
         self.devices = ({}, {})
+        configure_location_combo(self.fields["wild_location"])
         self.devices_checked = False
         self.run_input_states = None
         self.preferred_frame_parity_scheme = 1
@@ -374,6 +379,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.fields["profile_language"].currentIndexChanged.connect(self._populate_categories)
         self.fields["wild_category"].currentIndexChanged.connect(self._populate_locations)
         self.fields["wild_location"].currentIndexChanged.connect(self._populate_species)
+        self.fields["wild_location"].editTextChanged.connect(self._populate_species)
         self.fields["wild_species"].currentIndexChanged.connect(self._populate_abilities)
         self.fields["video"].currentIndexChanged.connect(self.refresh_state)
         self.fields["port"].currentIndexChanged.connect(self.refresh_state)
@@ -466,6 +472,7 @@ class FrlgWindow(FrlgPreviewWindow):
             widget = self.fields[key]
             signal = widget.currentIndexChanged if isinstance(widget, QComboBox) else widget.valueChanged if isinstance(widget, QSpinBox) else widget.textChanged
             signal.connect(self.invalidate)
+        self.fields["wild_location"].editTextChanged.connect(self.invalidate)
         for pair in self.iv_ranges:
             for widget in pair:
                 widget.valueChanged.connect(self.invalidate)
@@ -484,6 +491,8 @@ class FrlgWindow(FrlgPreviewWindow):
             if index == -1 and preferred is not None:
                 index = combo.findData(preferred)
             combo.setCurrentIndex(max(0, index) if combo.count() else -1)
+            if combo.property("locationSearch"):
+                refresh_location_search_roles(combo)
 
     def game_code(self, *, include_profile_language=True):
         family = "fr" if self.fields["wild_game"].currentIndex() == 0 else "lg"
@@ -508,7 +517,7 @@ class FrlgWindow(FrlgPreviewWindow):
             availability = traversal_availability(
                 method="All Wild Methods" if wild else "Static 1",
                 category=self.fields["wild_category"].currentData() or "",
-                location=self.fields["wild_location"].currentData() or "",
+                location=selected_location(self.fields["wild_location"]) or "",
                 game=self.game_code(),
                 pokemon=self.fields["wild_species"].currentData() or "",
                 direct_mode=direct,
@@ -552,8 +561,8 @@ class FrlgWindow(FrlgPreviewWindow):
     def _populate_locations(self):
         category = self.fields["wild_category"].currentData()
         if self.fields["wild_method"].currentIndex() == 0:
-            locations = sorted({loc for loc, cat in load_frlg_encounters(self.game_code()) if cat == category})
-            items = [(location_to_zh(loc), loc) for loc in locations]
+            locations = {loc for loc, cat in load_frlg_encounters(self.game_code()) if cat == category}
+            items = sorted_location_items(locations)
         else:
             items = [(CATEGORY_EN_TO_ZH.get(category, category), category)] if category else []
         self._fill(self.fields["wild_location"], items, "Viridian Forest")
@@ -562,7 +571,7 @@ class FrlgWindow(FrlgPreviewWindow):
 
     def _populate_species(self):
         category = self.fields["wild_category"].currentData()
-        location = self.fields["wild_location"].currentData()
+        location = selected_location(self.fields["wild_location"])
         if not category or not location:
             names = []
         elif self.fields["wild_method"].currentIndex() == 0:
@@ -609,10 +618,13 @@ class FrlgWindow(FrlgPreviewWindow):
 
         seed_index = f["wild_seed_mode"].currentIndex()
         direct = f["wild_search_mode"].currentIndex() == 1
+        location = selected_location(f["wild_location"])
+        if location is None:
+            raise ValueError("地点：请输入名称后从匹配列表中选择当前遭遇方式下的地点，不能使用未完成的搜索文字。")
         request = AutoSearchRequest(
             game=self.game_code(), tid=integer("wild_tid", "当前 TID"), sid=integer("wild_sid", "当前 SID"),
             method="All Wild Methods" if f["wild_method"].currentIndex() == 0 else "Static 1",
-            category=f["wild_category"].currentData() or "", location=f["wild_location"].currentData() or "",
+            category=f["wild_category"].currentData() or "", location=location,
             pokemon=f["wild_species"].currentData() or "", min_advances=integer("wild_min", "最小消耗帧") if not direct else 0, max_advances=integer("wild_max", "最大消耗帧") if not direct else 0,
             iv_min=tuple(pair[0].value() for pair in self.iv_ranges), iv_max=tuple(pair[1].value() for pair in self.iv_ranges),
             shiny=FILTER_SHINY_ZH_TO_EN[f["wild_shiny"].currentText()], nature=FILTER_NATURE_ZH_TO_EN[f["wild_nature"].currentText()],

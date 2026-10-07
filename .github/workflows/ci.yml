@@ -65,6 +65,7 @@ jobs:
           device_label_overrides.py
           pyside_app/path_settings.py
           pyside_app/jobs.py
+          pyside_app/location_picker.py
           pyside_app/profiles.py
           pyside_app/window.py
           pyside_app/migration.py
@@ -189,6 +190,8 @@ jobs:
           tests.test_starter_calibration
           tests.test_calibration_trust_gates
           tests.test_tenlines_fixes
+          tests.test_locations
+          tests.test_location_picker
           tests.test_compute_regressions
           tests.test_tid_rng137
           tests.test_tid_bootstrap

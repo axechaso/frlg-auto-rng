@@ -17,7 +17,7 @@ from .tenlines import (
     frame_to_ms, ms_to_time_str, hex_seed,
 )
 
-from assets.game_text import species_to_zh, species_to_en
+from assets.game_text import location_to_en, species_to_zh, species_to_en
 
 # ============================================================
 # Data loading: personal info, species/ability names
@@ -231,13 +231,13 @@ FRLG_MAP_TO_LOCATION = {
     "MAP_FOUR_ISLAND_ICEFALL_CAVE_BACK": "Four Island Icefall Cave Back",
     "MAP_SIX_ISLAND_PATTERN_BUSH": "Six Island Pattern Bush",
     "MAP_FIVE_ISLAND_LOST_CAVE": "Five Island Lost Cave",
-    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM1": "Five Island Lost Cave Room 1", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM2": "Five Island Lost Cave Room 2",
-    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM3": "Five Island Lost Cave Room 3", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM4": "Five Island Lost Cave Room 4",
-    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM5": "Five Island Lost Cave Room 5", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM6": "Five Island Lost Cave Room 6",
-    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM7": "Five Island Lost Cave Room 7", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM8": "Five Island Lost Cave Room 8",
-    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM9": "Five Island Lost Cave Room 9", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM10": "Five Island Lost Cave Room 10",
-    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM11": "Five Island Lost Cave Room 11", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM12": "Five Island Lost Cave Room 12",
-    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM13": "Five Island Lost Cave Room 13", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM14": "Five Island Lost Cave Room 14",
+    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM1": "Five Island Lost Cave", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM2": "Five Island Lost Cave",
+    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM3": "Five Island Lost Cave", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM4": "Five Island Lost Cave",
+    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM5": "Five Island Lost Cave", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM6": "Five Island Lost Cave",
+    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM7": "Five Island Lost Cave", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM8": "Five Island Lost Cave",
+    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM9": "Five Island Lost Cave", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM10": "Five Island Lost Cave",
+    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM11": "Five Island Lost Cave Item Room", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM12": "Five Island Lost Cave Item Room",
+    "MAP_FIVE_ISLAND_LOST_CAVE_ROOM13": "Five Island Lost Cave Item Room", "MAP_FIVE_ISLAND_LOST_CAVE_ROOM14": "Five Island Lost Cave Item Room",
     "MAP_ONE_ISLAND_KINDLE_ROAD": "One Island Kindle Road",
     "MAP_ONE_ISLAND_TREASURE_BEACH": "One Island Treasure Beach",
     "MAP_TWO_ISLAND_CAPE_BRINK": "Two Island Cape Brink",
@@ -254,13 +254,13 @@ FRLG_MAP_TO_LOCATION = {
     "MAP_SEVEN_ISLAND_SEVAULT_CANYON_ENTRANCE": "Seven Island Sevault Canyon Entrance",
     "MAP_SEVEN_ISLAND_SEVAULT_CANYON": "Seven Island Sevault Canyon",
     "MAP_SEVEN_ISLAND_TANOBY_RUINS": "Seven Island Tanoby Ruins",
-    "MAP_SEVEN_ISLAND_TANOBY_RUINS_DILFORD_CHAMBER": "Seven Island Tanoby Ruins",
-    "MAP_SEVEN_ISLAND_TANOBY_RUINS_LIPTOO_CHAMBER": "Seven Island Tanoby Ruins",
-    "MAP_SEVEN_ISLAND_TANOBY_RUINS_MONEAN_CHAMBER": "Seven Island Tanoby Ruins",
-    "MAP_SEVEN_ISLAND_TANOBY_RUINS_RIXY_CHAMBER": "Seven Island Tanoby Ruins",
-    "MAP_SEVEN_ISLAND_TANOBY_RUINS_SCUFIB_CHAMBER": "Seven Island Tanoby Ruins",
-    "MAP_SEVEN_ISLAND_TANOBY_RUINS_VIAPOIS_CHAMBER": "Seven Island Tanoby Ruins",
-    "MAP_SEVEN_ISLAND_TANOBY_RUINS_WEEPTH_CHAMBER": "Seven Island Tanoby Ruins",
+    "MAP_SEVEN_ISLAND_TANOBY_RUINS_DILFORD_CHAMBER": "Seven Island Tanoby Ruins Dilford Chamber",
+    "MAP_SEVEN_ISLAND_TANOBY_RUINS_LIPTOO_CHAMBER": "Seven Island Tanoby Ruins Liptoo Chamber",
+    "MAP_SEVEN_ISLAND_TANOBY_RUINS_MONEAN_CHAMBER": "Seven Island Tanoby Ruins Monean Chamber",
+    "MAP_SEVEN_ISLAND_TANOBY_RUINS_RIXY_CHAMBER": "Seven Island Tanoby Ruins Rixy Chamber",
+    "MAP_SEVEN_ISLAND_TANOBY_RUINS_SCUFIB_CHAMBER": "Seven Island Tanoby Ruins Scufib Chamber",
+    "MAP_SEVEN_ISLAND_TANOBY_RUINS_VIAPOIS_CHAMBER": "Seven Island Tanoby Ruins Viapois Chamber",
+    "MAP_SEVEN_ISLAND_TANOBY_RUINS_WEEPTH_CHAMBER": "Seven Island Tanoby Ruins Weepth Chamber",
     "MAP_PALLET_TOWN": "Pallet Town", "MAP_VIRIDIAN_CITY": "Viridian City",
     "MAP_CERULEAN_CITY": "Cerulean City", "MAP_VERMILION_CITY": "Vermilion City",
     "MAP_CELADON_CITY": "Celadon City", "MAP_FUCHSIA_CITY": "Fuchsia City",
@@ -284,6 +284,11 @@ def load_frlg_encounters(game_version: str = "fr_nx") -> dict:
         if version_filter not in base:
             continue
         map_name = enc.get("map", "")
+        # The later Altering Cave entries are separate alternative tables,
+        # not extra slots in the default Zubat table. Never expose them as a
+        # combined 108-slot encounter table.
+        if map_name == "MAP_SIX_ISLAND_ALTERING_CAVE" and base != f"sSixIslandAlteringCave_{version_filter}":
+            continue
         location_name = FRLG_MAP_TO_LOCATION.get(map_name)
         if location_name is None:
             continue
@@ -291,8 +296,9 @@ def load_frlg_encounters(game_version: str = "fr_nx") -> dict:
             section = enc.get(enc_type)
             if section and section.get("encounter_rate", 0) > 0:
                 key = (location_name, key_suffix)
-                if key not in result:
-                    result[key] = {"rate": section["encounter_rate"], "slots": []}
+                if key in result:
+                    continue  # Ten Lines groups maps with the same slot table.
+                result[key] = {"rate": section["encounter_rate"], "slots": []}
                 for slot in section["mons"]:
                     species = slot["species"] & 0x7ff
                     result[key]["slots"].append({
@@ -304,8 +310,9 @@ def load_frlg_encounters(game_version: str = "fr_nx") -> dict:
         if fish and fish.get("encounter_rate", 0) > 0:
             for rod_type, rod_range in [("OldRod", (0,2)), ("GoodRod", (2,5)), ("SuperRod", (5,10))]:
                 key = (location_name, rod_type)
-                if key not in result:
-                    result[key] = {"rate": fish["encounter_rate"], "slots": []}
+                if key in result:
+                    continue
+                result[key] = {"rate": fish["encounter_rate"], "slots": []}
                 for i in range(*rod_range):
                     if i < len(fish["mons"]):
                         slot = fish["mons"][i]
@@ -317,8 +324,9 @@ def load_frlg_encounters(game_version: str = "fr_nx") -> dict:
         rock_smash = enc.get("rock_smash_mons")
         if rock_smash and rock_smash.get("encounter_rate", 0) > 0:
             key = (location_name, "RockSmash")
-            if key not in result:
-                result[key] = {"rate": rock_smash["encounter_rate"], "slots": []}
+            if key in result:
+                continue
+            result[key] = {"rate": rock_smash["encounter_rate"], "slots": []}
             for slot in rock_smash["mons"]:
                 result[key]["slots"].append({
                     "species": slot["species"],
@@ -328,6 +336,7 @@ def load_frlg_encounters(game_version: str = "fr_nx") -> dict:
     return result
 
 def get_encounter(location: str, category: str, game_version: str = "fr_nx") -> Optional[dict]:
+    location = location_to_en(location)
     cache_key = (location, category, game_version)
     if cache_key in encounter_cache:
         return encounter_cache[cache_key]

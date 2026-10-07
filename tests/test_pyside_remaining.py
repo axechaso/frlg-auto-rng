@@ -274,6 +274,29 @@ class RemainingQtTests(unittest.TestCase):
         self.assertEqual(request.locations[0], "Viridian Forest")
         self.assertEqual(request.effort_values[0][0], 252)
 
+    def test_sid_rejects_old_or_pending_wild_locations_before_generation(self):
+        w = self.w
+        w.select_page("sid")
+        w.fields["sid_count"].setValue(1)
+        row = w.sid_party_widgets[0]
+        row[0].setText("皮卡丘")
+        row[1].setText("3")
+        row[2].setCurrentIndex(1)
+        w.sid_ack.setChecked(True)
+        for name in ("不归之穴 房间14", "Five Island Lost Cave Room 14", "不归", "不存在的地点"):
+            with self.subTest(location=name):
+                row[3].setText(name)
+                with self.assertRaisesRegex(ValueError, "队伍第 1 只.*重新选择"):
+                    w.reader.sid()
+        row[3].setText("不归之穴（有物品的房间）")
+        self.assertEqual(w.reader.sid().locations[0], "Five Island Lost Cave Item Room")
+        # Static sources do not require a wild location; disabled rows are
+        # ignored rather than migrated or validated as active observations.
+        row[2].setCurrentIndex(0)
+        row[3].setText("不归之穴 房间14")
+        w.sid_party_widgets[1][3].setText("不存在的地点")
+        self.assertEqual(w.reader.sid().locations[1], "")
+
     def test_egg_config_can_inherit_defaults_without_local_script_pack(self):
         self.configure_egg()
         self.w.fields["source"].setText(str(self.root / "missing-script-pack"))

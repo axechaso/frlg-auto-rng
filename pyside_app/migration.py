@@ -18,7 +18,7 @@ from automation import STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME, resolve_script
 from automation.sid_traversal_policy import validate_traversal_request
 from automation.tid_starter_save import TID_STARTER_SAVE_NAME
 from automation.precalibration import update_from_manifest
-from rng.tenlines_utils import get_species_name
+from rng.tenlines_utils import get_species_name, load_frlg_encounters
 from rng.sid_reverse import find_earliest_shiny_sid, parse_pid_hex, sid_min_advances_for_f3, DEFAULT_TID_SID_SEARCH_ADVANCES
 from sid_traversal import DEFAULT_TARGET_MAX_ADVANCES, sid_traversal_start_advance
 from tid_session import write_json_atomic
@@ -27,6 +27,7 @@ from .window import FrlgWindow, easycon_log_has_fatal_error, workflow_start_conf
 from .forms import FormReader, species_id
 from .workflows import WorkflowInputs, prepare_workflow, prepare_workflow_run
 from .egg_config import build_egg_parent_config_payload, build_egg_full_config_payload, parse_egg_parent_config_payload, parse_egg_full_config_payload
+from .location_picker import configure_location_edit
 
 
 class CompleteWindow(FrlgWindow):
@@ -87,6 +88,8 @@ class CompleteWindow(FrlgWindow):
             popup.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
             popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
             edit.setCompleter(completer)
+        self._refresh_sid_location_completions()
+        self.fields["sid_game"].currentIndexChanged.connect(self._refresh_sid_location_completions)
         self.fields["script_entry"].currentIndexChanged.connect(self.sync_script)
         self.fields["source"].editingFinished.connect(self.sync_script)
         self.fields["script_path"].setPlaceholderText("选择 ECS 文件")
@@ -108,6 +111,12 @@ class CompleteWindow(FrlgWindow):
         self.page_guides = PageGuides(self)
         self.audio_observer = AudioObserverController(self)
         self.refresh_state()
+
+    def _refresh_sid_location_completions(self, *_):
+        game = "fr_nx" if self.fields["sid_game"].currentIndex() == 0 else "lg_nx"
+        locations = {loc for loc, _category in load_frlg_encounters(game)}
+        for row in self.sid_party_widgets:
+            configure_location_edit(row[3], locations)
 
     def extra_checks(self):
         return (self.egg_ack, self.sid_ack, self.traversal_check, self.tid_flow_check, self.tid_any_check,
