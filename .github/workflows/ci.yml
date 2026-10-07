@@ -88,6 +88,8 @@ jobs:
           run_auto_planner.py
           run_easycon_logged.py
           run_sid_reverse.py
+          rng/ev_training.py
+          tools/inspect_sid_training_packages.py
           run_sid_reverse_capture.py
           run_sid_traversal.py
           run_tid_starter_flow.py
@@ -175,6 +177,7 @@ jobs:
           tests.test_sid_reverse118
           tests.test_sid_reverse_capture
           tests.test_sid_reverse_workflow
+          tests.test_ev_training
           tests.test_starter_sid_verification
           tests.test_script_test
           tests.test_save_profiles

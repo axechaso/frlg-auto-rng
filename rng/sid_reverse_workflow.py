@@ -8,6 +8,8 @@ from typing import Iterable, Sequence
 
 from assets.game_text import location_to_en
 
+from .ev_training import EVTrainingLog, EVTrainingSnapshot, TRAINING_PREFIX, validate_evs
+
 from .sid_reverse import (
     PIDCandidate,
     ShinyEvidence,
@@ -234,6 +236,7 @@ class SIDObservation:
     source_type: str = SOURCE_STATIC
     location: str = ""
     effort_values: tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0)
+    training: EVTrainingSnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -250,6 +253,8 @@ class PokemonReverseSummary:
     location: str
     effort_values: tuple[int, int, int, int, int, int]
     encounter_categories: tuple[str, ...]
+    training_battles: int = 0
+    effort_history: tuple[tuple[int, tuple[int, int, int, int, int, int]], ...] = ()
 
     @property
     def psvs(self) -> tuple[int, ...]:
@@ -267,20 +272,33 @@ def parse_sid_reverse_log(lines: str | Iterable[str]) -> tuple[int | None, list[
         lines = lines.splitlines()
     tid: int | None = None
     observations: list[SIDObservation] = []
+    training_log = EVTrainingLog()
     for raw_line in lines:
-        marker = raw_line.find(SIDREV_PREFIX)
-        if marker < 0:
+        markers = [position for prefix in (SIDREV_PREFIX, TRAINING_PREFIX)
+                   if (position := raw_line.find(prefix)) >= 0]
+        if not markers:
             continue
+        marker = min(markers)
         # EasyCon CLI wraps printed lines in ANSI colour resets.  Remove them
         # before parsing the final numeric field (usually SPE).
         payload = _ANSI_ESCAPE_RE.sub("", raw_line[marker:]).strip()
         parts = payload.split("|")
+        is_training = parts[0] == TRAINING_PREFIX.rstrip("|")
         record_type = parts[1] if len(parts) > 1 else ""
         values: dict[str, str] = {}
         for part in parts[2:]:
             key, separator, value = part.partition("=")
             if separator:
+                if is_training and key.strip().upper() in values:
+                    raise ValueError("duplicate field in SID training record")
                 values[key.strip().upper()] = value.strip()
+            elif is_training:
+                raise ValueError("invalid field in SID training record")
+        training = None
+        if is_training:
+            training = training_log.consume(record_type, values)
+            if training is None:
+                continue
         if record_type == "META":
             if "TID" in values:
                 tid = int(values["TID"])
@@ -290,6 +308,8 @@ def parse_sid_reverse_log(lines: str | Iterable[str]) -> tuple[int | None, list[
                 pokemon_index = int(values["MON"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise ValueError(f"invalid SIDREV attempt marker: {payload}") from exc
+            if pokemon_index in training_log.party_sessions:
+                raise ValueError("training cannot restart from a candy attempt marker")
             observations = [
                 item for item in observations if item.pokemon_index != pokemon_index
             ]
@@ -314,6 +334,8 @@ def parse_sid_reverse_log(lines: str | Iterable[str]) -> tuple[int | None, list[
         if gender_value is not None and gender_value not in (0, 1, 2):
             raise ValueError(f"invalid SIDREV gender observation: {gender_value}")
         gender = gender_value
+        if training is None and pokemon_index in training_log.party_sessions:
+            raise ValueError("candy and training observations were mixed for one party slot")
         observations.append(
             SIDObservation(
                 pokemon_index=pokemon_index,
@@ -325,6 +347,7 @@ def parse_sid_reverse_log(lines: str | Iterable[str]) -> tuple[int | None, list[
                 source_type=source_type,
                 location=location,
                 effort_values=effort_values,  # type: ignore[arg-type]
+                training=training,
             )
         )
     return tid, observations
@@ -427,18 +450,43 @@ def analyze_observed_pokemon(
         raise ValueError("source type changed within one Pokemon's observations")
     if any(item.location != first.location for item in observations):
         raise ValueError("encounter location changed within one Pokemon's observations")
-    if any(item.effort_values != first.effort_values for item in observations):
-        raise ValueError("effort values changed within one Pokemon's observations")
+    training = first.training
+    if training is None:
+        if any(item.training is not None for item in observations):
+            raise ValueError("candy and training observations were mixed")
+        if any(item.effort_values != first.effort_values for item in observations):
+            raise ValueError("effort values changed without a confirmed training journal")
+    else:
+        previous = None
+        for item in observations:
+            snapshot = item.training
+            if snapshot is None or snapshot.context != training.context:
+                raise ValueError("observations from different training sessions were mixed")
+            context = snapshot.context
+            if (context.pokemon_index != item.pokemon_index or context.species_id != item.species_id
+                    or snapshot.level != item.level or context.source_type != source_type
+                    or context.location != item.location):
+                raise ValueError("training snapshot identity does not match the observation")
+            if snapshot.effort_values != item.effort_values:
+                raise ValueError("effort values disagree with the confirmed training journal")
+            if previous is None and snapshot.sequence != 0:
+                raise ValueError("training journal is missing the initial stat observation")
+            if previous is not None:
+                if (snapshot.sequence < previous.sequence
+                        or snapshot.defeated_species[:previous.sequence] != previous.defeated_species
+                        or snapshot.level < previous.level):
+                    raise ValueError("training observation history changed or moved backwards")
+                if snapshot.sequence > previous.sequence and snapshot.level <= previous.level:
+                    raise ValueError("EV gains without a level-up cannot refresh training stats")
+                if snapshot.sequence == previous.sequence and snapshot.level != previous.level:
+                    raise ValueError("level changed without a recorded training defeat")
+            previous = snapshot
     if not 1 <= first.species_id <= 386:
         raise ValueError(f"unsupported National Dex number: {first.species_id}")
     if not 0 <= first.nature < 25:
         raise ValueError(f"invalid nature index: {first.nature}")
-    if len(first.effort_values) != 6:
-        raise ValueError("six effort values are required")
-    if any(not 0 <= value <= 255 for value in first.effort_values):
-        raise ValueError("each effort value must be in 0-255")
-    if sum(first.effort_values) > 510:
-        raise ValueError("the six effort values must total no more than 510")
+    for item in observations:
+        validate_evs(item.effort_values)
 
     location = ""
     encounter_categories: tuple[str, ...] = ()
@@ -471,11 +519,15 @@ def analyze_observed_pokemon(
         raise ValueError(f"Pokemon {first.pokemon_index} contains an invalid OCR observation")
 
     personal = get_personal(first.species_id, game)
-    iv_range = iv_calculator(
-        iv_observations,
-        personal["stats"],
-        effort_values=first.effort_values,
-    )
+    if training is None:
+        iv_range = iv_calculator(
+            iv_observations, personal["stats"], effort_values=first.effort_values,
+        )
+    else:
+        iv_range = iv_calculator(
+            iv_observations, personal["stats"],
+            effort_values_per_observation=[item.effort_values for item in observations],
+        )
     iv_min = _tuple_from_ivs(iv_range.ivs_lower_bound)
     iv_max = _tuple_from_ivs(iv_range.ivs_upper_bound)
     if any(lower > upper for lower, upper in zip(iv_min, iv_max)):
@@ -509,6 +561,8 @@ def analyze_observed_pokemon(
         location,
         first.effort_values,
         encounter_categories,
+        observations[-1].training.sequence if training is not None else 0,
+        tuple((item.level, item.effort_values) for item in observations) if training is not None else (),
     )
 
 

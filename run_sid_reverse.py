@@ -34,7 +34,12 @@ def build_report(text: str, *, tid_override: int | None = None, game: str = "fr_
         if item.location:
             categories = "/".join(item.encounter_categories)
             lines.append(f"  相遇地点: {item.location}；匹配方式: {categories}")
-        lines.append(f"  努力值: {_format_ivs(item.effort_values)}")
+        if item.effort_history:
+            lines.append(f"  练级记录: {item.training_battles}次已确认击倒；按各次观测的努力值计算")
+            for level, effort_values in item.effort_history:
+                lines.append(f"  LV{level} 努力值: {_format_ivs(effort_values)}")
+        else:
+            lines.append(f"  努力值: {_format_ivs(item.effort_values)}")
         lines.append(f"  IV范围: {_format_ivs(item.iv_min)} - {_format_ivs(item.iv_max)}")
         lines.append(f"  PID候选: {len(item.candidates)}；PSV候选: {len(item.psvs)}")
         if len(item.candidates) <= 12:

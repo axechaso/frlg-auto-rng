@@ -1071,7 +1071,19 @@ def iv_calculator(
     ivs_observations: List[IVsObservation],
     base_stats: Tuple[int, int, int, int, int, int] = None,
     effort_values: Tuple[int, int, int, int, int, int] = (0, 0, 0, 0, 0, 0),
+    *,
+    effort_values_per_observation: Optional[List[Tuple[int, int, int, int, int, int]]] = None,
 ) -> IVsRange:
+    if effort_values_per_observation is not None:
+        if len(effort_values_per_observation) != len(ivs_observations):
+            raise ValueError("one effort vector is required for each observation")
+        if effort_values != (0, 0, 0, 0, 0, 0):
+            raise ValueError("constant and per-observation effort values cannot be combined")
+        for values in effort_values_per_observation:
+            if len(values) != 6 or any(type(value) is not int or not 0 <= value <= 255 for value in values):
+                raise ValueError("each observation requires six effort values in 0-255")
+            if sum(values) > 510:
+                raise ValueError("the six effort values must total no more than 510")
     if not ivs_observations or base_stats is None:
         return IVsRange(
             ivs_lower_bound=IVs(0, 0, 0, 0, 0, 0),
@@ -1096,7 +1108,9 @@ def iv_calculator(
     nature_reduce = [  -1,  2,  5,  3,  4,  1, -1,  5,  3,  4,
                         1,  2, -1,  3,  4,  1,  2,  5, -1,  4,
                         1,  2,  5,  3, -1]
-    for obs in ivs_observations:
+    for observation_index, obs in enumerate(ivs_observations):
+        if effort_values_per_observation is not None:
+            effort_terms = [value // 4 for value in effort_values_per_observation[observation_index]]
         nature_idx = nature_map.get(obs.nature.strip().title(), -1)
         boost_stat  = nature_boost[nature_idx]  if 0 <= nature_idx < 25 else -1
         reduce_stat = nature_reduce[nature_idx] if 0 <= nature_idx < 25 else -1
@@ -1121,8 +1135,9 @@ def iv_calculator(
                 if stat == observed[stat_idx]:
                     possible_for_obs[stat_idx].add(iv)
         for stat_idx in range(6):
-            if possible_for_obs[stat_idx]:
-                all_possible[stat_idx] &= possible_for_obs[stat_idx]
+            # An impossible observed stat invalidates the intersection. It is
+            # not a missing sample and must not be silently ignored.
+            all_possible[stat_idx] &= possible_for_obs[stat_idx]
     lower = IVs()
     upper = IVs()
     stat_attrs = ["hp", "attack", "defense", "sp_attack", "sp_defense", "speed"]
