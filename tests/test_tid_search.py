@@ -204,7 +204,9 @@ class TidSearchTests(unittest.TestCase):
             source=configure_tid_template_text(self.template,request)
             allowed={p+"_"+name for name in ("打印参数","匹配","计算穷举候选距离","穷举模式偏移运算","乱数模式操作延迟校验",
                 "穷举推进到下一个搜索点", "乱数模式偏移运算", "乱数定位到当前壳层下一个有效组合", "乱数推进到下一个壳层组合")}
-            allowed.update({"TID_读取当前退出标签", "TID_关闭游戏"})
+            allowed.update({"TID_读取当前退出标签", "TID_关闭游戏", "TID_检测新建存档"})
+            self.assertIn("@无存档", function(source, "TID_检测新建存档"))
+            self.assertIn("$OP检查截止 = 400", function(source, "TID_检测新建存档"))
             for name in re.findall(r"(?m)^FUNC ([^\s(]+)",self.template):
                 if name not in allowed:
                     self.assertEqual(function(source,name),function(self.template,name),name)

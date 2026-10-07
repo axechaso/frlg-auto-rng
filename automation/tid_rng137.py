@@ -439,11 +439,13 @@ def configure_tid_template_text(
     include_flow_marker: bool = False,
 ) -> str:
     if is_starter_save_template(template_text):
+        from .tid_bootstrap import install_tid_bootstrap
         from .tid_search import extend_tid_search
         configured = configure_starter_save_id(
             template_text, request, include_flow_marker=include_flow_marker
         )
-        return extend_tid_search(configured, request)
+        configured = extend_tid_search(configured, request)
+        return install_tid_bootstrap(configured, request.language)
     if request.auto_rng or request.additional_target_tids:
         raise ValueError("多目标和自动转乱数需要新版TID球前存档模板，请更新TID缓存")
     request.validate(template_text)
@@ -591,6 +593,7 @@ def write_configured_tid_project(
                     "starter_save_164a" if is_starter_save_template(template_text) else "standalone_137"
                 ),
                 "tid_starter_flow_marker": include_flow_marker,
+                "tid_no_save_bootstrap": "# TID_AUTO_BOOTSTRAP_V1" in configured,
                 "backend": {
                     "name": EASYCON_BACKEND_NAME,
                     "expected_cli_version": EXPECTED_EZCON_VERSION,

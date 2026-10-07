@@ -165,6 +165,7 @@ def _prepare_workflow_in_directory(
             plan.starter_run_plan.initial_seed.advances if plan and plan.starter_run_plan else "—")
         details = ("TID → 球前存档 → 御三家" if flow else "TID / SID 建档") + f"\n{request.language} · Switch {request.nx_model} · {'穷举' if request.mode == 0 else '乱数'}\n"
         details += "将先检测固定延迟，回填后重新生成并继续。" if request.calibration_check else "使用当前固定延迟。"
+        details += "\n确认无存档时先建临时基础档并设置语速快；保存并重启确认后继续TID。"
         details += "\n运行器负责恢复同参数的进度与记录实测 TID。"
     elif inputs.mode == "script_test":
         project = Path(inputs.extra["script"]).resolve()

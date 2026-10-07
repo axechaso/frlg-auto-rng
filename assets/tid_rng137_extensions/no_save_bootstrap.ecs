@@ -1,0 +1,239 @@
+# TID_AUTO_BOOTSTRAP_V1：日美共用已实测建档动作，语言只选择语速标签。
+$TID建档已尝试 = 0
+$TID建档等待验证 = 0
+$TID建档结果 = 0
+$OP无存档匹配分 = 0
+$OP存档状态 = 0
+$TID建档FAST分 = 0
+$TID建档MID分 = 0
+$TID建档SLOW分 = 0
+$TID建档语速状态 = -1
+$TID建档语速重试 = 0
+$TID建档确认索引 = 0
+$TID建档开场等待MS = 0
+$TID建档开场A等待 = [1000, 1000, 2500, 1000, 1000]
+
+# 0=未确认，1=有存档，2=无存档，-1=冲突；固定95，不跟随低分自适应。
+FUNC TID建档_判定存档状态($有存档分: INT, $无存档分: INT): INT
+    IF $有存档分 >= 95 and $无存档分 >= 95
+        RETURN -1
+    ELIF $有存档分 >= 95
+        RETURN 1
+    ELIF $无存档分 >= 95
+        RETURN 2
+    ENDIF
+    RETURN 0
+ENDFUNC
+
+# 保留有存档连续两次确认及原400/450/500ms窗口，无存档只在唯一命中时放行。
+FUNC TID_检测新建存档(): INT
+    $OP检查起点 = TIME()
+    $OP检查截止 = 400
+    $OP连续匹配 = 0
+    $OP存档状态 = 0
+    FOR 3
+        $OP检查耗时 = TIME() - $OP检查起点
+        $OP检查剩余 = $OP检查截止 - $OP检查耗时
+        IF $OP检查剩余 > 0
+            WAIT $OP检查剩余
+        ENDIF
+        $OP界面匹配分 = @存档
+        $OP无存档匹配分 = @无存档
+        $OP存档状态 = TID建档_判定存档状态($OP界面匹配分, $OP无存档匹配分)
+        PRINT "TID_BOOTSTRAP_OP|存档=" & $OP界面匹配分 & "|无存档=" & $OP无存档匹配分 & "|门槛=95|状态=" & $OP存档状态
+        IF $OP存档状态 == -1 or $OP存档状态 == 2
+            BREAK
+        ELIF $OP存档状态 == 1
+            $OP连续匹配 += 1
+        ELSE
+            $OP连续匹配 = 0
+        ENDIF
+        IF $OP连续匹配 >= 2
+            BREAK
+        ENDIF
+        $OP检查截止 += 50
+    NEXT
+    $OP检查耗时 = TIME() - $OP检查起点
+    $OP检查剩余 = 500 - $OP检查耗时
+    IF $OP检查剩余 > 0
+        WAIT $OP检查剩余
+    ENDIF
+    IF $OP存档状态 == -1 or $OP存档状态 == 2
+        RETURN $OP存档状态
+    ENDIF
+    IF $OP连续匹配 >= 2
+        RETURN 1
+    ENDIF
+    RETURN 0
+ENDFUNC
+
+FUNC TID建档_创建新游戏
+    # 无存档菜单不先按DOWN；动作与已验收独立测试一致。
+    A DOWN
+    WAIT 1000
+    A UP
+    WAIT 550
+    FOR $TID建档确认索引 = 0 TO 4
+        A DOWN
+        WAIT 50
+        A UP
+        $TID建档开场等待MS = $TID建档开场A等待[$TID建档确认索引]
+        WAIT $TID建档开场等待MS
+    NEXT
+    A DOWN
+    WAIT 3000
+    A UP
+    WAIT 2500
+    PRINT 【创建进度】推进开场说明与大木博士对话
+    FOR 35
+        B
+        WAIT 800
+    NEXT
+    FOR 2
+        B DOWN
+        WAIT 50
+        B UP
+        WAIT 3000
+    NEXT
+    PRINT 【创建进度】选择主角性别
+    IF $gender == 1
+        LS DOWN
+        WAIT 50
+        LS RESET
+        WAIT 500
+    ENDIF
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 4000
+    A
+    WAIT 1500
+    PRINT 【创建进度】确认主角默认姓名
+    X
+    WAIT 500
+    A
+    WAIT 4000
+    A
+    WAIT 1500
+    FOR 14
+        B
+        WAIT 800
+    NEXT
+    PRINT 【创建进度】选择劲敌预设姓名
+    LS DOWN
+    WAIT 50
+    LS RESET
+    WAIT 1500
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 3500
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 1500
+    FOR 20
+        B
+        WAIT 800
+    NEXT
+    WAIT 5500
+    PRINT 【创建进度】已执行进入房间操作；下一步用语速标签确认菜单位置
+ENDFUNC
+
+FUNC TID建档_判定语速($FAST: INT, $MID: INT, $SLOW: INT): INT
+    IF $FAST >= 95 and $FAST > $MID and $FAST > $SLOW
+        RETURN 0
+    ELIF $MID >= 95 and $MID > $FAST and $MID > $SLOW
+        RETURN 1
+    ELIF $SLOW >= 95 and $SLOW > $FAST and $SLOW > $MID
+        RETURN 2
+    ENDIF
+    RETURN -1
+ENDFUNC
+
+FUNC TID建档_读取语速
+    IF $连续流程_游戏版本 == 1
+        $TID建档FAST分 = @日版TEXT_SPEED_FAST
+        $TID建档MID分 = @日版TEXT_SPEED_MID
+        $TID建档SLOW分 = @日版TEXT_SPEED_SLOW
+    ELSE
+        $TID建档FAST分 = @TEXT_SPEED_FAST
+        $TID建档MID分 = @TEXT_SPEED_MID
+        $TID建档SLOW分 = @TEXT_SPEED_SLOW
+    ENDIF
+    $TID建档语速状态 = TID建档_判定语速($TID建档FAST分, $TID建档MID分, $TID建档SLOW分)
+    PRINT "TID_BOOTSTRAP_TEXT|语言=" & $连续流程_游戏版本 & "|FAST=" & $TID建档FAST分 & "|MID=" & $TID建档MID分 & "|SLOW=" & $TID建档SLOW分 & "|状态=" & $TID建档语速状态
+ENDFUNC
+
+FUNC TID建档_设置语速并首次保存(): INT
+    X DOWN
+    WAIT 50
+    X UP
+    WAIT 500
+    FOR 3
+        LS DOWN
+        WAIT 50
+        LS RESET
+        WAIT 100
+    NEXT
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 1500
+    FOR $TID建档语速重试 = 1 TO 3
+        CALL TID建档_读取语速
+        IF $TID建档语速状态 >= 0
+            BREAK
+        ENDIF
+        WAIT 250
+    NEXT
+    IF $TID建档语速状态 < 0
+        RETURN 0
+    ENDIF
+    IF $TID建档语速状态 == 1
+        LS RIGHT
+        WAIT 50
+        LS RESET
+        WAIT 500
+    ELIF $TID建档语速状态 == 2
+        LS LEFT
+        WAIT 50
+        LS RESET
+        WAIT 500
+    ENDIF
+    FOR $TID建档语速重试 = 1 TO 3
+        CALL TID建档_读取语速
+        IF $TID建档语速状态 == 0
+            BREAK
+        ENDIF
+        WAIT 250
+    NEXT
+    IF $TID建档语速状态 != 0
+        PRINT FAST设置后未通过95分确认
+        RETURN 0
+    ENDIF
+    PRINT 文字速度已确认FAST；不修改声音、战斗动画、按键设置
+    B DOWN
+    WAIT 50
+    B UP
+    WAIT 1500
+    LS UP
+    WAIT 50
+    LS RESET
+    WAIT 100
+    PRINT 【首次保存】只确认首次保存，不执行覆盖旧存档的上键确认
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 2500
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 8000
+    A DOWN
+    WAIT 50
+    A UP
+    WAIT 2000
+    PRINT 首次保存按键已执行；下一轮重启确认有存档后才继续TID
+    RETURN 1
+ENDFUNC

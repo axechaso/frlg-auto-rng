@@ -115,6 +115,7 @@ jobs:
           automation/script_test.py
           automation/sid_reverse118.py
           automation/tid_rng137.py
+          automation/tid_bootstrap.py
           automation/tid_calibration.py
           automation/tid_checkpoint.py
           automation/tid_search.py
@@ -131,6 +132,7 @@ jobs:
           tools/benchmark_history_logs.py
           tools/verify_acceptance_plans.py
           tools/verify_easycon_protocol.py
+          tools/verify_tid_bootstrap_integration.py
           tools/verify_guide_layouts.py
 
       - name: Run offline QQ notification integration tests
@@ -181,6 +183,8 @@ jobs:
           tests.test_tenlines_fixes
           tests.test_compute_regressions
           tests.test_tid_rng137
+          tests.test_tid_bootstrap
+          tests.test_tid_bootstrap_test_script
           tests.test_tid_calibration
           tests.test_tid_records
           tests.test_tid_session
