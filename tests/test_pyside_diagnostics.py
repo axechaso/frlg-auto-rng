@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from pyside_app.diagnostics import explain_error, parse_integer
+from pyside_app.diagnostics import brief_error, explain_error, explain_popup_error, parse_integer
 
 
 ROI_ERROR = (
@@ -48,6 +48,95 @@ class DiagnosticTests(unittest.TestCase):
         self.assertIn("空值", issue.summary)
         self.assertIn("没有提供字段名", issue.action)
         self.assertNotIn("OP", issue.message)
+
+    def test_popup_advice_covers_actual_error_categories(self):
+        cases = (
+            ("检查程序更新失败: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer certificate>", "network_certificate"),
+            ("ImportError: DLL load failed while importing QtCore: 找不到指定的程序。", "runtime_dll"),
+            ("采集卡编号或名称已改变，请重新检测并生成方案", "device_changed"),
+            ("采集卡打开失败", "capture_connection"),
+            ("采集卡被占用", "capture_connection"),
+            ("未检测到串口 COM4，请重新检测设备", "serial_connection"),
+            ("could not open port COM4: PermissionError: Access is denied", "serial_connection"),
+            ("No space left on device", "disk_space"),
+            ("OSError: disk full", "disk_space"),
+            ("[WinError 32] 另一个程序正在使用此文件", "file_access"),
+            ("TID 标签数量应为 1155，当前为 328", "label_package"),
+            ("标签 JSON 损坏", "label_package"),
+            ("2.0 模板字段 $孵蛋Held无蛋表Seed 应出现 1 次，实际为 0 次", "template_version"),
+            ("2.0 脚本指纹不一致", "integrity"),
+            ("预检后文件已改变，请重新生成 / 预检：main.ecs", "plan_preflight"),
+            ("FileNotFoundError: [Errno 2] No such file or directory: old/main.ecs", "path_missing"),
+            ("HTTP Error 403: Forbidden", "network_http"),
+            ("检查程序更新失败: <urlopen error timed out>", "network_connection"),
+            ("Seed 表未加载", "seed_table_missing"),
+            ("指定 Seed 1234 在 fr_nx 的所有可用 Seed 模式中均不可达", "seed_unreachable"),
+            ("指定 Seed 1234 不在 fr_nx 的 Seed 表/模式 6 中", "seed_unreachable"),
+            ("找到了 20 个个体结果，但没有初始 Seed 方案落在 Advance 0-1000", "seed_unreachable"),
+            ("Ten Lines 没有找到满足宝可梦、闪光、性格、个体值条件的结果", "search_no_result"),
+            ("HOME_BUFFER calibration timeout", "home_buffer"),
+            ("HOME_BUFFER校准失败：短/长边界之间没有达到当前识图阈值的整数延迟", "home_buffer"),
+            ("反查失败：没有候选", "reverse_search"),
+            ("性格识别失败，最高匹配度:65", "recognition"),
+            ("JSONDecodeError: Expecting value", "config_format"),
+            ("当前目标仅支持搜索，不能重建自动运行工程", "route_unsupported"),
+            ("请检查输入：“当前 TID”为空，请填写整数。", "input_or_precondition"),
+            ("运行进程无法启动：系统找不到指定的程序", "process_start"),
+            ("当前标签会在相邻页面触发", "label_false_positive"),
+            ("先通过同图原生测试和 3 张新帧动态测试", "label_verification_pending"),
+            ("故障资料中没有当次实际加载的标签备份，不能直接修复。", "label_evidence_missing"),
+        )
+        for text, expected in cases:
+            with self.subTest(text=text):
+                issue = explain_popup_error(text)
+                self.assertEqual(issue.key, expected)
+                self.assertIn("可能原因（需核对）", issue.message)
+                self.assertIn("建议排查", issue.message)
+                self.assertTrue(issue.possible_causes)
+
+    def test_specific_hardware_and_certificate_errors_win_over_outer_text(self):
+        self.assertEqual(explain_popup_error("程序更新失败: certificate verify failed: timed out").key, "network_certificate")
+        self.assertEqual(explain_popup_error("标签操作失败：could not open COM4: Access is denied").key, "serial_connection")
+        self.assertEqual(explain_popup_error("标签草稿保存失败：[WinError 5] 拒绝访问").key, "file_access")
+        self.assertEqual(explain_popup_error(ROI_ERROR + "\n标签 JSON 损坏").key, "capture_roi:错误退出")
+
+    def test_timeout_alone_and_success_headers_do_not_invent_network_or_serial_cause(self):
+        self.assertEqual(explain_popup_error("未知阶段 timeout").key, "unknown")
+        self.assertEqual(explain_popup_error("单片机串口COM4连接成功\nHOME_BUFFER calibration timeout").key, "home_buffer")
+        self.assertEqual(explain_popup_error("单片机串口COM4连接成功\n性格识别失败，最高匹配度65").key, "recognition")
+        for text in ("HOME_BUFFER锁定值识别失败:1/3，保持1200ms重试", "性格识别失败，最高匹配度65", "正在检查程序更新", "单片机连接成功"):
+            self.assertIsNone(explain_error(text))
+
+    def test_unknown_popup_does_not_blame_equipment_or_propose_reset(self):
+        issue = explain_popup_error("unclassified error 123")
+        self.assertEqual(issue.key, "unknown")
+        self.assertIn("不能确定", issue.message)
+        self.assertIn("历史日志", issue.action)
+        self.assertIn("保留资料", issue.action)
+        self.assertNotIn("设备故障", issue.message)
+        self.assertNotIn("删除旧配置后", issue.action)
+
+    def test_advice_preserves_network_security_and_known_version_policies(self):
+        cert = explain_popup_error("CERTIFICATE_VERIFY_FAILED").message
+        self.assertIn("不要关闭证书验证", cert)
+        timeout = explain_popup_error("timed out", context="程序更新检查失败").message
+        self.assertIn("不代表账号凭据已失效", timeout)
+        integrity = explain_popup_error("SHA256不一致").message
+        self.assertIn("现有指纹警告策略", integrity)
+        self.assertIn("不由此弹窗自动放宽", integrity)
+
+    def test_visible_excerpt_is_bounded_and_retains_traceback_exception(self):
+        long = "Traceback (most recent call last):\n" + "  frame\n" * 100 + "ValueError: 当前 TID 不正确"
+        self.assertIn("ValueError: 当前 TID 不正确", brief_error(long))
+        self.assertIn("完整原始错误", brief_error(long))
+        self.assertLess(len(brief_error("x" * 10000)), 550)
+        self.assertEqual(brief_error("当前 TID 为空"), "当前 TID 为空")
+
+    def test_update_file_access_advice_names_explorer_only_in_update_context(self):
+        generic = explain_popup_error("PermissionError: Access is denied").action
+        update = explain_popup_error("PermissionError: Access is denied", context="程序更新失败").action
+        self.assertNotIn("绿色版程序目录", generic)
+        self.assertIn("资源管理器", update)
 
 
 @unittest.skipUnless(importlib.util.find_spec("PySide6"), "PySide6 is optional")
@@ -145,6 +234,87 @@ class QtDiagnosticTests(unittest.TestCase):
         self.assertIn("采集画面不可用", dialog.detail_label.text())
         self.assertIn(ROI_ERROR, dialog.detail_label.text())
         self.assertTrue(dialog.isVisible())
+
+    def test_generic_error_dialog_keeps_exact_raw_details_and_plain_text(self):
+        from PySide6.QtCore import Qt
+        from pyside_app.error_dialog import create_error_dialog
+        raw = "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED]>\nD:\\old\\配置.json"
+        dialog = create_error_dialog(self.w, "程序更新检查失败", raw)
+        self.assertEqual(dialog.detailedText(), raw)
+        self.assertIn(raw, dialog.informativeText())
+        self.assertIn("可能原因", dialog.informativeText())
+        self.assertIn("建议排查", dialog.informativeText())
+        self.assertEqual(dialog.textFormat(), Qt.TextFormat.PlainText)
+        dialog.deleteLater()
+
+    def test_error_details_buttons_stay_chinese_when_toggled(self):
+        from PySide6.QtWidgets import QMessageBox, QTextEdit
+        from pyside_app.error_dialog import create_error_dialog
+        dialog = create_error_dialog(self.w, "操作未完成", "PermissionError: 拒绝访问")
+        details = next(b for b in dialog.buttons() if dialog.buttonRole(b) == QMessageBox.ButtonRole.ActionRole)
+        dialog.show()
+        self.app.processEvents()
+        self.assertEqual(dialog.button(QMessageBox.StandardButton.Ok).text(), "确定")
+        self.assertEqual(details.text(), "查看详细信息")
+        details.click()
+        self.assertEqual(details.text(), "收起详细信息")
+        self.assertTrue(dialog.findChild(QTextEdit).isVisible())
+        details.click()
+        self.assertEqual(details.text(), "查看详细信息")
+        self.assertFalse(dialog.findChild(QTextEdit).isVisible())
+        dialog.close()
+        dialog.deleteLater()
+
+    def test_general_window_error_adds_advice_without_mutating_inputs(self):
+        before = self.w.settings_payload()
+        raw = "请检查输入：“当前 TID”为空，请填写整数。"
+        with patch("pyside_app.window.show_error_dialog") as popup, patch.object(self.w.process, "start") as run:
+            self.w.show_error(raw)
+            popup.assert_called_once_with(self.w, "操作未完成", raw)
+            run.assert_not_called()
+        self.assertIn(raw, self.w.result_panel.toPlainText())
+        self.assertIn("可能原因", self.w.result_panel.toPlainText())
+        self.assertEqual(self.w.settings_payload(), before)
+
+    def test_recognition_retry_logs_do_not_gain_new_popup_diagnoses(self):
+        raw = "HOME_BUFFER锁定值识别失败:1/3，保持1200ms重试\n性格识别失败，最高匹配度65\n"
+        with patch("pyside_app.window.show_error_dialog") as popup:
+            self.w._append_log(raw)
+            popup.assert_not_called()
+        self.assertFalse(self.w.runtime_issues)
+        self.assertNotIn("[问题说明]", self.w.log_view.toPlainText())
+
+    def test_long_raw_error_is_complete_in_details_but_excerpt_is_short(self):
+        from pyside_app.error_dialog import create_error_dialog
+        raw = "unknown error\n" + "frame at source/path.py\n" * 100
+        dialog = create_error_dialog(self.w, "操作未完成", raw)
+        self.assertEqual(dialog.detailedText(), raw)
+        self.assertLess(len(dialog.informativeText()), 1000)
+        self.assertIn("完整原始错误", dialog.informativeText())
+        dialog.deleteLater()
+
+    def test_profile_save_failure_uses_shared_dialog_and_keeps_draft(self):
+        from pyside_app.profiles import ProfileManager
+        from save_profiles import SaveProfileStore
+        manager = ProfileManager(SaveProfileStore(self.root / "isolated_profiles.json"), self.w)
+        manager.name.setText("待保存的草稿")
+        def fail():
+            raise PermissionError("拒绝访问")
+        with patch("pyside_app.profiles.show_error_dialog") as popup:
+            manager.mutate(fail)
+            popup.assert_called_once_with(manager, "无法保存存档", "拒绝访问")
+        self.assertEqual(manager.name.text(), "待保存的草稿")
+        manager.deleteLater()
+
+    def test_notice_preference_failure_uses_shared_dialog_without_false_persistence(self):
+        from pyside_app.startup_notice import StartupNoticeDialog
+        dialog = StartupNoticeDialog(self.root / "notice", self.w)
+        dialog.hide_checkbox.setChecked(True)
+        with patch("pyside_app.startup_notice.write_json_atomic", side_effect=PermissionError("拒绝访问")), patch("pyside_app.startup_notice.show_error_dialog") as popup:
+            dialog.accept()
+            popup.assert_called_once_with(dialog, "公告设置未保存", "拒绝访问")
+        self.assertFalse((self.root / "notice/startup_notice.json").exists())
+        dialog.deleteLater()
 
     def test_real_logged_child_preserves_raw_file_and_next_run_clears_diagnosis(self):
         from PySide6.QtCore import QEventLoop, QTimer

@@ -64,6 +64,8 @@ jobs:
           label_verification.py
           device_label_overrides.py
           pyside_app/path_settings.py
+          pyside_app/diagnostics.py
+          pyside_app/error_dialog.py
           pyside_app/jobs.py
           pyside_app/location_picker.py
           pyside_app/profiles.py

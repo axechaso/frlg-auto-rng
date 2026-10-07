@@ -68,6 +68,8 @@ class LabelRepairPromptTests(unittest.TestCase):
         summary=incident_summary(record)
         self.assertIn("未采集，要求 >95",summary)
         self.assertIn("OR",summary)
+        self.assertIn("可能原因",summary)
+        self.assertIn("建议排查",summary)
 
     def test_preflight_and_capture_fault_are_diagnostics_without_label_claim(self):
         self.assertTrue(self.p.preflight("标签 JSON 损坏"))
@@ -75,6 +77,17 @@ class LabelRepairPromptTests(unittest.TestCase):
         self.p.dialog.close()
         self.p.after_exit(1,"capture-run",text="采集卡打开失败")
         self.assertIn(("capture-run","prompt"),self.p.seen)
+
+    def test_structured_incident_uses_its_actual_failure_type_for_advice(self):
+        for kind, expected in (("capture_unavailable", "视频采集设备"), ("label_invalid", "标签包或标签文件"),
+                               ("stage_timeout", "当前画面"), ("state_stalled", "当前画面")):
+            with self.subTest(kind=kind):
+                record = incident_payload()
+                record["failure_kind"] = kind
+                summary = incident_summary(record)
+                self.assertIn(expected, summary)
+                self.assertIn("可能原因", summary)
+                self.assertIn("建议排查", summary)
 
     def test_reported_release_failure_requires_actual_manual_confirmation(self):
         record=incident_payload();record["input_released"]=False

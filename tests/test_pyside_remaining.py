@@ -387,7 +387,6 @@ class RemainingQtTests(unittest.TestCase):
         self.assertEqual(self.errors, [])
 
     def test_prefilled_profile_draft_is_create_only_and_saves_only_on_user_action(self):
-        from PySide6.QtWidgets import QMessageBox
         from pyside_app.profiles import ProfileManager
         from save_profiles import SaveProfileStore
 
@@ -417,7 +416,7 @@ class RemainingQtTests(unittest.TestCase):
         )
         failed.show()
         store._write = lambda: (_ for _ in ()).throw(OSError("disk full"))
-        with patch.object(QMessageBox, "warning") as warning:
+        with patch("pyside_app.profiles.show_error_dialog") as warning:
             failed.save()
         warning.assert_called_once()
         self.assertIsNone(failed.profile_id)

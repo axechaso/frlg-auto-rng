@@ -112,6 +112,17 @@ class PySideAppUpdateTests(unittest.TestCase):
         self.assertEqual(self.window.app_update.status.text(), "当前已是最新正式版。")
         self.assertEqual(check.call_args.kwargs["source"], "gitee")
 
+    def test_update_check_error_uses_shared_advice_only_for_manual_check(self):
+        raw = "检查程序更新失败: CERTIFICATE_VERIFY_FAILED"
+        result = UpdateCheckResult("error", raw)
+        with patch("pyside_app.app_update.show_error_dialog") as popup:
+            self.window.app_update._checked(result, manual=False)
+            popup.assert_not_called()
+            self.window.app_update._checked(result, manual=True)
+            popup.assert_called_once_with(self.window, "程序更新检查失败", raw)
+        self.assertEqual(self.window.app_update.status.text(), raw)
+        self.assertIsNone(self.window.app_update.candidate)
+
     def test_update_source_defaults_to_auto_and_persists_manual_choice(self):
         combo = self.window.fields["update_source"]
         self.assertEqual(combo.currentData(), "auto")

@@ -25,6 +25,7 @@ from device_label_overrides import LabelOverrideStore
 from label_incidents import LabelIncidentStore
 from label_verification import verify_label
 from .label_canvas import LabelCanvas
+from .error_dialog import show_error_dialog
 
 
 COORDINATE_FIELDS = (
@@ -254,7 +255,7 @@ class LabelEditorDialog(QDialog):
                 if source.is_file() and all(existing[0] != filename for existing in available):
                     available.append((filename, item))
             if not available:
-                QMessageBox.warning(self, "缺少当次标签", "故障资料中没有当次实际加载的标签备份，不能直接修复。")
+                show_error_dialog(self, "缺少当次标签", "故障资料中没有当次实际加载的标签备份，不能直接修复。")
                 return
             for filename, info in available:
                 score = info.get("score")
@@ -779,7 +780,7 @@ class LabelEditorDialog(QDialog):
                 draft.write_bytes(data)
             self.result_text.setText(f"草稿已保存：{draft}\n状态：未应用到当前设备。")
         except (OSError, RuntimeError, ValueError) as exc:
-            QMessageBox.warning(self, "草稿保存失败", str(exc))
+            show_error_dialog(self, "草稿保存失败", str(exc))
 
     def restore_previous(self) -> None:
         try:
@@ -790,17 +791,17 @@ class LabelEditorDialog(QDialog):
                 f"{result}；" + ("运行工程已按原目标重建。" if applied else "设备覆盖已恢复，当前没有可重建的已选方案。")
             )
         except (OSError, RuntimeError, ValueError) as exc:
-            QMessageBox.warning(self, "恢复失败", str(exc))
+            show_error_dialog(self, "恢复失败", str(exc))
 
     def save_and_apply(self) -> None:
         if not self.scene_confirm.isChecked():
-            QMessageBox.information(self,"现场尚未确认","请先确认截图确实是预期页面，错误页面应先修复启动位置。")
+            show_error_dialog(self,"现场尚未确认","请先确认截图确实是预期页面，错误页面应先修复启动位置。")
             return
         if self._adjacent_ok is False:
-            QMessageBox.information(self, "相邻页面被误识别", "当前标签会在相邻页面触发；请调整模板或范围后重新完成测试。")
+            show_error_dialog(self, "相邻页面被误识别", "当前标签会在相邻页面触发；请调整模板或范围后重新完成测试。")
             return
         if not self._same_image_ok or not self._fresh_frames_ok:
-            QMessageBox.information(self, "尚未完成验证", "先通过同图原生测试和 3 张新帧动态测试；相邻页面检查仍会明确标为未验证。")
+            show_error_dialog(self, "尚未完成验证", "先通过同图原生测试和 3 张新帧动态测试；相邻页面检查仍会明确标为未验证。")
             return
         try:
             self._check_capture_selection()
@@ -852,7 +853,7 @@ class LabelEditorDialog(QDialog):
             self._dirty = False
             self.accept()
         except (OSError, RuntimeError, ValueError) as exc:
-            QMessageBox.warning(self, "保存或重新准备失败", f"标签内容仍保留在故障资料中。\n{exc}")
+            show_error_dialog(self, "保存或重新准备失败", f"标签内容仍保留在故障资料中。\n{exc}")
 
     def _known_label_directories(self) -> tuple[Path, ...]:
         return tuple(Path(self.w.fields[key].text()) / "ImgLabel" for key in (

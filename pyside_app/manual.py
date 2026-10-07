@@ -16,6 +16,7 @@ from .jobs import Job
 from .controller_layout import ControllerLayout, DEFAULT_KEYS, LABELS, load_mapping_values, validate_mapping
 from .controller_keyboard import ControllerKeyboard
 from .monitor_view import VideoSurface, ZOOM_WIDTHS, video_rect
+from .error_dialog import show_error_dialog
 
 DIRECTIONS = {(0, -1): "TOP", (0, 1): "DOWN", (-1, 0): "LEFT", (1, 0): "RIGHT",
               (-1, -1): "TOP_LEFT", (1, -1): "TOP_RIGHT", (-1, 1): "DOWN_LEFT", (1, 1): "DOWN_RIGHT"}
@@ -439,7 +440,7 @@ class ControllerWindow(QDialog):
                 self.refresh_keys()
                 dialog.accept()
             except (ValueError, OSError) as exc:
-                QMessageBox.warning(dialog, "键位未保存", str(exc))
+                show_error_dialog(dialog, "键位未保存", str(exc))
         buttons.accepted.connect(save)
         layout.addWidget(buttons)
         dialog.exec()

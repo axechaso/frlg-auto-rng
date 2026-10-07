@@ -44,7 +44,8 @@ from .location_picker import (
 )
 from .history_controller import HistoryController
 from .path_settings import restore_resource_path
-from .diagnostics import explain_error, parse_integer
+from .diagnostics import explain_error, explain_popup_error, parse_integer
+from .error_dialog import show_error_dialog
 from .profiles import ProfileManager, ProfileWheelFilter
 from .services import AppPaths, WildInputs, prepare_wild, prepare_run, display_log_line
 from notifications.qq_service import QQNotificationService, QQSettingsStore
@@ -823,19 +824,10 @@ class FrlgWindow(FrlgPreviewWindow):
                 self.set_status(text)
                 self.result_panel.setPlainText(text)
                 return
-        explanation = explain_error(text)
-        if explanation is None:
-            self.set_status(text)
-            self.result_panel.setPlainText(text)
-            QMessageBox.warning(self, "操作未完成", text)
-            return
+        explanation = explain_popup_error(text)
         self.set_status(explanation.summary)
         self.result_panel.setPlainText(explanation.message + "\n\n原始错误：\n" + text)
-        dialog = QMessageBox(QMessageBox.Icon.Warning, "操作未完成", explanation.message,
-                             QMessageBox.StandardButton.Ok, self)
-        dialog.setTextFormat(Qt.TextFormat.PlainText)
-        dialog.setDetailedText(text)
-        dialog.exec()
+        show_error_dialog(self, "操作未完成", text)
 
     def search(self):
         if self.input_mode != "wild" or self.running or self.job:
@@ -1305,7 +1297,7 @@ class FrlgWindow(FrlgPreviewWindow):
                 )
             except (OSError, ValueError) as exc:
                 if not self.closing:
-                    QMessageBox.warning(self, "设置未保存", str(exc))
+                    show_error_dialog(self, "设置未保存", str(exc))
         super().closeEvent(event)
 
     def reload_profiles(self, *, apply=False):

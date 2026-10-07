@@ -24,6 +24,7 @@ from app_updater import (
     write_install_request,
 )
 from app_version import APP_VERSION, APP_VERSION_CODE, UPDATER_EXECUTABLE
+from .error_dialog import show_error_dialog
 
 
 class AppUpdateController(QObject):
@@ -143,7 +144,7 @@ class AppUpdateController(QObject):
         self.incremental_plan = None
         if result.status == "error":
             if manual:
-                QMessageBox.warning(self.w, "程序更新检查失败", result.message)
+                show_error_dialog(self.w, "程序更新检查失败", result.message)
             return
         if result.status != "available" or result.candidate is None:
             if manual:
@@ -188,7 +189,7 @@ class AppUpdateController(QObject):
             self.check(force=True)
             return
         if self.w.running:
-            QMessageBox.warning(
+            show_error_dialog(
                 self.w,
                 "无法安装程序更新",
                 "请先停止 EasyCon，再安装程序更新。",
@@ -245,7 +246,7 @@ class AppUpdateController(QObject):
         if self.w.running:
             message = "EasyCon 仍在运行，请停止后重新检查更新。"
             self.status.setText(message)
-            QMessageBox.warning(self.w, "无法安装程序更新", message)
+            show_error_dialog(self.w, "无法安装程序更新", message)
             return
         QMessageBox.information(
             self.w,
@@ -278,7 +279,7 @@ class AppUpdateController(QObject):
             message = f"独立更新器启动失败：{exc}"
             self.status.setText(message)
             self.w.set_status(message)
-            QMessageBox.warning(self.w, "程序更新失败", str(exc))
+            show_error_dialog(self.w, "程序更新失败", message)
             return
         self.status.setText("独立更新器已启动，正在退出当前版本……")
         self.w.set_status("正在退出当前版本并安装程序更新……")

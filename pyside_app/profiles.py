@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 )
 from pyside_chrome import ThemedDialog as QDialog
 from pyside_preview import Card, FrlgPreviewWindow, _button, _combo, _line
+from .error_dialog import show_error_dialog
 
 
 class ProfileManager(QDialog):
@@ -119,7 +120,7 @@ class ProfileManager(QDialog):
         try:
             operation()
         except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "无法保存存档", str(exc))
+            show_error_dialog(self, "无法保存存档", str(exc))
             return
         self.refresh()
         self.changed.emit()

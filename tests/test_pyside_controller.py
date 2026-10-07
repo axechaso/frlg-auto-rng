@@ -342,7 +342,7 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(self.w.mapping, original)
             self.assertEqual(self.w.keyboard.bindings, bindings)
             dialog.reject()
-        with patch("pyside_app.manual.write_json_atomic", side_effect=OSError("read-only")), patch("pyside_app.manual.QMessageBox.warning") as warning:
+        with patch("pyside_app.manual.write_json_atomic", side_effect=OSError("read-only")), patch("pyside_app.manual.show_error_dialog") as warning:
             QTimer.singleShot(0, attempt)
             self.w.edit_mapping()
             warning.assert_called_once()

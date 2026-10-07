@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from app_paths import RESOURCE_ROOT
 from tid_session import write_json_atomic
+from .error_dialog import show_error_dialog
 
 
 NOTICE_TITLE = "本工具完全开源免费！！！但是钱包空了求打赏..."
@@ -189,5 +190,5 @@ class StartupNoticeDialog(QDialog):
                     {"schema": 1, "hidden": True},
                 )
             except OSError as exc:
-                QMessageBox.warning(self, "公告设置未保存", str(exc))
+                show_error_dialog(self, "公告设置未保存", str(exc))
         super().accept()

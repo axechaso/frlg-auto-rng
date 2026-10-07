@@ -6,6 +6,7 @@ from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QCheckBox
 from .jobs import Job
 from device_label_overrides import diagnose_label_log
+from .diagnostics import brief_error, explain_popup_error
 
 
 def incident_summary(record):
@@ -21,6 +22,9 @@ def incident_summary(record):
         score = item.get("score")
         lines.append(f"{item.get('name',unknown)}：{unknown if score is None else score}，要求 {item.get('operator',unknown)}{item.get('threshold',unknown)}")
     lines.append("先确认画面处于预期页面且已稳定，再检查语言、分辨率和实际标签。OR 候选的低分不单独代表坏标签；最高分也不保证正确。")
+    symptom = {"capture_unavailable": "采集画面不可用", "label_invalid": "标签结构损坏"}.get(
+        record.get("failure_kind"), "识图等待失败：没有通过当前阶段的标签判定")
+    lines.append(explain_popup_error(symptom).message)
     return "\n".join(lines)
 
 
@@ -100,13 +104,13 @@ class LabelRepairPrompts(QObject):
             issues = diagnose_label_log(text)
             capture_failure = any(marker in text.casefold() for marker in ("采集卡打开失败", "capture unavailable", "capture failed", "cannot open camera"))
             if issues or capture_failure:
-                self._show([], "可能为标签或页面问题（缺少完整阶段证据）。\n请先核对页面、语言及采集设置；这不是坏标签结论。", log_path, run_id)
+                explanation = explain_popup_error("采集卡打开失败" if capture_failure else "识图等待失败：没有完整阶段证据")
+                self._show([], explanation.message + "\n\n原始输出摘录：\n" + brief_error(text), log_path, run_id)
 
     def preflight(self, message):
         if self.w.label_repair_prompt_check.isChecked() and any(word in message for word in ("标签", ".IL", "采集卡", "画面")):
-            from .diagnostics import explain_error
-            explanation = explain_error(message)
-            detail = (explanation.message + "\n\n原始错误：\n" if explanation else "") + message
+            explanation = explain_popup_error(message)
+            detail = explanation.message + "\n\n原始错误：\n" + message
             self._show([], "预检未通过，尚未运行。\n" + detail + "\n先检查标签结构或采集设置；未采集分数与截图。", None, "preflight:"+message)
             return True
         return False
