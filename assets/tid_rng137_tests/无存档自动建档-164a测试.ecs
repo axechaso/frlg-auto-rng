@@ -1,15 +1,15 @@
 # 无存档自动建档独立测试；EasyCon 1.6.4-a+9c86137。
 # 将本文件放在当前原包根目录，与 ImgLabel 同级。
 # 启动位置：NS主页选中火红/叶绿，游戏已关闭；采集画面1920x1080。
-# 真实操作：新游戏 -> 预设姓名 -> 语速FAST -> 首次保存 -> 可选重启检查。
+# 真实操作：新游戏 -> 默认姓名 -> 语速FAST -> 首次保存 -> 可选重启检查。
 # 只在“无存档>=95且存档<95”时建档。有存档/双命中则保留现场停止。
 # 不删除存档、不输入目标TID/SID、不领取御三家、不回填正式乱数参数。
-# 第一轮默认NS1。日版只改“测试ROM语言”为1，不改机型。
+# 第一轮默认NS1。ROM语言仅选择语速标签，建档按键日美共用，不改变机型。
 
 # ===== 测试配置 =====
-$测试ROM语言 = 0 # 0=美版英文，1=日版；火红/叶绿共用。
+$测试ROM语言 = 0 # 0=美版英文，1=日版；仅选择语速标签，建档按键日美共用。
 $测试NS机型 = 1 # 1=NS1，2=NS2；不自动猜测。
-$测试主角性别 = 0 # 0=男，1=女；主角和劲敌均选择第一个预设姓名。
+$测试主角性别 = 0 # 0=男，1=女；主角使用空白默认名，劲敌选择第一项预设姓名。
 $测试OP基础等待MS = 30600 # 未扣机型差的实际固定等待，不是RNG advance。
 $测试OP初始修正MS = 0
 $测试OP按键 = 0 # 0=A，1=X(游戏Start)，2=L；默认A。
@@ -79,6 +79,7 @@ PRINT ========================
 PRINT 无存档自动建档独立测试
 PRINT ========================
 PRINT ROM语言： & $测试ROM语言 & "；NS机型：" & $测试NS机型 & "；主角性别：" & $测试主角性别
+PRINT 建档按键使用日美共用实测流程；ROM语言仅选择对应语速标签
 PRINT OP后存档/无存档门槛固定95，不使用低分自适应
 PRINT 请确认NS主页选中目标游戏且已关闭；本测试会真实创建基础存档
 PRINT 创建的是临时基础身份，不是目标TID/SID；不会进入御三家流程
@@ -367,18 +368,17 @@ FUNC 测试_创建新游戏
     A UP
     WAIT 2500
     PRINT 【创建进度】推进开场说明与大木博士对话
-    FOR 40
+    FOR 35
         B
         WAIT 800
     NEXT
-    IF $测试ROM语言 == 1
-        FOR 2
-            B DOWN
-            WAIT 50
-            B UP
-            WAIT 3000
-        NEXT
-    ENDIF
+    # 日美均保留已实测流程的2次B与等待，不随语速标签语言跳过。
+    FOR 2
+        B DOWN
+        WAIT 50
+        B UP
+        WAIT 3000
+    NEXT
     PRINT 【创建进度】选择主角性别
     IF $测试主角性别 == 1
         LS DOWN
@@ -389,65 +389,39 @@ FUNC 测试_创建新游戏
     A DOWN
     WAIT 50
     A UP
-    WAIT 2000
-
-    # 跳过“自定义姓名”，选择第一项预设姓名；不进入键盘。
-    PRINT 【创建进度】选择主角预设姓名
-    LS DOWN
-    WAIT 50
-    LS RESET
+    WAIT 4000
+    # 进入取名键盘，空白提交后再按A确认默认姓名。
+	A
+	WAIT 1500
+    PRINT 【创建进度】确认主角默认姓名
+    X
     WAIT 500
-    A DOWN
-    WAIT 50
-    A UP
-    WAIT 2000
-    A DOWN
-    WAIT 500
-    A UP
-    WAIT 2000
-    A DOWN
-    WAIT 50
-    A UP
-    WAIT 2500
-    A DOWN
-    WAIT 50
-    A UP
-    WAIT 1000
-    A DOWN
-    WAIT 50
-    A UP
+    A
+    WAIT 4000
+    A
     WAIT 1500
+    FOR 14
+    B
+    WAIT 800
+    NEXT
 
     PRINT 【创建进度】选择劲敌预设姓名
     LS DOWN
     WAIT 50
     LS RESET
-    WAIT 500
-    A DOWN
-    WAIT 50
-    A UP
     WAIT 1500
     A DOWN
     WAIT 50
     A UP
+    WAIT 3500
+    A DOWN
+    WAIT 50
+    A UP
     WAIT 1500
-    A DOWN
-    WAIT 50
-    A UP
-    WAIT 2500
-    A DOWN
-    WAIT 50
-    A UP
-    WAIT 1000
-    IF $测试ROM语言 == 1
-        A DOWN
-        WAIT 50
-        A UP
-        WAIT 1000
-    ENDIF
-    A DOWN
-    WAIT 50
-    A UP
+    FOR 20
+    B
+    WAIT 800
+    NEXT
     WAIT 5500
     PRINT 【创建进度】已执行进入房间操作；下一步用语速标签确认菜单位置
 ENDFUNC

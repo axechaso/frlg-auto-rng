@@ -74,18 +74,36 @@ class TidBootstrapScriptTests(unittest.TestCase):
         body = function(self.text, "测试_创建新游戏")
         opening = body[:body.index("PRINT 【创建进度】选择主角性别")]
         self.assertNotIn("LS DOWN", opening)
-        self.assertIn("IF $测试ROM语言 == 1\n        FOR 2", opening)
+        self.assertIn("    FOR 2\n        B DOWN\n        WAIT 50\n        B UP\n        WAIT 3000\n    NEXT", opening)
 
-    def test_oak_dialogue_uses_requested_40_b_presses_and_800ms(self):
+    def test_oak_dialogue_preserves_user_tested_35_b_presses_and_800ms(self):
         creating = function(self.text, "测试_创建新游戏")
         self.assertIn(
             "PRINT 【创建进度】推进开场说明与大木博士对话\n"
-            "    FOR 40\n        B\n        WAIT 800\n    NEXT\n",
+            "    FOR 35\n        B\n        WAIT 800\n    NEXT\n",
             creating,
         )
         self.assertNotIn("$测试B索引", self.text)
         self.assertNotIn("测试_开场B等待", self.text)
         self.assertNotIn("$测试开场B等待", self.text)
+
+    def test_rom_language_only_selects_labels_not_creation_actions(self):
+        creating = function(self.text, "测试_创建新游戏")
+        self.assertNotIn("$测试ROM语言", creating)
+        self.assertIn("IF $测试主角性别 == 1", creating)
+        reading = function(self.text, "测试_读取语速")
+        self.assertIn("IF $测试ROM语言 == 1", reading)
+        self.assertIn("ROM语言仅选择对应语速标签", self.text)
+
+    def test_user_verified_name_confirmation_and_dialogues_are_preserved(self):
+        creating = function(self.text, "测试_创建新游戏")
+        player = creating[creating.index("PRINT 【创建进度】确认主角默认姓名"):]
+        player, rival = player.split("PRINT 【创建进度】选择劲敌预设姓名", 1)
+        self.assertIn("    X\n    WAIT 500\n    A\n    WAIT 4000\n    A\n    WAIT 1500", player)
+        self.assertIn("FOR 14\n    B\n    WAIT 800\n    NEXT", player)
+        self.assertIn("WAIT 3500", rival)
+        self.assertIn("FOR 20\n    B\n    WAIT 800\n    NEXT", rival)
+        self.assertNotIn("$测试ROM语言", rival)
 
     def test_japanese_text_speed_labels_are_not_english_aliases(self):
         body = function(self.text, "测试_读取语速")
