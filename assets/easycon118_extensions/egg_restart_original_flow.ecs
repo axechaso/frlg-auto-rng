@@ -26,14 +26,15 @@ FUNC 孵蛋测试_关闭游戏($识图阈值: INT): INT
             WAIT 1500
             A
             WAIT 1500
-            PRINT "FRLG_STAGE|BEGIN|egg.restart.await_close_animation|egg.restart.await_close_animation|15000|lib/27_孵蛋测试流程.ecs|孵蛋测试_关闭游戏|egg27.restart.await_close_animation|manual_prepare_then_restart|OR;正在关闭.IL:>=:" & $识图阈值 & "|!"
+            PRINT "FRLG_STAGE|BEGIN|egg.restart.await_close_animation|egg.restart.await_close_animation|15000|lib/27_孵蛋测试流程.ecs|孵蛋测试_关闭游戏|egg27.restart.await_close_animation|manual_prepare_then_restart|OR;正在关闭.IL:>=:" & $识图阈值 & ",正在关闭_暗.IL:>=:" & $识图阈值 & "|!"
             FOR
                 $孵蛋库_正在关闭匹配 = @正在关闭
+                $孵蛋库_正在关闭暗匹配 = @正在关闭_暗
                 IF $孵蛋库_调试日志输出 == 1
-                    PRINT "孵蛋重启识图|正在关闭=" & $孵蛋库_正在关闭匹配
+                    PRINT "孵蛋重启识图|正在关闭=" & $孵蛋库_正在关闭匹配 & "|正在关闭_暗=" & $孵蛋库_正在关闭暗匹配
                 ENDIF
-                IF $孵蛋库_正在关闭匹配 >= $识图阈值
-                    WAIT 1000
+                IF $孵蛋库_正在关闭匹配 >= $识图阈值 or $孵蛋库_正在关闭暗匹配 >= $识图阈值
+                    WAIT 2000
                 ELSE
                     PRINT "FRLG_STAGE|END|egg.restart.await_close_animation|!"
                     BREAK

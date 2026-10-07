@@ -468,7 +468,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.input_keys = [k for k in self.fields if k.startswith("wild_") or k.startswith("expansion_")]
         self.input_keys += ["profile_game", "profile_language", "source", "ezcon", "port", "video",
                             "seed_calibration", "seed_startup", "script_entry", "parity", "layers", "output_log",
-                            "togepi_reverse_adv", "egg_reverse_seed", "egg_reverse_min_adv", "egg_reverse_max_adv"]
+                            "togepi_reverse_mode", "togepi_reverse_adv", "egg_reverse_mode", "egg_reverse_seed", "egg_reverse_min_adv", "egg_reverse_max_adv"]
         for key in self.input_keys:
             widget = self.fields[key]
             signal = widget.currentIndexChanged if isinstance(widget, QComboBox) else widget.valueChanged if isinstance(widget, QSpinBox) else widget.textChanged
@@ -604,7 +604,18 @@ class FrlgWindow(FrlgPreviewWindow):
                 ("egg_reverse_min_adv", "孵蛋野生最小消耗帧"),
                 ("egg_reverse_max_adv", "孵蛋野生最大消耗帧"),
             ]
+            # The latest mother initializes these globals to 0, then derives
+            # [Held, Pickup + 4000] at runtime. They are not useful manual
+            # defaults: preserve the visible advanced bounds/user config.
+            dynamic_egg_window = all(line in text for line in (
+                "    $孵蛋野生最小消耗帧 = $孵蛋生成目标帧",
+                "    $孵蛋野生最大消耗帧 = $孵蛋领取目标帧 + 4000",
+            ))
             for key, name in pairs:
+                if dynamic_egg_window and key in {"egg_reverse_min_adv", "egg_reverse_max_adv"}:
+                    continue
+                if key == "togepi_reverse_adv" and self.fields["togepi_reverse_mode"].currentIndex() == 1:
+                    continue  # Do not overwrite an explicit manual preference.
                 match = re.search(rf"(?m)^\s*\${re.escape(name)}\s*=\s*(\d+)\s*$", text)
                 if match:
                     widget = self.fields[key]
@@ -654,7 +665,8 @@ class FrlgWindow(FrlgPreviewWindow):
             reverse_expansion_layers=f["layers"].value() if advanced else None,
             reverse_expansion_seed_tolerances=tuple(integer(f"expansion_{i}_seed", f"第 {i} 层 Seed 容差") for i in range(1, 4)) if advanced else None,
             reverse_expansion_frame_half_widths=tuple(integer(f"expansion_{i}_adv", f"第 {i} 层帧半宽") for i in range(1, 4)) if advanced else None,
-            togepi_seed_reverse_frame_half_width=integer("togepi_reverse_adv", "波克比 Seed 反查帧半宽") if advanced else None,
+            togepi_seed_reverse_frame_half_width=integer("togepi_reverse_adv", "波克比 Seed 反查帧半宽")
+                if advanced and f["togepi_reverse_mode"].currentIndex() == 1 else None,
         )
         video = f["video"].currentData()
         capture_name = self.devices[1].get(video, "")
@@ -1236,6 +1248,18 @@ class FrlgWindow(FrlgPreviewWindow):
             source_index = self.fields["update_source"].findData(update_source)
             self.fields["update_source"].setCurrentIndex(max(0, source_index))
             self.label_supervision_check.setChecked(values.get("label_supervision") is True)
+            togepi_mode = values.get("togepi_reverse_mode", 0)
+            if type(togepi_mode) is int and togepi_mode in (0, 1):
+                self.fields["togepi_reverse_mode"].setCurrentIndex(togepi_mode)
+            else:
+                self._settings_invalid = True
+                self.settings_load_error = "设置字段 togepi_reverse_mode 必须是 0 或 1"
+            togepi_width = values.get("togepi_reverse_half_width", "5000")
+            if isinstance(togepi_width, str):
+                self.fields["togepi_reverse_adv"].setText(togepi_width)
+            else:
+                self._settings_invalid = True
+                self.settings_load_error = "设置字段 togepi_reverse_half_width 必须是文本"
             for key, widget in (
                 ("update_precalibration", self.precalibration_check),
                 ("record_shiny_video", self.record_shiny_video_check),
@@ -1274,6 +1298,8 @@ class FrlgWindow(FrlgPreviewWindow):
             "record_shiny_video": self.record_shiny_video_check.isChecked(),
             "label_repair_prompt": self.label_repair_prompt_check.isChecked(),
             "preferred_frame_parity_scheme": self.preferred_frame_parity_scheme,
+            "togepi_reverse_mode": self.fields["togepi_reverse_mode"].currentIndex(),
+            "togepi_reverse_half_width": self.fields["togepi_reverse_adv"].text(),
         }
 
     def closeEvent(self, event):

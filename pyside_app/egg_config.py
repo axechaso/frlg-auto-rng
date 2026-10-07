@@ -256,7 +256,7 @@ def build_egg_full_config_payload(
     except (TypeError, ValueError) as exc:
         raise ValueError("Seed 校准方案只能是 0、1 或 2") from exc
     if seed_calibration_scheme not in {0, 1, 2}:
-        raise ValueError("Seed 校准方案只能是 0（原始 12 轮众数）、1（实验锁定细调）或 2（命中保持后的方向票接续）")
+        raise ValueError("Seed 校准方案只能是 0（原始 12 轮众数）或 1/2（统一粗调与微调，1 为兼容编号）")
     try:
         debug_log_output = int(debug_log_output)
     except (TypeError, ValueError) as exc:

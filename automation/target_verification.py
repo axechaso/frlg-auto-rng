@@ -86,6 +86,22 @@ def _event_line(spec: TargetVerificationSpec, event: str, *, shiny: str) -> str:
     )
 
 
+def paired_shiny_terminal_blocks(template: str) -> tuple[str, str, int]:
+    """Recognize only complete, matching audited EN/JP shiny exits."""
+    anchor = "    IF $道具乱数模式 == 0 and @出闪 >= $识图阈值\n"
+    pairs = []
+    for terminal in (0, -2):
+        tail = ("        PRINT 已识别到出闪，脚本停止\n"
+                + f"        RETURN {terminal}\n    ENDIF\n")
+        english = anchor + '        PRINT ""\n' + tail
+        japanese = anchor + tail
+        if template.count(english) == 1 and template.count(japanese) == 1:
+            pairs.append((english, japanese, terminal))
+    if len(pairs) != 1 or template.count(anchor) != 2:
+        raise ValueError("主脚本英/日闪光识别分支结构异常，拒绝接入目标验证")
+    return pairs[0]
+
+
 def inject_target_verification(
     template: str,
     spec: TargetVerificationSpec | Mapping[str, object],
@@ -106,19 +122,9 @@ def inject_target_verification(
 
     global_anchor = '$脚本版本 = "2.0"\n'
     shiny_anchor = "    IF $道具乱数模式 == 0 and @出闪 >= $识图阈值\n"
-    english_block = (
-        shiny_anchor
-        + '        PRINT ""\n'
-        + "        PRINT 已识别到出闪，脚本停止\n"
-        + "        RETURN 0\n"
-        + "    ENDIF\n"
-    )
-    japanese_block = (
-        shiny_anchor
-        + "        PRINT 已识别到出闪，脚本停止\n"
-        + "        RETURN 0\n"
-        + "    ENDIF\n"
-    )
+    # The October upstream now uses -2 for a confirmed shiny terminal result.
+    # Accept only the two complete, synchronized EN/JP branch shapes; do not
+    # turn arbitrary returns or partial/mixed revisions into target evidence.
     loop_anchor = "        $本轮流程结果 = 执行RNG启动与目标获取()\n"
     exact_target_anchor = (
         "    IF $道具乱数模式 == 0 and $命中差索引 == 0 and "
@@ -129,8 +135,7 @@ def inject_target_verification(
     )
     if template.count(global_anchor) != 1:
         raise ValueError("主脚本缺少唯一版本全局锚点，拒绝注入 SID 目标证明")
-    if template.count(english_block) != 1 or template.count(japanese_block) != 1:
-        raise ValueError("主脚本英/日闪光识别分支结构异常，拒绝注入 SID 目标证明")
+    english_block, japanese_block, _ = paired_shiny_terminal_blocks(template)
     if template.count(loop_anchor) != 1:
         raise ValueError("主脚本缺少唯一目标循环锚点，拒绝注入 SID 目标证明")
     if template.count(exact_target_anchor) != 1 or template.count(non_target_anchor) != 1:

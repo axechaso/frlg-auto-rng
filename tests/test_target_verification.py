@@ -57,6 +57,18 @@ class TargetVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "锚点"):
             inject_target_verification(self.template + self.template.split("    $循环计数 += 1")[0], self.spec)
 
+    def test_upstream_shiny_minus_two_is_adapted_without_changing_evidence_rules(self):
+        latest = self.template.replace("        RETURN 0\n", "        RETURN -2\n")
+        injected = inject_target_verification(latest, self.spec)
+        validate_injected_target_verification(injected, self.spec)
+        self.assertEqual(inject_target_verification(injected, self.spec), injected)
+        self.assertEqual(injected.count("$SID遍历本轮出闪 = 1"), 2)
+        self.assertNotIn("RETURN -2", injected)
+        with self.assertRaisesRegex(ValueError, "英/日"):
+            inject_target_verification(
+                self.template.replace("        RETURN 0\n", "        RETURN -2\n", 1), self.spec
+            )
+
     def test_only_one_complete_current_attempt_event_is_accepted(self):
         event = (
             "SIDTRAVERSAL|V=1|RUN=run-1|ATTEMPT=attempt-1|ROUND=4|EVENT=TARGET|"

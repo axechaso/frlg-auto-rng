@@ -54,6 +54,7 @@ from .easycon118 import (
     write_configured_project,
 )
 from .frame_parity import resolve_frame_parity
+from .target_verification import paired_shiny_terminal_blocks
 from .planner import AutoSearchRequest, RunPlan
 from .seed_modes import settings_to_seed_mode
 from .support import get_route_support
@@ -844,19 +845,7 @@ def enable_starter_success_markers(template: str) -> str:
         return template
     global_anchor = '$脚本版本 = "2.0"\n'
     shiny_anchor = "    IF $道具乱数模式 == 0 and @出闪 >= $识图阈值\n"
-    english_shiny_block = (
-        shiny_anchor
-        + '        PRINT ""\n'
-        + "        PRINT 已识别到出闪，脚本停止\n"
-        + "        RETURN 0\n"
-        + "    ENDIF\n"
-    )
-    japanese_shiny_block = (
-        shiny_anchor
-        + "        PRINT 已识别到出闪，脚本停止\n"
-        + "        RETURN 0\n"
-        + "    ENDIF\n"
-    )
+    english_shiny_block, japanese_shiny_block, terminal = paired_shiny_terminal_blocks(template)
     exact_target_anchor = (
         "    IF $道具乱数模式 == 0 and $命中差索引 == 0 and "
         "$本轮消耗帧误差 == 0 and $本轮物种命中 == 1\n"
@@ -866,8 +855,6 @@ def enable_starter_success_markers(template: str) -> str:
         raise ValueError("御三家模板缺少唯一的用户输入区，拒绝接入目标闪光验证")
     if template.count(shiny_anchor) != 2:
         raise ValueError("御三家模板的英/日闪光识别分支数量异常，拒绝接入目标验证")
-    if template.count(english_shiny_block) != 1 or template.count(japanese_shiny_block) != 1:
-        raise ValueError("御三家模板的英/日出闪停止分支结构异常，拒绝接入目标验证")
     if template.count(exact_target_anchor) != 1:
         raise ValueError("御三家模板缺少唯一的精确目标命中分支，拒绝接入目标验证")
     if template.count(loop_anchor) != 1:
@@ -887,7 +874,7 @@ def enable_starter_success_markers(template: str) -> str:
             + "        IF $TID连续流程目标验证 == 0\n"
             + ('            PRINT ""\n' if include_blank_line else "")
             + "            PRINT 已识别到出闪，脚本停止\n"
-            + "            RETURN 0\n"
+            + f"            RETURN {terminal}\n"
             + "        ENDIF\n"
             + "        $TIDFLOW本轮出闪 = 1\n"
             + "    ENDIF\n"

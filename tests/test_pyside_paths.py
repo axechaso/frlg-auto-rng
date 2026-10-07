@@ -199,6 +199,8 @@ class StartupPathTests(unittest.TestCase):
                 "record_shiny_video": True,
                 "label_repair_prompt": True,
                 "preferred_frame_parity_scheme": 1,
+                "togepi_reverse_mode": 0,
+                "togepi_reverse_half_width": "5000",
             })
 
     def test_startup_recovers_after_previous_package_is_removed(self):

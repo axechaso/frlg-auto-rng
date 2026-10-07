@@ -1,13 +1,13 @@
 # Windows 绿色版
 
-使用 `tools\build_windows_release.ps1` 生成发布包。构建机使用项目自己的 `.venv`，脚本锁定安装 PyInstaller 6.15.0、PySide6 6.11.2 与 truststore 0.10.4；使用发布包的用户不需要安装 Python 或任何 Python 依赖。当前发布合同为 `0.9.4.2 / 2026100201`，正式界面仅为 PySide6，发行目录不包含旧 Tk、Tcl/Tk 或 tkinterdnd2 运行时。
+使用 `tools\build_windows_release.ps1` 生成发布包。构建机使用项目自己的 `.venv`，脚本锁定安装 PyInstaller 6.15.0、PySide6 6.11.2 与 truststore 0.10.4；用户不需要安装 Python。当前发布合同为 `0.9.5 / 2026100701`，正式界面仅为 PySide6，不含旧 Tk。发布资源使用已审计的两个 2.0 入口、31 个 ECS 库、Seed 表状态文件、1155 个共同标签及保留的 TID r5；不得为追求“全同步”把 r4 覆盖回去。
 
 ```powershell
 .\tools\build_windows_release.ps1 `
-  -BuildTag pyside6-0-9-4-2-20261002-r1 `
+  -BuildTag pyside6-0-9-5-20261007-r4 `
   -EasyConPublish 'D:\Download\伊机控-EasyCon-v1.6.4alpha测试版-260518\publish' `
   -LocalAssets .\local_assets `
-  -NotesFile .\docs\releases\v0.9.4.2.md
+  -NotesFile .\docs\releases\v0.9.5.md
 ```
 
 脚本默认从现有 `dist\*\easycon\publish` 查找 EasyCon 1.6.4-a。也可以明确指定：
@@ -16,7 +16,7 @@
 .\tools\build_windows_release.ps1 -EasyConPublish 'D:\EasyCon\publish'
 ```
 
-输出位于 `.build\windows-release-pyside6-0-9-4-2-20261002-r1\FRLG-Auto-RNG-0.9.4.2-windows-x64`，同时生成同名 ZIP、`update-manifest.json`、`.sha256`、`incremental-release-assets` 和 `gitee-release-assets`。增量资源生成后逐文件与完整 ZIP 核对，构建末尾再执行冻结版本探针和隔离数据目录下的 PySide6 截图冒烟。发布包是绿色文件夹，不应把 `.venv`、源码或 Python 安装包一起复制给用户。配置、日志和运行时生成的 ECS 工程会写入 `%LOCALAPPDATA%\FRLG-Auto-RNG`。
+输出位于 `.build\windows-release-pyside6-0-9-5-20261007-r4\FRLG-Auto-RNG-0.9.5-windows-x64`，同时生成同名 ZIP、`update-manifest.json`、`.sha256`、`incremental-release-assets` 和 `gitee-release-assets`。增量资源生成后逐文件与完整 ZIP 核对，末尾执行冻结版本探针和隔离数据目录下的 PySide6 截图冒烟；截图模式停止自动更新计时器并等待窗口安全关闭，不强制丢弃仍在运行的线程，正常启动仍自动检查更新。只收录当前 `runtime_backend/easycon164a-cli-gui-rounding-selfcontained`，不带入旁边的旧备份目录，也不删除工作区备份。不要把 `.venv`、源码或 Python 安装包一起复制给用户。配置、日志和生成的 ECS 工程写入 `%LOCALAPPDATA%\FRLG-Auto-RNG`。
 
 按当前源码构建的绿色版会内置 Seed 表更新器。用户在 GUI 点击“检查/更新 Seed 表”即可下载 Ten Lines 官方火红/叶绿 NX 二进制表、生成对应 EasyCon ECS 表并执行真实 1.6.4-a `format` 校验，不需要系统 Python，也不依赖外部 `Tools\update_*.py`。验证后的四个文件写入 `%LOCALAPPDATA%\FRLG-Auto-RNG\seed_tables\current`，上一版保留为 `previous`；生成运行工程时会自动覆盖两份 `lib` Seed 表。
 
@@ -40,16 +40,16 @@
 
 现有 `0.2.2` 绿色包可通过原有整包更新器直接升级到 `0.9`，因为主程序、独立更新器、schema 1 清单和健康探针合同保持不变。`0.2.1` 或更早版本若受旧证书链问题影响，应手工安装 `0.2.2` 或 `0.9`，不得关闭 TLS 验证。源码运行模式不会联网自更新。
 
-## 发布 `0.9.4.2`
+## 发布 `0.9.5`
 
 确认 `main` 已推送且 GitHub Actions 成功后运行：
 
 ```powershell
 .\tools\publish_windows_release.ps1 `
-  -BuildRoot .build\windows-release-pyside6-0-9-4-2-20261002-r1 `
-  -Tag v0.9.4.2 `
-  -Title "FRLG Auto RNG 0.9.4.2 PySide6版" `
-  -NotesFile .\docs\releases\v0.9.4.2.md
+  -BuildRoot .build\windows-release-pyside6-0-9-5-20261007-r4 `
+  -Tag v0.9.5 `
+  -Title "FRLG Auto RNG 0.9.5 PySide6版" `
+  -NotesFile .\docs\releases\v0.9.5.md
 ```
 
 脚本先验证完整包与所有增量资源内容一致，再创建草稿 Release，上传完整 ZIP、`update-manifest.json`、SHA 文件及 `incremental-release-assets` 内清单引用的全部资源，并回读资产名称和增量包大小。校验未完成时草稿保持不公开，不会覆盖已有 tag。

@@ -589,8 +589,8 @@ STATS = ("HP", "攻击", "防御", "特攻", "特防", "速度")
 NOT_CONNECTED = "界面预览：此操作尚未接入后端。"
 SEED_CALIBRATION_CHOICES = (
     ("0 · 原始众数", "seed_calibration_0"),
-    ("1 · 锁定细调", "seed_calibration_1"),
-    ("2 · 命中保持", "seed_calibration_2"),
+    ("1 · 统一校准（兼容编号）", "seed_calibration_1"),
+    ("2 · 统一校准", "seed_calibration_2"),
 )
 SEED_STARTUP_CHOICES = (
     ("0 · HOME_BUFFER", "seed_startup_0"),
@@ -1785,21 +1785,32 @@ class FrlgPreviewWindow(QMainWindow):
             ),
             "togepi": self._build_reverse_config_dialog(
                 "波克比 Seed 反查",
-                "领取波克比后，在水之迷宫捕获野生宝可梦复核 Seed。Seed 容差沿用本轮目标，下面设置目标帧两侧的窗口。",
+                "默认自动：以波克比领取目标帧为中心，读取脚本默认半宽（当前 ±5000），每次目标变化自动重算范围，最低不小于0。需要覆盖时选手动；Seed 容差沿用本轮目标。",
                 [("togepi_reverse_adv", "消耗帧半宽（±）", _line("5000"))],
+                leading_entries=[("togepi_reverse_mode", "窗口模式", _combo("自动（跟随目标与脚本默认值）", "手动设置半宽"))],
                 columns=1,
             ),
             "egg": self._build_reverse_config_dialog(
                 "孵蛋 Seed 反查",
-                "领取蛋后捕获野生宝可梦复核 Seed。首次无候选时，脚本仍按既有逻辑追加 Seed ±5、最大消耗帧 +1000。",
+                "默认自动：新版脚本使用 Held 到 Pickup +4000，随目标变化重算；只有选择手动才使用下面的数字。首次无候选时追加 Seed ±5、最大消耗帧 +1000。",
                 [
                     ("egg_reverse_seed", "Seed 容差（±）", _line("5")),
                     ("egg_reverse_min_adv", "最小消耗帧", _line("500")),
                     ("egg_reverse_max_adv", "最大消耗帧", _line("6500")),
                 ],
+                leading_entries=[("egg_reverse_mode", "窗口模式", _combo("自动（使用脚本目标窗口）", "手动设置范围"))],
                 columns=2,
             ),
         }
+        self.fields["togepi_reverse_mode"].currentIndexChanged.connect(
+            lambda index: self.fields["togepi_reverse_adv"].setEnabled(
+                index == 1 and self.advanced_check.isChecked()
+            )
+        )
+        self.fields["egg_reverse_mode"].currentIndexChanged.connect(
+            lambda index: [self.fields[key].setEnabled(index == 1 and self.advanced_check.isChecked())
+                           for key in ("egg_reverse_seed", "egg_reverse_min_adv", "egg_reverse_max_adv")]
+        )
         reverse_buttons = QGridLayout()
         reverse_buttons.setSpacing(10)
         self.reverse_config_buttons = []
@@ -1831,17 +1842,23 @@ class FrlgPreviewWindow(QMainWindow):
     ) -> QDialog:
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
-        dialog.resize(700, 570 if title == "野生 / 定点反查" else 360)
+        dialog.resize(700, 570 if title == "野生 / 定点反查" else 520 if title == "孵蛋 Seed 反查" else 400)
         dialog.setMinimumSize(560, 320)
         body = QVBoxLayout(dialog)
         page, layout = self._page_canvas()
         card = Card(title, subtitle)
+        rows = (len(entries) + columns - 1) // columns + (len(leading_entries or ()))
+        card.setMinimumHeight(110 + 80 * rows)
         if leading_entries:
             self._form(card, leading_entries, 1)
         self._form(card, entries, columns)
         layout.addWidget(card)
         layout.addStretch(1)
-        body.addWidget(page)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(page)
+        body.addWidget(scroll)
         close = _button("完成", enabled=True)
         close.clicked.connect(dialog.hide)
         body.addWidget(close)
@@ -1867,7 +1884,7 @@ class FrlgPreviewWindow(QMainWindow):
         self.fields["sid_threshold"].setEnabled(advanced)
         egg = self.input_mode == "egg"
         calibration = self.fields["seed_calibration"]
-        choices = SEED_CALIBRATION_CHOICES[:3 if egg else 2]
+        choices = SEED_CALIBRATION_CHOICES
         if calibration.count() != len(choices):
             previous = calibration.currentIndex()
             calibration.clear()
@@ -1896,12 +1913,17 @@ class FrlgPreviewWindow(QMainWindow):
             "Seed 校准与启动在主窗口顶部；以下参数仅保存在本次预览中。"
             if applies else
             "当前模式不使用反查扩窗与奇偶设置。Seed 校准与启动在主窗口顶部。")
-        reverse_fields = {"layers", "togepi_reverse_adv", "egg_reverse_seed", "egg_reverse_min_adv", "egg_reverse_max_adv"}
+        reverse_fields = {"layers", "togepi_reverse_mode", "togepi_reverse_adv", "egg_reverse_mode", "egg_reverse_seed", "egg_reverse_min_adv", "egg_reverse_max_adv"}
         for name, widget in self.fields.items():
             if name in reverse_fields or name.startswith("expansion_"):
                 widget.setEnabled(advanced and applies)
         for button in getattr(self, "reverse_config_buttons", ()):
             button.setEnabled(advanced and applies)
+        self.fields["togepi_reverse_adv"].setEnabled(
+            advanced and applies and self.fields["togepi_reverse_mode"].currentIndex() == 1
+        )
+        for key in ("egg_reverse_seed", "egg_reverse_min_adv", "egg_reverse_max_adv"):
+            self.fields[key].setEnabled(advanced and applies and self.fields["egg_reverse_mode"].currentIndex() == 1)
         self.fields["parity"].setEnabled(advanced and applies and not egg)
         if egg:
             self.fields["parity"].setCurrentIndex(0)

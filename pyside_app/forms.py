@@ -56,7 +56,7 @@ class FormReader:
             reverse_expansion_frame_half_widths=tuple(self.integer(f"expansion_{i}_adv") for i in range(1, 4)))
 
     def egg_seed_reverse(self):
-        if not self.w.advanced_check.isChecked():
+        if not self.w.advanced_check.isChecked() or self.index("egg_reverse_mode") == 0:
             return {}
         return dict(
             egg_seed_reverse_seed_tolerance=self.integer("egg_reverse_seed"),

@@ -51,6 +51,15 @@ class WindowsReleaseScriptTests(unittest.TestCase):
         self.assertIn("PySide6==6.11.2", requirements)
         self.assertIn('pywin32>=306; sys_platform == "win32"', requirements)
 
+    def test_build_bundles_only_current_runner_not_backup_directories(self):
+        source = (ROOT / "tools" / "build_windows_release.ps1").read_text(encoding="utf-8")
+        self.assertIn(
+            "$(Join-Path $Root 'runtime_backend\\easycon164a-cli-gui-rounding-selfcontained');runtime_backend/easycon164a-cli-gui-rounding-selfcontained",
+            source,
+        )
+        self.assertIn("$(Join-Path $Root 'runtime_backend\\README.md');runtime_backend", source)
+        self.assertNotIn("$(Join-Path $Root 'runtime_backend');runtime_backend", source)
+
     def test_ci_uses_pyside6_requirements_and_no_removed_tk_tests(self):
         source = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("requirements-pyside6.txt", source)

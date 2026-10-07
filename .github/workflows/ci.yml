@@ -139,6 +139,7 @@ jobs:
           tools/qq_notify_test/client.py
           tools/benchmark_history_logs.py
           tools/verify_acceptance_plans.py
+          tools/verify_release_script_sync.py
           tools/verify_easycon_protocol.py
           tools/verify_tid_bootstrap_integration.py
           tools/verify_sid_observation.py
@@ -167,6 +168,7 @@ jobs:
           tests.test_home_buffer_recovery
           tests.test_label_matcher
           tests.test_pyside_preview
+          tests.test_pyside_screenshot
           tests.test_pyside_chrome
           tests.test_pyside_services
           tests.test_pyside_backend

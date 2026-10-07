@@ -80,7 +80,7 @@ OPTIONAL_DIRECT_TEMPLATE_NAMES = (
     "NS火叶全自动一键乱数2.0-170a.ecs",
 )
 PRECALIBRATION_RUNTIME_MARKER = "# GUI_PRECALIBRATION_V1"
-EXPECTED_SCRIPT_FILE_COUNT = 33
+EXPECTED_SCRIPT_FILE_COUNT = 34
 EGG_PARENT_TYPES_COMMENT_OLD = (
     '# 亲本A固定填写雌方或无性别方，亲本B固定填写雄方；性别填写 "雌" / "雄" / "无性别"。'
 )
@@ -255,8 +255,9 @@ PREVIOUS_SCRIPT_SHA256S += (
     "eb18777c634b7c5ab10c0f5a930fe29d65b1fdca7d18edb10b461c733dd30bbb",
     # October 2 source corpus with the upstream wild/egg timing updates.
     "abedc36a98710f02b02b79f0af10f6221e3e0a04f3f0f6e107d5c9887ce2661e",
+    "b0f0302037b778661ac5087c6d007ab03865f4030fcd6a680c9f2d450afa1392",
 )
-EXPECTED_SCRIPT_SHA256 = "b0f0302037b778661ac5087c6d007ab03865f4030fcd6a680c9f2d450afa1392"
+EXPECTED_SCRIPT_SHA256 = "2a8acea58843d03826a35259facd2dbd1722dd3a5094246a7195216ebbd7de32"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
@@ -422,6 +423,9 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     "04a0cdda3c9ded4dda8fb2192765ed76cc46ed6e963fc6cb737c18f8125ad994",
     # October 2 materialization after importing the updated upstream corpus.
     "2cd606b7d04c3517b250680858ebf1ef3b042aef18685608775345b073b7d94f",
+    # October 7: preserve the upstream unified Seed controller, lib/29 egg
+    # delegates, TV controller, A-before-TIME origin and dark closing waits.
+    "6d585335af4b47afe3b04da19e515765bc51ef6b572cd2ea7d5f483b397d864f",
 )
 
 
@@ -1942,7 +1946,7 @@ class EggRunRequest:
             raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
         if self.seed_calibration_scheme not in {0, 1, 2}:
             raise ValueError(
-                "Seed校准方案只能是0（原始12轮众数）、1（实验锁定细调）或2（命中保持后的方向票接续）"
+                "Seed校准方案只能是0（原始12轮众数）或1/2（统一粗调与微调，1为兼容编号）"
             )
         _validate_runtime_output_mode(self.debug_log_output)
         _reverse_expansion_values(
@@ -2607,8 +2611,8 @@ def plan_to_user_values(
 
     if options.seed_startup_scheme not in {0, 1}:
         raise ValueError("Seed启动方案只能是0（当前HOME_BUFFER）或1（固定用户界面HOME）")
-    if options.seed_calibration_scheme not in {0, 1}:
-        raise ValueError("正式版 Seed校准方案只能是0（原始12轮众数）或1（实验锁定细调）")
+    if options.seed_calibration_scheme not in {0, 1, 2}:
+        raise ValueError("Seed校准方案只能是0（原始12轮众数）或1/2（统一粗调与微调，1为兼容编号）")
     debug_log_output = _validate_runtime_output_mode(options.debug_log_output)
     frame_parity_scheme = _validate_frame_parity_scheme(options.frame_parity_scheme)
     if type(options.mystery_gift_enabled) is not bool:
@@ -3197,7 +3201,7 @@ def _render_japanese_starter_ocr_helper() -> str:
         "",
         "    IF $道具乱数模式 == 0 and @出闪 >= $识图阈值",
         "        PRINT 已识别到出闪，脚本停止",
-        "        RETURN 0",
+        "        RETURN -2",
         "    ENDIF",
         "",
         f"    {_JAPANESE_STARTER_PAGE_SYNC_MARKER}",
@@ -3440,6 +3444,31 @@ def _apply_japanese_seed_mode10(library_path: Path, game_cn: str, game: str) -> 
     return configured
 
 
+EGG_DYNAMIC_SEED_WINDOW_ASSIGNMENTS = (
+    "    $孵蛋野生最小消耗帧 = $孵蛋生成目标帧",
+    "    $孵蛋野生最大消耗帧 = $孵蛋领取目标帧 + 4000",
+)
+
+
+def _apply_egg_explicit_seed_window_text(template_text: str) -> str:
+    """Let explicit advanced bounds override only the audited dynamic defaults."""
+    counts = tuple(template_text.count(line) for line in EGG_DYNAMIC_SEED_WINDOW_ASSIGNMENTS)
+    if counts == (0, 0):
+        return template_text  # Legacy templates already use their global bounds.
+    if counts != (1, 1):
+        raise ValueError("孵蛋自动反查窗口初始化不完整，拒绝覆盖手动窗口")
+    signature = "FUNC 孵蛋流程_解析并校验配置(): INT"
+    _, _, block = _function_block(template_text, signature)
+    if not all(block.count(line) == 1 for line in EGG_DYNAMIC_SEED_WINDOW_ASSIGNMENTS):
+        raise ValueError("孵蛋自动反查窗口不在已审计配置入口，拒绝覆盖")
+    block = block.replace(
+        EGG_DYNAMIC_SEED_WINDOW_ASSIGNMENTS[0],
+        "    # GUI_EGG_SEED_WINDOW_OVERRIDE: keep explicit global bounds",
+        1,
+    ).replace(EGG_DYNAMIC_SEED_WINDOW_ASSIGNMENTS[1] + "\n", "", 1)
+    return _replace_function_block(template_text, signature, block)
+
+
 def configure_egg_template_text(template_text: str, request: EggRunRequest) -> str:
     """Configure the 1.6.4a-only experimental same-seed egg entry."""
     template_text = _apply_egg_parent_pairing_text(template_text)
@@ -3452,10 +3481,10 @@ def configure_egg_template_text(template_text: str, request: EggRunRequest) -> s
         configured,
         {"出闪录像": int(request.record_shiny_video)},
     )
-    configured = _configure_all_values(
-        configured,
-        reverse_expansion_to_ecs_values(request),
-    )
+    reverse_values = reverse_expansion_to_ecs_values(request)
+    if "孵蛋野生最小消耗帧" in reverse_values:
+        configured = _apply_egg_explicit_seed_window_text(configured)
+    configured = _configure_all_values(configured, reverse_values)
     availability = build_egg_held_availability(request)
     availability_values = egg_held_availability_to_ecs_values(availability)
     missing_fields = tuple(
@@ -3877,6 +3906,14 @@ def _apply_egg_seed_controller_runtime_override_text(
     override_text: str,
 ) -> str:
     """Reuse the formal Seed lock/fine-tune controller in the egg entry."""
+    if _uses_upstream_unified_seed_controller(template_text):
+        _, _, block = _function_block(
+            template_text,
+            "FUNC 孵蛋流程_按观测Seed校正等待($Seed差索引: INT): INT",
+        )
+        if block.count("$Seed本次修正索引 = 计算Seed所选方案修正(0)") != 1:
+            raise ValueError("新版孵蛋 Seed 入口未调用统一方案分派，拒绝覆盖或回退")
+        return template_text
     if EGG_SEED_CONTROLLER_OVERRIDE_MARKER in template_text:
         start = template_text.index(EGG_SEED_CONTROLLER_OVERRIDE_MARKER)
     else:
@@ -3890,8 +3927,39 @@ def _apply_egg_seed_controller_runtime_override_text(
     return template_text[:start] + replacement + template_text[end:]
 
 
+def _uses_upstream_unified_seed_controller(template_text: str) -> bool:
+    """Keep the reviewed upstream 1/2 controller out of legacy overlays."""
+    dispatcher = "FUNC 计算Seed所选方案修正($原始样本已写入: INT): INT"
+    if dispatcher not in template_text:
+        return False
+    required = (
+        dispatcher,
+        "FUNC 重置Seed统一校准状态",
+        "FUNC 计算Seed统一粗调修正(): INT",
+        "FUNC 更新Seed统一校准阶段(): INT",
+        "FUNC 计算Seed统一校准修正(): INT",
+        SEED_HOLD_OBSERVATION_FUNCTION,
+    )
+    blocks = {signature: _function_block(template_text, signature)[2]
+              for signature in required}
+    dispatch = blocks[dispatcher]
+    fine = blocks[SEED_HOLD_OBSERVATION_FUNCTION]
+    if (
+        dispatch.count("RETURN 计算Seed统一校准修正()") != 1
+        or dispatch.count("RETURN 计算Seed原始众数修正()") != 1
+        or "IF $Seed校准方案 == 0" not in dispatch
+        or "Seed校准方案 == 1" in dispatch
+        or "Seed校准方案 == 2" in dispatch
+        or "ELIF $Seed校准方案 != 0 and $方案2Seed接续启用 == 1" not in fine
+    ):
+        raise ValueError("新版 Seed 统一控制器结构不完整，拒绝套用旧控制器")
+    return True
+
+
 def _apply_seed_hold_observation_window_text(template_text: str) -> str:
     """Install the shared scheme-1/2 five-miss fixed-half controller."""
+    if _uses_upstream_unified_seed_controller(template_text):
+        return template_text
     configured = template_text
     for declaration in ("$Seed曾命中目标 = 0", "$Seed锁定提前多数票数 = 3"):
         name = declaration.split(" = ", 1)[0]
@@ -3955,6 +4023,25 @@ def _apply_egg_formal_parity_runtime_override_text(
     override_text: str,
 ) -> str:
     """Use a generation menu for Held parity and keep Pickup's menu phase."""
+    _, _, calculation = _function_block(
+        template_text, EGG_FORMAL_PARITY_ORIGINAL_FUNCTION
+    )
+    if "# EGG_MODULE_DELEGATE:" in calculation:
+        for signature in (
+            "FUNC 孵蛋流程_推送校准上下文(): INT",
+            "FUNC 孵蛋流程_回收校准上下文(): INT",
+        ):
+            _function_block(template_text, signature)
+        for statement in (
+            "# EGG_MODULE_DELEGATE: 孵蛋校准_计算两次命中时间",
+            "$孵蛋模块推送结果 = 孵蛋流程_推送校准上下文()",
+            "$孵蛋模块调用结果 = 孵蛋校准_计算两次命中时间()",
+            "$孵蛋模块回收结果 = 孵蛋流程_回收校准上下文()",
+            "RETURN $孵蛋模块调用结果",
+        ):
+            if calculation.count(statement) != 1:
+                raise ValueError("新版孵蛋校准模块委托不完整，拒绝换回旧计算函数")
+        return template_text
     configured = template_text
     required_globals = tuple(
         line for line in EGG_FORMAL_PARITY_GLOBALS.splitlines() if line
@@ -4861,6 +4948,11 @@ def _apply_egg_restart_runtime_override_text(
 ) -> str:
     """Replace the whole egg restart helper with the audited original flow."""
     global_anchor = "$孵蛋库_正在关闭匹配 = 0\n"
+    dark_global = "$孵蛋库_正在关闭暗匹配 = 0\n"
+    if dark_global not in library_text:
+        if library_text.count(global_anchor) != 1:
+            raise ValueError("孵蛋流程库缺少唯一的关闭状态全局变量")
+        library_text = library_text.replace(global_anchor, global_anchor + dark_global, 1)
     nx2_global = "$孵蛋库_HOME_BUFFER正确退出NS2匹配 = 0\n"
     if nx2_global not in library_text:
         if library_text.count(global_anchor) != 1:
@@ -5045,7 +5137,7 @@ def materialize_easycon118_164a_fixes(source_dir: str | Path) -> dict[str, Any]:
         template_path.write_text(configured, encoding="utf-8")
 
     # The download package may also carry direct-run 1.70a mirrors. They are
-    # not generator mothers and therefore do not enter the 33-file corpus,
+    # not generator mothers and therefore do not enter the 34-file corpus,
     # but their round-zero settings check must honor the same shortcut labels.
     for template_name in OPTIONAL_DIRECT_TEMPLATE_NAMES:
         template_path = source_dir / template_name
@@ -5254,6 +5346,12 @@ def write_configured_project(
             "expected_cli_sha256": EXPECTED_EZCON_SHA256,
         },
     }
+    if _uses_upstream_unified_seed_controller(configured):
+        overrides = manifest["runtime_overrides"]
+        overrides["seed_controller_implementation"] = "upstream-unified-1-2"
+        overrides["seed_hold_observation_window_sha256"] = hashlib.sha256(
+            _function_block(configured, SEED_HOLD_OBSERVATION_FUNCTION)[2].encode("utf-8")
+        ).hexdigest()
     (output_dir / "plan.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -5397,6 +5495,14 @@ def write_configured_egg_project(
     runtime_overrides = apply_egg_settings_runtime_override(
         output_dir / "lib" / EGG_SETTINGS_LIBRARY_NAME
     )
+    if _uses_upstream_unified_seed_controller(configured):
+        runtime_overrides["seed_controller_implementation"] = "upstream-unified-1-2"
+        runtime_overrides["egg_seed_controller_sha256"] = hashlib.sha256(
+            _function_block(
+                configured,
+                "FUNC 孵蛋流程_按观测Seed校正等待($Seed差索引: INT): INT",
+            )[2].encode("utf-8")
+        ).hexdigest()
     runtime_overrides["ocr_unavailable_fallback_sha256"] = ocr_fallback_sha256
     runtime_overrides["egg_home_buffer_refine_sha256"] = hashlib.sha256(
         home_buffer_override_text.encode("utf-8")
@@ -5410,9 +5516,10 @@ def write_configured_egg_project(
     runtime_overrides["egg_party_slot_main_sha256"] = hashlib.sha256(
         party_slot_main_override_text.encode("utf-8")
     ).hexdigest()
-    runtime_overrides["egg_seed_controller_sha256"] = hashlib.sha256(
-        seed_controller_override_text.encode("utf-8")
-    ).hexdigest()
+    if "egg_seed_controller_sha256" not in runtime_overrides:
+        runtime_overrides["egg_seed_controller_sha256"] = hashlib.sha256(
+            seed_controller_override_text.encode("utf-8")
+        ).hexdigest()
     runtime_overrides["egg_cross_method_confirmation_sha256"] = hashlib.sha256(
         (
             EGG_REVERSE_LOOKUP_POLICY_MARKER
@@ -5435,6 +5542,25 @@ def write_configured_egg_project(
         hashlib.sha256(formal_parity_override_text.encode("utf-8")).hexdigest()
         if formal_parity_override_text
         else None
+    )
+    calibration_library = output_dir / "lib" / "29_孵蛋校准.ecs"
+    if calibration_library.is_file():
+        runtime_overrides["egg_calibration_module_sha256"] = hashlib.sha256(
+            calibration_library.read_bytes()
+        ).hexdigest()
+    if _uses_upstream_unified_seed_controller(configured):
+        runtime_overrides["seed_hold_observation_window_sha256"] = hashlib.sha256(
+            _function_block(configured, SEED_HOLD_OBSERVATION_FUNCTION)[2].encode("utf-8")
+        ).hexdigest()
+        runtime_overrides["egg_formal_parity_main_sha256"] = hashlib.sha256(
+            _function_block(configured, "FUNC 孵蛋流程_计算两次命中时间(): INT")[2].encode("utf-8")
+        ).hexdigest()
+        runtime_overrides["egg_formal_parity_implementation"] = "upstream-calibration-module-29"
+    runtime_overrides["egg_seed_reverse_window"] = (
+        "explicit-advanced" if request.egg_seed_reverse_min_advances is not None
+        else "held-to-pickup-plus-4000" if all(
+            line in configured for line in EGG_DYNAMIC_SEED_WINDOW_ASSIGNMENTS
+        ) else "legacy-template-default"
     )
     runtime_overrides["egg_transient_retry_main_sha256"] = hashlib.sha256(
         "\n".join(

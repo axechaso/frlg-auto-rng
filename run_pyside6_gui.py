@@ -12,6 +12,24 @@ from pyside_app.migration import CompleteWindow
 from pyside_app.startup_notice import StartupNoticeDialog, should_show_startup_notice
 
 
+def _schedule_screenshot(app, window, screenshot: Path) -> None:
+    """Capture without network checks or abandoning live Qt worker threads."""
+    controller = getattr(window, "app_update", None)
+    if controller is not None:
+        controller.auto_timer.stop()
+    app.setQuitOnLastWindowClosed(False)
+
+    def capture():
+        screenshot.parent.mkdir(parents=True, exist_ok=True)
+        ok = window.grab().save(str(screenshot))
+        # closeEvent may defer closing until workers finish. Do not force
+        # app.exit() after an ignored close and destroy a running QThread.
+        app.lastWindowClosed.connect(lambda: app.exit(0 if ok else 2))
+        window.close()
+
+    QTimer.singleShot(400, capture)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="FRLG Auto RNG · PySide6")
     parser.add_argument("--page", default="wild", choices=("sid", "tid", "tid_records", "wild", "egg", "script_test", "logs", "history_logs"))
@@ -37,12 +55,7 @@ def main(argv=None):
     if should_show_startup_notice(paths.user, automated=bool(args.screenshot)):
         StartupNoticeDialog(paths.user, window).exec()
     if args.screenshot:
-        def capture():
-            args.screenshot.parent.mkdir(parents=True, exist_ok=True)
-            ok = window.grab().save(str(args.screenshot))
-            window.close()
-            app.exit(0 if ok else 2)
-        QTimer.singleShot(400, capture)
+        _schedule_screenshot(app, window, args.screenshot)
     return app.exec()
 
 

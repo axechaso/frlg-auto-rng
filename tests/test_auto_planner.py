@@ -444,7 +444,7 @@ class CompatibilityTests(unittest.TestCase):
             seed_search=lambda **_: [route("9C76", 100020, mode=6)],
         )
         names = (
-            "游戏版本文本", "Seed模式", "NX机型", "Seed启动方案", "调试日志输出",
+            "游戏版本文本", "Seed模式", "NX机型", "Seed启动方案", "Seed校准方案", "调试日志输出",
             "帧奇偶修正方案", "目标Seed", "目标消耗帧",
             "目标宝可梦名称", "目标全国图鉴编号", "静态或野生", "宝可梦遭遇方法",
             "宝可梦遭遇地点", "麻痹", "点到为止", "出闪后继续抓捕",
@@ -466,6 +466,7 @@ class CompatibilityTests(unittest.TestCase):
             EasyCon118Options(
                 nx_model=1,
                 seed_startup_scheme=1,
+                seed_calibration_scheme=2,
                 debug_log_output=0,
                 frame_parity_scheme=0,
                 record_shiny_video=True,
@@ -478,6 +479,7 @@ class CompatibilityTests(unittest.TestCase):
         )
         self.assertIn('$Seed模式 = 6', configured)
         self.assertIn('$Seed启动方案 = 1', configured)
+        self.assertIn('$Seed校准方案 = 2', configured)
         self.assertIn('$出闪录像 = 1', configured)
         self.assertIn('$非目标闪光停止 = 0', configured)
         self.assertIn('$目标Seed = "9C76"', configured)
@@ -586,7 +588,7 @@ class CompatibilityTests(unittest.TestCase):
     @unittest.skipUnless(LABEL_DIR.is_dir(), "local 1.1.8 package is not present")
     def test_real_118_script_manifest(self):
         manifest = inspect_script_corpus(self.LABEL_DIR.parent)
-        self.assertEqual(manifest["count"], 33)
+        self.assertEqual(manifest["count"], 34)
         self.assertIn(
             manifest["sha256"],
             (EXPECTED_SCRIPT_SHA256, *SUPPORTED_RUNTIME_SCRIPT_SHA256S),

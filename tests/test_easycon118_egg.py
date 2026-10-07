@@ -2,7 +2,11 @@ import re
 import unittest
 from pathlib import Path
 
+SOURCE_118 = Path(__file__).resolve().parents[1] / "local_assets/easycon118"
+
 from automation.easycon118 import (
+    STANDARD_TEMPLATE_NAME,
+    EGG_TEMPLATE_NAME,
     EGG_HOME_BUFFER_GLOBALS,
     EGG_HOME_BUFFER_OVERRIDE_PATH,
     HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH,
@@ -554,6 +558,25 @@ ENDFUNC
         self.assertIn('$孵蛋野生最小消耗帧 = 700', configured)
         self.assertIn('$孵蛋野生最大消耗帧 = 8700', configured)
         self.assertIn('$孵蛋双亲A_DEF = 29', configured)
+
+    @unittest.skipUnless(SOURCE_118.is_dir(), "requires audited 2.0 assets")
+    def test_latest_dynamic_seed_window_and_explicit_advanced_override(self):
+        from automation.easycon118 import EGG_DYNAMIC_SEED_WINDOW_ASSIGNMENTS
+        for name in (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME):
+            with self.subTest(template=name):
+                original = (SOURCE_118 / name).read_text(encoding="utf-8")
+                automatic = configure_egg_template_text(original, egg_request())
+                self.assertTrue(all(line in automatic for line in EGG_DYNAMIC_SEED_WINDOW_ASSIGNMENTS))
+                configured = configure_egg_template_text(original, egg_request(
+                    egg_seed_reverse_seed_tolerance=7,
+                    egg_seed_reverse_min_advances=700,
+                    egg_seed_reverse_max_advances=8700,
+                ))
+                self.assertIn("GUI_EGG_SEED_WINDOW_OVERRIDE", configured)
+                self.assertFalse(any(line in configured for line in EGG_DYNAMIC_SEED_WINDOW_ASSIGNMENTS))
+                for variable, value in (("孵蛋野生Seed容差", 7), ("孵蛋野生最小消耗帧", 700),
+                                        ("孵蛋野生最大消耗帧", 8700)):
+                    self.assertEqual(re.findall(rf"(?m)^\s*\${variable} = (.+)$", configured), [str(value)])
         self.assertIn('$孵蛋双亲B_SPA = 3', configured)
         self.assertIn('$孵蛋Held无蛋表Seed = "75D1"', configured)
         self.assertIn('$孵蛋Held无蛋表目标帧 = 8021', configured)
@@ -1918,6 +1941,8 @@ ENDFUNC
         if not template_path.is_file() or not library_path.is_file():
             self.skipTest("requires the imported 2.0 egg runtime")
         template = template_path.read_text(encoding="utf-8")
+        calibration = (source_dir / "lib/29_孵蛋校准.ecs").read_text(encoding="utf-8")
+        runtime = template + "\n" + calibration
         self.assertEqual(template_path.name, "NS火叶全自动一键乱数2.0.ecs")
         self.assertIn(EGG_FORMAL_WAIT_MARKER, template)
         self.assertIn("$孵蛋使用绝对时间轴 = 0", template)
@@ -1944,7 +1969,7 @@ ENDFUNC
         self.assertIn("CALL 关闭游戏", template.split("FUNC 准备Seed启动原点", 1)[1].split("ENDFUNC", 1)[0])
         self.assertIn("PRINT Seed启动方案: 固定用户界面HOME", template)
         self.assertIn(EGG_FORMAL_PARITY_REAL_CALL_NX_WAIT_MODE, template)
-        self.assertIn("A#固定方案：恢复游戏后再建立Seed计时原点，与参考脚本一致", template)
+        self.assertIn("A#恢复游戏；两种启动方案统一在A命令执行完成后建立Seed计时原点", template)
         self.assertIn("抓捕失败，关闭游戏并继续下一轮", template)
         self.assertIn("RETURN 2", template)
         self.assertIn("$候选细分累计范围有效 = 0", template)
@@ -1955,10 +1980,10 @@ ENDFUNC
         self.assertIn("$孵蛋Pickup反查帧容差 = 2000", template)
         self.assertIn(
             "Pickup尚未稳定：仍登记本轮Held无蛋区间证据；已有可信Held正式修正时允许直接吸收±1帧",
-            template,
+            calibration,
         )
-        no_egg_handler = template.split(
-            "FUNC 孵蛋流程_处理目标Seed无蛋(): INT", 1
+        no_egg_handler = calibration.split(
+            "FUNC 孵蛋校准_处理目标Seed无蛋(): INT", 1
         )[1].split("ENDFUNC", 1)[0]
         self.assertIn(
             "IF $孵蛋流程Held正式修正可信 == 1 and ($孵蛋流程Held无蛋微调差 == -1 or $孵蛋流程Held无蛋微调差 == 1)",
@@ -1998,14 +2023,14 @@ ENDFUNC
             "$孵蛋流程目标Seed无蛋区间确认次数 = 0",
         ):
             self.assertNotIn(forbidden_reset, non_target_no_egg)
-        self.assertIn("连续命中目标Seed且无蛋超过处理上限，停止以避免死循环", template)
+        self.assertIn("连续命中目标Seed且无蛋超过处理上限，停止以避免死循环", calibration)
         self.assertIn("FUNC 孵蛋流程_候选个体是否完全一致(): INT", template)
         self.assertIn("FUNC 孵蛋流程_合并当前方法候选($方法: INT): INT", template)
         self.assertIn("FUNC 孵蛋流程_选择校准候选(): INT", template)
         self.assertIn("FUNC 孵蛋流程_应用多候选锚点跳出(): INT", template)
         self.assertIn("FUNC 孵蛋流程_更新Held归一候选交集(): INT", template)
-        held_intersection = template.split(
-            "FUNC 孵蛋流程_更新Held归一候选交集(): INT", 1
+        held_intersection = calibration.split(
+            "FUNC 孵蛋校准_更新Held归一候选交集(): INT", 1
         )[1].split("ENDFUNC", 1)[0]
         self.assertIn(
             "$孵蛋流程Held交集当前值 = $孵蛋流程不同Held候选表[$孵蛋流程Held交集当前索引] - $孵蛋流程本轮Held总执行修正帧",
@@ -2029,10 +2054,10 @@ ENDFUNC
         self.assertIn(EGG_REVERSE_LOOKUP_POLICY_MARKER, template)
         self.assertIn(
             "$孵蛋流程跨方法候选总数 += $孵蛋流程合并方法总数",
-            template,
+            calibration,
         )
-        self.assertIn("$孵蛋流程不同Held候选数 += 1", template)
-        self.assertIn("$孵蛋流程不同Pickup候选数 += 1", template)
+        self.assertIn("$孵蛋流程不同Held候选数 += 1", calibration)
+        self.assertIn("$孵蛋流程不同Pickup候选数 += 1", calibration)
         self.assertIn("Held存在多个不同帧值，本轮禁止修改正式Held累计修正", template)
         self.assertIn(
             "$孵蛋流程实际方法 = $孵蛋流程最佳候选方法",
@@ -2045,19 +2070,19 @@ ENDFUNC
             "$孵蛋流程候选参考Held帧 = $孵蛋流程上次确认实际Held帧 + $孵蛋流程本轮Held总执行修正帧 - $孵蛋流程上次确认Held总执行修正帧",
             template,
         )
-        self.assertIn("$孵蛋流程无蛋跳出估计落点", template)
-        self.assertIn("$孵蛋流程无蛋跳出最佳预测落点", template)
+        self.assertIn("$孵蛋流程无蛋跳出估计落点", runtime)
+        self.assertIn("$孵蛋流程无蛋跳出最佳预测落点", runtime)
         self.assertIn(
             "$孵蛋流程无蛋跳出候选预测落点 % 2 != $孵蛋生成目标帧 % 2",
-            template,
+            calibration,
         )
         self.assertIn(
             "$孵蛋流程无蛋跳出候选偏移 = $孵蛋流程无蛋跳出候选预测落点 - $孵蛋流程无蛋跳出估计落点",
-            template,
+            calibration,
         )
         self.assertIn(
             "$孵蛋流程无蛋预测Held帧 = $孵蛋流程无蛋跳出最佳预测落点",
-            template,
+            calibration,
         )
         self.assertIn(
             "$孵蛋流程候选参考Held帧 = $孵蛋流程无蛋跳出最佳预测落点",
@@ -2067,33 +2092,33 @@ ENDFUNC
         self.assertIn("已在孵化蛋能力页识别到闪光，目标命中并结束反查", template)
         self.assertIn(
             "$孵蛋流程请求Held帧 = $孵蛋生成目标帧 - $孵蛋Held固定预校准帧 + $孵蛋Held执行修正帧",
-            template,
+            calibration,
         )
         self.assertIn(
             "$孵蛋流程请求Pickup帧 = $孵蛋领取目标帧 - $孵蛋Pickup固定预校准帧 + $孵蛋Pickup执行修正帧",
-            template,
+            calibration,
         )
         self.assertIn(
             "$孵蛋流程执行Pickup帧 = $孵蛋流程Pickup奇偶基准帧 - $孵蛋流程Pickup菜单推进帧",
-            template,
+            calibration,
         )
         self.assertIn(
             "$孵蛋流程执行Held帧 = $孵蛋流程请求Held帧",
-            template,
+            calibration,
         )
         self.assertIn(
             "IF $孵蛋流程Held已稳定 == 1 and $孵蛋流程Pickup奇偶基准帧 % 2 != 0",
-            template,
+            calibration,
         )
         library = library_path.read_text(encoding="utf-8")
         self.assertIn("$Seed启动方案: INT", library)
         self.assertIn("$使用绝对时间轴: INT", library)
         self.assertIn("FUNC 孵蛋测试_按模式等待到", library)
         self.assertIn(
-            "IF $Seed启动方案 == 1\n        A\n        $孵蛋库_Seed时间轴原点 = TIME()",
+            "A#恢复游戏；两种启动方案统一在A命令执行完成后建立Seed计时原点\n    $孵蛋库_Seed时间轴原点 = TIME()",
             library,
         )
-        self.assertIn("孵蛋生成奇偶校准: 生成菜单", template)
+        self.assertIn("孵蛋生成奇偶校准: 生成菜单", calibration)
         self.assertIn("$孵蛋流程本轮奇偶等待MS, $孵蛋封面长按MS", template)
         self.assertIn(
             "$孵蛋流程生成菜单奇偶开关, $孵蛋流程Pickup菜单奇偶开关, $孵蛋出蛋检测阈值",

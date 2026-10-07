@@ -727,6 +727,9 @@ class CompleteWindow(FrlgWindow):
             # Load current script defaults first, then overlay every value that
             # was explicitly saved.  Version-1 files without the new per-flow
             # Seed window fields therefore remain portable.
+            self.fields["egg_reverse_mode"].setCurrentIndex(
+                int(config["egg_seed_reverse_min_advances"] is not None)
+            )
             self._read_expansion_defaults()
             if config["reverse_expansion_layers"] is not None:
                 self.fields["layers"].setValue(config["reverse_expansion_layers"])

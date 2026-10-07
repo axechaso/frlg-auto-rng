@@ -263,7 +263,7 @@ class GuideCopyTests(unittest.TestCase):
         by_id = {page: {step.step_id: step for step in steps} for page, steps in GUIDES.items()}
         required = {
             ("controls", "adaptive"): ("关闭", "开启", "连续 3 次", "唯一最高分", "至少 90", "不会降低"),
-            ("controls", "calibration"): ("0“原始众数”", "1“锁定细调”", "2“命中保持”", "2 仅孵蛋", "固定 0"),
+            ("controls", "calibration"): ("0“原始众数”", "1“统一校准（兼容编号）”", "2“统一校准”", "完全相同", "重新粗调", "固定 0"),
             ("controls", "startup"): ("0“HOME_BUFFER”", "1“固定 HOME”", "1500 ms", "3000 ms", "记录不混用"),
             ("controls", "seed_terms"): ("Seed 模式", "Seed 启动", "Seed 校准", "不同的事"),
             ("controls", "precalibration"): ("开启", "关闭", "完整命中", "默认开启"),

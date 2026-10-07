@@ -95,7 +95,10 @@ $args = @(
     "--add-data", "$(Join-Path $Root 'rng\resources');rng\resources",
     "--add-data", "$(Join-Path $Root 'docs\assets');docs/assets",
     "--add-data", "$LocalAssets;local_assets",
-    "--add-data", "$(Join-Path $Root 'runtime_backend');runtime_backend",
+    # Only the current runner is a runtime dependency. Never bundle sibling
+    # before-* backups (which can contain old single-file executables).
+    "--add-data", "$(Join-Path $Root 'runtime_backend\easycon164a-cli-gui-rounding-selfcontained');runtime_backend/easycon164a-cli-gui-rounding-selfcontained",
+    "--add-data", "$(Join-Path $Root 'runtime_backend\README.md');runtime_backend",
     "--add-data", "$(Join-Path $Root 'default.yaml');.",
     "--add-binary", "$(Join-Path $Root 'rng\src\pybind\calibration_bind.cp312-win_amd64.pyd');rng\src\pybind",
     (Join-Path $Root 'package_entry.py')

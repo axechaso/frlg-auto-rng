@@ -30,6 +30,9 @@ FUNC HOME_BUFFER恢复启动原点(): INT
             $HOME_BUFFER恢复错误 = @错误退出_NS2
         ENDIF
         $HOME_BUFFER恢复关闭中 = @正在关闭
+        IF @正在关闭_暗 > $HOME_BUFFER恢复关闭中
+            $HOME_BUFFER恢复关闭中 = @正在关闭_暗
+        ENDIF
         IF $调试日志输出 == 1
             PRINT "HOME_BUFFER_RECOVERY|NX=" & $NX机型 & "|HOME=" & $HOME_BUFFER恢复主页 & "|NORMAL=" & $HOME_BUFFER恢复普通 & "|BUFFER=" & $HOME_BUFFER恢复窗口 & "|ERROR=" & $HOME_BUFFER恢复错误 & "|CLOSING=" & $HOME_BUFFER恢复关闭中 & "|HOME_SENT=" & $HOME_BUFFER恢复已按HOME
         ENDIF
@@ -38,6 +41,8 @@ FUNC HOME_BUFFER恢复启动原点(): INT
             $HOME_BUFFER本轮待确认 = 0
             $HOME_BUFFER恢复稳定 = 0
             $HOME_BUFFER恢复未知 = 0
+            WAIT 2000
+            CONTINUE
         ELIF $HOME_BUFFER本轮待确认 == 1 and $HOME_BUFFER恢复窗口 >= $HOME_BUFFER有效识图阈值
             # 只接纳本轮 HOME 后的未知结果；恢复尚未发键，窗口仍属于本轮延迟。
             $HOME_BUFFER本轮待确认 = 0

@@ -131,24 +131,55 @@ class RemainingQtTests(unittest.TestCase):
             ["Raikou", "Entei", "Suicune"],
         )
 
+    def test_togepi_window_defaults_to_automatic_and_manual_override_is_explicit(self):
+        w = self.w
+        w.advanced_check.setChecked(True)
+        w.fields["wild_tid"].setText("12345")
+        w.fields["wild_sid"].setText("54321")
+        for i in range(1, 4):
+            w.fields[f"expansion_{i}_seed"].setText("25")
+            w.fields[f"expansion_{i}_adv"].setText("5000")
+        mode, width = w.fields["togepi_reverse_mode"], w.fields["togepi_reverse_adv"]
+        self.assertEqual(mode.currentIndex(), 0)
+        self.assertFalse(width.isEnabled())
+        width.setText("not-a-number")
+        self.assertIsNone(w.collect_inputs().options.togepi_seed_reverse_frame_half_width)
+        mode.setCurrentIndex(1)
+        self.assertTrue(width.isEnabled())
+        width.setText("4321")
+        self.assertEqual(w.collect_inputs().options.togepi_seed_reverse_frame_half_width, 4321)
+        self.assertEqual(w.settings_payload()["togepi_reverse_mode"], 1)
+        mode.setCurrentIndex(0)
+        self.assertIsNone(w.collect_inputs().options.togepi_seed_reverse_frame_half_width)
+
     def test_egg_full_roundtrip_and_acknowledgement(self):
         expected = self.configure_egg()
         actual = self.w.reader.egg()
         self.assertEqual(actual.species_id, 148)
         self.assertEqual(actual.parent_a_ivs, expected.parent_a_ivs)
         self.assertEqual(actual.pickup_advances, expected.pickup_advances)
-        self.assertEqual(actual.egg_seed_reverse_seed_tolerance, 5)
-        self.assertEqual(actual.egg_seed_reverse_min_advances, 500)
-        self.assertEqual(actual.egg_seed_reverse_max_advances, 6500)
+        self.assertIsNone(actual.egg_seed_reverse_seed_tolerance)
+        self.assertIsNone(actual.egg_seed_reverse_min_advances)
+        self.assertIsNone(actual.egg_seed_reverse_max_advances)
+        self.assertEqual(self.w.fields["egg_reverse_mode"].currentIndex(), 0)
         payload = self.w.egg_payload(True)
-        self.assertEqual(payload["egg_seed_reverse_seed_tolerance"], 5)
-        self.assertEqual(payload["egg_seed_reverse_min_advances"], 500)
-        self.assertEqual(payload["egg_seed_reverse_max_advances"], 6500)
+        self.assertIsNone(payload["egg_seed_reverse_seed_tolerance"])
+        self.assertIsNone(payload["egg_seed_reverse_min_advances"])
+        self.assertIsNone(payload["egg_seed_reverse_max_advances"])
         self.w.apply_egg_config(payload, True)
         self.assertFalse(self.w.egg_ack.isChecked())
         with self.assertRaisesRegex(ValueError, "前置"):
             self.w.reader.egg()
         self.assertEqual(self.w.reader.egg(require_ack=False), actual)
+
+        self.w.fields["egg_reverse_mode"].setCurrentIndex(1)
+        self.w.fields["egg_reverse_min_adv"].setText("700")
+        self.w.fields["egg_reverse_max_adv"].setText("8700")
+        payload = self.w.egg_payload(True)
+        self.assertEqual(payload["egg_seed_reverse_min_advances"], 700)
+        self.w.apply_egg_config(payload, True)
+        self.assertEqual(self.w.fields["egg_reverse_mode"].currentIndex(), 1)
+        self.assertEqual(self.w.reader.egg(require_ack=False).egg_seed_reverse_max_advances, 8700)
 
         from pyside_app.egg_config import parse_egg_full_config_payload
         legacy = dict(payload)
