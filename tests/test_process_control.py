@@ -103,7 +103,8 @@ class ProcessControlTests(unittest.TestCase):
             child_code = (
                 "import json, os, subprocess, sys, time; from pathlib import Path; "
                 "child=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(25)']); "
-                f"Path({str(ready)!r}).write_text(json.dumps([os.getpid(), child.pid])); "
+                f"ready=Path({str(ready)!r}); staging=ready.with_suffix('.tmp'); "
+                "staging.write_text(json.dumps([os.getpid(), child.pid])); staging.replace(ready); "
                 "print('READY', flush=True); time.sleep(25)"
             )
             startup = subprocess.STARTUPINFO()

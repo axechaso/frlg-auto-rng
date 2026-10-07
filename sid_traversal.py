@@ -17,7 +17,8 @@ import os
 from pathlib import Path
 import uuid
 
-from rng.sid_reverse import sid_at_advance
+from rng.sid_reverse import pid_to_psv, sid_at_advance, sid_candidates_for_psv
+from automation.sid_observation import validate_observation
 
 
 SCHEMA = 3
@@ -245,6 +246,33 @@ def _validate_state(state: dict, context: dict) -> None:
         value = state.get(key)
         if value is not None and not isinstance(value, dict):
             raise ValueError(f"SID 遍历 {key} 必须是对象")
+    evidence = state.get("pid_observations", [])
+    excluded = state.get("excluded_tsvs", [])
+    confirmed = state.get("confirmed_tsv")
+    if not isinstance(evidence, list) or not isinstance(excluded, list):
+        raise ValueError("SID 遍历 TSV 证据必须是列表")
+    expected_excluded, expected_confirmed, seen = set(), None, set()
+    for value in evidence:
+        observation = validate_observation(value)
+        key = (observation.run_id, observation.attempt_id, observation.round)
+        if key in seen:
+            raise ValueError("SID 遍历 TSV 证据重复")
+        seen.add(key)
+        psv = pid_to_psv(observation.pid)
+        if observation.shiny:
+            if expected_confirmed is not None and expected_confirmed != psv:
+                raise ValueError("SID 遍历闪光 TSV 证据冲突")
+            expected_confirmed = psv
+        else:
+            expected_excluded.add(psv)
+    if any(type(v) is not int or not 0 <= v <= 8191 for v in excluded) or len(excluded) != len(set(excluded)):
+        raise ValueError("SID 遍历排除 TSV 无效")
+    if set(excluded) != expected_excluded or confirmed != expected_confirmed or (
+        confirmed is not None and (type(confirmed) is not int or confirmed in expected_excluded)
+    ):
+        raise ValueError("SID 遍历 TSV 约束与 PID 证据不一致")
+    if type(state.get("evidence_skipped_count", 0)) is not int or state.get("evidence_skipped_count", 0) < 0:
+        raise ValueError("SID 遍历证据跳过计数无效")
 
 
 def read_progress(directory: str | Path, context: dict) -> dict | None:
@@ -327,6 +355,10 @@ class SIDTraversalSession:
             "hit_sid": None,
             "hit_sid_advance": None,
             "hit_evidence": None,
+            "pid_observations": [],
+            "excluded_tsvs": [],
+            "confirmed_tsv": None,
+            "evidence_skipped_count": 0,
         }
 
     def __enter__(self):
@@ -426,7 +458,7 @@ class SIDTraversalSession:
         current = self.current_sid_advance
         if current is None:
             raise ValueError("没有正在进行的 SID 候选")
-        if outcome not in {"tested_non_shiny", "window_skipped"}:
+        if outcome not in {"tested_non_shiny", "window_skipped", "tsv_excluded"}:
             raise ValueError("SID 遍历候选结果类型无效")
         step = int(self.context.get("sid_advance_step", SID_ADVANCE_STEP))
         next_advance = current + step
@@ -459,6 +491,9 @@ class SIDTraversalSession:
                 if outcome == "window_skipped"
                 else int(self.state.get("skipped_count", 0))
             ),
+            evidence_skipped_count=(
+                int(self.state.get("evidence_skipped_count", 0)) + (outcome == "tsv_excluded")
+            ),
         )
         if exhausted:
             self.completed = True
@@ -472,6 +507,70 @@ class SIDTraversalSession:
     def skip_candidate(self, reason: str) -> int:
         """Advance after the complete search window had no executable target."""
         return self._advance_candidate("window_skipped", reason)
+
+    def record_pid_observations(self, values: list[dict], *, log: str) -> None:
+        """Apply a batch atomically: conflicts never partially change constraints."""
+        if not isinstance(values, list):
+            raise ValueError("SID PID 证据必须是列表")
+        observations = list(self.state.get("pid_observations", []))
+        seen = {(v["run_id"], v["attempt_id"], v["round"]): v for v in observations}
+        excluded = set(self.state.get("excluded_tsvs", []))
+        confirmed = self.state.get("confirmed_tsv")
+        for value in values:
+            observation = validate_observation(value)
+            key = (observation.run_id, observation.attempt_id, observation.round)
+            normalized = observation.to_dict()
+            if key in seen:
+                if any(seen[key].get(k) != v for k, v in normalized.items()):
+                    raise ValueError("同一轮唯一 PID 证据不一致，保留现场停止")
+                continue
+            psv = pid_to_psv(observation.pid)
+            if observation.shiny:
+                if psv in excluded or (confirmed is not None and confirmed != psv):
+                    raise ValueError("闪光与非闪 TSV 证据冲突，保留现场停止")
+                confirmed = psv
+            else:
+                if psv == confirmed:
+                    raise ValueError("非闪与已确认闪光 TSV 证据冲突，保留现场停止")
+                excluded.add(psv)
+            normalized.update(log=str(log), tsv=psv)
+            seen[key] = normalized
+            observations.append(normalized)
+        self.state.update(pid_observations=observations, excluded_tsvs=sorted(excluded), confirmed_tsv=confirmed)
+        self.save()
+
+    def candidate_tsv_excluded(self, sid: int) -> bool:
+        return ((int(self.context["tid"]) ^ sid) >> 3) in self.state.get("excluded_tsvs", [])
+
+    def skip_excluded_candidate(self) -> int:
+        if self.current_sid_advance is None or not self.candidate_tsv_excluded(int(self.state["current_sid"])):
+            raise ValueError("当前 SID 的 TSV 没有可靠排除证据")
+        return self._advance_candidate("tsv_excluded", "unique-pid-non-shiny-tsv-excluded")
+
+    def resolve_confirmed_tsv(self) -> dict:
+        """Finish without new console input; shiny status leaves eight full SIDs."""
+        tsv = self.state.get("confirmed_tsv")
+        if tsv is None:
+            raise ValueError("没有可靠闪光 PID 确认的 TSV")
+        tid = int(self.context["tid"])
+        sids = list(sid_candidates_for_psv(tid, tsv))
+        seen = set()
+        advances = []
+        for advance in range(int(self.context["start_sid_advance"]), int(self.context["max_advances"]) + 1, SID_ADVANCE_STEP):
+            sid = sid_at_advance(tid, advance)
+            if sid in sids and sid not in seen:
+                advances.append({"sid": sid, "sid_advance": advance})
+                seen.add(sid)
+        selected = advances[0] if advances else {}
+        evidence = next(v for v in self.state["pid_observations"] if v["shiny"])
+        result = {"tsv": tsv, "sid_candidates": sids, "sid_advance_candidates": advances,
+                  "sid": selected.get("sid"), "sid_advance": selected.get("sid_advance"),
+                  "uniquely_determined": False, "hit_evidence": evidence}
+        self.state.update(status="completed", candidate_phase="idle", last_result="unique-pid-shiny-tsv-confirmed",
+                          hit_sid=result["sid"], hit_sid_advance=result["sid_advance"], hit_evidence=evidence)
+        self.completed = True
+        self.save()
+        return result
 
     def pause(self, result: str = "paused") -> None:
         """Keep the current candidate for the next invocation."""

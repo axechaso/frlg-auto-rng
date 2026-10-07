@@ -215,7 +215,7 @@ def _prepare_workflow_in_directory(
         write_json_atomic(directory / "traversal.json", payload)
         project = inputs.source / inputs.template
         metrics = ("遍历中确定", "—", "—")
-        details = f"SID 遍历：TID {request.tid:05d}；起点 {context['start_sid_advance']} / 上限 {context['max_advances']}\n每个 SID 搜索 {request.min_advances}–{DEFAULT_TARGET_MAX_ADVANCES} ADV；只有明确未出闪才推进。"
+        details = f"SID 遍历：TID {request.tid:05d}；起点 {context['start_sid_advance']} / 上限 {context['max_advances']}\n每个 SID 搜索 {request.min_advances}–{DEFAULT_TARGET_MAX_ADVANCES} ADV；唯一 PID 的非闪个体可排除 TSV，已排除的 SID 自动跳过。非目标闪光也会抓获反查 TSV，成功后保留现场停止。"
         from sid_traversal import read_progress
         saved = read_progress(inputs.extra["progress_dir"], context)
         if saved:

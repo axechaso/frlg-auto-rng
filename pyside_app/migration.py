@@ -240,7 +240,7 @@ class CompleteWindow(FrlgWindow):
                 self.summary_note.setText("填写参数后生成或预检。")
             labels = self.overview.findChildren(QLabel, "metricLabel")
             if self.traversal_check.isChecked() and self.input_mode == "wild":
-                for label, text in zip(labels, ("候选 SID", "建档 ADV", "状态")):
+                for label, text in zip(labels, ("候选 SID", "建档 ADV", "已确认 TSV")):
                     label.setText(text)
             if self.workflow_summary:
                 title, context, metrics, note = self.workflow_summary

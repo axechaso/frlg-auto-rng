@@ -37,9 +37,11 @@ from automation.input_state_protocol import format_input_session_marker
 from automation.planner import SearchCancelledError
 from automation.sid_traversal_policy import validate_traversal_request
 from automation.target_verification import TargetVerificationSpec, parse_target_verification
+from automation.sid_observation import parse_pid_observations
 from device_label_overrides import apply_profile_to_projects, load_label_override_profile
 from easycon_outcome import easycon_log_has_fatal_error
 from rng.tenlines_utils import get_species_id
+from rng.sid_reverse import pid_to_psv
 from process_control import StopFileWatcher, terminate_process_tree
 from run_easycon_logged import run_logged
 from sid_traversal import (
@@ -351,7 +353,12 @@ def run_traversal(
                 ),
                 "tested_non_shiny_count": int(session.state.get("tested_non_shiny_count", 0)),
                 "skipped_count": int(session.state.get("skipped_count", 0)),
+                "evidence_skipped_count": int(session.state.get("evidence_skipped_count", 0)),
+                "excluded_tsvs": session.state.get("excluded_tsvs", []),
+                "pid_observations": session.state.get("pid_observations", []),
             })
+            if session.state.get("confirmed_tsv") is not None:
+                state_report["tsv"] = session.state["confirmed_tsv"]
             if session.state.get("last_candidate") is not None:
                 state_report["last_candidate"] = session.state["last_candidate"]
             if session.state.get("hit_evidence") is not None:
@@ -365,6 +372,8 @@ def run_traversal(
                 "sid_advance": session.state.get("hit_sid_advance"),
                 "uniquely_determined": False if session.state.get("hit_sid") is not None else None,
             })
+            if session.state.get("confirmed_tsv") is not None:
+                state_report.update(session.resolve_confirmed_tsv())
             save_report()
             emit_terminal("ENDED")
             _append_log(log_path, f"SID遍历已有终态：{session.state.get('last_result')}，不重复运行")
@@ -376,6 +385,12 @@ def run_traversal(
                 _append_log(log_path, "SID遍历已停止，当前候选保留")
                 save_report("paused")
                 return 130
+            if session.state.get("confirmed_tsv") is not None:
+                state_report.update(session.resolve_confirmed_tsv())
+                save_report("completed")
+                emit_terminal("ENDED")
+                _append_log(log_path, f"已从保留的唯一闪光 PID 确认 TSV={state_report['tsv']}，不再操作游戏")
+                return 0
             advance = session.next_sid_advance
             sid = session.begin_candidate(advance)
             attempt_id = str(session.state["attempt_id"])
@@ -393,6 +408,14 @@ def run_traversal(
             }
             state_report["candidates"].append(candidate_info)
             save_report()
+            if session.candidate_tsv_excluded(sid):
+                session.skip_excluded_candidate()
+                candidate_info["status"] = "tsv-excluded"
+                candidate_info["tsv"] = (request.tid ^ sid) >> 3
+                _emit_session(run_id, attempt_id, "sid_candidate", "ENDED")
+                _append_log(log_path, f"ADV={advance} / SID={sid:05d} 的 TSV={candidate_info['tsv']} 已由唯一非闪 PID 排除，跳过搜索和实机运行")
+                save_report("exhausted" if session.completed else "running")
+                continue
             try:
                 result = search_best_plan(
                     candidate_request,
@@ -553,6 +576,28 @@ def run_traversal(
                 "target_verification": proof,
             })
             _append_log(log_path, f"\n===== ADV={advance} SID={sid:05d} =====\n{candidate_text}")
+            # Complete packets remain useful if the user stops a later round.
+            # Record the entire batch atomically before any cursor decisions;
+            # an ambiguous/malformed/conflicting batch never excludes a TSV.
+            try:
+                observations = parse_pid_observations(candidate_text, run_id=run_id, attempt_id=attempt_id)
+                if proof and proof["event"] == "TARGET":
+                    for observation in observations:
+                        if observation["round"] == proof["round"] and observation["pid"] == target_snapshot["pid"] and observation["shiny"] != proof["shiny"]:
+                            raise ValueError("同一轮目标证明与唯一 PID 的闪光状态冲突")
+                session.record_pid_observations(observations, log=str(candidate_log))
+                candidate_info["pid_observations"] = observations
+                for observation in observations:
+                    psv = pid_to_psv(int(observation["pid"], 16))
+                    _append_log(log_path, f"唯一 PID 证据|ROUND={observation['round']}|图鉴={observation['species_id']}|PID={observation['pid']}|"
+                                + (f"闪光，确认 TSV={psv}" if observation["shiny"] else f"非闪，排除 TSV={psv}"))
+            except ValueError as exc:
+                session.pause("invalid-pid-evidence")
+                candidate_info.update(status="paused-invalid-pid-evidence", result=str(exc))
+                emit_terminal("FAILED")
+                _append_log(log_path, str(exc) + "；当前起点保留，不再操作游戏")
+                save_report("paused")
+                return 1
             stopped = stop_file is not None and stop_file.is_file()
             if stopped:
                 session.pause("stopped")
@@ -571,7 +616,23 @@ def run_traversal(
                 _append_log(log_path, f"ADV={advance} 运行器退出异常（退出码 {code}），保留当前候选")
                 save_report("paused")
                 return code or 1
-            if proof and proof["event"] == "TARGET" and proof["seed_match"] and proof["advance_match"] and proof["species_match"] and proof["shiny"]:
+            if session.state.get("confirmed_tsv") is not None:
+                state_report.update(session.resolve_confirmed_tsv())
+                candidate_info["status"] = "unique-shiny-tsv-confirmed"
+                save_report("completed")
+                emit_terminal("ENDED")
+                _append_log(log_path, f"唯一 PID 闪光反查确认 TSV={state_report['tsv']}；对应8个SID，结果与可达ADV已记录；保留现场，不重启游戏")
+                return 0
+            if session.candidate_tsv_excluded(sid):
+                session.skip_excluded_candidate()
+                candidate_info["status"] = "tsv-excluded"
+                _append_log(log_path, f"当前 TSV 已由唯一非闪 PID 排除，无需等待目标命中；继续 ADV={session.next_sid_advance}")
+                save_report("exhausted" if session.completed else "running")
+                continue
+            # Exact-target protocol remains as a second check, never as a
+            # substitute for the unique PID + confirmed shiny-state evidence.
+            target_observations = [o for o in observations if o["pid"] == target_snapshot["pid"]]
+            if target_observations and proof and proof["event"] == "TARGET" and proof["seed_match"] and proof["advance_match"] and proof["species_match"] and proof["shiny"]:
                 hit_evidence = {
                     "target": target_snapshot,
                     "proof": proof,
@@ -587,7 +648,7 @@ def run_traversal(
                 save_report("completed")
                 emit_terminal("ENDED")
                 return 0
-            if proof and proof["event"] == "TARGET" and proof["seed_match"] and proof["advance_match"] and proof["species_match"] and not proof["shiny"]:
+            if target_observations and proof and proof["event"] == "TARGET" and proof["seed_match"] and proof["advance_match"] and proof["species_match"] and not proof["shiny"]:
                 session.complete_non_shiny("verified-target-non-shiny")
                 candidate_info["status"] = "tested-non-shiny"
                 _append_log(

@@ -37,6 +37,8 @@ tools/EasyCon164aTidBootstrapCheck/bin/
 tools/EasyCon164aTidBootstrapCheck/obj/
 tools/EasyCon164aTidBootstrapIntegrationCheck/bin/
 tools/EasyCon164aTidBootstrapIntegrationCheck/obj/
+tools/EasyCon164aSIDObservationCheck/bin/
+tools/EasyCon164aSIDObservationCheck/obj/
 .worktrees/
 .tools/
 local_assets/

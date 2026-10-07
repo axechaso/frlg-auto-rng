@@ -448,7 +448,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.log_view.setPlainText("尚无运行输出。点击开始运行后在这里查看日志。")
         self.result_panel.setPlainText("尚无方案。搜索完成后显示真实结果与正式预检详情。")
         self.log_view.setToolTip("原始运行日志保存在生成工程中；显示区隐藏完整的已知机器检查点，保留错误和未知记录。")
-        self.traversal_check.setToolTip("按原有 SID 遍历运行器处理；停止后保留当前候选，同参数下次继续。")
+        self.traversal_check.setToolTip("唯一 PID 的非闪个体可排除 TSV；目标或非目标闪光可反查 TSV。停止后保留证据和进度，同参数下次继续。")
         for key in ("source", "ezcon", "port", "video"):
             self.fields[key].setToolTip("选择正式脚本包或本次运行设备；启动前会重新核对设备与运行时。")
         for key in ("wild_seed_mode", "wild_direct_seed", "wild_direct_adv"):

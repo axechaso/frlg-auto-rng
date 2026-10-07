@@ -1,0 +1,93 @@
+# SIDTRAVERSAL_PID_OBSERVATION_V1
+# 仅生成的SID遍历工程使用；普通、孵蛋、TID母本与共享库不修改。
+$SID遍历候选TID = __CANDIDATE_TID__
+$SID遍历候选SID = __CANDIDATE_SID__
+$SID遍历证据前缀 = "__PID_OBSERVATION_PREFIX__"
+$SID遍历PID一致 = 0
+$SID遍历PID高 = -1
+$SID遍历PID低 = -1
+$SID遍历闪光状态 = -1
+$SID遍历采样索引 = 0
+$SID遍历星标分数 = 0
+$SID遍历页面分数 = 0
+$SID遍历星标最低 = 0
+$SID遍历星标最高 = 0
+$SID遍历页面最低 = 0
+$SID遍历证据阈值 = 95
+$SID遍历PSV = 0
+$SID遍历候选TSV = 0
+$SID遍历最近闪光 = 0
+$SID遍历证据动作 = 0
+
+FUNC SID遍历收集匹配PID
+    IF $本轮候选命中计数 == 1
+        $SID遍历PID高 = $PIDHI
+        $SID遍历PID低 = $PIDLO
+        $SID遍历PID一致 = 1
+    ELIF $PIDHI != $SID遍历PID高 or $PIDLO != $SID遍历PID低
+        $SID遍历PID一致 = 0
+    ENDIF
+ENDFUNC
+
+FUNC SID遍历采样闪光状态
+    $SID遍历闪光状态 = -1
+    $SID遍历证据阈值 = $识图阈值
+    IF $SID遍历证据阈值 < 95
+        $SID遍历证据阈值 = 95
+    ENDIF
+    $SID遍历星标最低 = 100
+    $SID遍历星标最高 = 0
+    $SID遍历页面最低 = 100
+    FOR $SID遍历采样索引 = 1 TO 3
+        IF $Seed模式 == 10
+            $SID遍历页面分数 = @日版性格界面
+        ELSE
+            $SID遍历页面分数 = @性格界面
+        ENDIF
+        $SID遍历星标分数 = @出闪
+        IF $SID遍历页面分数 < $SID遍历页面最低
+            $SID遍历页面最低 = $SID遍历页面分数
+        ENDIF
+        IF $SID遍历星标分数 < $SID遍历星标最低
+            $SID遍历星标最低 = $SID遍历星标分数
+        ENDIF
+        IF $SID遍历星标分数 > $SID遍历星标最高
+            $SID遍历星标最高 = $SID遍历星标分数
+        ENDIF
+        IF $SID遍历采样索引 < 3
+            WAIT 50
+        ENDIF
+    NEXT
+    IF $SID遍历页面最低 < $SID遍历证据阈值
+        RETURN
+    ENDIF
+    $SID遍历最近闪光 = 读取最近出闪检测结果()
+    IF $SID遍历星标最低 >= $SID遍历证据阈值
+        $SID遍历闪光状态 = 1
+        $SID遍历本轮出闪 = 1
+    ELIF $SID遍历星标最高 <= $SID遍历证据阈值 - 5 and $SID遍历最近闪光 == 0 and $SID遍历本轮出闪 == 0
+        $SID遍历闪光状态 = 0
+    ENDIF
+ENDFUNC
+
+FUNC SID遍历处理反查证据($反查成功: INT): INT
+    IF $反查成功 == 1 and $本轮候选命中计数 > 0 and $SID遍历PID一致 == 1 and $SID遍历闪光状态 >= 0
+        PRINT $SID遍历证据前缀 & "|ROUND=" & $循环计数 & "|SPECIES=" & $目标全国图鉴编号 & "|PIDHI=" & $SID遍历PID高 & "|PIDLO=" & $SID遍历PID低 & "|UNIQUE_PID=1|CANDIDATES=" & $本轮候选命中计数 & "|SHINY=" & $SID遍历闪光状态 & "|STAR_MIN=" & $SID遍历星标最低 & "|STAR_MAX=" & $SID遍历星标最高 & "|PAGE_MIN=" & $SID遍历页面最低 & "|THRESHOLD=" & $SID遍历证据阈值 & "|END=1"
+        $SID遍历PSV = (($SID遍历PID高 | $SID遍历PID低) - ($SID遍历PID高 & $SID遍历PID低)) >> 3
+        $SID遍历候选TSV = (($SID遍历候选TID | $SID遍历候选SID) - ($SID遍历候选TID & $SID遍历候选SID)) >> 3
+        IF $SID遍历闪光状态 == 1
+            PRINT SID遍历唯一PID闪光反查：TSV已确定，保留宝可梦与当前画面停止
+            RETURN 1
+        ENDIF
+        IF $SID遍历PSV == $SID遍历候选TSV
+            PRINT SID遍历唯一PID非闪：当前候选TSV已排除，无需等待目标命中
+            RETURN 2
+        ENDIF
+    ENDIF
+    $SID遍历最近闪光 = 读取最近出闪检测结果()
+    IF $SID遍历本轮出闪 == 1 or $SID遍历最近闪光 == 1 or $SID遍历闪光状态 == 1
+        PRINT SID遍历已发现闪光但没有可靠唯一PID证据，保留现场停止，不重启游戏
+        RETURN 3
+    ENDIF
+    RETURN 0
+ENDFUNC

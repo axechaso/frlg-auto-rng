@@ -16,8 +16,18 @@ def sid_report_summary(report):
 
 def traversal_report_summary(report):
     status = report.get("status")
+    state = report.get("state", {})
+    tsv = report.get("tsv", state.get("confirmed_tsv"))
+    if status == "completed" and type(tsv) is int:
+        sid = report.get("sid")
+        advance = report.get("sid_advance")
+        selected = f"；窗口内最早可采用 SID {sid:05d} / ADV {advance}" if type(sid) is int and type(advance) is int else "；当前 ADV 范围内无可采用值"
+        return (f"已确认 TSV {tsv}", "唯一闪光 PID 反查成功",
+                (f"{sid:05d}" if type(sid) is int else "—", advance if type(advance) is int else "—", tsv),
+                "对应 8 个 SID，不能仅凭闪光确定低 3 位" + selected + "。结果和证据保存在报告中；没有重启游戏。")
     if status == "completed" and type(report.get("sid")) is int and type(report.get("sid_advance")) is int:
         return (f"确认 SID {report['sid']:05d}", "运行器已记录出闪", (f"{report['sid']:05d}", report["sid_advance"], "—"), "完整运行记录和候选过程保存在报告中。")
-    state = report.get("state", {})
+    excluded_count = len(state.get("excluded_tsvs", report.get("excluded_tsvs", [])))
     return ("已到遍历上限" if status == "exhausted" else "遍历已暂停", "未确认命中 SID",
-        ("—", state.get("current_sid_advance") or state.get("next_sid_advance", "—"), "—"), "同参数下次继续；仅明确未出闪才会推进到下一候选。")
+        ("—", state.get("current_sid_advance") if state.get("current_sid_advance") is not None else state.get("next_sid_advance", "—"), "—"),
+        f"已凭唯一非闪 PID 排除 {excluded_count} 个 TSV。同参数下次继续；已排除 TSV 的 SID 会直接跳过。")

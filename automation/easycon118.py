@@ -36,6 +36,7 @@ from .target_verification import (
     inject_target_verification,
     validate_injected_target_verification,
 )
+from .sid_observation import inject_pid_observation, validate_injected_pid_observation
 from .seed_common_regions import apply_seed_common_regions
 
 
@@ -3040,6 +3041,10 @@ def validate_generated_project_consistency(
         validate_injected_target_verification(
             Path(project_main).read_text(encoding="utf-8"), verification,
         )
+        validate_injected_pid_observation(
+            Path(project_main).read_text(encoding="utf-8"), verification,
+            tid=plan.request.tid, sid=plan.request.sid,
+        )
     user_values = plan_to_user_values(plan, options)
     shiny_values = _shiny_strategy_to_ecs_values(options, is_wild=_is_wild(plan))
     for name in shiny_values:
@@ -5161,6 +5166,9 @@ def write_configured_project(
         )
     if target_verification is not None:
         configured = inject_target_verification(configured, target_verification)
+        configured = inject_pid_observation(
+            configured, target_verification, tid=plan.request.tid, sid=plan.request.sid,
+        )
     main_path = output_dir / "main.ecs"
     main_path.write_text(configured, encoding="utf-8")
     wild_pid_retry_limit_sha256 = apply_wild_pid_retry_limit(main_path)

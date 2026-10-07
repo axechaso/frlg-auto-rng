@@ -66,7 +66,7 @@ def validate_traversal_request(request, options, template_name: str) -> Traversa
     if options.item_rng_mode:
         raise ValueError("道具乱数与 SID 遍历互斥")
     if options.continue_capture_after_shiny:
-        raise ValueError("SID 遍历必须在出闪后停止自动抓捕")
+        raise ValueError("SID 遍历自行处理闪光抓获与反查，请关闭普通“出闪后继续抓捕”选项")
     if template_name not in {STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME}:
         raise ValueError("SID 遍历入口只能是正式版或时间轴版")
     availability = traversal_availability(

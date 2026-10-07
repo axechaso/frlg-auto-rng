@@ -106,6 +106,7 @@ jobs:
           tenlines_seed_updater.py
           automation/easycon118.py
           automation/target_verification.py
+          automation/sid_observation.py
           automation/sid_traversal_policy.py
           automation/frame_parity.py
           automation/calibration_trust_gates.py
@@ -133,6 +134,7 @@ jobs:
           tools/verify_acceptance_plans.py
           tools/verify_easycon_protocol.py
           tools/verify_tid_bootstrap_integration.py
+          tools/verify_sid_observation.py
           tools/verify_guide_layouts.py
 
       - name: Run offline QQ notification integration tests
@@ -194,6 +196,7 @@ jobs:
           tests.test_precalibration
           tests.test_sid_traversal
           tests.test_target_verification
+          tests.test_sid_observation
           tests.test_sid_traversal_policy
           tests.test_run_input_state
           tests.test_frame_parity
