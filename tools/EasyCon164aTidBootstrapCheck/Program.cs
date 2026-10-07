@@ -50,6 +50,19 @@ foreach (var slow in scores)
         : slow >= 95 && slow > fast && slow > mid ? 2 : -1;
     AssertCall($"测试_判定语速({fast}, {mid}, {slow})", expected, $"speed-{fast}-{mid}-{slow}");
 }
+var dialogue = Regex.Match(source,
+    @"^    PRINT 【创建进度】推进开场说明与大木博士对话\r?\n    (FOR 40\r?\n        B\r?\n        WAIT 800\r?\n    NEXT)\r?\n",
+    RegexOptions.Multiline);
+if (!dialogue.Success) throw new Exception("The actual Oak dialogue must use FOR 40, B, WAIT 800, NEXT.");
+// Execute the actual loop with key/WAIT statements replaced by counters only.
+var offlineDialogue = dialogue.Groups[1].Value.Replace("        B\r\n", "        $native_b_count += 1\r\n")
+    .Replace("        B\n", "        $native_b_count += 1\n")
+    .Replace("        WAIT 800", "        $native_b_wait += 800");
+pure.AppendLine("$native_b_count = 0\n$native_b_wait = 0");
+pure.AppendLine(offlineDialogue);
+pure.AppendLine("IF $native_b_count != 40\n    PRINT ASSERT_FAIL:oak-b-count\n    RETURN\nENDIF");
+pure.AppendLine("IF $native_b_wait != 32000\n    PRINT ASSERT_FAIL:oak-b-wait\n    RETURN\nENDIF");
+checks += 2;
 for (var i = 1; i <= 10; i++)
 {
     AssertCall("测试_增加OP等待()", 1, $"op-allow-{i}");
@@ -67,7 +80,7 @@ if (compilation.KeyAction || compilation.NeedIL) throw new Exception("Native tes
 var output = new TestOutput();
 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 compilation.Evaluate(output, null, null, ImmutableDictionary<string, Func<int>>.Empty, timeout.Token);
-Console.WriteLine($"Native bootstrap decision/OP cases: {checks}, pass={output.Passed && !output.Failed}");
+Console.WriteLine($"Native bootstrap decision/OP/dialogue cases: {checks}, pass={output.Passed && !output.Failed}");
 return output.Passed && !output.Failed ? 0 : 1;
 
 sealed class TestOutput : IOutputAdapter

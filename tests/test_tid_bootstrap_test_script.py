@@ -76,6 +76,17 @@ class TidBootstrapScriptTests(unittest.TestCase):
         self.assertNotIn("LS DOWN", opening)
         self.assertIn("IF $测试ROM语言 == 1\n        FOR 2", opening)
 
+    def test_oak_dialogue_uses_requested_40_b_presses_and_800ms(self):
+        creating = function(self.text, "测试_创建新游戏")
+        self.assertIn(
+            "PRINT 【创建进度】推进开场说明与大木博士对话\n"
+            "    FOR 40\n        B\n        WAIT 800\n    NEXT\n",
+            creating,
+        )
+        self.assertNotIn("$测试B索引", self.text)
+        self.assertNotIn("测试_开场B等待", self.text)
+        self.assertNotIn("$测试开场B等待", self.text)
+
     def test_japanese_text_speed_labels_are_not_english_aliases(self):
         body = function(self.text, "测试_读取语速")
         japanese, english = body.split("    ELSE", 1)
