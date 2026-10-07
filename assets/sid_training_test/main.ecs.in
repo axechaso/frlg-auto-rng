@@ -1,0 +1,540 @@
+# SID 战斗练级有限测试 / EasyCon 1.6.4a
+# 从待测闪光宝可梦的【性格页】启动。主菜单上次选中项必须是宝可梦。
+# 自己战斗：队伍只放待测宝可梦。学习装置：只放两只，待测在第2位。
+# 请先读压缩包里的使用说明；这个独立测试不会保存、关闭或重启游戏。
+
+# ---------- 需要填写 ----------
+$训练准备确认 = 0
+# 1=只读初始能力，不战斗；初始识图正确后改为0测试战斗。
+$训练只测试识图 = 1
+$训练TID = 12345
+# 0=火红，1=叶绿（用于代欧奇希斯形态种族值）。
+$训练游戏 = 0
+$训练图鉴 = 1
+$训练初始等级 = 5
+# 0=定点来源，1=野生来源；地点是原捕获地点，不是练级地点。
+$训练来源 = 0
+$训练原地点 = ""
+# HP / 攻击 / 防御 / 特攻 / 特防 / 速度，必须是目前已知的真实EV。
+$训练初始EV = [0,0,0,0,0,0]
+$训练强制锻炼器 = 0
+$训练曾感染病毒 = 0
+$训练最多战斗 = 1
+# 每次运行单独保存日志；合并日志前请为每次运行改一个新会话名。
+$训练会话 = "@@SESSION@@"
+
+# ---------- 入口已选择的模式，不要混用两种队伍准备 ----------
+$训练ROM语言 = @@LANG@@
+$训练经验方式 = @@MODE@@
+$训练队伍位置 = @@SLOT@@
+$训练接收方式 = "@@RECIPIENT@@"
+# 不自动降阈值。数字/性格不足时保留现场停止。
+$训练数字阈值 = 90
+$训练状态阈值 = 95
+$训练区分差值 = 3
+$训练最多回合 = 8
+
+@@DATA@@
+
+$训练EV = [0,0,0,0,0,0]
+$训练能力 = [0,0,0,0,0,0]
+$训练上次能力 = [0,0,0,0,0,0]
+$训练等级 = -1
+$训练登记等级 = -1
+$训练性格 = -1
+$训练登记性格 = -1
+$训练击倒序号 = 0
+$训练敌图鉴 = -1
+$训练经验条数 = 0
+$训练需要经验条数 = 1
+$训练经验已显示 = 0
+$训练经验低分连续 = 0
+$训练战斗轮 = 0
+$训练回合 = 0
+$训练读次 = 0
+$训练动作结果 = 0
+$训练观测结果 = 0
+$训练级别前样本 = -1
+$训练性格前样本 = -1
+$训练i = 0
+$训练数字 = -1
+$训练数百 = 0
+$训练数十 = 0
+$训练数个 = -1
+$训练能力下限 = 0
+$训练能力上限 = 0
+$训练基础 = 0
+$训练EV项 = 0
+$训练中间 = 0
+$训练总EV = 0
+$训练增量 = 0
+$训练倍率 = 1
+$训练原生顺序 = [0,1,2,5,3,4]
+$训练源名 = "STATIC"
+$训练重算名 = "INITIAL"
+$训练分数 = -1
+$训练最好 = -1
+$训练次好 = -1
+$训练最好编号 = -1
+$训练判断轮 = 0
+$训练菜单连续 = 0
+$训练检测次数 = 0
+$训练已结算 = 0
+$训练错误 = ""
+
+IF $训练准备确认 != 1
+    PRINT "请填写参数、核对队伍和道具，然后把 训练准备确认 改为1。未发送任何按键。"
+    RETURN
+ENDIF
+IF $训练图鉴 < 1 or $训练图鉴 > 386 or $训练初始等级 < 1 or $训练初始等级 > 99 or $训练TID < 0 or $训练TID > 65535
+    PRINT "参数错误：图鉴1-386、初始等级1-99、TID 0-65535。未发送任何按键。"
+    RETURN
+ENDIF
+IF $训练最多战斗 < 1 or $训练最多战斗 > 10 or $训练只测试识图 < 0 or $训练只测试识图 > 1
+    PRINT "参数错误：战斗上限1-10，只测试识图只能是0或1。"
+    RETURN
+ENDIF
+IF ($训练强制锻炼器 != 0 and $训练强制锻炼器 != 1) or ($训练曾感染病毒 != 0 and $训练曾感染病毒 != 1)
+    PRINT "倍率开关只能是0或1。"
+    RETURN
+ENDIF
+IF $训练经验方式 == 1 and $训练强制锻炼器 == 1
+    PRINT "学习装置与强制锻炼器不能同时携带，停止。"
+    RETURN
+ENDIF
+IF $训练来源 != 0 and $训练来源 != 1
+    PRINT "来源只能是0定点或1野生。"
+    RETURN
+ENDIF
+IF $训练游戏 != 0 and $训练游戏 != 1
+    PRINT "游戏版本只能是0火红或1叶绿。"
+    RETURN
+ENDIF
+IF $训练来源 == 1 and $训练原地点 == ""
+    PRINT "野生来源请填写原捕获地点的TenLines名称。"
+    RETURN
+ENDIF
+IF $训练来源 == 1
+    $训练源名 = "WILD"
+ENDIF
+FOR $训练i = 0 TO 5
+    IF $训练初始EV[$训练i] < 0 or $训练初始EV[$训练i] > 255
+        PRINT "初始EV必须逐项为0-255。"
+        RETURN
+    ENDIF
+    $训练EV[$训练i] = $训练初始EV[$训练i]
+    $训练总EV = $训练总EV + $训练EV[$训练i]
+NEXT
+IF $训练总EV > 510
+    PRINT "初始EV合计不能超过510。"
+    RETURN
+ENDIF
+IF $训练强制锻炼器 == 1
+    $训练倍率 = $训练倍率 * 2
+ENDIF
+IF $训练曾感染病毒 == 1
+    $训练倍率 = $训练倍率 * 2
+ENDIF
+IF $训练经验方式 == 1
+    $训练需要经验条数 = 2
+ENDIF
+
+PRINT "SIDTRAIN_TEST|START|ROM=" & $训练ROM语言 & "|MODE=" & $训练经验方式 & "|SLOT=" & $训练队伍位置
+PRINT "先采集初始状态；本测试不会存档，也不会关闭或重启游戏。"
+$训练观测结果 = 训练读取稳定观测()
+IF $训练观测结果 != 1 or $训练等级 != $训练初始等级
+    PRINT "初始识图失败或实际等级与填写值不同；停止并保留现场。实际等级=" & $训练等级
+    RETURN
+ENDIF
+$训练登记等级 = $训练等级
+$训练登记性格 = $训练性格
+PRINT "SIDREV|META|TID=" & $训练TID
+CALL 训练输出开始
+CALL 训练输出观测
+IF $训练只测试识图 == 1
+    PRINT "只读测试完成，已输出初始能力与EV。停在性格页，没有开始战斗。"
+    RETURN
+ENDIF
+CALL 训练返回场景
+
+FOR $训练战斗轮 = 1 TO $训练最多战斗
+    PRINT "SIDTRAIN_TEST|BATTLE_BEGIN|ROUND=" & $训练战斗轮
+    $训练动作结果 = 训练等待遇敌()
+    IF $训练动作结果 != 1
+        PRINT "停止：遇敌超时。请确认在两格均可走动的草地内。"
+        RETURN
+    ENDIF
+    $训练敌图鉴 = 训练识别敌方()
+    IF $训练敌图鉴 < 1
+        PRINT "停止：敌人不在支持表、匹配含糊或发现闪光。没有发动攻击、没有记EV。"
+        RETURN
+    ENDIF
+    WAIT 250
+    $训练动作结果 = 训练识别敌方()
+    IF $训练动作结果 != $训练敌图鉴
+        PRINT "停止：两次敌方识别结果不一致。没有发动攻击、没有记EV。"
+        RETURN
+    ENDIF
+    $训练动作结果 = 训练进行战斗()
+    IF $训练动作结果 != 1
+        PRINT "停止：战斗或经验接收未完整确认；本场没有记EV，保留当前画面。"
+        RETURN
+    ENDIF
+    # 仅在预期全部经验消息处理完、重新打开游戏内菜单后提交一次。
+    CALL 训练累计击倒EV
+    CALL 训练输出击倒
+    PRINT "确认击倒=" & $训练击倒序号 & "，累计EV=" & $训练EV
+    $训练动作结果 = 训练从菜单进入摘要()
+    IF $训练动作结果 != 1
+        PRINT "停止：不能确认摘要页。本场EV已记；尚未输出新的能力观测。"
+        RETURN
+    ENDIF
+    $训练观测结果 = 训练读取稳定身份()
+    IF $训练观测结果 != 1 or $训练性格 != $训练登记性格 or $训练等级 < $训练登记等级
+        PRINT "停止：能力/身份识图失败。已确认击倒不撤销，不重新读取其他队员。"
+        RETURN
+    ENDIF
+    IF $训练等级 > $训练登记等级
+        $训练观测结果 = 训练读取稳定观测()
+        IF $训练观测结果 != 1 or $训练性格 != $训练登记性格 or $训练等级 <= $训练登记等级
+            PRINT "升级后的能力/等级未完整确认；保留现场，不输出新OBS。"
+            RETURN
+        ENDIF
+        $训练重算名 = "LEVEL_UP"
+        CALL 训练输出观测
+        $训练登记等级 = $训练等级
+        PRINT "升级后登记完成，实际等级=" & $训练等级 & "，已关联本轮EV快照。"
+    ELSE
+        PRINT "本场没有升级，只记录EV；不把未重算能力的旧面板作为新IV观测。"
+    ENDIF
+    IF $训练战斗轮 < $训练最多战斗 and $训练等级 < 100
+        CALL 训练返回场景
+    ELSE
+        PRINT "有限测试完成。停在待测宝可梦性格页，不自动保存；请保存本次完整日志。"
+        RETURN
+    ENDIF
+NEXT
+
+FUNC 训练返回场景
+    # 性格页 -> 队伍 -> 主菜单 -> 游戏内，菜单选中项保持宝可梦。
+    B
+    WAIT 700
+    B
+    WAIT 700
+    B
+    WAIT 700
+ENDFUNC
+
+FUNC 训练从菜单进入摘要(): INT
+    A
+    WAIT 1500
+    # 主菜单先前选中宝可梦；队伍重新打开时从第1位选择。
+    IF $训练队伍位置 == 2
+        DOWN
+        WAIT 500
+    ENDIF
+    A
+    WAIT 500
+    A
+    WAIT 1500
+    RETURN 1
+ENDFUNC
+
+FUNC 训练等待遇敌(): INT
+    FOR $训练判断轮 = 1 TO 80
+        IF @TRAIN_敌HP >= $训练状态阈值
+            LS RESET
+            WAIT 1500
+            RETURN 1
+        ENDIF
+        LS LEFT, 120
+        LS RESET
+        WAIT 250
+        IF @TRAIN_敌HP >= $训练状态阈值
+            WAIT 1500
+            RETURN 1
+        ENDIF
+        LS RIGHT, 120
+        LS RESET
+        WAIT 250
+    NEXT
+    LS RESET
+    RETURN 0
+ENDFUNC
+
+FUNC 训练进行战斗(): INT
+    $训练经验条数 = 0
+    $训练经验已显示 = 0
+    $训练经验低分连续 = 0
+    FOR $训练回合 = 1 TO $训练最多回合
+        $训练菜单连续 = 0
+        FOR $训练检测次数 = 1 TO 100
+            IF 训练有危险消息() == 1
+                RETURN 0
+            ENDIF
+            IF @TRAIN_战斗菜单 >= $训练状态阈值
+                $训练菜单连续 = $训练菜单连续 + 1
+                IF $训练菜单连续 >= 2
+                    BREAK
+                ENDIF
+                WAIT 150
+            ELSE
+                $训练菜单连续 = 0
+                A
+                WAIT 400
+            ENDIF
+        NEXT
+        IF $训练菜单连续 < 2 or @TRAIN_我方血量 < $训练状态阈值
+            PRINT "战斗菜单/绿色血量未确认，停止；不盲目用药或切换队员。"
+            RETURN 0
+        ENDIF
+        A
+        WAIT 800
+        # 原包“技能池”图片实际是红色0/，代表空PP；不能把它当有PP的标签。
+        IF @TRAIN_空PP >= 80 or @TRAIN_战斗菜单 >= 80
+            PRINT "疑似空PP或未离开战斗选项，停止；请核对第1格伤害技能与标签。"
+            RETURN 0
+        ENDIF
+        A
+        WAIT 600
+        $训练菜单连续 = 0
+        FOR $训练检测次数 = 1 TO 200
+            IF 训练有危险消息() == 1
+                RETURN 0
+            ENDIF
+            $训练分数 = @TRAIN_经验
+            $训练动作结果 = 训练记录经验状态($训练分数)
+            IF $训练动作结果 == -1
+                PRINT "经验消息多于预期，可能有额外学习装置/参与者；不记EV。"
+                RETURN 0
+            ENDIF
+            IF $训练分数 >= $训练状态阈值
+                IF $训练动作结果 == 1
+                    PRINT "SIDTRAIN_TEST|XP|MESSAGE=" & $训练经验条数 & "|EXPECTED=" & $训练需要经验条数 & "|SCORE=" & $训练分数
+                    A
+                ENDIF
+                WAIT 100
+            ELSE
+                IF $训练分数 >= 80
+                    # 可疑的经验文字先重采样，不能按A把尚未确认的消息略过。
+                    WAIT 100
+                    CONTINUE
+                ENDIF
+                IF @TRAIN_战斗菜单 >= $训练状态阈值
+                    IF $训练经验条数 != 0
+                        PRINT "出现经验消息后又回到战斗菜单，状态异常；不记EV。"
+                        RETURN 0
+                    ENDIF
+                    $训练菜单连续 = $训练菜单连续 + 1
+                    IF $训练菜单连续 >= 2
+                        BREAK
+                    ENDIF
+                    WAIT 150
+                ELSE
+                    $训练菜单连续 = 0
+                    # 经验已出现，先确认所有接收者再尝试打开主菜单。
+                    IF $训练经验条数 == $训练需要经验条数 and $训练经验已显示 == 0
+                        X
+                        WAIT 300
+                        IF @TRAIN_主菜单 >= $训练状态阈值
+                            PRINT "经验接收完整，游戏内菜单已确认。"
+                            RETURN 1
+                        ENDIF
+                    ENDIF
+                    A
+                    WAIT 200
+                ENDIF
+            ENDIF
+        NEXT
+        IF $训练菜单连续 < 2
+            PRINT "战斗结算超时，经验条数=" & $训练经验条数 & "，不推定为击倒。"
+            RETURN 0
+        ENDIF
+    NEXT
+    PRINT "超过本场最大回合数，停止；不逃跑、不重启。"
+    RETURN 0
+ENDFUNC
+
+FUNC 训练记录经验状态($score: INT): INT
+    IF $score >= $训练状态阈值
+        $训练经验低分连续 = 0
+        IF $训练经验已显示 == 0
+            $训练经验已显示 = 1
+            $训练经验条数 = $训练经验条数 + 1
+            IF $训练经验条数 > $训练需要经验条数
+                RETURN -1
+            ENDIF
+            RETURN 1
+        ENDIF
+    ELSE
+        IF $score < 80
+            $训练经验低分连续 = $训练经验低分连续 + 1
+            IF $训练经验低分连续 >= 2
+                $训练经验已显示 = 0
+            ENDIF
+        ELSE
+            $训练经验低分连续 = 0
+        ENDIF
+    ENDIF
+    RETURN 0
+ENDFUNC
+
+FUNC 训练有危险消息(): INT
+    IF @TRAIN_学新技能1 >= $训练状态阈值 or @TRAIN_学新技能2 >= $训练状态阈值 or @TRAIN_进化 >= $训练状态阈值
+        PRINT "遇到学习招式或进化，保留现场停止。请手动处理，不替换技能。"
+        RETURN 1
+    ENDIF
+    RETURN 0
+ENDFUNC
+
+FUNC 训练累计击倒EV
+    # 游戏原生能力顺序：HP、攻击、防御、速度、特攻、特防。
+    FOR $训练i = 0 TO 5
+        $训练EV项 = $训练原生顺序[$训练i]
+        $训练增量 = 训练取EV产出($训练敌图鉴, $训练EV项) * $训练倍率
+        IF $训练增量 > 255 - $训练EV[$训练EV项]
+            $训练增量 = 255 - $训练EV[$训练EV项]
+        ENDIF
+        IF $训练增量 > 510 - $训练总EV
+            $训练增量 = 510 - $训练总EV
+        ENDIF
+        $训练EV[$训练EV项] = $训练EV[$训练EV项] + $训练增量
+        $训练总EV = $训练总EV + $训练增量
+    NEXT
+    $训练击倒序号 = $训练击倒序号 + 1
+ENDFUNC
+
+FUNC 训练读取稳定观测(): INT
+    $训练级别前样本 = -1
+    $训练性格前样本 = -1
+    FOR $训练读次 = 1 TO 3
+        $训练性格 = 训练识别性格()
+        $训练等级 = 训练识别等级()
+        IF $训练性格 < 0 or $训练等级 < 1 or $训练等级 > 99
+            PRINT "性格/等级识图未确认，不切页。请检查对应TRAIN标签。"
+            RETURN 0
+        ENDIF
+        RIGHT
+        WAIT 600
+        FOR $训练i = 0 TO 5
+            $训练基础 = 训练取种族值($训练图鉴, $训练i)
+            $训练能力下限 = 训练计算能力($训练基础, 0, $训练EV[$训练i], $训练等级, $训练性格, $训练i)
+            $训练能力上限 = 训练计算能力($训练基础, 31, $训练EV[$训练i], $训练等级, $训练性格, $训练i)
+            $训练能力[$训练i] = 训练识别能力($训练i, $训练能力下限, $训练能力上限)
+        NEXT
+        LEFT
+        WAIT 600
+        FOR $训练i = 0 TO 5
+            IF $训练能力[$训练i] < 1
+                PRINT "能力识图失败，项目=" & $训练i & "。保留现场，不输出不完整OBS。"
+                RETURN 0
+            ENDIF
+        NEXT
+        $训练观测结果 = 1
+        IF $训练等级 != $训练级别前样本 or $训练性格 != $训练性格前样本
+            $训练观测结果 = 0
+        ENDIF
+        FOR $训练i = 0 TO 5
+            IF $训练能力[$训练i] != $训练上次能力[$训练i]
+                $训练观测结果 = 0
+            ENDIF
+            $训练上次能力[$训练i] = $训练能力[$训练i]
+        NEXT
+        IF $训练观测结果 == 1
+            PRINT "稳定能力=" & $训练能力 & "，等级=" & $训练等级 & "，性格=" & $训练性格
+            RETURN 1
+        ENDIF
+        $训练级别前样本 = $训练等级
+        $训练性格前样本 = $训练性格
+    NEXT
+    PRINT "三次能力采集没有得到连续两次相同结果。"
+    RETURN 0
+ENDFUNC
+
+FUNC 训练读取稳定身份(): INT
+    $训练级别前样本 = -1
+    $训练性格前样本 = -1
+    FOR $训练读次 = 1 TO 3
+        $训练性格 = 训练识别性格()
+        $训练等级 = 训练识别等级()
+        IF $训练性格 < 0 or $训练等级 < 1 or $训练等级 > 99
+            PRINT "性格/等级未确认，不读取未重算的能力。"
+            RETURN 0
+        ENDIF
+        IF $训练等级 == $训练级别前样本 and $训练性格 == $训练性格前样本
+            RETURN 1
+        ENDIF
+        $训练级别前样本 = $训练等级
+        $训练性格前样本 = $训练性格
+        WAIT 200
+    NEXT
+    RETURN 0
+ENDFUNC
+
+FUNC 训练计算能力($base: INT, $iv: INT, $ev: INT, $level: INT, $nature: INT, $stat: INT): INT
+    $q = $ev - $ev % 4
+    $q = $q / 4
+    $v = (2 * $base + $iv + $q) * $level
+    $v = ($v - $v % 100) / 100
+    IF $stat == 0
+        IF $训练图鉴 == 292
+            RETURN 1
+        ENDIF
+        RETURN $v + $level + 10
+    ENDIF
+    $v = $v + 5
+    $up = ($nature - $nature % 5) / 5
+    $down = $nature % 5
+    # 性格编号的顺序为攻击、防御、速度、特攻、特防；不同于界面六项顺序。
+    $natureStat = $stat - 1
+    IF $stat == 3
+        $natureStat = 3
+    ELIF $stat == 4
+        $natureStat = 4
+    ELIF $stat == 5
+        $natureStat = 2
+    ENDIF
+    IF $up != $down
+        IF $natureStat == $up
+            $v = $v * 11
+            $v = ($v - $v % 10) / 10
+        ENDIF
+        IF $natureStat == $down
+            $v = $v * 9
+            $v = ($v - $v % 10) / 10
+        ENDIF
+    ENDIF
+    RETURN $v
+ENDFUNC
+
+FUNC 训练输出开始
+    $evhp = $训练EV[0]
+    $evatk = $训练EV[1]
+    $evdef = $训练EV[2]
+    $evspa = $训练EV[3]
+    $evspd = $训练EV[4]
+    $evspe = $训练EV[5]
+    PRINT "SIDTRAIN|BEGIN|V=1|SESSION=" & $训练会话 & "|MON=" & $训练队伍位置 & "|DEX=" & $训练图鉴 & "|LEVEL=" & $训练初始等级 & "|SOURCE=" & $训练源名 & "|LOCATION=" & $训练原地点 & "|RECIPIENT=" & $训练接收方式 & "|MACHO_BRACE=" & $训练强制锻炼器 & "|POKERUS=" & $训练曾感染病毒 & "|EVHP=" & $evhp & "|EVATK=" & $evatk & "|EVDEF=" & $evdef & "|EVSPA=" & $evspa & "|EVSPD=" & $evspd & "|EVSPE=" & $evspe
+ENDFUNC
+
+FUNC 训练输出击倒
+    PRINT "SIDTRAIN|DEFEAT|V=1|SESSION=" & $训练会话 & "|MON=" & $训练队伍位置 & "|SEQ=" & $训练击倒序号 & "|FOE=" & $训练敌图鉴 & "|RESULT=DEFEATED|XP_CONFIRMED=1|RECIPIENT_CONFIRMED=1"
+ENDFUNC
+
+FUNC 训练输出观测
+    $evhp = $训练EV[0]
+    $evatk = $训练EV[1]
+    $evdef = $训练EV[2]
+    $evspa = $训练EV[3]
+    $evspd = $训练EV[4]
+    $evspe = $训练EV[5]
+    $hp = $训练能力[0]
+    $atk = $训练能力[1]
+    $def = $训练能力[2]
+    $spa = $训练能力[3]
+    $spd = $训练能力[4]
+    $spe = $训练能力[5]
+    PRINT "SIDTRAIN|OBS|V=1|SESSION=" & $训练会话 & "|MON=" & $训练队伍位置 & "|SEQ=" & $训练击倒序号 & "|DEX=" & $训练图鉴 & "|SOURCE=" & $训练源名 & "|LOCATION=" & $训练原地点 & "|NATURE=" & $训练性格 & "|LEVEL=" & $训练等级 & "|RECALC=" & $训练重算名 & "|EVHP=" & $evhp & "|EVATK=" & $evatk & "|EVDEF=" & $evdef & "|EVSPA=" & $evspa & "|EVSPD=" & $evspd & "|EVSPE=" & $evspe & "|HP=" & $hp & "|ATK=" & $atk & "|DEF=" & $def & "|SPA=" & $spa & "|SPD=" & $spd & "|SPE=" & $spe
+ENDFUNC
+
+@@FUNCTIONS@@
