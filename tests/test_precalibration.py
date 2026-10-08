@@ -99,6 +99,88 @@ def make_egg_request(**changes):
 
 
 class PrecalibrationStoreTests(unittest.TestCase):
+    def test_target_shiny_marker_saves_successful_offsets_without_reverse_lookup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            context = PrecalibrationContext("fr", 1, 1, "TIMELINE", "STATIC", 0)
+            scope = PrecalibrationFrameScope(1, False)
+            manifest = root / "plan.json"
+            manifest.write_text(json.dumps({"precalibration": {
+                "enabled": True, "context": context.to_dict(),
+                "frame_scope": scope.to_dict(), "frame_enabled": True,
+                "target_shiny_success": {"enabled": True, "species_id": 144},
+            }}), encoding="utf-8")
+            marker = build_marker(context, seed_index=-7, frame_pre=23,
+                                  frame_enabled=True, frame_scope=scope)
+            for stage in (0, 1):
+                with self.subTest(stage=stage):
+                    store = root / f"precalibration-{stage}.json"
+                    text = (
+                        "[11:41:25.702] 时差检测到出闪\n"
+                        f"\x1b[90m[11:41:25.702]\x1b[0m {marker}"
+                        f"|EVIDENCE=TARGET_SHINY|TARGET_DEX=144|ROUND=8|SHINY_STAGE={stage}|SHINY_END=1\n"
+                        "目标获取流程结束，停止脚本\n脚本运行完成\n"
+                    )
+                    record = update_from_manifest(store, manifest, text)
+                    self.assertEqual(record["seed_ns1"], -7)
+                    self.assertEqual(record["frame_ns1"], 23)
+                    self.assertEqual(read_record(store, context, frame_scope=scope), record)
+
+    def test_target_shiny_writeback_rejects_other_target_and_disabled_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            context = PrecalibrationContext("fr", 1, 1, "FORMAL", "STATIC", 0)
+            scope = PrecalibrationFrameScope(1, False)
+            store = root / "precalibration.json"
+            update_record(store, context, {"seed_ns1": -6})
+            original = store.read_bytes()
+            manifest = root / "plan.json"
+            config = {"enabled": True, "context": context.to_dict(),
+                      "frame_scope": scope.to_dict(), "frame_enabled": False,
+                      "target_shiny_success": {"enabled": True, "species_id": 144}}
+            marker = build_marker(context, seed_index=9, frame_pre=-17,
+                                  frame_enabled=False, frame_scope=scope)
+            marker += "|EVIDENCE=TARGET_SHINY|TARGET_DEX=144|ROUND=8|SHINY_STAGE=0|SHINY_END=1"
+            for change in (
+                {"target_shiny_success": {"enabled": True, "species_id": 145}},
+                {"target_shiny_success": {"enabled": False, "species_id": 144}},
+                {"target_shiny_success": None},
+                {"frame_enabled": True},
+                {"frame_scope": PrecalibrationFrameScope(0, False).to_dict()},
+            ):
+                with self.subTest(change=change):
+                    manifest.write_text(json.dumps({"precalibration": config | change}), encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        update_from_manifest(store, manifest, marker)
+                    self.assertEqual(store.read_bytes(), original)
+            manifest.write_text(json.dumps({"precalibration": config}), encoding="utf-8")
+            record = update_from_manifest(store, manifest, marker)
+            self.assertEqual(record["seed_ns1"], 9)
+            self.assertIsNone(record["frame_ns1"])
+
+    def test_target_shiny_evidence_must_be_complete_and_is_not_sid_proof(self):
+        context = PrecalibrationContext("fr", 1, 1, "TIMELINE", "STATIC", 0)
+        marker = build_marker(context, seed_index=-3, frame_pre=7, frame_enabled=True,
+                              frame_scope=PrecalibrationFrameScope(1, False))
+        marker += "|EVIDENCE=TARGET_SHINY|TARGET_DEX=144|ROUND=8|SHINY_STAGE=0|SHINY_END=1"
+        self.assertIsNotNone(parse_marker(marker))
+        for invalid in (
+            marker.replace("|TARGET_DEX=144", ""),
+            marker.replace("|ROUND=8", ""),
+            marker.replace("|SHINY_STAGE=0", ""),
+            marker.replace("|SHINY_END=1", ""),
+            marker.replace("SHINY_END=1", "SHINY_END=0"),
+            marker.replace("TARGET_DEX=144", "TARGET_DEX=0"),
+            marker.replace("TARGET_DEX=144", "TARGET_DEX=387"),
+            marker.replace("ROUND=8", "ROUND=0"),
+            marker.replace("SHINY_STAGE=0", "SHINY_STAGE=2"),
+            marker.replace("EVIDENCE=TARGET_SHINY", "EVIDENCE=UNKNOWN"),
+            marker.replace("KIND=STATIC", "KIND=STARTER"),
+            marker.replace("V=2", "V=1"),
+        ):
+            with self.subTest(marker=invalid):
+                self.assertIsNone(parse_marker(invalid))
+
     def test_seed_startup_schemes_never_share_records(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "precalibration.json"
@@ -341,6 +423,20 @@ class PrecalibrationGenerationTests(unittest.TestCase):
                             manifest_path = main.parent / "plan.json"
                             config = json.loads(manifest_path.read_text(encoding="utf-8"))["precalibration"]
                             text = main.read_text(encoding="utf-8")
+                            self.assertTrue(config["target_shiny_success"]["enabled"])
+                            self.assertEqual(config["target_shiny_success"]["species_id"], plan.species_id)
+                            self.assertIn("CALL 清空最近出闪检测\n        CALL 开始反查识图轮次", text)
+                            self.assertIn("IF $本轮流程结果 == -1\n            $预校准目标出闪写回结果 = 记录目标出闪预校准(0)", text)
+                            self.assertIn("IF $反查细分成功 == -2\n            $预校准目标出闪写回结果 = 记录目标出闪预校准(1)", text)
+                            helper = text.split("FUNC 记录目标出闪预校准($来源: INT): INT", 1)[1].split("\nENDFUNC", 1)[0]
+                            for unsafe in ("WAIT ", "@", "CAPTURE", "CALL 打开", "CALL 抓捕"):
+                                self.assertNotIn(unsafe, helper)
+                            self.assertIn("$Seed累计修正索引", helper)
+                            self.assertIn("$消耗帧实际执行修正量", helper)
+                            self.assertNotIn("$命中差索引", helper)
+                            self.assertNotIn("$本轮消耗帧误差", helper)
+                            self.assertIn(f"读取最近出闪检测图鉴编号() != {plan.species_id}", helper)
+                            self.assertIn("|EVIDENCE=TARGET_SHINY|", helper)
                             block = text.split("FUNC 执行自动校准与等待更新(): INT", 1)[1].split("\nENDFUNC", 1)[0]
                             hit_condition = (
                                 "IF $道具乱数模式 == 0 and $命中差索引 == 0 and "
@@ -366,6 +462,35 @@ class PrecalibrationGenerationTests(unittest.TestCase):
                             persisted = read_record(store, config["context"], frame_scope=config["frame_scope"])
                             self.assertEqual(persisted[seed_field], 4)
                             self.assertEqual(persisted[frame_field], expected_frame)
+
+    def test_identity_verification_item_mode_and_disabled_writeback_keep_old_terminals(self):
+        from automation.target_verification import TargetVerificationSpec, validate_injected_target_verification
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = make_plan(static=True)
+            spec = TargetVerificationSpec("offline", "attempt", plan.initial_seed.seed,
+                                          plan.initial_seed.advances, plan.species_id,
+                                          plan.target.method, plan.target.pid)
+            for name, options, verification in (
+                ("disabled", EasyCon118Options(update_precalibration=False), None),
+                ("starter-proof", EasyCon118Options(update_precalibration=True,
+                                                   precalibration_context_kind="STARTER"), None),
+                ("sid-proof", EasyCon118Options(update_precalibration=True), spec),
+                ("items", EasyCon118Options(update_precalibration=True, item_rng_mode=True), None),
+            ):
+                with self.subTest(name=name):
+                    selected = make_plan() if name == "items" else plan
+                    main = write_configured_project(
+                        SOURCE_118, root / name, selected, options,
+                        precalibration_store_path=root / "unused.json", target_verification=verification,
+                    )
+                    text = main.read_text(encoding="utf-8")
+                    self.assertNotIn("GUI_TARGET_SHINY_PRECALIBRATION", text)
+                    self.assertNotIn("CALL 记录目标出闪预校准", text)
+                    if verification:
+                        validate_injected_target_verification(text, verification)
+                    manifest = json.loads((main.parent / "plan.json").read_text(encoding="utf-8"))
+                    self.assertFalse(manifest["precalibration"]["target_shiny_success"]["enabled"])
 
     def test_formal_static_loads_seed_but_disables_frame_reuse(self):
         with tempfile.TemporaryDirectory() as directory:

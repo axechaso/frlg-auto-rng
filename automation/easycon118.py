@@ -2385,6 +2385,7 @@ def _apply_regular_precalibration_runtime_text(
             f"$消耗帧预校准修正_NS1 = {frame_ns1}",
             f"$消耗帧预校准修正_NS2 = {frame_ns2}",
             "$消耗帧预校准修正 = 0",
+            "$预校准目标出闪写回结果 = 0",
         ],
     )
     ns1_anchor = "    $Seed预校准索引 = $Seed预校准索引_NS1"
@@ -2428,7 +2429,75 @@ def _apply_regular_precalibration_runtime_text(
     if block.count(terminal_anchor) != 1:
         raise ValueError("2.0 自动校准函数缺少唯一的完整目标命中分支")
     block = block.replace(terminal_anchor, marker_line + "\n" + terminal_anchor, 1)
-    return _replace_function_block(text, signature, block)
+    text = _replace_function_block(text, signature, block)
+    shiny_success = config.get("target_shiny_success", {})
+    if shiny_success.get("enabled") is not True:
+        return text
+
+    # Save the offsets actually used by this successful round. This is not
+    # SID/PID proof: identity-verification plans keep their exact-hit path.
+    # Do not touch the paired EN/JP shiny branches used by those injectors.
+    loop_start = "        CALL 开始反查识图轮次\n        $本轮流程结果 = 执行RNG启动与目标获取()"
+    battle_stop = (
+        "        IF $本轮流程结果 == -1\n"
+        '            PRINT ""\n'
+        "            PRINT 目标获取流程结束，停止脚本"
+    )
+    summary_stop = "        IF $反查细分成功 == -2\n            RETURN\n        ENDIF"
+    for anchor in (loop_start, battle_stop, summary_stop):
+        if text.count(anchor) != 1:
+            raise ValueError("2.0 目标出闪预校准缺少唯一的当轮启动/停止分支")
+    text = text.replace(
+        loop_start,
+        "        CALL 清空最近出闪检测\n" + loop_start,
+        1,
+    ).replace(
+        battle_stop,
+        battle_stop.replace('            PRINT ""', '            $预校准目标出闪写回结果 = 记录目标出闪预校准(0)\n            PRINT ""'),
+        1,
+    ).replace(
+        summary_stop,
+        "        IF $反查细分成功 == -2\n"
+        "            $预校准目标出闪写回结果 = 记录目标出闪预校准(1)\n"
+        "            RETURN\n        ENDIF",
+        1,
+    )
+    # The main script changes $目标全国图鉴编号 to the encountered species
+    # for reverse lookup. Bind writeback to the immutable configured target,
+    # not that mutable value, and clear battle evidence before every round.
+    target_dex = shiny_success["species_id"]
+    shiny_marker_head = _precalibration_marker_head(context, frame_scope).replace(
+        "|V=2|", "|V=2|EVIDENCE=TARGET_SHINY|", 1,
+    )
+    helper = f'''
+# GUI_TARGET_SHINY_PRECALIBRATION_V1
+FUNC 记录目标出闪预校准($来源: INT): INT
+    IF $更新预校准 != 1 or $道具乱数模式 != 0 or $循环计数 <= 0
+        RETURN 0
+    ENDIF
+    IF 读取获取结果识图失败() == 1
+        RETURN 0
+    ENDIF
+    IF $来源 == 0
+        IF 读取最近出闪检测结果() != 1 or 读取最近出闪检测图鉴编号() != {target_dex}
+            RETURN 0
+        ENDIF
+    ELIF $来源 == 1
+        IF $本轮物种命中 != 1 or $目标全国图鉴编号 != {target_dex}
+            RETURN 0
+        ENDIF
+    ELSE
+        RETURN 0
+    ENDIF
+    IF 读取获取结果图鉴编号() > 0 and 读取获取结果图鉴编号() != {target_dex}
+        RETURN 0
+    ENDIF
+    PRINT "{shiny_marker_head}" & $Seed累计修正索引 & "|FRAME_PRE=" & $消耗帧实际执行修正量 & "|FRAME_ENABLED={1 if frame_enabled else 0}|TARGET_DEX={target_dex}|ROUND=" & $循环计数 & "|SHINY_STAGE=" & $来源 & "|SHINY_END=1"
+    PRINT 已确认配置目标出闪，记录本轮实际使用的预校准修正
+    RETURN 1
+ENDFUNC
+'''
+    return text.rstrip() + "\n" + helper
 
 
 def _apply_egg_precalibration_runtime_text(
@@ -5214,6 +5283,15 @@ def write_configured_project(
         selected_template,
         store_path,
     )
+    precalibration["target_shiny_success"] = {
+        "enabled": (
+            precalibration["enabled"]
+            and target_verification is None
+            and precalibration["context"]["kind"] in {"WILD", "STATIC"}
+            and not options.item_rng_mode
+        ),
+        "species_id": plan.species_id,
+    }
 
     output_dir.mkdir(parents=True, exist_ok=True)
     configured = configure_template_text(

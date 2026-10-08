@@ -1142,7 +1142,7 @@ class FrlgWindow(FrlgPreviewWindow):
                                               self.run_command.log_path.read_text(encoding="utf-8", errors="replace"))
                 self._append_log(
                     "\n预校准已更新。\n" if record else
-                    "\n未取得完整反查命中记录，预校准未更新（出闪后直接停止也不会写入；原记录保留）。\n"
+                    "\n未取得目标成功标记，预校准未更新（原记录保留；旧工程请重新生成）。\n"
                 )
             except (OSError, ValueError, TypeError) as exc:
                 self._append_log(f"\n预校准更新失败，原记录保留：{exc}\n")

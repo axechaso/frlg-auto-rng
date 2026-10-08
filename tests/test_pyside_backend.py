@@ -214,10 +214,74 @@ class PySideBackendTests(unittest.TestCase):
             w._process_finished(0, None)
         output = w.log_view.toPlainText()
         self.assertIn("预校准未更新", output)
-        self.assertIn("未取得完整反查命中记录", output)
+        self.assertIn("未取得目标成功标记", output)
         self.assertNotIn("预校准更新失败", output)
         self.assertNotIn("标记不完整或格式无效", output)
         self.assertEqual(store.read_bytes(), original)
+
+    def test_target_shiny_early_stop_persists_precalibration_through_actual_finished_callback(self):
+        import json
+        from automation.precalibration import PrecalibrationContext, PrecalibrationFrameScope, build_marker, read_record
+
+        w = self.window
+        context = PrecalibrationContext("fr", 1, 1, "FORMAL", "STATIC", 0)
+        scope = PrecalibrationFrameScope(1, False)
+        store = self.root / "precalibration.json"
+        (self.root / "plan.json").write_text(json.dumps({"precalibration": {
+            "enabled": True, "context": context.to_dict(), "frame_scope": scope.to_dict(),
+            "frame_enabled": False, "target_shiny_success": {"enabled": True, "species_id": 144},
+        }}), encoding="utf-8")
+        marker = build_marker(context, seed_index=-7, frame_pre=23,
+                              frame_enabled=False, frame_scope=scope)
+        marker += "|EVIDENCE=TARGET_SHINY|TARGET_DEX=144|ROUND=8|SHINY_STAGE=0|SHINY_END=1"
+        log = self.root / "early-target-shiny.log"
+        text = f"时差检测到出闪\n{marker}\n目标获取流程结束，停止脚本\n脚本运行完成\n"
+        log.write_text(text, encoding="utf-8")
+        w.running_prepared = SimpleNamespace(
+            project=self.root / "main.ecs",
+            inputs=SimpleNamespace(options=SimpleNamespace(update_precalibration=True)),
+        )
+        w.run_command = SimpleNamespace(log_path=log)
+        w._append_log(text, final=True)
+        with patch.object(w, "_read_output"), patch.object(w, "_notify_run_finished"):
+            w._process_finished(0, None)
+        self.assertIn("预校准已更新", w.log_view.toPlainText())
+        self.assertNotIn("预校准更新失败", w.log_view.toPlainText())
+        self.assertEqual(read_record(store, context, frame_scope=scope)["seed_ns1"], -7)
+
+    def test_abnormal_or_error_exit_does_not_persist_even_a_target_shiny_marker(self):
+        import json
+        from automation.precalibration import PrecalibrationContext, PrecalibrationFrameScope, build_marker, update_record
+
+        w = self.window
+        context = PrecalibrationContext("fr", 1, 1, "FORMAL", "STATIC", 0)
+        scope = PrecalibrationFrameScope(1, False)
+        store = self.root / "precalibration.json"
+        update_record(store, context, {"seed_ns1": -6})
+        original = store.read_bytes()
+        (self.root / "plan.json").write_text(json.dumps({"precalibration": {
+            "enabled": True, "context": context.to_dict(), "frame_scope": scope.to_dict(),
+            "frame_enabled": False, "target_shiny_success": {"enabled": True, "species_id": 144},
+        }}), encoding="utf-8")
+        marker = build_marker(context, seed_index=9, frame_pre=23,
+                              frame_enabled=False, frame_scope=scope)
+        marker += "|EVIDENCE=TARGET_SHINY|TARGET_DEX=144|ROUND=8|SHINY_STAGE=0|SHINY_END=1"
+        log = self.root / "failed-target-shiny.log"
+        w.running_prepared = SimpleNamespace(
+            project=self.root / "main.ecs",
+            inputs=SimpleNamespace(options=SimpleNamespace(update_precalibration=True)),
+        )
+        w.run_command = SimpleNamespace(log_path=log)
+        for code, error in ((1, ""), (0, "!!意外错误!!Index was outside the bounds of the array.")):
+            with self.subTest(code=code, error=bool(error)):
+                w._run_terminal_handled = False
+                text = f"{marker}\n{error}\n"
+                log.write_text(text, encoding="utf-8")
+                w.log_view.setPlainText(text)
+                with patch.object(w, "_read_output"), patch.object(w, "_notify_run_finished"):
+                    w._process_finished(code, None)
+                self.assertNotIn("预校准已更新", w.log_view.toPlainText())
+                self.assertEqual(store.read_bytes(), original)
 
     def test_history_page_lists_filters_and_previews_saved_logs(self):
         run_dir = self.root / "runtime" / ("egg-" + "a" * 32)

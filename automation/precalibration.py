@@ -1,6 +1,7 @@
 """Persistent, context-scoped pre-calibration values for 2.0 runs.
 
-The ECS scripts only emit a small, ASCII marker after a complete target hit.
+The ECS scripts emit a small ASCII marker after an exact target hit or a
+confirmed configured-target shiny, to save the offsets used by that round.
 This module owns the durable side of that handshake.  TID/SID code does not
 import it, so identity calibration remains independent from 2.0 values.
 """
@@ -40,6 +41,10 @@ _INT_FIELDS = {
     "PICKUP_PRE",
     "PARITY",
     "GIFT",
+    "TARGET_DEX",
+    "ROUND",
+    "SHINY_STAGE",
+    "SHINY_END",
 }
 _SEED_FIELDS = {"seed_ns1", "seed_ns2"}
 _FRAME_FIELDS = {
@@ -511,6 +516,17 @@ def parse_marker(text: str) -> dict[str, Any] | None:
             return None
     elif "FRAME_PRE" not in marker:
         return None
+    if "EVIDENCE" in marker:
+        if (
+            marker["EVIDENCE"] != "TARGET_SHINY"
+            or marker["V"] != SCHEMA_VERSION
+            or marker["KIND"] not in {"WILD", "STATIC"}
+            or not 1 <= marker.get("TARGET_DEX", 0) <= 386
+            or marker.get("ROUND", 0) <= 0
+            or marker.get("SHINY_STAGE") not in (0, 1)
+            or marker.get("SHINY_END") != 1
+        ):
+            return None
     return marker
 
 
@@ -609,15 +625,24 @@ def update_from_manifest(
         return None
     if "context" not in config:
         raise ValueError("预校准生成清单缺少上下文，未更新记录")
-    # Finding a shiny can stop the script before capture / exact Seed+Advance
-    # verification.  Absence of an update marker is not a malformed marker.
-    # Keep the same no-write contract as update_from_log; a present but invalid
-    # marker below is still an error and never overwrites the user's record.
+    # Old projects and non-success stops may have no marker. That is a no-op,
+    # not a malformed marker; present but invalid markers still reject writes.
     if MARKER_PREFIX not in text:
         return None
     marker = parse_marker(text)
     if marker is None:
         raise ValueError("预校准成功标记不完整或格式无效，未更新记录")
+    if marker.get("EVIDENCE") == "TARGET_SHINY":
+        shiny_success = config.get("target_shiny_success")
+        if (
+            not isinstance(shiny_success, dict)
+            or shiny_success.get("enabled") is not True
+            or type(shiny_success.get("species_id")) is not int
+            or shiny_success["species_id"] != marker["TARGET_DEX"]
+            or type(config.get("frame_enabled")) is not bool
+            or int(config["frame_enabled"]) != marker["FRAME_ENABLED"]
+        ):
+            raise ValueError("目标出闪预校准标记与本次配置目标或保存范围不一致，未更新记录")
     if marker.get("V") == SCHEMA_VERSION:
         expected_scope = config.get("frame_scope")
         if expected_scope is None or normalize_frame_scope(expected_scope).to_dict() != PrecalibrationFrameScope(
