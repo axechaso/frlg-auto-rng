@@ -27,6 +27,7 @@ MAX_FILES = 100_000
 MAX_BUNDLES = 4096
 MAX_UNPACKED_BYTES = 12 * 1024 * 1024 * 1024
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+RESOURCE_SUFFIXES = frozenset({".il", ".ecs", ".json", ".txt", ".md", ".yaml", ".yml", ".ini", ".toml"})
 
 
 class IncrementalError(ValueError):
@@ -236,6 +237,11 @@ def plan_update(manifest: Manifest, install: Path, cache: Path, *, cancelled=lam
 def unpack_bundle(path: Path, bundle: Bundle) -> bytes:
     with path.open("rb") as stream:
         payload = stream.read(bundle.bytes + 1)
+    return unpack_payload(payload, bundle)
+
+
+def unpack_payload(payload: bytes, bundle: Bundle) -> bytes:
+    """Validate one bounded compressed block, independent of its transport."""
     if len(payload) != bundle.bytes or hashlib.sha256(payload).hexdigest() != bundle.sha256:
         raise IncrementalError(f"增量数据包校验失败：{bundle.name}")
     decoder = zlib.decompressobj()
@@ -294,7 +300,7 @@ def stage_update(plan: Plan, install: Path, cache: Path, stage: Path, *, cancell
         content.cache_clear()
 
 
-def create_assets(root: Path, package_manifest: dict, output: Path) -> Manifest:
+def create_assets(root: Path, package_manifest: dict, output: Path, *, separate_resources: bool = False) -> Manifest:
     """Build deterministic bundles; no previous release or Range server needed.
 
     Large files have their own bundles. Small files are grouped into 16 stable
@@ -328,8 +334,9 @@ def create_assets(root: Path, package_manifest: dict, output: Path) -> Manifest:
             if not path.is_file():
                 continue
             name = safe_path(path.relative_to(root).as_posix())
+            category = ("resources:" if Path(name).suffix.lower() in RESOURCE_SUFFIXES else "runtime:") if separate_resources else ""
             group = ("file:" + name) if path.stat().st_size >= 1024 * 1024 else (
-                "small:" + hashlib.sha256(name.encode("utf-8")).hexdigest()[0]
+                "small:" + category + hashlib.sha256(name.encode("utf-8")).hexdigest()[0]
             )
             groups.setdefault(group, []).append(path)
         for group in sorted(groups):
@@ -366,12 +373,16 @@ def create_assets(root: Path, package_manifest: dict, output: Path) -> Manifest:
         raise
 
 
-def verify_release_assets(package: Path, package_manifest: dict, assets: Path) -> Manifest:
+def verify_release_assets(
+    package: Path, package_manifest: dict, assets: Path, *,
+    manifest: Manifest | None = None, read_bundle: Callable[[Bundle], bytes] | None = None,
+) -> Manifest:
     """Check every published byte and bind the incremental tree to the full ZIP."""
-    manifest_path = assets / MANIFEST_NAME
-    if manifest_path.stat().st_size > MAX_MANIFEST_BYTES:
-        raise IncrementalError("增量清单超过大小限制")
-    manifest = parse_manifest(json.loads(manifest_path.read_text(encoding="utf-8")))
+    if manifest is None:
+        manifest_path = assets / MANIFEST_NAME
+        if manifest_path.stat().st_size > MAX_MANIFEST_BYTES:
+            raise IncrementalError("增量清单超过大小限制")
+        manifest = parse_manifest(json.loads(manifest_path.read_text(encoding="utf-8")))
     if any(getattr(manifest, key) != package_manifest[key] for key in ("version", "version_code", "unpacked_bytes")):
         raise IncrementalError("增量清单版本或大小与整包不一致")
     if (
@@ -384,6 +395,8 @@ def verify_release_assets(package: Path, package_manifest: dict, assets: Path) -
 
     @lru_cache(maxsize=2)
     def content(name):
+        if read_bundle is not None:
+            return unpack_payload(read_bundle(bundles[name]), bundles[name])
         path = assets / name
         if path.stat().st_size != bundles[name].bytes:
             raise IncrementalError(f"增量数据包大小不符：{name}")

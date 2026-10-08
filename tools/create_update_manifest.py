@@ -8,7 +8,7 @@ import json
 import shutil
 from pathlib import Path
 
-from incremental_update import create_assets, verify_release_assets
+from packed_updates import create_assets, verify_release_assets
 
 from app_version import (
     APP_VERSION,

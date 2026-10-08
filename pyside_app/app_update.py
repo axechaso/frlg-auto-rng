@@ -100,6 +100,14 @@ class AppUpdateController(QObject):
                 f"完整包大小：{size_mib:.1f} MiB（供比较）"
             )
             action = "将仅下载所需数据包，组装并校验新版后退出安装。是否继续？"
+            archive_bytes = getattr(plan, "archive_download_bytes", 0)
+            if archive_bytes:
+                download = download.replace("增量下载：", "预计按需下载：")
+                download += (
+                    "\n服务器不支持分段读取时，只下载相关整份压缩包："
+                    f"最多 {archive_bytes / (1024 * 1024):.1f} MiB。"
+                )
+                action = "将读取所需压缩包数据，组装并校验新版后退出安装。是否继续？"
         else:
             download = f"下载大小：{size_mib:.1f} MiB"
             action = "此版本未提供增量资源，将下载完整绿色版、校验后退出并安装。是否继续？"

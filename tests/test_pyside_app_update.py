@@ -181,6 +181,17 @@ class PySideAppUpdateTests(unittest.TestCase):
         )
         self.assertTrue(self.window.label_supervision_check.isChecked())
 
+    def test_packed_update_prompt_explains_range_estimate_and_full_zip_fallback(self):
+        plan = SimpleNamespace(
+            download_bytes=1024 * 1024, archive_download_bytes=8 * 1024 * 1024,
+            reuse={"runtime.dll"}, manifest=SimpleNamespace(files=[1, 2]),
+        )
+        text = self.window.app_update.description(candidate(), plan)
+        self.assertIn("预计按需下载：1.0 MiB", text)
+        self.assertIn("最多 8.0 MiB", text)
+        self.assertIn("服务器不支持分段读取", text)
+        self.assertIn("复用本地文件：1/2", text)
+
     def test_running_process_defers_available_install(self):
         from PySide6.QtWidgets import QMessageBox
 

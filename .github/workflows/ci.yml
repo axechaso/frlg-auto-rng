@@ -101,11 +101,13 @@ jobs:
           app_version.py
           app_updater.py
           incremental_update.py
+          packed_updates.py
           update_installer.py
           updater_entry.py
           package_entry.py
           tools/create_update_manifest.py
           tools/verify_incremental_release.py
+          tools/pack_incremental_release.py
           tools/stage_release_assets.py
           tools/verify_windows_upgrade.py
           tools/verify_frozen_workers.py
@@ -231,6 +233,7 @@ jobs:
           tests.test_worker_commands
           tests.test_app_updater
           tests.test_incremental_update
+          tests.test_packed_updates
           tests.test_update_installer
           tests.test_update_manifest_tool
           tests.test_windows_release_scripts

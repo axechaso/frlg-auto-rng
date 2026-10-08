@@ -116,7 +116,7 @@ class UpdateManifestToolTests(unittest.TestCase):
             self.assertEqual(manifest["notes"], expected)
 
     def test_cli_builds_identical_incremental_assets_for_both_sources(self):
-        from incremental_update import MANIFEST_NAME, verify_release_assets
+        from packed_updates import MANIFEST_NAME, asset_names, verify_release_assets
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -138,5 +138,43 @@ class UpdateManifestToolTests(unittest.TestCase):
                 ]), 0)
             manifest = json.loads((root / "update-manifest.json").read_text(encoding="utf-8"))
             metadata = verify_release_assets(package, manifest, incremental)
-            for name in [MANIFEST_NAME, *(bundle.name for bundle in metadata.bundles)]:
+            for name in asset_names(metadata):
                 self.assertEqual((gitee / name).read_bytes(), (incremental / name).read_bytes())
+            self.assertEqual(metadata.schema, 2)
+            self.assertNotIn("incremental-manifest.json", [path.name for path in gitee.iterdir()])
+
+    def test_repack_tool_preserves_old_assets_and_outputs_exact_compact_names(self):
+        from incremental_update import create_assets
+        from packed_updates import asset_names, verify_release_assets
+        from tools.pack_incremental_release import main as repack
+        from tools.verify_incremental_release import main as verify
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            unpacked = root / "release"
+            contents = {"FRLG-Auto-RNG.exe": b"main", "FRLG-Auto-RNG-Updater.exe": b"updater", "_internal/data": b"data"}
+            package = root / f"FRLG-Auto-RNG-{APP_VERSION}-windows-x64.zip"
+            with zipfile.ZipFile(package, "w") as archive:
+                for name, value in contents.items():
+                    path = unpacked / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(value)
+                    archive.writestr(name, value)
+            manifest = create_manifest(package, unpacked)
+            old = root / "old"
+            create_assets(unpacked, manifest, old)
+            old_values = {path.name: path.read_bytes() for path in old.iterdir()}
+            output, gitee = root / "packed", root / "gitee"
+            with patch.object(sys, "stdout", io.StringIO()):
+                self.assertEqual(repack([
+                    "--package", str(package), "--manifest", str(root / "update-manifest.json"),
+                    "--assets-dir", str(old), "--output-dir", str(output), "--gitee-output-dir", str(gitee),
+                ]), 0)
+            metadata = verify_release_assets(package, manifest, output)
+            self.assertEqual({path.name: path.read_bytes() for path in old.iterdir()}, old_values)
+            self.assertEqual({path.name for path in output.iterdir()}, set(asset_names(metadata)))
+            for name in asset_names(metadata):
+                self.assertEqual((output / name).read_bytes(), (gitee / name).read_bytes())
+            with patch.object(sys, "argv", ["verify", "--package", str(package), "--manifest", str(root / "update-manifest.json"), "--assets-dir", str(output)]), patch.object(sys, "stdout", io.StringIO()) as stdout:
+                verify()
+                self.assertEqual(json.loads(stdout.getvalue()), list(asset_names(metadata)))

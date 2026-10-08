@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -25,6 +26,7 @@ from typing import Callable
 import certifi
 import truststore
 import incremental_update
+import packed_updates
 
 from app_version import (
     APP_VERSION_CODE,
@@ -485,7 +487,7 @@ def _restore_incremental(candidate: UpdateCandidate, value: dict) -> UpdateCandi
     if data is None:
         return candidate
     try:
-        metadata = incremental_update.parse_manifest(data)
+        metadata = packed_updates.parse_metadata(data)
     except incremental_update.IncrementalError as exc:
         raise UpdateError(str(exc)) from exc
     if (
@@ -497,16 +499,17 @@ def _restore_incremental(candidate: UpdateCandidate, value: dict) -> UpdateCandi
     ):
         raise UpdateError("增量清单与完整更新清单不一致")
     urls = value.get("incremental_urls")
-    if not isinstance(urls, dict) or set(urls) != {bundle.name for bundle in metadata.bundles}:
+    names = packed_updates.asset_names(metadata)[1:]
+    if not isinstance(urls, dict) or set(urls) != set(names):
         raise UpdateError("增量清单缺少数据包下载地址")
-    verified = tuple((bundle.name, _incremental_asset_url(
-        candidate, {"name": bundle.name, "browser_download_url": urls[bundle.name]}, bundle.name,
-    )) for bundle in metadata.bundles)
+    verified = tuple((name, _incremental_asset_url(
+        candidate, {"name": name, "browser_download_url": urls[name]}, name,
+    )) for name in names)
     return replace(candidate, incremental=metadata, incremental_urls=verified)
 
 
 def _attach_incremental(candidate: UpdateCandidate, assets: dict, opener: Callable) -> UpdateCandidate:
-    name = incremental_update.MANIFEST_NAME
+    name = packed_updates.MANIFEST_NAME if packed_updates.MANIFEST_NAME in assets else incremental_update.MANIFEST_NAME
     if name not in assets:
         return candidate  # Releases published before incremental support.
     url = _incremental_asset_url(candidate, assets[name], name)
@@ -515,11 +518,14 @@ def _attach_incremental(candidate: UpdateCandidate, assets: dict, opener: Callab
         payload = _read_response(response, incremental_update.MAX_MANIFEST_BYTES)
     data = _read_json_object(payload, "增量更新清单")
     try:
-        metadata = incremental_update.parse_manifest(data)
+        metadata = packed_updates.parse_metadata(data)
     except incremental_update.IncrementalError as exc:
         raise UpdateError(str(exc)) from exc
+    if packed_updates.asset_names(metadata)[0] != name:
+        raise UpdateError("增量清单协议与文件名不一致")
     urls = {}
-    for bundle in metadata.bundles:
+    transports = metadata.archives if isinstance(metadata, packed_updates.Manifest) else metadata.bundles
+    for bundle in transports:
         asset = assets.get(bundle.name)
         if asset is None:
             raise UpdateError(f"Release 缺少增量数据包：{bundle.name}")
@@ -1062,7 +1068,8 @@ def plan_incremental_update(
     if candidate.incremental is None:
         return None
     try:
-        return incremental_update.plan_update(
+        planner = packed_updates.plan_update if isinstance(candidate.incremental, packed_updates.Manifest) else incremental_update.plan_update
+        return planner(
             candidate.incremental, Path(install_dir), Path(updates_root) / "bundles",
             cancelled=lambda: _check_cancelled(cancelled), status=status or (lambda text: None),
         )
@@ -1074,7 +1081,11 @@ def _download_incremental_bundles(
     candidate: UpdateCandidate, plan: incremental_update.Plan, cache: Path, *,
     opener: Callable, progress: Callable[[int, int], None] | None,
     cancelled: Callable[[], bool] | None,
+    status: Callable[[str], None] = lambda text: None,
 ) -> None:
+    if isinstance(candidate.incremental, packed_updates.Manifest):
+        _download_packed_bundles(candidate, plan, cache, opener=opener, progress=progress, cancelled=cancelled, status=status)
+        return
     cache.mkdir(parents=True, exist_ok=True)
     check_cancel = lambda: _check_cancelled(cancelled)
     missing = [bundle for bundle in plan.needed if not incremental_update.matches(
@@ -1117,6 +1128,120 @@ def _download_incremental_bundles(
         progress(total, total)
 
 
+def _download_packed_bundles(
+    candidate: UpdateCandidate, plan: incremental_update.Plan, cache: Path, *,
+    opener: Callable, progress: Callable[[int, int], None] | None,
+    cancelled: Callable[[], bool] | None, status: Callable[[str], None],
+) -> None:
+    metadata = candidate.incremental
+    check_cancel = lambda: _check_cancelled(cancelled)
+    cache.mkdir(parents=True, exist_ok=True)
+    archives_root = packed_updates.archive_cache(cache)
+    archives_root.mkdir(parents=True, exist_ok=True)
+    locations = {item.bundle: item for item in metadata.locations}
+    missing = [bundle for bundle in plan.needed if not incremental_update.matches(
+        incremental_update.local_file(cache, bundle.name), bundle.bytes, bundle.sha256, check_cancel,
+    )]
+    groups = {
+        archive.name: [bundle for bundle in missing if locations[bundle.name].archive == archive.name]
+        for archive in metadata.archives
+    }
+    cached = {
+        archive.name for archive in metadata.archives if groups[archive.name] and incremental_update.matches(
+            incremental_update.local_file(archives_root, archive.name), archive.bytes, archive.sha256, check_cancel,
+        )
+    }
+    total = sum(bundle.bytes for bundle in missing if locations[bundle.name].archive not in cached)
+    received = 0
+
+    def report():
+        if progress:
+            progress(received, total)
+
+    def stream_verified(response, destination, size, sha256):
+        nonlocal received
+        temporary = destination.with_name(destination.name + f".{uuid.uuid4().hex}.part")
+        digest = hashlib.sha256()
+        written = 0
+        encoding = _response_header(response, "Content-Encoding")
+        if encoding and encoding.lower() != "identity":
+            raise UpdateError("增量压缩包响应不应经过额外编码")
+        try:
+            with temporary.open("xb") as output:
+                while True:
+                    check_cancel()
+                    chunk = response.read(min(DOWNLOAD_CHUNK_BYTES, size - written + 1))
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > size:
+                        raise UpdateError("增量压缩包或数据块下载大小超出清单")
+                    output.write(chunk)
+                    digest.update(chunk)
+                    received += len(chunk)
+                    report()
+            if written != size or digest.hexdigest() != sha256:
+                raise UpdateError("增量压缩包或数据块大小或 SHA-256 校验失败")
+            check_cancel()
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    urls = dict(candidate.incremental_urls)
+    report()
+    for archive in metadata.archives:
+        remaining = groups[archive.name]
+        if not remaining:
+            continue
+        check_cancel()
+        path = archives_root / archive.name
+        if archive.name in cached:
+            status("正在复用已校验的增量压缩包……")
+            packed_updates.extract_bundles(metadata, archive, path, remaining, cache, cancelled=check_cancel)
+            continue
+        for index, bundle in enumerate(remaining):
+            check_cancel()
+            location = locations[bundle.name]
+            start, end = location.offset, location.offset + bundle.bytes - 1
+            headers = {"User-Agent": "FRLG-Auto-RNG-Updater", "Accept-Encoding": "identity", "Range": f"bytes={start}-{end}"}
+            request = urllib.request.Request(urls[archive.name], headers=headers)
+            try:
+                try:
+                    response = _open(opener, request, 30.0)
+                except urllib.error.HTTPError as exc:
+                    if exc.code not in {400, 405, 416, 501}:
+                        raise
+                    exc.close()
+                    request = urllib.request.Request(urls[archive.name], headers={key: value for key, value in headers.items() if key != "Range"})
+                    response = _open(opener, request, 30.0)
+                with response:
+                    code = getattr(response, "status", None)
+                    if code is None:
+                        code = response.getcode() if hasattr(response, "getcode") else 200
+                    if code == 206:
+                        actual = _response_header(response, "Content-Range") or ""
+                        if actual.strip() != f"bytes {start}-{end}/{archive.bytes}":
+                            raise UpdateError("服务器返回的增量数据块范围与清单不一致")
+                        stream_verified(response, cache / bundle.name, bundle.bytes, bundle.sha256)
+                        continue
+                    if code != 200:
+                        raise UpdateError(f"增量压缩包响应状态无效：HTTP {code}")
+                    total += archive.bytes - sum(item.bytes for item in remaining[index:])
+                    status(
+                        "服务器不支持按需读取，将下载所需的整份增量压缩包；"
+                        f"本次预计下载 {total / (1024 * 1024):.1f} MiB。"
+                    )
+                    report()
+                    stream_verified(response, path, archive.bytes, archive.sha256)
+                packed_updates.extract_bundles(metadata, archive, path, remaining[index:], cache, cancelled=check_cancel)
+                break
+            except urllib.error.HTTPError as exc:
+                raise UpdateSourceUnavailable(
+                    f"增量压缩包下载失败：{candidate.source} HTTP {exc.code}；{request.full_url}"
+                ) from exc
+    report()
+
+
 def _prepare_incremental(
     candidate: UpdateCandidate, plan: incremental_update.Plan, install_dir: Path,
     updates_root: Path, stage_dir: Path, *, opener: Callable,
@@ -1125,8 +1250,10 @@ def _prepare_incremental(
 ) -> None:
     cache = updates_root / "bundles"
     try:
-        _download_incremental_bundles(candidate, plan, cache, opener=opener, progress=progress, cancelled=cancelled)
-    except (OSError, urllib.error.URLError, UpdateSourceUnavailable) as exc:
+        _download_incremental_bundles(candidate, plan, cache, opener=opener, progress=progress, cancelled=cancelled, status=status)
+    except incremental_update.IncrementalError as exc:
+        raise UpdateError(str(exc)) from exc
+    except (OSError, urllib.error.URLError, http.client.HTTPException, UpdateSourceUnavailable) as exc:
         if candidate.source != "github" or not allow_gitee_fallback:
             raise UpdateError(f"{candidate.source} 增量更新下载失败：{exc}") from exc
         status("GitHub 下载失败，正在检查 Gitee 增量备用源……")
@@ -1134,7 +1261,10 @@ def _prepare_incremental(
         mirror = fetch_gitee_candidate(opener=opener)
         if not _same_package(candidate.manifest, mirror.manifest) or mirror.incremental != candidate.incremental:
             raise UpdateError("Gitee 备用源增量清单与 GitHub 不一致") from exc
-        _download_incremental_bundles(mirror, plan, cache, opener=opener, progress=progress, cancelled=cancelled)
+        try:
+            _download_incremental_bundles(mirror, plan, cache, opener=opener, progress=progress, cancelled=cancelled, status=status)
+        except incremental_update.IncrementalError as mirror_exc:
+            raise UpdateError(str(mirror_exc)) from mirror_exc
     try:
         incremental_update.stage_update(
             plan, install_dir, cache, stage_dir,
@@ -1193,7 +1323,8 @@ def prepare_update(
     updates_root.mkdir(parents=True, exist_ok=True)
     if candidate.incremental is not None:
         same_volume = updates_root.stat().st_dev == install_dir.parent.stat().st_dev
-        cache_needed = incremental_plan.download_bytes + (needed if same_volume else 64 * 1024 * 1024)
+        cache_bytes = getattr(incremental_plan, "cache_bytes", incremental_plan.download_bytes)
+        cache_needed = cache_bytes + (needed if same_volume else 64 * 1024 * 1024)
         if shutil.disk_usage(updates_root).free < cache_needed:
             raise UpdateError("更新缓存盘剩余空间不足")
     download_dir = updates_root / "downloads" / str(candidate.manifest.version_code)
@@ -1201,7 +1332,7 @@ def prepare_update(
     if candidate.incremental is not None:
         report(
             f"增量更新：复用 {len(incremental_plan.reuse)}/{len(candidate.incremental.files)} 个文件，"
-            f"需下载 {incremental_plan.download_bytes / (1024 * 1024):.1f} MiB"
+            f"预计按需下载 {incremental_plan.download_bytes / (1024 * 1024):.1f} MiB"
         )
         _prepare_incremental(
             candidate, incremental_plan, install_dir, updates_root, stage_dir,

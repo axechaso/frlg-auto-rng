@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from incremental_update import MANIFEST_NAME, verify_release_assets
+from packed_updates import asset_names, verify_release_assets
 
 
 def main():
@@ -15,7 +15,7 @@ def main():
     args = parser.parse_args()
     package_manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     manifest = verify_release_assets(args.package, package_manifest, args.assets_dir)
-    print(json.dumps([MANIFEST_NAME, *(bundle.name for bundle in manifest.bundles)]))
+    print(json.dumps(asset_names(manifest)))
 
 
 if __name__ == "__main__":
