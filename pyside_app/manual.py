@@ -37,8 +37,13 @@ QPushButton:checked { background:#e9edff; border-color:#aebaff; color:#485cc7; }
 
 class ControllerWindow(QDialog):
     def __init__(self, host):
-        super().__init__(host)
+        # A Qt window parent also becomes the native owner on Windows. Owned
+        # windows disappear when that owner is minimized, even when topmost.
+        # Accessories keeps the Python reference and closes us with the host.
+        super().__init__()
         self.host = host
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        host.destroyed.connect(self.dispose_with_host)
         self.setWindowTitle("虚拟手柄")
         self.setStyleSheet(TOOL_STYLE)
         self.resize(820, 660)
@@ -91,6 +96,7 @@ class ControllerWindow(QDialog):
             button.released.connect(lambda key=key: self.mouse_release(key))
         self.layout_box.addWidget(self.pad, 1)
         self.overlay = ControllerOverlay(self)
+        self.destroyed.connect(self.overlay.deleteLater)
         self.keyboard = ControllerKeyboard(self)
         try:
             mapping_source = self.mapping_path
@@ -139,6 +145,7 @@ class ControllerWindow(QDialog):
         self.refresh_keys()
 
     def showEvent(self, event):
+        QApplication.instance().installEventFilter(self)
         super().showEvent(event)
         if self.shutting_down:
             self.shutting_down = False
@@ -167,6 +174,7 @@ class ControllerWindow(QDialog):
             accessories = getattr(self.host, "accessories", None)
             view = getattr(accessories, "input_view", None)
             self.set_script_observation(view)
+        QApplication.instance().installEventFilter(self)
         self.overlay_only = True
         self.overlay_requested = True
         self.shutting_down = False
@@ -454,6 +462,9 @@ class ControllerWindow(QDialog):
     def closeEvent(self, event):
         self.shutting_down = True
         self.overlay_requested = False
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
         self.keyboard.stop()
         self.disconnect()
         self.overlay.hide()
@@ -463,11 +474,25 @@ class ControllerWindow(QDialog):
         else:
             event.accept()
 
+    def dispose_with_host(self):
+        # QObject lifetime is tied to the host without using native ownership.
+        # A late connection result must be discarded before deleting its job.
+        self.shutting_down = True
+        self.overlay_only = False
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        self.hide()
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.close()
+
 
 class ControllerOverlay(QWidget):
     def __init__(self, controller):
-        super().__init__(controller, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        # Independent of both the main window and the large controller dialog.
+        super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.controller = controller
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setFixedSize(100, 100)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, False)
@@ -513,6 +538,10 @@ class ControllerOverlay(QWidget):
                 self.controller.job.cancelled.set()
             self.controller.disconnect()
             self.controller.keyboard.stop()
+
+    def closeEvent(self, event):
+        self.exit_control()
+        event.accept()
 
     def showEvent(self, event):
         self.timer.start()
@@ -664,8 +693,11 @@ class FrameReader:
 
 class MonitorWindow(QDialog):
     def __init__(self, host):
-        super().__init__(host)
+        # Keep the service host without making it the native window owner.
+        super().__init__()
         self.host = host
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        host.destroyed.connect(self.dispose_with_host)
         self.reader = None
         self.old_readers = []
         self.setWindowTitle("监视窗口")
@@ -693,7 +725,13 @@ class MonitorWindow(QDialog):
                 button.setFixedWidth(36)
                 button.setToolTip("缩小画面" if text == "−" else "放大画面")
                 self.zoom_buttons[text] = button
-            button.clicked.connect(callback)
+            if text == "置顶":
+                button.setCheckable(True)
+                button.setToolTip("开启后，即使主工具最小化，监视窗口仍置顶显示。")
+                button.toggled.connect(self.set_topmost)
+                self.topmost_button = button
+            else:
+                button.clicked.connect(callback)
             tools.addWidget(button)
         layout.addWidget(self.toolbar)
         self.picture = VideoSurface(self)
@@ -704,7 +742,14 @@ class MonitorWindow(QDialog):
         self.timer = QTimer(self)
         self.timer.setInterval(33)
         self.timer.timeout.connect(self.render)
+
+    def showEvent(self, event):
         self.timer.start()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
 
     def current_source(self):
         repair = getattr(getattr(self.host,"accessories",None),"repair_preview",None)
@@ -787,7 +832,10 @@ class MonitorWindow(QDialog):
         super().resizeEvent(event)
 
     def toggle_topmost(self):
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, not bool(self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint))
+        self.topmost_button.toggle()
+
+    def set_topmost(self, enabled):
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
         self.show()
 
     def wheel_zoom(self, delta):
@@ -807,3 +855,7 @@ class MonitorWindow(QDialog):
     def closeEvent(self, event):
         self.stop_capture()
         event.accept()
+
+    def dispose_with_host(self):
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.close()

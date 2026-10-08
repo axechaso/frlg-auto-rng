@@ -146,6 +146,7 @@ jobs:
           tools/verify_tid_bootstrap_integration.py
           tools/verify_sid_observation.py
           tools/verify_guide_layouts.py
+          tools/verify_floating_windows.py
 
       - name: Run offline QQ notification integration tests
         run: >-

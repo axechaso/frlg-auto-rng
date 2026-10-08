@@ -72,6 +72,160 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(self.w.pressed)
         self.transport.release.assert_called_once_with(self.w.native.A)
 
+    def test_controller_and_overlay_have_no_native_window_owner(self):
+        from PySide6.QtCore import Qt
+
+        self.assertIs(self.w.host, self.host)
+        self.assertIsNone(self.w.parentWidget())
+        self.assertIsNone(self.w.windowHandle().transientParent())
+        self.w.set_topmost(True)
+        self.w.overlay.show_control()
+        self.app.processEvents()
+        for window in (self.w, self.w.overlay):
+            self.assertIsNone(window.parentWidget())
+            self.assertIsNone(window.windowHandle().transientParent())
+            self.assertTrue(window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+            self.assertFalse(window.testAttribute(Qt.WidgetAttribute.WA_QuitOnClose))
+
+    def test_minimizing_main_window_preserves_overlay_and_manual_input(self):
+        self.host.show()
+        self.w.open_overlay()
+        self.host.showMinimized()
+        self.app.processEvents()
+        self.assertTrue(self.host.isMinimized())
+        self.assertTrue(self.w.overlay.isVisible())
+        self.assertTrue(self.w.overlay.timer.isActive())
+        self.assertTrue(self.w.keyboard_allowed())
+        self.w.keyboard.feed(0x43, True)
+        self.app.processEvents()
+        self.assertIn("A", self.w.pressed)
+        self.w.keyboard.feed(0x43, False)
+        self.app.processEvents()
+        self.assertFalse(self.w.pressed)
+        self.host.showNormal()
+        self.app.processEvents()
+        self.assertTrue(self.w.overlay.isVisible())
+        self.transport.disconnect.assert_not_called()
+
+    def test_native_overlay_close_releases_input_and_selected_port(self):
+        self.w.open_overlay()
+        self.w.press("A")
+        self.w.overlay.close()
+        self.app.processEvents()
+        self.assertFalse(self.w.overlay.isVisible())
+        self.assertFalse(self.w.overlay.timer.isActive())
+        self.assertFalse(self.w.keyboard_active)
+        self.assertFalse(self.w.pressed)
+        self.assertIsNone(self.w.controller)
+        self.transport.release_all.assert_called()
+        self.transport.disconnect.assert_called_once()
+
+    def test_minimized_script_overlay_remains_read_only_and_updates_buttons(self):
+        self.host.show()
+        self.w.disconnect()
+        self.transport.reset_mock()
+        self.host.running = True
+        snapshot = {"buttons": ("A",), "hat": "CENTER", "left_stick": (128, 128), "right_stick": (128, 128)}
+        view = SimpleNamespace(snapshot=snapshot, message="offline scripted press")
+        self.host.accessories.input_view = view
+        self.w.open_overlay()
+        self.host.showMinimized()
+        self.app.processEvents()
+        self.assertTrue(self.w.overlay.isVisible())
+        self.assertTrue(self.w.observing)
+        self.assertFalse(self.w.keyboard_allowed())
+        self.assertFalse(self.w.keyboard.feed(0x43, True))
+        self.assertEqual(self.w.overlay.grab().toImage().pixelColor(83, 33).name(), "#00ff00")
+        snapshot["buttons"] = ()
+        self.w.set_script_observation(view)
+        self.app.processEvents()
+        self.assertNotEqual(self.w.overlay.grab().toImage().pixelColor(83, 33).name(), "#00ff00")
+        self.transport.press.assert_not_called()
+        self.transport.set_stick.assert_not_called()
+        self.host.running = False
+        self.w.set_script_observation(None)
+
+    def test_closed_controller_can_reinstall_filter_for_overlay_escape(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from easycon import GamePadKey
+
+        self.w.close()
+        self.w.controller = self.transport
+        self.w.native = GamePadKey
+        self.w.open_overlay()
+        self.app.processEvents()
+        self.assertTrue(self.w.overlay.isVisible())
+        QTest.keyClick(self.w.overlay, Qt.Key.Key_Escape)
+        self.assertFalse(self.w.overlay.isVisible())
+        self.assertIsNone(self.w.controller)
+
+    def test_destroying_controller_also_disposes_its_detached_overlay(self):
+        from PySide6.QtCore import QCoreApplication, QEvent
+        from pyside_app.manual import ControllerWindow
+        from shiboken6 import isValid
+
+        controller = ControllerWindow(self.host)
+        overlay = controller.overlay
+        controller.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.assertFalse(isValid(controller))
+        self.assertFalse(isValid(overlay))
+
+    def test_destroying_host_disposes_controller_and_detached_overlay(self):
+        from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtWidgets import QWidget
+        from pyside_app.manual import ControllerWindow
+        from shiboken6 import isValid
+
+        host = QWidget()
+        host.paths = self.host.paths
+        host.running = False
+        host.job = None
+        controller = ControllerWindow(host)
+        overlay = controller.overlay
+        controller.controller = self.transport
+        controller.native = self.w.native
+        controller.overlay_only = True
+        host.deleteLater()
+        for _ in range(3):
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.assertFalse(isValid(controller))
+        self.assertFalse(isValid(overlay))
+        self.transport.disconnect.assert_called_once()
+
+    def test_host_destruction_waits_for_late_connection_before_disposing(self):
+        import threading
+        from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtWidgets import QWidget
+        from pyside_app.manual import ControllerWindow
+        from shiboken6 import isValid
+
+        host = QWidget()
+        host.paths = self.host.paths
+        host.running = False
+        host.job = None
+        controller = ControllerWindow(host)
+        overlay = controller.overlay
+        job = controller.job = Mock(cancelled=threading.Event())
+        controller.overlay_only = True
+        controller.overlay_requested = True
+        controller.job_result = (self.transport, self.w.native)
+        controller.job_error = ""
+        host.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.assertTrue(isValid(controller))
+        self.assertTrue(controller.shutting_down)
+        self.assertTrue(job.cancelled.is_set())
+        controller.connected()
+        for _ in range(3):
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.assertFalse(isValid(controller))
+        self.assertFalse(isValid(overlay))
+        self.transport.disconnect.assert_called_once()
+        job.deleteLater.assert_called_once()
+
     def test_top_button_only_opens_reusable_overlay_and_exit_releases_port(self):
         self.w.open_overlay()
         self.app.processEvents()

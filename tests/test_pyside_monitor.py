@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 import threading
 import unittest
 from types import SimpleNamespace
@@ -36,6 +37,82 @@ class MonitorTests(unittest.TestCase):
         event = QWheelEvent(QPointF(60, 60), QPointF(self.w.picture.mapToGlobal(QPoint(60, 60))), QPoint(), QPoint(0, delta), Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
         self.app.sendEvent(self.w.picture, event)
         self.app.processEvents()
+
+    def test_topmost_is_checkable_and_never_adds_a_main_window_owner(self):
+        from PySide6.QtCore import Qt
+
+        self.assertIs(self.w.host, self.host)
+        self.assertIsNone(self.w.parentWidget())
+        self.assertIsNone(self.w.windowHandle().transientParent())
+        self.assertFalse(self.w.testAttribute(Qt.WidgetAttribute.WA_QuitOnClose))
+        self.assertTrue(self.w.topmost_button.isCheckable())
+        self.assertFalse(self.w.topmost_button.isChecked())
+        for enabled in (True, False, True):
+            self.w.topmost_button.click()
+            self.app.processEvents()
+            self.assertEqual(self.w.topmost_button.isChecked(), enabled)
+            self.assertEqual(bool(self.w.windowFlags() & Qt.WindowType.WindowStaysOnTopHint), enabled)
+            self.assertIsNone(self.w.windowHandle().transientParent())
+            self.assertTrue(self.w.isVisible())
+
+    def test_minimizing_host_keeps_topmost_preview_visible_without_reconnecting(self):
+        self.host.show()
+        self.w.toggle_topmost()
+        reader = SimpleNamespace(frame=None, status="fake", stop=threading.Event(), thread=Mock(is_alive=Mock(return_value=False)))
+        self.w.reader = reader
+        with patch.object(self.w, "restart") as restart:
+            self.host.showMinimized()
+            self.app.processEvents()
+            self.assertTrue(self.host.isMinimized())
+            self.assertTrue(self.w.isVisible())
+            self.assertTrue(self.w.timer.isActive())
+            self.assertIs(self.w.reader, reader)
+            self.assertFalse(reader.stop.is_set())
+            self.host.showNormal()
+            self.app.processEvents()
+            self.assertTrue(self.w.isVisible())
+            restart.assert_not_called()
+
+    def test_topmost_toggle_keeps_picture_only_geometry_and_capture(self):
+        self.w.toggle_picture_only()
+        reader = SimpleNamespace(frame=None, status="fake", stop=threading.Event(), thread=Mock(is_alive=Mock(return_value=False)))
+        self.w.reader = reader
+        geometry = self.w.geometry()
+        for _ in range(2):
+            self.w.toggle_topmost()
+            self.app.processEvents()
+            self.assertTrue(self.w.picture_only)
+            self.assertFalse(self.w.toolbar.isVisible())
+            self.assertFalse(self.w.window_chrome.titlebar.isVisible())
+            self.assertEqual(self.w.geometry(), geometry)
+            self.assertIs(self.w.reader, reader)
+            self.assertFalse(reader.stop.is_set())
+
+    def test_close_and_reopen_stop_and_restart_only_the_render_timer(self):
+        self.assertTrue(self.w.timer.isActive())
+        self.w.close()
+        self.assertFalse(self.w.timer.isActive())
+        self.w.show()
+        self.app.processEvents()
+        self.assertTrue(self.w.timer.isActive())
+        self.assertIsNone(self.w.windowHandle().transientParent())
+
+    def test_destroying_host_releases_and_disposes_detached_monitor(self):
+        from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtWidgets import QWidget
+        from pyside_app.manual import MonitorWindow
+        from shiboken6 import isValid
+
+        host = QWidget()
+        monitor = MonitorWindow(host)
+        reader = SimpleNamespace(frame=None, status="fake", stop=threading.Event(), thread=Mock(is_alive=Mock(return_value=False)))
+        monitor.reader = reader
+        monitor.show()
+        host.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.assertTrue(reader.stop.is_set())
+        self.assertFalse(isValid(monitor))
 
     def test_anamorphic_buffer_uses_switch_display_ratio_without_mutating_frame(self):
         from PySide6.QtCore import Qt
@@ -152,6 +229,34 @@ class MonitorTests(unittest.TestCase):
         capture.set.assert_any_call(4, 720)
         capture.release.assert_called_once()
         self.assertEqual((reader.frame.width(), reader.frame.height()), (640, 480))
+
+
+@unittest.skipUnless(sys.platform == "win32" and importlib.util.find_spec("PySide6"), "Native Windows / PySide6 required")
+class NativeFloatingWindowTests(unittest.TestCase):
+    def test_real_application_minimize_pin_and_close_without_devices(self):
+        import json
+        import os
+        from pathlib import Path
+        import subprocess
+        import sys
+
+        root = Path(__file__).resolve().parents[1]
+        environment = dict(os.environ, PYTHONIOENCODING="utf-8", QT_QPA_PLATFORM="windows")
+        result = subprocess.run(
+            [sys.executable, str(root / "tools/verify_floating_windows.py")],
+            cwd=root, env=environment, capture_output=True, text=True, encoding="utf-8", timeout=45,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["platform"], "windows")
+        self.assertFalse(report["hardware_connected"])
+        self.assertGreaterEqual(report["checks"], 60)
+        minimized = [state for state in report["states"] if state["stage"] == "main_minimized"]
+        self.assertEqual({state["window"] for state in minimized}, {"monitor", "overlay"})
+        for state in minimized:
+            self.assertTrue(state["native_visible"])
+            self.assertTrue(state["native_topmost"])
+            self.assertEqual(state["native_owner"], 0)
 
 
 if __name__ == "__main__":
