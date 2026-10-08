@@ -185,6 +185,40 @@ class PySideBackendTests(unittest.TestCase):
         self.assertTrue(fatal)
         self.assertEqual(notify.call_args.args[2], "失败")
 
+    def test_shiny_early_stop_does_not_report_a_precalibration_update_failure(self):
+        import json
+        from automation.precalibration import PrecalibrationContext, update_record
+
+        w = self.window
+        context = PrecalibrationContext("fr", 1, 1, "FORMAL", "STATIC", 0)
+        store = self.root / "precalibration.json"
+        update_record(store, context, {"seed_ns1": -6})
+        original = store.read_bytes()
+        (self.root / "plan.json").write_text(json.dumps({
+            "precalibration": {"enabled": True, "context": context.to_dict()},
+        }), encoding="utf-8")
+        log = self.root / "early-shiny.log"
+        text = (
+            "[11:41:25.702] 时差检测到出闪\n"
+            "[11:41:25.702] 目标获取流程结束，停止脚本\n"
+            "脚本运行完成FRLG_INPUT_SESSION|V=1|STATE=ENDED|END=1\n"
+        )
+        log.write_text(text, encoding="utf-8")
+        w.running_prepared = SimpleNamespace(
+            project=self.root / "main.ecs",
+            inputs=SimpleNamespace(options=SimpleNamespace(update_precalibration=True)),
+        )
+        w.run_command = SimpleNamespace(log_path=log)
+        w._append_log(text, final=True)
+        with patch.object(w, "_read_output"), patch.object(w, "_notify_run_finished"):
+            w._process_finished(0, None)
+        output = w.log_view.toPlainText()
+        self.assertIn("预校准未更新", output)
+        self.assertIn("未取得完整反查命中记录", output)
+        self.assertNotIn("预校准更新失败", output)
+        self.assertNotIn("标记不完整或格式无效", output)
+        self.assertEqual(store.read_bytes(), original)
+
     def test_history_page_lists_filters_and_previews_saved_logs(self):
         run_dir = self.root / "runtime" / ("egg-" + "a" * 32)
         run_dir.mkdir(parents=True)

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import tempfile
 import unittest
 from dataclasses import replace
@@ -25,6 +26,7 @@ from automation.precalibration import (
     build_marker,
     context_key,
     read_record,
+    parse_marker,
     update_from_log,
     update_from_manifest,
     update_record,
@@ -207,6 +209,67 @@ class PrecalibrationStoreTests(unittest.TestCase):
             self.assertIsNone(update_from_log(path, context, "普通运行日志"))
             self.assertFalse(path.exists())
 
+    def test_manifest_without_a_success_marker_is_a_noop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "precalibration.json"
+            manifest_path = root / "plan.json"
+            context = PrecalibrationContext("fr", 1, 1, "FORMAL", "STATIC", 0)
+            update_record(store, context, {"seed_ns1": -6})
+            original = store.read_bytes()
+            manifest_path.write_text(json.dumps({
+                "precalibration": {
+                    "enabled": True,
+                    "context": context.to_dict(),
+                    "frame_scope": PrecalibrationFrameScope(1, False).to_dict(),
+                },
+            }), encoding="utf-8")
+            logs = (
+                "[11:41:25.702] 时差检测到出闪\n"
+                "[11:41:25.702] 目标获取流程结束，停止脚本\n"
+                "脚本运行完成FRLG_INPUT_SESSION|V=1|STATE=ENDED|END=1\n",
+                "[11:41:25.702] 已识别到出闪，脚本停止\n",
+                "普通运行日志\n",
+                "",
+            )
+            for text in logs:
+                with self.subTest(log=text):
+                    self.assertIsNone(update_from_manifest(store, manifest_path, text))
+                    self.assertEqual(store.read_bytes(), original)
+            self.assertEqual(list(root.glob("*.bak")), [])
+
+    def test_manifest_rejects_a_present_but_invalid_success_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "precalibration.json"
+            manifest_path = root / "plan.json"
+            context = PrecalibrationContext("fr", 1, 1, "FORMAL", "STATIC", 0)
+            scope = PrecalibrationFrameScope(1, False)
+            update_record(store, context, {"seed_ns1": -6})
+            original = store.read_bytes()
+            manifest_path.write_text(json.dumps({
+                "precalibration": {
+                    "enabled": True, "context": context.to_dict(),
+                    "frame_scope": scope.to_dict(),
+                },
+            }), encoding="utf-8")
+            complete = build_marker(
+                context, seed_index=4, frame_enabled=False, frame_scope=scope,
+            )
+            for text in (
+                "PRECALIBRATION_UPDATE",
+                "PRECALIBRATION_UPDATE|V=2|GAME=FR",
+                complete.replace("|SEED_INDEX=4", "|SEED_INDEX=bad"),
+                complete.replace("|GIFT=0", "|GIFT=bad"),
+            ):
+                with self.subTest(marker=text):
+                    with self.assertRaisesRegex(ValueError, "不完整或格式无效"):
+                        update_from_manifest(store, manifest_path, text)
+                    self.assertEqual(store.read_bytes(), original)
+            updated = update_from_manifest(store, manifest_path, complete)
+            self.assertEqual(updated["seed_ns1"], 4)
+            self.assertIsNone(updated["frame_ns1"])
+
     def test_frame_scope_isolated_while_seed_values_are_shared(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "precalibration.json"
@@ -257,6 +320,53 @@ class PrecalibrationStoreTests(unittest.TestCase):
 
 @unittest.skipUnless(SOURCE_118.is_dir(), "requires materialized EasyCon assets")
 class PrecalibrationGenerationTests(unittest.TestCase):
+    def test_regular_success_marker_matches_each_generated_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for template_name in (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME):
+                for static in (False, True):
+                    for nx_model in (1, 2):
+                        with self.subTest(template=template_name, static=static, nx=nx_model):
+                            output = root / f"{template_name}-{static}-{nx_model}"
+                            store = output / "precalibration.json"
+                            plan = make_plan(static=static, nx_model=nx_model)
+                            options = EasyCon118Options(nx_model=nx_model, update_precalibration=True)
+                            main = write_configured_project(
+                                SOURCE_118, output, plan, options,
+                                template_name=template_name, precalibration_store_path=store,
+                            )
+                            validate_generated_project_consistency(
+                                main, plan, options, template_name=template_name,
+                            )
+                            manifest_path = main.parent / "plan.json"
+                            config = json.loads(manifest_path.read_text(encoding="utf-8"))["precalibration"]
+                            text = main.read_text(encoding="utf-8")
+                            block = text.split("FUNC 执行自动校准与等待更新(): INT", 1)[1].split("\nENDFUNC", 1)[0]
+                            hit_condition = (
+                                "IF $道具乱数模式 == 0 and $命中差索引 == 0 and "
+                                "$本轮消耗帧误差 == 0 and $本轮物种命中 == 1"
+                            )
+                            self.assertLess(block.index(hit_condition), block.index("PRECALIBRATION_UPDATE"))
+                            marker_lines = [line for line in block.splitlines() if "PRECALIBRATION_UPDATE" in line]
+                            self.assertEqual(len(marker_lines), 1)
+                            marker_line = marker_lines[0]
+                            head = marker_line.split('"', 2)[1]
+                            enabled = re.search(r'"\|FRAME_ENABLED=([01])"', marker_line).group(1)
+                            # Exercise the actual generated context/fields, with
+                            # deterministic simulated runtime correction values.
+                            marker = f"{head}4|FRAME_PRE=-17|FRAME_ENABLED={enabled}"
+                            parsed = parse_marker(marker)
+                            self.assertIsNotNone(parsed)
+                            updated = update_from_manifest(store, manifest_path, f"\x1b[90m[11:41:25.702]\x1b[0m {marker}\n")
+                            seed_field = f"seed_ns{nx_model}"
+                            frame_field = f"frame_ns{nx_model}"
+                            self.assertEqual(updated[seed_field], 4)
+                            expected_frame = -17 if config["frame_enabled"] else None
+                            self.assertEqual(updated[frame_field], expected_frame)
+                            persisted = read_record(store, config["context"], frame_scope=config["frame_scope"])
+                            self.assertEqual(persisted[seed_field], 4)
+                            self.assertEqual(persisted[frame_field], expected_frame)
+
     def test_formal_static_loads_seed_but_disables_frame_reuse(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -609,6 +609,12 @@ def update_from_manifest(
         return None
     if "context" not in config:
         raise ValueError("预校准生成清单缺少上下文，未更新记录")
+    # Finding a shiny can stop the script before capture / exact Seed+Advance
+    # verification.  Absence of an update marker is not a malformed marker.
+    # Keep the same no-write contract as update_from_log; a present but invalid
+    # marker below is still an error and never overwrites the user's record.
+    if MARKER_PREFIX not in text:
+        return None
     marker = parse_marker(text)
     if marker is None:
         raise ValueError("预校准成功标记不完整或格式无效，未更新记录")

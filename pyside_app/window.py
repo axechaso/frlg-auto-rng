@@ -1140,7 +1140,10 @@ class FrlgWindow(FrlgPreviewWindow):
             try:
                 record = update_from_manifest(self.paths.user / "precalibration.json", prepared.project.parent / "plan.json",
                                               self.run_command.log_path.read_text(encoding="utf-8", errors="replace"))
-                self._append_log("\n预校准已更新。\n" if record else "\n没有完整命中记录，预校准未更新。\n")
+                self._append_log(
+                    "\n预校准已更新。\n" if record else
+                    "\n未取得完整反查命中记录，预校准未更新（出闪后直接停止也不会写入；原记录保留）。\n"
+                )
             except (OSError, ValueError, TypeError) as exc:
                 self._append_log(f"\n预校准更新失败，原记录保留：{exc}\n")
         from label_incidents import REPAIR_REQUIRED_EXIT_CODE

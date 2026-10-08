@@ -266,7 +266,10 @@ class GuideCopyTests(unittest.TestCase):
             ("controls", "calibration"): ("0“原始众数”", "1“统一校准（兼容编号）”", "2“统一校准”", "完全相同", "重新粗调", "固定 0"),
             ("controls", "startup"): ("0“HOME_BUFFER”", "1“固定 HOME”", "1500 ms", "3000 ms", "记录不混用"),
             ("controls", "seed_terms"): ("Seed 模式", "Seed 启动", "Seed 校准", "不同的事"),
-            ("controls", "precalibration"): ("开启", "关闭", "完整命中", "默认开启"),
+            ("controls", "precalibration"): (
+                "开启", "关闭", "完整命中", "默认开启", "反查确认",
+                "Seed", "消耗帧", "目标物种", "Held", "Pickup", "直接停止", "不会写入",
+            ),
             ("controls", "protection"): ("关闭", "开启", "原始 EasyCon", "另管是否弹窗"),
             ("tid", "mode"): ("穷举模式", "乱数模式", "起点＋最大范围", "中心帧＋半径"),
             ("tid", "sid_mode"): ("目标 SID", "不乱数 SID", "固定 F3", "实际"),
@@ -302,6 +305,8 @@ class GuideCopyTests(unittest.TestCase):
         self.assertNotIn("必须手动", HELP_TEXT["direct"][1])
         self.assertIn("默认自动选择", HELP_TEXT["egg_seed"][1])
         self.assertIn("默认开启", HELP_TEXT["precalibration"][1])
+        for term in ("反查确认", "Seed", "消耗帧", "目标物种", "直接停止", "不会写入"):
+            self.assertIn(term, HELP_TEXT["precalibration"][1])
         self.assertIn("连续 3 次", HELP_TEXT["adaptive"][1])
         for mode in ("0", "1", "2"):
             self.assertIn("Seed", HELP_TEXT[f"seed_calibration_{mode}"][1])
