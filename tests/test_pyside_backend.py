@@ -107,6 +107,42 @@ class PySideBackendTests(unittest.TestCase):
         self.assertTrue(any("游走路线不使用自行车" in item for item in requirements))
         self.assertFalse(any("登记第2项" in item for item in requirements))
 
+    def test_run_requirements_use_current_party_and_capture_text(self):
+        from pyside_app.window import wild_run_requirements
+
+        cases = (
+            ("wild", "Wild 1", "Grass", 25, False, 1, "队伍至少留有一个空位。", True),
+            ("static", "Static 1", "Static", 143, False, 1, "队伍至少留有一个空位。", True),
+            ("roaming", "Static 1", "Roaming", 243, False, 1, "队伍至少留有一个空位。", True),
+            ("starter", "Static 1", "Starter", 7, False, 1, "队伍至少留有一个空位。", False),
+            ("item", "Wild 1", "Surf", 54, True, 3,
+             "队伍预留 3 个空位；脚本会保存同样数量的携带道具目标。", True),
+            ("togepi", "Static 1", "Static", 175, False, 1,
+             "队伍放四只宝可梦：第五位留给波克比蛋，第六位留给 Seed 复核野生。", True),
+        )
+        capture_text = "反查捕捉要求，球袋第一格放反查用球（大师球最佳）。"
+        for name, method, category, species, item_mode, slots, party_text, captures in cases:
+            with self.subTest(workflow=name):
+                plan = SimpleNamespace(
+                    request=SimpleNamespace(method=method, category=category, location=""),
+                    species_id=species,
+                    initial_seed=SimpleNamespace(advances=8000),
+                )
+                options = SimpleNamespace(
+                    item_rng_mode=item_mode, party_empty_slots=slots,
+                    paralysis=False, false_swipe=False,
+                    continue_capture_after_shiny=True,
+                )
+                requirements = wild_run_requirements(plan, options)
+                self.assertIn(party_text, requirements)
+                self.assertEqual(capture_text in requirements, captures)
+                self.assertNotIn("队伍放五只宝可梦，第六位留空。", requirements)
+                self.assertNotIn("背包第三页第一格放大师球。", requirements)
+                self.assertEqual(
+                    "背包第三页第二格放出闪后抓捕使用的球种。" in requirements,
+                    captures,
+                )
+
     def test_fishing_tv_requirements_use_bag_tv_and_registered_rod(self):
         from pyside_app.window import wild_run_requirements
 
@@ -543,7 +579,10 @@ class PySideBackendTests(unittest.TestCase):
         )
         prompt = confirm.call_args.args[0]
         self.assertIn("运行前必须确认", prompt)
-        self.assertIn("队伍放五只宝可梦，第六位留空", prompt)
+        self.assertIn("队伍至少留有一个空位。", prompt)
+        self.assertIn("反查捕捉要求，球袋第一格放反查用球（大师球最佳）。", prompt)
+        self.assertNotIn("队伍放五只宝可梦，第六位留空", prompt)
+        self.assertNotIn("背包第三页第一格放大师球", prompt)
         self.assertIn("背包第一页第一格放神奇糖果", prompt)
         self.assertIn("目标 Seed", prompt)
         self.assertIn("目标 Advance", prompt)

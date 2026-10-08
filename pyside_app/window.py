@@ -72,7 +72,7 @@ def wild_run_requirements(plan, options) -> tuple[str, ...]:
     elif species == 175:
         requirements.append("队伍放四只宝可梦：第五位留给波克比蛋，第六位留给 Seed 复核野生。")
     else:
-        requirements.append("队伍放五只宝可梦，第六位留空。")
+        requirements.append("队伍至少留有一个空位。")
 
     if (is_wild and request.category in {"Grass", "Surf"}) or species == 175:
         requirements.append("队伍第一位放会使用甜甜香气的宝可梦。")
@@ -85,7 +85,7 @@ def wild_run_requirements(plan, options) -> tuple[str, ...]:
 
     requirements.append("背包第一页第一格放神奇糖果，数量不限。")
     if is_wild or species in _CAPTURE_REQUIREMENT_SPECIES:
-        requirements.extend(("背包第一页第二格放血药。", "背包第三页第一格放大师球。"))
+        requirements.extend(("背包第一页第二格放血药。", "反查捕捉要求，球袋第一格放反查用球（大师球最佳）。"))
         if options.continue_capture_after_shiny:
             requirements.append("背包第三页第二格放出闪后抓捕使用的球种。")
     if species in _ROAMING_SPECIES:
