@@ -47,7 +47,7 @@ EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
 EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
 EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
 EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
-EXPECTED_COMPAT_PATCH_ID = "easycon164a-label-supervision-v10-stage-log-filter-input-state-v2"
+EXPECTED_COMPAT_PATCH_ID = "easycon164a-synchronous-capture-v11-stage-log-filter-input-state-v2"
 EXPECTED_TESSDATA_SHA256 = {
     "frlg_battle.traineddata": "7abcaef4936727b33717656b38fd5b5027823e1cafec21abb06cc8ef1f7ff758",
     "FRLG_EN_ALL.traineddata": "3272f23a6f259518813025d89be77d706574ccdf163132ccf6f5be15ca19cfa0",
@@ -5917,15 +5917,16 @@ def prepare_compat_runner(
     fingerprint_warning_only: bool = False,
     fingerprint_warnings: list[str] | None = None,
 ) -> Path:
-    """Validate the pinned latest-frame CLI and sync audited local-OCR assets.
+    """Validate the pinned synchronous-capture CLI and audited local-OCR assets.
 
     EasyCon 1.6.4-a's GUI rounds image-label confidence upward with
     ``Math.Ceiling`` and continuously drains the capture device.  Its bundled
     ``ezcon.exe run`` truncates confidence and reads only when a label is
     evaluated, which can return buffered DSHOW transition frames.  The
-    compatibility runner is built from the exact 1.6.4-a source commit and
-    adds latest-frame consumption plus the GUI's rounding behavior (and .NET 9
-    build-only compatibility).
+    compatibility runner is built from the exact 1.6.4-a source commit. Each
+    label/OCR call makes a fresh read, serialized with background draining;
+    only preview and fault snapshots reuse the cache. GUI rounding and .NET 9
+    build-only compatibility are preserved.
     """
     ezcon_path = Path(ezcon_path).resolve()
     runner_path = Path(runner_path).resolve()
@@ -5955,7 +5956,7 @@ def prepare_compat_runner(
     if manifest.get("source_commit") != EXPECTED_COMPAT_SOURCE_COMMIT:
         raise ValueError("兼容运行器不是从已锁定的 EasyCon 1.6.4-a commit 构建")
     if manifest.get("patch_id") != EXPECTED_COMPAT_PATCH_ID:
-        raise ValueError("兼容运行器补丁标识不一致；请重建或更新兼容运行器以支持按键回显")
+        raise ValueError("兼容运行器补丁标识不一致；请重建或更新兼容运行器以支持现场取帧与按键回显")
     dll_records = manifest.get("files")
     if not isinstance(dll_records, dict):
         raise ValueError("兼容运行器缺少程序集摘要清单，请重新构建")

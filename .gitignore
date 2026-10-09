@@ -31,6 +31,9 @@ rng/dev/
 .venv/
 .build/
 runtime_backend/*.before-json-v2-*/
+runtime_backend/*.before-synchronous-capture-*/
+tools/EasyConFrameCaptureCheck/bin/
+tools/EasyConFrameCaptureCheck/obj/
 tools/EasyConInputStateProtocolCheck/bin/
 tools/EasyConInputStateProtocolCheck/obj/
 tools/EasyCon164aTidBootstrapCheck/bin/

@@ -1,0 +1,125 @@
+diff --git a/src/EasyCon2.CLI/Program.cs b/src/EasyCon2.CLI/Program.cs
+index 0b7fa96..9f86080 100644
+--- a/src/EasyCon2.CLI/Program.cs
++++ b/src/EasyCon2.CLI/Program.cs
+@@ -5,6 +5,7 @@ using EasyCon.Core.Runner;
+ using EasyCon.Lsp;
+ using EasyCon.Script;
+ using EasyCon.Script.Syntax;
++using EasyCon2.CLI;
+ using EasyDevice;
+ using EasyScript;
+ using OpenCvSharp;
+@@ -199,6 +200,7 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+     Exception? captureFailure = null;
+     CancellationTokenSource? captureCts = null;
+     Task? captureTask = null;
++    SynchronizedFrameSource<Mat>? frameSource = null;
+     MjpegPreviewServer? previewServer = null;
+     long latestFrameSequence = 0;
+     long latestFrameCapturedTicks = 0;
+@@ -334,32 +336,40 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+             outdap.Info("采集卡打开成功.");
+ 
+             // Match the GUI request, then continuously drain the DSHOW queue.
+-            // Label getters consume a clone of the newest frame instead of
+-            // triggering one potentially buffered capture per label.
++            // All camera reads share one gate. Script label/OCR calls read on
++            // demand like the GUI; preview and fault snapshots use the cache.
+             cvcap.SetProperties(1920, 1080);
+             var firstFrame = new TaskCompletionSource<(int Width, int Height)>(
+                 TaskCreationOptions.RunContinuationsAsynchronously);
+             captureCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+             var captureToken = captureCts.Token;
++            frameSource = new SynchronizedFrameSource<Mat>(
++                cvcap.GetMatFrame,
++                frame => frame.Empty(),
++                captured =>
++                {
++                    lock (latestFrameLock)
++                    {
++                        latestFrame?.Dispose();
++                        latestFrame = captured.Frame.Clone();
++                        latestFrameSequence = captured.Sequence;
++                        latestFrameCapturedTicks = captured.CompletedTicks;
++                    }
++                },
++                ex => { lock (latestFrameLock) captureFailure = ex; });
+             captureTask = Task.Run(() =>
+             {
+                 try
+                 {
+                     while (!captureToken.IsCancellationRequested)
+                     {
+-                        using var frame = cvcap.GetMatFrame();
+-                        if (frame.Empty())
++                        var captured = frameSource.Read(captureToken);
++                        using var frame = captured?.Frame;
++                        if (frame is null)
+                         {
+                             Thread.Sleep(5);
+                             continue;
+                         }
+-                        lock (latestFrameLock)
+-                        {
+-                            latestFrame?.Dispose();
+-                            latestFrame = frame.Clone();
+-                            latestFrameSequence++;
+-                            latestFrameCapturedTicks = Stopwatch.GetTimestamp();
+-                        }
+                         firstFrame.TrySetResult((frame.Width, frame.Height));
+                     }
+                 }
+@@ -389,6 +399,7 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+             var actualFrame = await firstFrame.Task;
+             outdap.Info(
+                 $"采集卡实际画面：{actualFrame.Width}x{actualFrame.Height}（请求 1920x1080）");
++            outdap.Info("识图取帧：现场同步读取；后台排空与监视共用同一采集卡");
+         }
+ 
+         Mat CloneLatestFrame()
+@@ -434,13 +445,16 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+         var externalGetters = label.ToDictionary(il => il.name, il => (Func<int>)(() =>
+         {
+             if (cvcap == null) throw new Exception("采集卡初始化异常");
+-            using var snapshot = CloneLatestFrame();
++            var captured = frameSource!.Read(runCancellation.Token);
++            if (captured is null) return 0; // Same empty-frame result as the GUI.
++            using var snapshot = captured.Frame;
+             try
+             {
+                 il.Search(snapshot, out var md);
+                 var score = (int)Math.Ceiling(md);
+-                var capture = CaptureState();
+-                supervisor?.ObserveMatch(il.name, md, score, snapshot, capture.Sequence, capture.CapturedTicks);
++                supervisor?.ObserveMatch(il.name, md, score, snapshot, captured.Sequence, captured.CompletedTicks);
++                if (verbose)
++                    outdap.Log($"FRLG_CAPTURE_SAMPLE|V=1|LABEL={il.name}|SEQ={captured.Sequence}|READ_MS={Stopwatch.GetElapsedTime(captured.StartedTicks, captured.CompletedTicks).TotalMilliseconds:F2}|AGE_MS={Stopwatch.GetElapsedTime(captured.CompletedTicks).TotalMilliseconds:F2}|END=1");
+                 return score;
+             }
+             catch (Exception ex)
+@@ -450,14 +464,8 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+             }
+         }));
+ 
+-        (bool Failed, string? Error, long Sequence, long CapturedTicks) CaptureState()
+-        {
+-            lock (latestFrameLock)
+-                return (captureFailure is not null, captureFailure?.GetBaseException().Message,
+-                    latestFrameSequence, latestFrameCapturedTicks);
+-        }
+-
+-        var ocr = cvcap == null ? null : OcrDelegateFactory.Create(CloneLatestFrame);
++        var ocr = cvcap == null ? null : OcrDelegateFactory.Create(
++            () => frameSource!.Read(runCancellation.Token)?.Frame);
+         using var monitorCancellation = new CancellationTokenSource();
+         var monitorTask = supervisor is null
+             ? Task.CompletedTask
+@@ -541,6 +549,7 @@ runScriptCommand.SetAction(async (parseResult, cancellationToken) =>
+             latestFrame?.Dispose();
+             latestFrame = null;
+         }
++        frameSource?.Dispose();
+         cvcap?.Release();
+         captureCts?.Dispose();
+     }

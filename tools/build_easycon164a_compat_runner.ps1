@@ -12,6 +12,8 @@ $stageLogFilterPatch = Join-Path $PSScriptRoot "patches\easycon164a-stage-log-fi
 $inputStatePatch = Join-Path $PSScriptRoot "patches\easycon164a-input-state-v1.patch"
 $inputStatePreviewVideoPatch = Join-Path $PSScriptRoot "patches\easycon164a-input-state-preview-video-v1.patch"
 $inputStateJsonPatch = Join-Path $PSScriptRoot "patches\easycon164a-input-state-json-v2.patch"
+$synchronousCapturePatch = Join-Path $PSScriptRoot "patches\easycon164a-synchronous-capture-v1.patch"
+$synchronizedFrameSource = Join-Path $PSScriptRoot "runner_capture\SynchronizedFrameSource.cs"
 $commit = "9c86137c7e63bff842175470895727a5fa9bab52"
 $sourceCommitMarker = Join-Path $source ".easycon-source-commit"
 $assemblyName = "EasyCon2.CLI.PreviewV5"
@@ -80,7 +82,8 @@ $patchAlreadyApplied = (
     (Test-Path -LiteralPath $previewSource) -and
     (Select-String -LiteralPath $programSource -Pattern 'previewPortOption' -Quiet) -and
     (Select-String -LiteralPath $programSource -Pattern 'runner\.NeedILLoad \|\| (previewPort > 0|previewVideo)' -Quiet) -and
-    (Select-String -LiteralPath $programSource -Pattern 'latestFrame = frame.Clone\(\)' -Quiet) -and
+    ((Select-String -LiteralPath $programSource -SimpleMatch 'latestFrame = frame.Clone()' -Quiet) -or
+     (Select-String -LiteralPath $programSource -SimpleMatch 'latestFrame = captured.Frame.Clone()' -Quiet)) -and
     (Select-String -LiteralPath $previewSource -Pattern 'class MjpegPreviewServer' -Quiet)
 )
 if (-not $patchAlreadyApplied) {
@@ -200,6 +203,20 @@ if (-not $jsonV2Applied) {
     git -c "safe.directory=$source" -C $source apply $inputStateJsonPatch
     if ($LASTEXITCODE -ne 0) { throw "Input-state JSON v2 patch failed" }
 }
+$synchronousCaptureApplied = (
+    (Select-String -LiteralPath $programSource -SimpleMatch 'frameSource = new SynchronizedFrameSource<Mat>(' -Quiet) -and
+    (Select-String -LiteralPath $programSource -SimpleMatch 'var captured = frameSource!.Read(runCancellation.Token);' -Quiet) -and
+    (Select-String -LiteralPath $programSource -SimpleMatch 'snapshot, captured.Sequence, captured.CompletedTicks' -Quiet) -and
+    (Select-String -LiteralPath $programSource -SimpleMatch '() => frameSource!.Read(runCancellation.Token)?.Frame' -Quiet)
+)
+if (-not $synchronousCaptureApplied) {
+    git -c "safe.directory=$source" -C $source apply --check $synchronousCapturePatch
+    if ($LASTEXITCODE -ne 0) { throw "Synchronous capture patch cannot apply cleanly; preserve the source and inspect its differences" }
+    git -c "safe.directory=$source" -C $source apply $synchronousCapturePatch
+    if ($LASTEXITCODE -ne 0) { throw "Synchronous capture patch failed" }
+}
+Copy-ChangedFile -SourcePath $synchronizedFrameSource -DestinationPath (Join-Path $source 'src\EasyCon2.CLI\SynchronizedFrameSource.cs')
+
 dotnet restore $project -r win-x64 -p:DefaultTargetFramework=net9.0 -p:LtsTargetFramework=net9.0
 if ($LASTEXITCODE -ne 0) { throw "NuGet restore failed" }
 
@@ -232,6 +249,9 @@ $python = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) { $python = "python" }
 & $python (Join-Path $PSScriptRoot "verify_easycon_protocol.py") --runner $stagedRunner --samples $samples --output $verification
 if ($LASTEXITCODE -ne 0) { throw "Staged runner HTTP/PRINT/GUI verification failed; current runner preserved" }
+$captureSamples = Join-Path $verification "synchronized-capture.json"
+dotnet run --project (Join-Path $PSScriptRoot "EasyConFrameCaptureCheck\EasyConFrameCaptureCheck.csproj") -p:EasyConDir=$staging -- $captureSamples
+if ($LASTEXITCODE -ne 0) { throw "Published synchronized capture verification failed; current runner preserved" }
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stagedRunner).Hash.ToLowerInvariant()
 $length = (Get-Item -LiteralPath $stagedRunner).Length
 $files = [ordered]@{}
@@ -243,8 +263,8 @@ $manifest = [ordered]@{
     source_repository = "https://github.com/EasyConNS/EasyCon.git"
     source_commit = $commit
     source_version = "1.6.4-a"
-    patch_id = "easycon164a-label-supervision-v10-stage-log-filter-input-state-v2"
-    description = "Run EasyCon 1.6.4-a native label checks, optionally supervise ECS stage markers and retries, and expose bounded read-only gamepad report state over loopback without changing the report sequence."
+    patch_id = "easycon164a-synchronous-capture-v11-stage-log-filter-input-state-v2"
+    description = "Read a fresh camera frame synchronously for every label/OCR request, serialize it with background draining, bind match diagnostics to the actual frame, and preserve shared preview, fault supervision and read-only input-state reporting."
     build_target = "net9.0/win-x64 self-contained onedir"
     filename = $runnerFilename
     bytes = $length
@@ -269,7 +289,7 @@ if (Test-Path -LiteralPath $oldTessdata) {
         Copy-Item -LiteralPath $_.FullName -Destination $stagedTessdata -Recurse -Force
     }
 }
-$backup = $outputFull + ".before-json-v2-" + [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
+$backup = $outputFull + ".before-synchronous-capture-" + [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
 New-Item -ItemType Directory -Force -Path $backendRoot | Out-Null
 try {
     if (Test-Path -LiteralPath $outputFull) { Move-Item -LiteralPath $outputFull -Destination $backup }

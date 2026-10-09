@@ -277,3 +277,25 @@ jobs:
         with:
           name: production-input-state-protocol
           path: .tmp/production-state.json
+
+  frame-capture:
+    name: Production C# synchronized capture / .NET 9
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Check production frame source without a camera or controller
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path .tmp -Force | Out-Null
+          $source = (Resolve-Path tools/runner_capture/SynchronizedFrameSource.cs).Path
+          dotnet run --project tools/EasyConFrameCaptureCheck -p:FrameSource="$source" -- .tmp/synchronized-capture.json
+          if ($LASTEXITCODE -ne 0) { throw 'production frame capture verification failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-synchronized-frame-capture
+          path: .tmp/synchronized-capture.json

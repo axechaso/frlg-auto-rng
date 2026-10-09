@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -47,7 +48,7 @@ ENDFUNC
 
         self.assertEqual(
             backend.EXPECTED_COMPAT_PATCH_ID,
-            "easycon164a-label-supervision-v10-stage-log-filter-input-state-v2",
+            "easycon164a-synchronous-capture-v11-stage-log-filter-input-state-v2",
         )
         self.assertIn("captureTask = Task.Run", additions)
         self.assertIn("latestFrame = frame.Clone()", additions)
@@ -127,6 +128,69 @@ ENDFUNC
         self.assertIn("-p:PublishSingleFile=false", build_script)
         self.assertNotIn("-p:PublishSingleFile=true", build_script)
         self.assertIn("self-contained onedir", build_script)
+
+    def test_synchronous_capture_patch_keeps_preview_cached_and_matches_fresh_frames(self):
+        root = Path(__file__).resolve().parents[1]
+        patch = (root / "tools/patches/easycon164a-synchronous-capture-v1.patch").read_text(encoding="utf-8")
+        additions = "\n".join(line[1:] for line in patch.splitlines() if line.startswith("+") and not line.startswith("+++"))
+        self.assertIn("var captured = frameSource!.Read(runCancellation.Token);", additions)
+        self.assertIn("using var snapshot = captured.Frame;", additions)
+        self.assertIn("snapshot, captured.Sequence, captured.CompletedTicks", additions)
+        self.assertIn("() => frameSource!.Read(runCancellation.Token)?.Frame", additions)
+        self.assertNotIn("using var snapshot = CloneLatestFrame()", additions)
+        self.assertNotIn("var capture = CaptureState()", additions)
+        self.assertNotIn("WAIT", additions)
+        self.assertNotIn("Math.Ceiling", additions)  # Existing rounding is untouched.
+        build = (root / "tools/build_easycon164a_compat_runner.ps1").read_text(encoding="utf-8")
+        self.assertIn("easycon164a-synchronous-capture-v1.patch", build)
+        self.assertIn("EasyConFrameCaptureCheck", build)
+        self.assertLess(build.index("Published synchronized capture verification failed"), build.index('Move-Item -LiteralPath $staging'))
+        project = (root / "tools/EasyConFrameCaptureCheck/EasyConFrameCaptureCheck.csproj").read_text(encoding="utf-8")
+        self.assertIn("bin/$(CaptureCheckMode)/$(Configuration)/", project)
+        self.assertIn("obj/$(CaptureCheckMode)/$(Configuration)/", project)
+
+    def test_encounter_probe_only_observes_and_keeps_the_mother_timing_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        probe = (root / "tools/test_scripts/entry_timing_probe.ecs").read_text(
+            encoding="utf-8"
+        )
+        commands = [
+            line.strip()
+            for line in probe.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(probe.count("WAIT 100\n"), 1)
+        self.assertIn("IF $HP匹配 > 90", commands)
+        self.assertIn("IF $空白匹配 > 96", commands)
+        self.assertIn("$探测次数上限 = 400", commands)
+        self.assertIn("FOR $探测序号 = 1 TO $探测次数上限", commands)
+        self.assertEqual(
+            {line.split("@")[1] for line in commands if "@" in line},
+            {"三代路闪遇敌", "三代路闪HP检测", "三代路闪wild检测"},
+        )
+        for line in commands:
+            self.assertNotIn(line.split()[0].upper(), {
+                "A", "B", "X", "Y", "L", "R", "ZL", "ZR", "UP", "DOWN",
+                "LEFT", "RIGHT", "HOME", "CAPTURE", "SELECT", "LS", "RS", "CALL",
+            })
+
+    @unittest.skipUnless(os.name == "nt" and backend.DEFAULT_COMPAT_RUNNER_PATH.is_file(), "requires the Windows published compatibility runner")
+    def test_published_synchronous_capture_without_camera_or_controller(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            report = Path(temporary) / "capture.json"
+            result = subprocess.run(["dotnet", "run", "--project", str(root / "tools/EasyConFrameCaptureCheck/EasyConFrameCaptureCheck.csproj"),
+                f"-p:EasyConDir={backend.DEFAULT_COMPAT_RUNNER_PATH.parent}", "--", str(report)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            data = json.loads(report.read_text(encoding="utf-8"))
+            self.assertFalse(data["hardware_access"])
+            self.assertGreaterEqual(data["checks"], 20)
+            self.assertIn("normal-encounter-stale-blank", data["scenarios"])
+            self.assertIn("queued-script-not-starved", data["scenarios"])
+            self.assertEqual(data["physical_read_fixture_calls"], 400)
+            self.assertEqual(hashlib.sha256(Path(data["assembly"]).read_bytes()).hexdigest(),
+                hashlib.sha256((backend.DEFAULT_COMPAT_RUNNER_PATH.parent / "EasyCon2.CLI.PreviewV5.dll").read_bytes()).hexdigest())
 
     def test_input_state_preview_flag_is_independent_from_status_server(self):
         root = Path(__file__).resolve().parents[1]
