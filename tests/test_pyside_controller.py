@@ -256,7 +256,13 @@ class ControllerTests(unittest.TestCase):
                 QTest.qWait(10)
             self.assertIsNone(self.w.job)
         self.assertIs(self.w.controller, connection)
-        connection.try_connect_port.assert_called_once_with("COM7", 115200, timeout=1.0)
+        connection.connect.assert_called_once()
+        args, options = connection.connect.call_args
+        self.assertEqual(args, ("COM7",))
+        self.assertEqual(options["timeout"], 1.0)
+        self.assertEqual(options["preferred_port"], "COM7")
+        self.assertTrue(callable(options["cancel_check"]))
+        self.assertTrue(callable(options["progress"]))
         self.assertFalse(self.w.isVisible())
         self.assertTrue(self.w.overlay.isVisible())
 

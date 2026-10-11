@@ -2,7 +2,7 @@
 from pathlib import Path
 import json
 
-from PySide6.QtCore import QObject, QEvent, QTimer, Qt
+from PySide6.QtCore import QObject, QEvent, QSignalBlocker, QTimer, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFileDialog, QLabel, QMessageBox, QPushButton, QTableWidgetItem
 
@@ -44,13 +44,14 @@ class Accessories(QObject):
         self.input_action_timer = QTimer(self)
         self.input_action_timer.setInterval(250)
         self.input_action_timer.timeout.connect(self._refresh_input_action_age)
-        for title, action in (("虚拟手柄", self.open_controller), ("监视窗口", self.open_monitor),
+        for title, action in (("自动连接", self.auto_connect), ("虚拟手柄", self.open_controller), ("监视窗口", self.open_monitor),
             ("手柄键位", self.open_controller_mapping),
             ("制作 / 修复标签", self.open_label_editor),
             ("检查/更新 Seed 表", self.update_seeds), ("选择标签文件（可多选）", self.choose_labels),
             ("选择标签文件夹", self.choose_label_directory), ("清除当前设备覆盖", self.clear_overrides)):
             window._bind(title, action)
         window.actions["虚拟手柄"].setToolTip("使用顶部所选串口打开手柄浮窗；键位在共通设置中修改。")
+        window.actions["自动连接"].setToolTip("优先尝试所选串口，再自动查找。收到伊机控 Hello 回复才连接；不会发送游戏按键。再次点击可取消或断开。")
         window.actions["手柄键位"].setToolTip("按手柄位置设置键盘映射，不打开手柄主窗口。")
         clear = next(button for button in self.card.findChildren(QPushButton) if button.text() == "清空诊断列表")
         clear.clicked.disconnect()
@@ -261,6 +262,54 @@ class Accessories(QObject):
             self.controller.set_script_observation(self.input_view)
         self.controller.open_overlay()
 
+    def auto_connect(self):
+        if self.w.running or self.w.job:
+            return
+        if self.controller is None:
+            self.controller = ControllerWindow(self.w)
+        if self.controller.job:
+            self.controller.job.cancelled.set()
+            self.w.set_status("正在取消单片机连接……")
+        elif self.controller.controller and self.controller.controller.is_connected:
+            self.controller.disconnect()
+            self.w.set_status("单片机已断开；点击“自动连接”可重新查找。")
+        else:
+            if self.controller.controller:
+                self.controller.disconnect()
+            self.controller.start_connection(automatic=True)
+        self.refresh_connection_actions()
+
+    def refresh_connection_actions(self):
+        button = self.w.actions["自动连接"]
+        connecting = bool(self.controller and self.controller.job)
+        connected = bool(self.controller and self.controller.controller and self.controller.controller.is_connected)
+        button.setText("取消连接" if connecting else "断开单片机" if connected else "自动连接")
+        button.setEnabled(not self.w.running and self.w.job is None)
+        if connecting:
+            self.w.start_button.setEnabled(False)
+
+    def connection_busy(self):
+        return bool(self.controller and self.controller.job)
+
+    def controller_connected(self, window):
+        self.w.preferred_controller_port = window.controller.port_name
+        if window.connection_auto:
+            port = window.controller.port_name
+            combo = self.w.fields["port"]
+            old = combo.currentData()
+            self.w.devices = (set(self.w.devices[0]) | {port}, self.w.devices[1])
+            with QSignalBlocker(combo):
+                index = combo.findData(port)
+                if index < 0:
+                    combo.addItem(port, port)
+                    index = combo.count() - 1
+                combo.setCurrentIndex(index)
+                combo.setEnabled(True)
+            if old != port:
+                self.w.invalidate()
+            self.w.refresh_state()
+        self.refresh_connection_actions()
+
     def open_controller_mapping(self):
         if self.controller is None:
             self.controller = ControllerWindow(self.w)
@@ -268,6 +317,9 @@ class Accessories(QObject):
 
     def port_changed(self, *_):
         if self.controller and (self.controller.controller or self.controller.job):
+            if self.controller.job:
+                self.controller.job.cancelled.set()
+            self.controller.disconnect()
             self.controller.overlay.exit_control()
             self.w.set_status("串口已切换；点击顶部“虚拟手柄”连接新串口。")
 

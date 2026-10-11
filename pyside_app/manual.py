@@ -58,6 +58,8 @@ class ControllerWindow(QDialog):
         self.shutting_down = False
         self.overlay_only = False
         self.overlay_requested = False
+        self.connection_auto = False
+        self.connection_selection_known = False
         self.keyboard_active = True
         self.mapping_path = host.paths.user / "pyside6_controller_keymap.json"
         self.mapping = dict(DEFAULT_KEYS)
@@ -149,6 +151,7 @@ class ControllerWindow(QDialog):
         super().showEvent(event)
         if self.shutting_down:
             self.shutting_down = False
+        if not self.observing:
             self.keyboard_active = True
         self.start_keyboard()
         QTimer.singleShot(0, self.pad.setFocus)
@@ -163,7 +166,7 @@ class ControllerWindow(QDialog):
 
     def report_status(self, text):
         self.status.setText(text)
-        if self.overlay_only:
+        if not self.shutting_down and (self.overlay_only or self.connection_auto):
             self.host.set_status(text)
 
     def open_overlay(self):
@@ -185,6 +188,7 @@ class ControllerWindow(QDialog):
         self.overlay.raise_()
         if self.observing:
             return
+        self.keyboard_active = True
         port = self.host.fields["port"].currentData()
         if self.controller and (not self.controller.is_connected or self.controller.port_name != port):
             self.disconnect()
@@ -212,23 +216,48 @@ class ControllerWindow(QDialog):
     def toggle_connection(self):
         if self.observing:
             return
-        if self.controller:
+        if self.controller and self.controller.is_connected:
             self.disconnect()
             return
+        if self.controller:
+            self.disconnect()
         if self.job:
+            self.job.cancelled.set()
+            self.report_status("正在取消连接……")
+            return
+        self.start_connection()
+
+    def start_connection(self, *, automatic=False):
+        if self.observing or self.job:
             return
         port = self.host.fields["port"].currentData()
-        if not port or self.host.running or self.host.job:
+        if self.host.running or self.host.job or (not automatic and not port):
             self.report_status("请先在顶部选择串口，并停止当前自动运行或预检。")
             return
-        self.connect_button.setEnabled(False)
-        self.report_status(f"正在连接 {port}……")
+        if self.controller:
+            self.disconnect()
+        self.shutting_down = False
+        self.connection_auto = automatic
+        if automatic and not self.isVisible() and not self.overlay.isVisible():
+            self.overlay_only = False
+            self.overlay_requested = False
+            self.keyboard_active = False
+            self.keyboard.stop()
+        self.connection_selection = port
+        self.connection_selection_known = True
+        self.connect_button.setText("取消连接")
+        self.report_status("正在自动查找单片机……" if automatic else f"正在连接 {port}……")
         def connect(cancel, progress):
             from easycon import EasyConController, GamePadKey
             controller = EasyConController()
             try:
-                if not controller.try_connect_port(port, controller.baudrate, timeout=1.0):
-                    raise ValueError(f"无法连接 {port}")
+                ok = controller.connect(None if automatic else port, timeout=1.0,
+                    preferred_port=port, cancel_check=cancel, progress=progress)
+                if cancel():
+                    raise ValueError("连接已取消")
+                if not ok:
+                    raise ValueError("未找到通过伊机控握手的单片机：" + controller.connection_error +
+                        "；请核对 USB/TTL 连接、固件、串口驱动，以及是否被其他伊机控或串口程序占用。")
                 return controller, GamePadKey
             except Exception:
                 controller.disconnect()
@@ -238,13 +267,21 @@ class ControllerWindow(QDialog):
         self.job_error = ""
         self.job.succeeded.connect(lambda result: setattr(self, "job_result", result))
         self.job.failed.connect(lambda error: setattr(self, "job_error", error))
+        self.job.status.connect(self.report_status)
         self.job.finished.connect(self.connected)
+        self.connection_state_changed()
         self.job.start()
 
     def connected(self):
         job, self.job = self.job, None
         self.connect_button.setEnabled(True)
-        stale = self.overlay_only and (not self.overlay_requested or (self.job_result and self.job_result[0].port_name != self.host.fields["port"].currentData()))
+        self.connect_button.setText("连接")
+        selected = None if self.shutting_down else self.host.fields["port"].currentData()
+        selection_changed = self.connection_selection_known and selected != self.connection_selection
+        stale = (self.shutting_down or job.cancelled.is_set() or self.host.running or self.observing
+            or selection_changed or (self.overlay_only and (not self.overlay_requested or
+                (not self.connection_auto and self.job_result and self.job_result[0].port_name != selected))))
+        self.connection_selection_known = False
         if stale:
             if self.job_result:
                 try:
@@ -253,15 +290,21 @@ class ControllerWindow(QDialog):
                     self.report_status(f"旧串口连接释放失败：{exc}")
             if self.overlay_requested:
                 QTimer.singleShot(0, self.retry_overlay_connection)
+            else:
+                self.report_status("连接已取消；未保留旧串口连接。")
         elif self.job_error:
             self.report_status(f"连接失败：{self.job_error}")
         else:
             self.controller, self.native = self.job_result
             self.connect_button.setText("断开")
-            self.report_status(f"手柄已连接 {self.controller.port_name}")
+            callback = getattr(getattr(self.host, "accessories", None), "controller_connected", None)
+            if callback:
+                callback(self)
+            self.report_status(f"单片机已连接 {self.controller.port_name} · {self.controller.baudrate}")
             if not self.overlay_only:
                 self.pad.setFocus()
         job.deleteLater()
+        self.connection_state_changed()
         if self.shutting_down:
             self.disconnect()
             self.close()
@@ -284,6 +327,18 @@ class ControllerWindow(QDialog):
         self.connect_button.setText("连接")
         self.report_status("手柄未连接")
         self.overlay.update()
+        self.connection_state_changed()
+
+    def connection_state_changed(self):
+        if self.shutting_down:
+            return
+        refresh = getattr(self.host, "refresh_state", None)
+        if refresh:
+            refresh()
+            return
+        callback = getattr(getattr(self.host, "accessories", None), "refresh_connection_actions", None)
+        if callback:
+            callback()
 
     def sync_direction(self):
         x, y = self.direction_vector()

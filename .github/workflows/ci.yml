@@ -42,6 +42,8 @@ jobs:
           tid_records.py
           tid_session.py
           tid_progress_logs.py
+          easycon/controller.py
+          easycon/serial_connection.py
           process_control.py
           console_output.py
           audio_observer.py

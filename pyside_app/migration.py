@@ -210,7 +210,8 @@ class CompleteWindow(FrlgWindow):
         super().refresh_state()
         if not getattr(self, "migration_ready", False):
             return
-        busy = self.running or self.job is not None
+        connecting = hasattr(self, "accessories") and self.accessories.connection_busy()
+        busy = self.running or self.job is not None or connecting
         self.profile_selector.setEnabled(self.profiles_available and not busy)
         self.profile_chip.setEnabled(not busy)
         if "监视窗口" in self.actions:
@@ -261,6 +262,8 @@ class CompleteWindow(FrlgWindow):
         self.summary_note.setMinimumHeight(max(28, self.summary_note.heightForWidth(max(180, self.summary_note.width()))))
         if hasattr(self, "app_update"):
             self.app_update.refresh()
+        if hasattr(self, "accessories"):
+            self.accessories.refresh_connection_actions()
 
     def _lock_run_inputs(self):
         super()._lock_run_inputs()

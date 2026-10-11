@@ -301,6 +301,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.devices_checked = False
         self.run_input_states = None
         self.preferred_frame_parity_scheme = 1
+        self.preferred_controller_port = ""
         self.manual_profile_draft = None
         self._settings_values = {}
         self._settings_invalid = False
@@ -708,7 +709,8 @@ class FrlgWindow(FrlgPreviewWindow):
     def refresh_state(self, *_):
         if not self.live_ready:
             return
-        busy = self.job is not None or self.running
+        connecting = hasattr(self, "accessories") and self.accessories.connection_busy()
+        busy = self.job is not None or self.running or connecting
         wild = self.input_mode == "wild"
         history_actions = {"刷新历史日志", "打开日志文件", "打开所在文件夹"}
         for title, button in self.actions.items():
@@ -774,6 +776,8 @@ class FrlgWindow(FrlgPreviewWindow):
             sidebar[1].setText("正在运行" if self.running else "方案预检通过" if valid else "使用正式 EasyCon 服务")
         self._lock_run_inputs()
         self._profile_summary()
+        if hasattr(self, "accessories"):
+            self.accessories.refresh_connection_actions()
 
     def _lock_run_inputs(self):
         if self.running:
@@ -797,6 +801,8 @@ class FrlgWindow(FrlgPreviewWindow):
 
     def launch_job(self, work, success, status, *, allow_while_running=False):
         if self.job is not None or (self.running and not allow_while_running):
+            return False
+        if hasattr(self, "accessories") and self.accessories.connection_busy():
             return False
         self.status_text = status
         job = Job(work, self)
@@ -888,7 +894,8 @@ class FrlgWindow(FrlgPreviewWindow):
             self.devices = (ports, videos)
             self.devices_checked = True
             self.updating = True
-            self._fill(self.fields["port"], [(p, p) for p in sorted(ports, key=lambda p: int(p[3:]))])
+            self._fill(self.fields["port"], [(p, p) for p in sorted(ports, key=lambda p: int(p[3:]))],
+                       preferred=self.preferred_controller_port)
             self._fill(self.fields["video"], [(f"{i} · {name}", i) for i, name in sorted(videos.items())])
             self.fields["port"].setEnabled(bool(ports))
             self.fields["video"].setEnabled(bool(videos))
@@ -1252,6 +1259,12 @@ class FrlgWindow(FrlgPreviewWindow):
             update_source = values.get("update_source", "auto")
             source_index = self.fields["update_source"].findData(update_source)
             self.fields["update_source"].setCurrentIndex(max(0, source_index))
+            preferred_port = values.get("preferred_controller_port", "")
+            if isinstance(preferred_port, str) and (not preferred_port or re.fullmatch(r"COM\d+", preferred_port, re.IGNORECASE)):
+                self.preferred_controller_port = preferred_port.upper()
+            else:
+                self._settings_invalid = True
+                self.settings_load_error = "设置字段 preferred_controller_port 必须是 COM 串口名称或空文本"
             self.label_supervision_check.setChecked(values.get("label_supervision") is True)
             togepi_mode = values.get("togepi_reverse_mode", 0)
             if type(togepi_mode) is int and togepi_mode in (0, 1):
@@ -1303,6 +1316,7 @@ class FrlgWindow(FrlgPreviewWindow):
             "record_shiny_video": self.record_shiny_video_check.isChecked(),
             "label_repair_prompt": self.label_repair_prompt_check.isChecked(),
             "preferred_frame_parity_scheme": self.preferred_frame_parity_scheme,
+            "preferred_controller_port": self.preferred_controller_port,
             "togepi_reverse_mode": self.fields["togepi_reverse_mode"].currentIndex(),
             "togepi_reverse_half_width": self.fields["togepi_reverse_adv"].text(),
         }

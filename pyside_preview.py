@@ -873,7 +873,7 @@ class FrlgPreviewWindow(QMainWindow):
         self.quick_layout.setContentsMargins(12, 8, 12, 8)
         self.quick_layout.setSpacing(10)
         self.quick_rows = []
-        for _ in range(3):
+        for _ in range(4):
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
@@ -989,7 +989,7 @@ class FrlgPreviewWindow(QMainWindow):
         tools_layout = QHBoxLayout(self.quick_tools)
         tools_layout.setContentsMargins(0, 0, 0, 0)
         tools_layout.setSpacing(8)
-        for title in ("重新检测", "虚拟手柄", "监视窗口"):
+        for title in ("重新检测", "自动连接", "虚拟手柄", "监视窗口"):
             button = _button(title, "quickToggle")
             button.setFixedSize(86, 36)
             button.setStyleSheet("min-height: 0; padding: 0 7px;")
@@ -1191,13 +1191,20 @@ class FrlgPreviewWindow(QMainWindow):
 
     def _layout_quick_settings(self) -> None:
         compact = self.width() < 1320
-        if self._quick_compact == compact:
+        narrow = self.width() < 1120
+        layout_key = compact, narrow
+        if self._quick_compact == layout_key:
             return
-        self._quick_compact = compact
+        self._quick_compact = layout_key
         for row in self.quick_rows:
             while row.layout().count():
                 row.layout().takeAt(0)
-        if compact:
+        if narrow:
+            rows = ((self.home_buffer_check, self.precalibration_check, *self.quick_device_groups),
+                    tuple(self.quick_seed_groups),
+                    (self.quick_tools,),
+                    (self.label_supervision_check, self.advanced_group, self.settings_button))
+        elif compact:
             rows = ((self.home_buffer_check, self.precalibration_check, *self.quick_device_groups),
                     tuple(self.quick_seed_groups),
                     (self.quick_tools, self.label_supervision_check, self.advanced_group, self.settings_button))
@@ -1211,10 +1218,12 @@ class FrlgPreviewWindow(QMainWindow):
             if index >= len(rows):
                 continue
             for widget in rows[index]:
-                if compact and index == 2 and widget is self.advanced_group:
+                if compact and widget is self.advanced_group:
                     row.layout().addStretch(1)
                 row.layout().addWidget(widget, 1 if widget in flexible else 0)
                 widget.show()
+            if narrow and index == 2:
+                row.layout().addStretch(1)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

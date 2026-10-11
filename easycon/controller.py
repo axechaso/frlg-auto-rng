@@ -7,6 +7,7 @@ import serial.tools.list_ports
 
 from .protocol import GamePadKey, Direction, SwitchButton, SwitchHAT, SwitchStick, SwitchReport
 from .serial_transport import EzDvCommand, Reply
+from .serial_connection import open_handshaken_port, ordered_ports
 
 
 def sleep(seconds: float, end: Optional[float] = None) -> None:
@@ -59,7 +60,11 @@ class EasyConController:
         self.serial_dev: Optional[serial.Serial] = None
         self.port_name: Optional[str] = None
         self.baudrate = 115200
-        self.baudrate_fallbacks = [9600, 57600, 38400, 19200]  # 覆盖多种固件波特率
+        self.baudrate_fallbacks = [9600]  # 与固定 EasyCon 164a 的 TryConnect 一致
+        self.connection_error = ""
+        self._connection_generation = 0
+        self._connection_lock = threading.RLock()
+        self._connect_gate = threading.Lock()
         self.connected_flag = False
         self.io_lock = threading.Lock()
         self.debug_flag = False
@@ -79,154 +84,93 @@ class EasyConController:
     def list_ports(self) -> List[str]:
         return [p.device for p in serial.tools.list_ports.comports()]
 
-    def connect(self, port: Optional[str] = None, timeout: float = 2.0) -> bool:
-        if port is None:
-            # ── 自动搜索：分类端口，USB 优先，蓝牙后试 ──
-            all_ports = list(serial.tools.list_ports.comports())
-            usb_ports = []
-            bt_ports = []
-            for p in all_ports:
-                hwid = (p.hwid or "").upper()
-                if "BTHENUM" in hwid or "RFCOMM" in hwid:
-                    bt_ports.append(p.device)
-                else:
-                    usb_ports.append(p.device)
-
-            if self.debug_flag:
-                print(f"USB ports: {usb_ports}, BT ports: {bt_ports}")
-
-            # 1) USB 端口 + 主波特率（覆盖绝大多数情况，最快命中最优端口）
-            for p in usb_ports:
-                if self.try_connect_port(p, self.baudrate, timeout):
-                    return True
-
-            # 2) USB 端口 + 回退波特率（固件可能用了非标波特率）
-            for baud in self.baudrate_fallbacks:
-                for p in usb_ports:
-                    if self.try_connect_port(p, baud, timeout):
-                        return True
-
-            # 3) 蓝牙端口 + 主波特率（极少数改蓝牙方案的控制器）
-            for p in bt_ports:
-                if self.try_connect_port(p, self.baudrate, timeout):
-                    return True
-
-            # 4) 蓝牙端口 + 回退波特率
-            for baud in self.baudrate_fallbacks:
-                for p in bt_ports:
-                    if self.try_connect_port(p, baud, timeout):
-                        return True
-
+    def connect(self, port: Optional[str] = None, timeout: float = 1.0, *,
+                preferred_port=None, cancel_check=lambda: False, progress=lambda _text: None) -> bool:
+        """Only adopt a verified device; explicit ports never scan other ports."""
+        if not self._connect_gate.acquire(blocking=False):
+            self.connection_error = "连接正在进行，请勿重复连接"
             return False
-        # 指定端口：先尝试主波特率，再回退。
-        # 使用线程超时保护，模仿 C# 版 _TryConnect + WaitOne(1000) 模式，
-        # 防止 ser.open() 在死端口（如蓝牙串口）上长时间阻塞（Windows 默认 DCOM 超时 5s）。
-        if self._try_connect_with_timeout(port, self.baudrate, timeout):
-            return True
-        for baud in self.baudrate_fallbacks:
-            if self._try_connect_with_timeout(port, baud, timeout):
-                return True
-        return False
-
-    def try_connect_port(self, port: str, baudrate: int, timeout: float) -> bool:
         try:
-            if self.debug_flag:
-                print(f"Trying {port}@{baudrate}...")
-
-            # 关键修复：先创建 Serial 对象（不打开），设置 DTR/RTS 为低电平，
-            # 再手动打开串口。避免 pyserial 默认 DTR=True 触发 CH340/Arduino
-            # 兼容板的自动复位（auto-reset），导致握手失败。
-            ser = serial.Serial()
-            ser.port = port
-            ser.baudrate = baudrate
-            ser.timeout = 0.1
-            ser._dtr_state = False
-            ser._rts_state = False
-            ser.open()
-
-            ser.reset_input_buffer()
-
-            hello_bytes = bytes([EzDvCommand.Ready, EzDvCommand.Ready, EzDvCommand.Hello])
-            dead_air_wait = 0.15  # 首轮快速等待，适配无自动复位的 MCU
-
-            for attempt in range(2):
-                ser.reset_input_buffer()
-                ser.write(hello_bytes)
-
-                if self.debug_flag:
-                    print(f"[{port}] >> {' '.join(f'{b:02X}' for b in hello_bytes)}")
-
-                deadline = time.time() + (timeout if attempt > 0 else dead_air_wait)
-                response = b''
-                while time.time() < deadline:
-                    if ser.in_waiting:
-                        response += ser.read(ser.in_waiting)
-                        break
-                    time.sleep(0.05)
-
-                if self.debug_flag:
-                    print(f"[{port}] << {' '.join(f'{b:02X}' for b in response) if response else '(无数据)'}")
-
-                if len(response) >= 1 and response[0] == Reply.Hello:
-                    if self.debug_flag:
-                        print(f"Connected to {port}@{baudrate}")
-                    self.serial_dev = ser
-                    self.port_name = port
-                    self.baudrate = baudrate
-                    self.connected_flag = True
-                    self.startio_thread()
-                    return True
-
-                # 首轮未响应：可能是自动复位还在启动，等够再试一次
-                if attempt == 0 and not response:
-                    time.sleep(max(0, timeout - dead_air_wait - 0.1))
-
-            if self.debug_flag:
-                print(f"No valid handshake on {port}@{baudrate}")
-            ser.close()
+            self.disconnect()
+            generation = self._connection_generation
+            cancelled = lambda: cancel_check() or generation != self._connection_generation
+            ports = [port] if port else ordered_ports(preferred_port)
+            if not ports:
+                self.connection_error = "未发现串口，请检查 USB 线、串口驱动和单片机供电"
+                return False
+            for candidate in ports:
+                for baudrate in (115200, *self.baudrate_fallbacks):
+                    if baudrate == 9600:
+                        # Fixed 164a leaves 100 ms before reopening at 9600.
+                        retry_at = time.monotonic() + .1
+                        while time.monotonic() < retry_at:
+                            if cancelled():
+                                self.connection_error = "连接已取消"
+                                return False
+                            time.sleep(.01)
+                    if cancelled():
+                        self.connection_error = "连接已取消"
+                        return False
+                    progress(f"正在握手 {candidate} · {baudrate}……")
+                    if self.try_connect_port(candidate, baudrate, timeout, cancel_check=cancelled):
+                        return True
+                    progress(f"{candidate} · {baudrate}：{self.connection_error}")
             return False
+        finally:
+            self._connect_gate.release()
 
-        except Exception as e:
+    def try_connect_port(self, port: str, baudrate: int, timeout: float, *, cancel_check=lambda: False) -> bool:
+        generation = self._connection_generation
+        cancelled = lambda: cancel_check() or generation != self._connection_generation
+        connection = None
+        try:
+            connection = open_handshaken_port(port, baudrate, timeout, cancelled=cancelled)
+            with self._connection_lock:
+                if cancelled():
+                    raise RuntimeError("连接已取消")
+                if self.serial_dev is not None:
+                    raise RuntimeError("已有连接，请先断开")
+                self.serial_dev = connection
+                self.port_name = port
+                self.baudrate = baudrate
+                self.connected_flag = True
+                self.connection_error = ""
+                self.startio_thread()
+                connection = None
+            return True
+        except Exception as exc:
+            with self._connection_lock:
+                if connection is not None and self.serial_dev is connection:
+                    try:
+                        self.disconnect()
+                    finally:
+                        connection = None
+            self.connection_error = str(exc)
             if self.debug_flag:
-                print(f"Failed to connect {port}: {e}")
+                print(f"Failed to connect {port}: {exc}")
             return False
+        finally:
+            if connection is not None:
+                connection.close()
 
     def _try_connect_with_timeout(self, port: str, baudrate: int, timeout: float) -> bool:
-        """带线程超时保护的端口探测。
-        
-        模仿 C# 版 _TryConnect 的 Task.Run + WaitOne(timeout) 模式：
-        将 ser.open() + 握手放在 daemon 线程中执行，主线程等待超时后返回。
-        这样即使 ser.open() 在死端口上阻塞 5s（Windows DCOM 超时），
-        主线程也不会被卡住。
-        """
-        result: list = []
-        ready = threading.Event()
-
-        def worker():
-            try:
-                result.append(self.try_connect_port(port, baudrate, timeout))
-            except Exception:
-                result.append(False)
-            finally:
-                ready.set()
-
-        t = threading.Thread(target=worker, daemon=True)
-        t.start()
-        # 总超时 = 握手 timeout + 2s 余量（ser.open() + C# WaitOne 风格保护）
-        if not ready.wait(timeout=timeout + 2.0):
-            return False
-        return result[0] if result else False
+        return self.try_connect_port(port, baudrate, timeout)
 
     def disconnect(self):
-        self.connected_flag = False
-        self.io_running = False
-        with self.io_cond:
-            self.io_cond.notify()
-        if self.io_thread and self.io_thread.is_alive():
-            self.io_thread.join(timeout=2.0)
-        if self.serial_dev:
-            self.serial_dev.close()
-            self.serial_dev = None
+        with self._connection_lock:
+            self._connection_generation += 1
+            self.connected_flag = False
+            self.io_running = False
+            with self.io_cond:
+                self.report_state.reset()
+                self.report_state_dirty = False
+                self.io_cond.notify()
+            if self.io_thread and self.io_thread.is_alive():
+                self.io_thread.join(timeout=2.0)
+            connection, self.serial_dev = self.serial_dev, None
+            self.port_name = None
+            if connection:
+                connection.close()
 
     def startio_thread(self):
         if self.io_thread and self.io_thread.is_alive():

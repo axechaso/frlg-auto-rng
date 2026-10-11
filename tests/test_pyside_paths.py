@@ -199,6 +199,7 @@ class StartupPathTests(unittest.TestCase):
                 "record_shiny_video": True,
                 "label_repair_prompt": True,
                 "preferred_frame_parity_scheme": 1,
+                "preferred_controller_port": "",
                 "togepi_reverse_mode": 0,
                 "togepi_reverse_half_width": "5000",
             })
