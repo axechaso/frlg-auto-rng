@@ -126,6 +126,13 @@ jobs:
           automation/seed_common_regions.py
           automation/starter_calibration.py
           automation/script_test.py
+          automation/eontimer_core.py
+          automation/eontimer_comparison.py
+          automation/eontimer_test.py
+          automation/eontimer_test_report.py
+          pyside_app/eontimer_test.py
+          tools/eontimer_comparison.py
+          tools/verify_eontimer_test.py
           automation/sid_reverse118.py
           automation/tid_rng137.py
           automation/tid_bootstrap.py
@@ -194,6 +201,8 @@ jobs:
           tests.test_sid_training_test
           tests.test_starter_sid_verification
           tests.test_script_test
+          tests.test_eontimer_comparison
+          tests.test_eontimer_test
           tests.test_save_profiles
           tests.test_seed_table_updater
           tests.test_seed_common_regions

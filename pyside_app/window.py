@@ -310,6 +310,8 @@ class FrlgWindow(FrlgPreviewWindow):
         self.all_history_rows = []
         self.history_rows = []
         self.history_controller = HistoryController(self)
+        from .eontimer_test import EonTimerController
+        self.eontimer_controller = EonTimerController(self)
         self.profile_store = SaveProfileStore(self.paths.user / "save_profiles.json")
         self.profiles_available = True
         self.record_store = TidRecordStore(self.paths.user / "tid_records.sqlite3")
@@ -671,9 +673,22 @@ class FrlgWindow(FrlgPreviewWindow):
         )
         video = f["video"].currentData()
         capture_name = self.devices[1].get(video, "")
+        eontimer = self.eontimer_test_check.isChecked()
+        template = EGG_TEMPLATE_NAME if f["script_entry"].currentIndex() == 1 else STANDARD_TEMPLATE_NAME
+        if eontimer:
+            from automation.eontimer_test import test_options, validate_test_request
+            validate_test_request(request, options, advanced=advanced)
+            if request.direct_mode and request.direct_advances >= 14400:
+                raise ValueError("EonTimer 临时测试不使用 TV，请指定小于 14400 的消耗帧")
+            if not request.direct_mode:
+                if request.min_advances >= 14400:
+                    raise ValueError("EonTimer 临时测试不使用 TV，请把最小消耗帧设为小于 14400")
+                from dataclasses import replace
+                request = replace(request, max_advances=min(request.max_advances, 14399))
+            options = test_options(options)
+            template = EGG_TEMPLATE_NAME
         return WildInputs(request, options, Path(f["source"].text()), Path(f["ezcon"].text()),
-                          EGG_TEMPLATE_NAME if f["script_entry"].currentIndex() == 1 else STANDARD_TEMPLATE_NAME,
-                          advanced, capture_name)
+                          template, advanced, capture_name, eontimer)
 
     def invalidate(self, *_):
         if not self.live_ready or self.updating:
@@ -778,6 +793,8 @@ class FrlgWindow(FrlgPreviewWindow):
         self._profile_summary()
         if hasattr(self, "accessories"):
             self.accessories.refresh_connection_actions()
+        if hasattr(self, "eontimer_controller"):
+            self.eontimer_controller.availability()
 
     def _lock_run_inputs(self):
         if self.running:
@@ -875,6 +892,8 @@ class FrlgWindow(FrlgPreviewWindow):
                 f"初始 Seed：{plan.initial_seed.seed}；Advance：{plan.initial_seed.advances}；Seed 模式：{display_mode}",
                 ("指定模式不计算个体 / 闪光；" if plan.request.direct_mode else f"IV 合计：{plan.iv_total}；") + f"路线：{plan.route_support.summary}",
                 f"计划：{prepared.plan_path}", f"脚本：{prepared.project or '未生成'}"]
+        if prepared.inputs.eontimer_test:
+            text.insert(0, "EonTimer 临时测试：GBA / Custom 自动计时与唯一反查校准；时间轴入口，无菜单 / TV，普通预校准不参与。")
         text.extend(f"提示：{x}" for x in (*plan.warnings, *prepared.check.warnings))
         text.extend(f"预检未通过：{x}" for x in prepared.check.errors)
         self.result_panel.setPlainText("\n".join(text))
@@ -946,6 +965,11 @@ class FrlgWindow(FrlgPreviewWindow):
                 self.devices[1][video],
                 command.check.warnings,
             )
+            if prepared.inputs.eontimer_test:
+                prompt = ('<p style="background:#fff0d2; color:#995300; padding:10px;">'
+                          '<b>EonTimer 临时测试</b>：本次由 GBA / Custom 规则计时与校准。'
+                          '搜索范围临时限制到 14400 帧以下，不执行菜单调整、TV 过帧，不读取或写回普通预校准。'
+                          '对照列只按相同观测计算，不代表另一次伊机控实跑。</p>') + prompt
             if not self._confirm_wild_start(prompt):
                 self.set_status("预检通过，等待开始运行。")
                 return
@@ -1000,6 +1024,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self.running_prepared = prepared_wild
         self.running_workflow = prepared_workflow
         self._begin_run_notification()
+        self.eontimer_controller.begin(command, prepared_wild)
         self.decoder.reset()
         self.pending_output = ""
         self.pending_visible = False
@@ -1091,6 +1116,7 @@ class FrlgWindow(FrlgPreviewWindow):
         old = bar.value()
         self._remove_pending_log_line()
         for line in pieces:
+            self.eontimer_controller.consume(line)
             if hasattr(self, "accessories") and self.accessories.consume_input_session_marker(line):
                 continue
             cleaned = display_log_line(line)
@@ -1142,6 +1168,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self._read_output()
         self._append_log(self.decoder.decode(b"", final=True), final=True)
         self.running = False
+        self.eontimer_controller.finish()
         flow_text = "\n".join(line for line in self.log_view.toPlainText().splitlines() if not line.startswith(LOG_PREFIX))
         fatal_output = easycon_log_has_fatal_error(flow_text)
         prepared = getattr(self, "running_prepared", None)
@@ -1189,6 +1216,7 @@ class FrlgWindow(FrlgPreviewWindow):
         self._run_terminal_handled = True
         self.running = False
         self._append_log(f"\n[启动失败] {message}\n")
+        self.eontimer_controller.finish()
         if self.run_command is not None:
             try:
                 self.run_command.log_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,114 @@
+# EONTIMER_GBA_CUSTOM_TEST_V1
+# Temporary generated-project adapter; never imported into the mother scripts.
+# EonTimer 3.0.0-rc.8 GBA: 59.7275 FPS = 23891/400.
+# F1/F2 Targets below are GBA frames. Final FRLG F2 RNG errors advance twice
+# per GBA frame, so normalize the observation before applying Custom Update.
+$EON已初始化 = 0
+$EONSeed校准MS = 0
+$EONF1目标帧 = 0
+$EONF2目标帧 = 0
+$EONF2校准MS = 0
+$EON更新次数 = 0
+$EON跳过次数 = 0
+
+FUNC EON换算毫秒($帧: INT, $倍率: INT): INT
+    IF $倍率 != 1 and $倍率 != 2
+        RETURN -1
+    ENDIF
+    IF $帧 < -1000000 or $帧 > 1000000
+        RETURN -1
+    ENDIF
+    $符号 = 1
+    IF $帧 < 0
+        $符号 = -1
+        $帧 = 0 - $帧
+    ENDIF
+    $分母 = 23891 * $倍率
+    $整部 = $帧 / $分母 * 400000
+    $余部 = $帧 % $分母
+    $乘数 = 400000 / $分母
+    $乘余 = 400000 % $分母
+    $结果 = $整部 + $余部 * $乘数 + $余部 * $乘余 / $分母
+    $舍入余 = $余部 * $乘余 % $分母
+    IF $舍入余 * 2 > $分母 or ($舍入余 * 2 == $分母 and $结果 % 2 != 0)
+        $结果 += 1
+    ENDIF
+    RETURN $结果 * $符号
+ENDFUNC
+
+FUNC EON除二($帧: INT): INT
+    $结果 = $帧 / 2
+    IF $帧 % 2 != 0 and $结果 % 2 != 0
+        $结果 += 1
+    ENDIF
+    RETURN $结果
+ENDFUNC
+
+FUNC EON应用计时(): INT
+    $EONSeed请求 = $目标SeedMS + $EONSeed校准MS
+    $EONF1请求 = EON换算毫秒($EONF1目标帧, 1)
+    $EONF2请求 = EON换算毫秒($EONF2目标帧, 1) + $EONF2校准MS
+    IF $EONSeed请求 <= 0 or $EONF1请求 < $F1阶段脚本固定延迟 or $EONF2请求 < $F2阶段脚本固定延迟
+        PRINT EonTimer测试停止：校准后的截止点早于可执行的固定动作，请选择更高的目标帧；不回退普通计时
+        RETURN 0
+    ENDIF
+    $SeedMS = $EONSeed请求
+    $F1等待MS = $EONF1请求 - $F1阶段脚本固定延迟
+    $F2等待MS = $EONF2请求 - $F2阶段脚本固定延迟
+    $TV等待MS = 0
+    $TV等待帧 = 0
+    $帧轴菜单奇偶开关 = 0
+    RETURN 1
+ENDFUNC
+
+FUNC 重新计算等待参数(): INT
+    $EON基线结果 = EON伊机控等待参数()
+    IF $EON基线结果 == 0
+        PRINT EonTimer测试停止：原始目标无法分配等待参数
+        RETURN 0
+    ENDIF
+    IF $进入TV != 0 or $静态或野生 == "孵蛋" or $道具乱数模式 != 0
+        PRINT EonTimer测试停止：本次不支持TV、孵蛋或道具乱数
+        RETURN 0
+    ENDIF
+    IF $EON已初始化 == 0
+        $EONF1目标帧 = $F1阶段脚本固定帧 + $F1等待帧
+        $EONF2目标帧 = EON除二($F2阶段脚本固定帧 + $F2等待帧)
+        $EONSeed校准MS = $SeedMS - $目标SeedMS
+        $EON已初始化 = 1
+        PRINT "EONTEST|V=1|TYPE=INIT|SEED_TARGET=" & $目标SeedMS & "|ADV_TARGET=" & $目标消耗帧 & "|F1_TARGET=" & $EONF1目标帧 & "|F2_TARGET=" & $EONF2目标帧 & "|SEED_CAL=" & $EONSeed校准MS & "|F2_CAL=0|MULTIPLIER=2|END=1"
+        PRINT EonTimer测试：参数已自动换算；F1固定，最终反查帧偏差用于F2；不使用菜单或TV，不保存普通预校准
+    ENDIF
+    RETURN EON应用计时()
+ENDFUNC
+
+FUNC 执行自动校准与等待更新(): INT
+    $EON本轮 = $循环计数
+    $EON已执行Seed = $SeedMS
+    $EON已执行F1 = $F1阶段脚本固定延迟 + $F1等待MS
+    $EON已执行F2 = $EON已执行F1 + $F2阶段脚本固定延迟 + $F2等待MS
+    # The original controller only computes a same-observation comparison.
+    # Its returned requests are never executed in this test mode.
+    $EON基线结果 = EON伊机控自动校准()
+    $EON伊机控Seed = $SeedMS
+    $EON伊机控F1 = $F1阶段脚本固定延迟 + $F1等待MS
+    $EON伊机控F2 = $EON伊机控F1 + $F2阶段脚本固定延迟 + $F2等待MS
+    $EON本轮更新 = 0
+    IF $本轮候选命中计数 == 1 and $本轮真值解 == 1
+        $EONSeed校准MS += $目标SeedMS - $命中SeedMS
+        $EONF2校准MS += EON换算毫秒($目标消耗帧 - $命中消耗帧, 2)
+        $EON更新次数 += 1
+        $EON本轮更新 = 1
+    ELSE
+        $EON跳过次数 += 1
+        PRINT EonTimer测试：本轮没有独立唯一反查结果，保持当前Calibration
+    ENDIF
+    $EON应用结果 = EON应用计时()
+    $EON下轮F1 = $F1阶段脚本固定延迟 + $F1等待MS
+    $EON下轮F2 = $EON下轮F1 + $F2阶段脚本固定延迟 + $F2等待MS
+    PRINT "EONTEST|V=1|TYPE=ROUND|ROUND=" & $EON本轮 & "|CANDIDATES=" & $本轮候选命中计数 & "|TRUTH=" & $本轮真值解 & "|UPDATED=" & $EON本轮更新 & "|HIT_SEED=" & $命中SeedMS & "|HIT_ADV=" & $命中消耗帧 & "|USED_SEED=" & $EON已执行Seed & "|USED_F1=" & $EON已执行F1 & "|USED_F2=" & $EON已执行F2 & "|BASE_SEED=" & $EON伊机控Seed & "|BASE_F1=" & $EON伊机控F1 & "|BASE_F2=" & $EON伊机控F2 & "|NEXT_SEED=" & $SeedMS & "|NEXT_F1=" & $EON下轮F1 & "|NEXT_F2=" & $EON下轮F2 & "|SEED_CAL=" & $EONSeed校准MS & "|F2_CAL=" & $EONF2校准MS & "|APPLIED=" & $EON应用结果 & "|END=1"
+    IF $EON应用结果 == 0 or $EON基线结果 == 0
+        RETURN 0
+    ENDIF
+    RETURN 1
+ENDFUNC

@@ -1,86 +1,77 @@
-# EonTimer 独立对照测试
+# EonTimer 临时计时对照测试
 
-本测试只用来比较 **EonTimer 校准后的时间轴** 与 **伊机控校准后的时间轴**。不接入正式流程，不生成或改写 ECS，不更换运行器，不连接单片机，也不读取或写回普通预校准配置。之前试作的第三运行后端、原生计时补丁和自动执行接线已撤回。
+最新范围（2026-10-12）：用户希望在工具内自动完成，并同意临时接入计时以供测试。现在不需要手填 EonTimer 或运行命令。默认关闭，只改变新生成的测试工程，不替换正式算法或运行器。
 
-## 先在 EonTimer 中设置
+## 工具内使用
 
-使用桌面版 EonTimer，设置 Console 为 **GBA**，打开 **Custom** 页。保持同一目标 Seed、消耗帧、游戏设置与计时原点，本次不加菜单调整，也不使用 TV 过帧。
+1. 开启顶部“高级模式”。进入“运行日志”，展开“EonTimer 临时对照测试”，勾选“使用 EonTimer GBA / Custom 计时（临时测试）”。
+2. 返回“野生 / 静态”页，正常搜索并生成，或指定同一个 Seed / 消耗帧生成。工具自动使用2.0时间轴入口，不需要另外填写 F1/F2。
+3. 正常“开始运行”。确认弹窗明确标出测试模式。第0轮测量固定动作后自动生成Seed、F1、F2的Custom Target；后续实际等待使用GBA换算与Calibration。
+4. 在运行日志页点“查看 EonTimer 自动对照”。窗口可在运行中打开，显示本轮采用的请求截止点、反查结果、当前校准、下轮截止，以及同观测伊机控计算的差值。
 
-| 阶段 | Unit | Target 填什么 | 结束动作 |
-| --- | --- | --- | --- |
-| Seed | ms | 对应 Seed 表查到的目标毫秒 | 封面确认 |
-| F1 | Advances | 手工分配的 F1 目标帧 | 进入存档 |
-| F2 | Advances | 手工分配的 F2 目标帧 | 触发目标 |
+测试开关只在本次工具启动期间有效，不持久化为默认。关闭开关后重新生成，恢复原计时与用户原来的预校准选择。不能在脚本运行中切换。
 
-F1/F2 用用户给定的目标帧，按 EonTimer 的 GBA 规则换算，不套伊机控旧的 60/120 换算。**不要把完整目标消耗帧又作为额外 F2，加到一个已包含它的 F1 后面。** 最终反查目标消耗帧另外记录，不根据 F1/F2 的名字或数值自动猜测。
+本次只支持独立野生 / 静态时间轴测试，包括日版御三家。搜索最高消耗帧临时限制为14399；指定模式若达到14400则明确拒绝，不自动换目标。TV、菜单奇偶调整、已开启神秘礼物的存档、孵蛋、波克比孵化、游走、狩猎区、道具乱数、SID遍历、TID与SID采集、自选ECS均不接入。
 
-教程使用 Seed 毫秒 + Advances 两段。若不需要单列 F1，助手中设置 `--f1 0`，EonTimer 中省略 F1 这一行；F2 使用完整目标 Advances。需要三段对照时，由用户先确定 F1/F2 的分配与对应动作。
+## 自动目标与校准
 
-两边均以脚本 **Seed 计时开始的位置** 为0（对应 `$time_start`），不是按 NS 电源键的时刻。HOME_BUFFER 校准、关闭游戏和额外预备倒计时不计入这个原点；必须在相同动作上启动两边的 Seed 计时，才能比较后续截止。
+采用固定桌面版EonTimer `3.0.0-rc.8` 的GBA / Custom算术：GBA59.7275 FPS；目标帧换算毫秒使用四舍六入五成双，Calibration按目标减实际逐轮累加。
 
-Seed 的 Target **不是十六进制 Seed 本身**。比如 Seed `EDDE` 的毫秒必须查对应表，不能把 `EDDE` 当作 Custom 的数值帧数。
+| 阶段 | 自动取得的Target | 校准来源 |
+| --- | --- | --- |
+| Seed | 本机型、语言、设置的Seed表毫秒 | 目标Seed毫秒 − 唯一反查Seed毫秒 |
+| F1 | 首轮固定帧 + 首次分配的F1等待帧，作为GBA目标帧 | 固定此目标，不伪造独立F1反查结果 |
+| F2 | 首轮固定帧 + 首次分配的F2等待帧，先归一成GBA目标帧 | 最终反查ADV误差归一成GBA帧后换算毫秒 |
 
-## 用反查结果校准
-
-先取得唯一反查结果，再记下实际 Seed 对应的毫秒与实际消耗帧。每次基于 EonTimer **当前 Calibration** 累加，不把之前的修正清零。
-
-```text
-Seed新Calibration = 当前Calibration + (目标Seed毫秒 - 实际Seed毫秒)
-F2新Calibration   = 当前Calibration + round((目标消耗帧 - 实际消耗帧) × 1000 / 59.7275)
-F1Calibration     = 保持当前手工设置
-```
-
-`round` 与桌面版源码一致，使用四舍六入五成双。实际偏晚就减等待，偏早就加等待。
-
-在 EonTimer 中直接使用 Update 时：
-
-- Seed 的 Hit 填实际 Seed 毫秒。
-- 两段测试且 `F2 Target = 最终目标消耗帧` 时，F2 的 Hit 直接填实际消耗帧。
-- 已经单列 F1 时，F2 的等效 Hit 为 `F2 Target + 实际消耗帧 - 最终目标消耗帧`。不要把最终总消耗帧误当成 F2 这一段的 Hit。也可以直接填写上式算出的新 Calibration。
-- 最终反查只给出总帧偏差，不能独立推算 F1 实测帧；本次固定 F1，把最终帧偏差用于 F2 校准。候选不唯一时先细分 IV，不使用“优先候选”当作唯一结果。
-
-## 独立计算助手
-
-源码根目录运行以下命令即可列出应填数值、各段时长与相对共同起点的累计截止。它只打印结果，不启动游戏或计时器。
-
-```powershell
-.\.venv\Scripts\python.exe tools\eontimer_comparison.py --seed-ms 30000 --f1 0 --f2 2000 --target-advances 2000
-```
-
-以上是演示数值，请替换为实际目标。三段测试时填写自己分配的 `--f1`、`--f2`。已有修正用 `--seed-cal`、`--f1-cal`、`--f2-cal` 填当前 Calibration（单位均为毫秒）。
-
-例如唯一反查得到 Seed `30020 ms`、消耗帧 `2002`：
-
-```powershell
-.\.venv\Scripts\python.exe tools\eontimer_comparison.py --seed-ms 30000 --f1 0 --f2 2000 --target-advances 2000 --hit-seed-ms 30020 --hit-advances 2002 --candidates 1
-```
-
-本例输出 Seed 新校准 `-20 ms`、F2 新校准 `-33 ms`。下轮须把这些当前校准值带上，再输入下一轮实际结果；助手不会自行持久化或自动执行。
-
-## 对比伊机控的已校准时间轴
-
-从同目标的无菜单/TV时间轴日志选择校准完成后的样本：
-
-```powershell
-.\.venv\Scripts\python.exe tools\eontimer_comparison.py --seed-ms 30000 --f1 0 --f2 2000 --target-advances 2000 --seed-cal -20 --f2-cal -33 --easycon-log 'D:\实际工程\easycon.log' --round 5
-```
-
-`--round` 指日志中第几个 **完整 Seed/F1/F2 时间轴样本**，从1开始；不是含第0轮设置检测的游戏轮号。日志有多个完整样本时必须指定，不能默认拿最后一条就当作校准完成。原日志保持只读。可用 `--output 'D:\测试\对照.json'` 另存一份新记录；已有文件拒绝覆盖。
-
-伊机控当前日志的三个计划值分别为：
+此模板F2的最终RNG计数每GBA帧推进2次，因此F2目标先除2并取整；反查误差也除2后换算，奇数误差保留半帧的毫秒影响。这个步骤是观测单位对齐，不是把GBA设成120FPS。F1/F2计时时长均直接由各自GBA目标帧按59.7275 FPS计算，不使用旧模板的60/120毫秒转换作为EonTimer计时核心。
 
 ```text
-Seed绝对时间轴: 请求...ms               相对于Seed计时开始
-F1绝对时间轴: 目标...ms                 相对于Seed确认
-F2绝对时间轴计划: 自Seed确认起...ms      同样相对于Seed确认
+Seed Calibration += 目标Seed毫秒 - 命中Seed毫秒
+F2 Calibration   += round((目标ADV - 命中ADV) × 1000 / 59.7275 / 2)
+F1 Calibration   = 0（保持初始化的Target）
 ```
 
-助手统一到“Seed计时开始为0”的截止点再比较。F2 计划已含 F1，**不能再加一次 F1**。输出正差值表示 EonTimer 计划更晚，负值表示更早。不会用不同轮的残缺行拼出假时间轴，也不会把缺少完整三项的旧日志强行换算。
+Seed初始Calibration沿用脚本的固定基础补偿与本次第0轮测到的命令开销修正，不读取历史预校准。用户普通预校准开关/配置的值不被改写；测试生成使用独立选项，不读取记录，也不输出普通成功写回标记。
 
-这只能回答两套校准最后落在什么计划时间点、相差多少毫秒；不能把软件计划当成 Switch 收键时间，也不能只凭时间接近宣称命中率已提高。下一步是否改正式算法，应由同条件实测的收敛轮数、稳定误差和命中结果决定。
+只有候选数1且本轮真值解1才更新；非唯一候选、投票优先候选、只同Seed或只同ADV不会作为完整反查结果更新。原有识图、糖果细分和反查搜索保持不变。
 
-## 对照来源
+校准后Seed必须为正，F1/F2截止不得早于固定操作能到达的时间。不可执行时停止，不悄悄回退普通计时；原日志和现场按已有终止流程保留。Blackout和启动模式保留原有最短时间检查。原有“停止EasyCon”、标签故障保护和非目标闪光行为不变。
 
-- [Retail RNG 火红/叶绿定点教程](https://retailrng.com/frlg/beginner/frlgstatic/)：Custom 以 Seed 毫秒、Advances 设置计时，唯一反查后 Update；接近后只在持续偏早/偏晚时继续调校。
-- [EonTimer GBA 设置](https://github.com/DasAmpharos/EonTimer/blob/ead211d6e4251c4f08345cc9e56e76d3cb2a29bd/eon_timer/settings/timer/model.py)、[换算核心](https://github.com/DasAmpharos/EonTimer/blob/ead211d6e4251c4f08345cc9e56e76d3cb2a29bd/eon_timer/timers/calibrator.py)、[Custom 校准](https://github.com/DasAmpharos/EonTimer/blob/ead211d6e4251c4f08345cc9e56e76d3cb2a29bd/eon_timer/timers/custom/custom_phase_widget.py)：固定桌面版 `3.0.0-rc.8` 提交，GBA 为59.7275 FPS，校准累加目标减实测的毫秒差。只参考算术，不移植计时执行器。
-- MIT 原许可与归属见 [EonTimer-LICENSE.md](../third_party/EonTimer-LICENSE.md)。
+## 对照含义与记录
+
+共同原点为脚本Seed计时开始（`time_start`），不是NS电源键。F1、F2原日志都相对Seed确认；F2已经包含F1，不能重复相加。报告统一到共同原点：
+
+报告中的时间轴是已采用/待采用的请求截止点，不是按键实际发送时间戳；超时和实际观测仍以原日志为证据。
+
+```text
+Seed截止 = Seed请求
+F1截止   = Seed请求 + F1阶段时长
+F2截止   = Seed请求 + F1阶段时长 + F2阶段时长
+```
+
+测试保留原伊机控控制器，只用同一批观测计算对照值，不执行它输出的等待。因此“伊机控对照”不等于另一组普通模式的实机已校准结果，不证明新计时更稳定。真正A/B须用相同目标、存档、机型、语言、设置、标签和设备，分别运行普通模式与测试模式，再比较收敛轮数、误差和命中。
+
+结束后自动在原日志旁新建`*.eontimer.json`，绑定本次run ID。原日志、计划和普通预校准不覆盖；已有同名报告拒绝覆盖并在窗口提示。原始`EONTEST|V=1`标记含完整参数和轮次，GUI按完整行增量解析，重复轮次、残缺/冲突字段、错误校准或时间点不一致均显示证据无效，不把它当作已校准成功。界面保留最近500轮，原日志保留完整证据。
+
+## 实现与验收
+
+- `automation/eontimer_test.py`仅在新UUID工程中注入`assets/eontimer_test/runtime.ecs`；母本、库、标签、正式运行器不变。生成后登记脚本与扩展摘要，开始前校验。指纹差异沿用用户已有的高级模式“只警告”规则；缺少测试标记、混入普通模式、无效配置仍拒绝，不能把它们当成指纹警告。
+- 使用原时间轴的绝对等待执行器，新增的是GBA目标/Custom校准算术，不移植外部Qt倒计时、提示音或新单片机协议。
+- Native检查器完整绑定编译实际生成工程，再以无硬件ECS执行验证换算、累加、唯一门控、不可执行停止；生产PRINT标记再交Python解析。测试夹具不是实际搜索到的闪光目标，不用于实机结果证明。
+
+2026-10-12离线验收：全量1060项回归通过（1070.747秒），最终指纹政策另经136项定向回归通过，最终文案与报告字段另经6项解析回归通过；当前语料、同步前备份各生成英版野生/定点及日版御三家×两机型，共12份工程通过固定164a完整绑定编译，每组436项纯ECS断言与跨语言协议解析通过；运行日志页和对照窗完成离屏布局核对。未连接单片机或采集卡，实机稳定性与命中率尚未验收。
+
+开发复验命令（不是用户操作步骤）：
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_eontimer_test tests.test_eontimer_comparison
+.\.venv\Scripts\python.exe tools\verify_eontimer_test.py --output .tmp\新的验收目录
+```
+
+早先`tools/eontimer_comparison.py`手工CLI仍保留为离线数值诊断，已不再是本功能入口。它接受用户明确指定的阶段目标/观测单位，不替代这里的自动目标归一或运行接线。
+
+## 来源
+
+- [Retail RNG火红/叶绿定点教程](https://retailrng.com/frlg/beginner/frlgstatic/)：Custom用Seed毫秒和Advances设置计时，唯一反查后Update。
+- [EonTimer换算核心](https://github.com/DasAmpharos/EonTimer/blob/ead211d6e4251c4f08345cc9e56e76d3cb2a29bd/eon_timer/timers/calibrator.py)、[Custom校准](https://github.com/DasAmpharos/EonTimer/blob/ead211d6e4251c4f08345cc9e56e76d3cb2a29bd/eon_timer/timers/custom/custom_phase_widget.py)、[GBA设置](https://github.com/DasAmpharos/EonTimer/blob/ead211d6e4251c4f08345cc9e56e76d3cb2a29bd/eon_timer/settings/timer/model.py)。
+- MIT原许可与归属见 [EonTimer-LICENSE.md](../third_party/EonTimer-LICENSE.md)。

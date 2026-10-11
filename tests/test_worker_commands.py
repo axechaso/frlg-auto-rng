@@ -133,9 +133,11 @@ class WorkerCommandTests(unittest.TestCase):
              patch.object(sys, "executable", "C:/Portable/FRLG-Auto-RNG.exe"), \
              patch("pyside_app.services.probe_easycon_devices", return_value=({"COM3"}, {1: "Capture"}, "")), \
              patch("pyside_app.services.validate_generated_project_consistency"), \
+             patch("pyside_app.services.validate_test_project") as identity, \
              patch("pyside_app.services.validate_runtime", return_value=check), \
              patch("pyside_app.services.prepare_compat_runner", return_value=Path("runner.exe")):
             command = prepare_run(prepared, "COM3", 1, "Capture")
+        identity.assert_called_once_with(prepared.project, expected=False, fingerprint_warning_only=False)
         self.assertEqual(command.program, "C:/Portable/FRLG-Auto-RNG.exe")
         self.assertEqual(command.arguments[:2], ("--worker", "easycon-log"))
         self.assertNotIn("-u", command.arguments)
@@ -147,11 +149,13 @@ class WorkerCommandTests(unittest.TestCase):
              patch.object(sys, "executable", "C:/Portable/FRLG-Auto-RNG.exe"), \
              patch("pyside_app.services.probe_easycon_devices", return_value=({"COM3"}, {1: "Capture"}, "")), \
              patch("pyside_app.services.validate_generated_project_consistency"), \
+             patch("pyside_app.services.validate_test_project") as identity, \
              patch("pyside_app.services.validate_runtime", return_value=check), \
              patch("pyside_app.services.prepare_compat_runner", return_value=Path("runner.exe")):
             supervised = prepare_run(
                 prepared, "COM3", 1, "Capture", label_supervision=True,
             )
+        identity.assert_called_once_with(prepared.project, expected=False, fingerprint_warning_only=False)
         self.assertIn("--label-supervision", supervised.arguments)
         self.assertEqual(supervised.incident_root.name, "label_incidents")
 

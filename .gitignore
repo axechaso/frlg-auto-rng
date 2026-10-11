@@ -73,3 +73,6 @@ assets/sprites/resources/
 Python312/
 PortableGit/
 _downloads/
+# Offline EonTimer compiler check output (not a replacement runner).
+tools/EasyCon164aEonTimerCheck/bin/
+tools/EasyCon164aEonTimerCheck/obj/

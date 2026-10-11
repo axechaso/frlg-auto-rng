@@ -168,9 +168,8 @@ class EonTimerCommandTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self.run_command(self.args() + ["--easycon-log", str(log), "--round", "3"])
 
-    def test_no_production_wiring_or_eon_runner_patch(self):
-        for name in ("pyside_preview.py", "pyside_app/migration.py", "pyside_app/workflows.py",
-                     "tools/build_easycon164a_compat_runner.ps1"):
+    def test_no_eon_runner_patch_or_other_workflow_injection(self):
+        for name in ("pyside_app/workflows.py", "tools/build_easycon164a_compat_runner.ps1"):
             self.assertNotIn("eontimer", (ROOT / name).read_text(encoding="utf-8").lower())
         for name in ("tools/patches/easycon164a-eontimer-test-v1.patch", "tools/eontimer/EonTimerBuiltins.cs",
                      "tools/verify_eontimer_runner.py"):

@@ -128,6 +128,8 @@ class CompleteWindow(FrlgWindow):
 
     def collect_workflow(self):
         mode = self.input_mode
+        if self.eontimer_test_check.isChecked():
+            raise ValueError("EonTimer 临时测试仅用于独立野生 / 静态流程，不用于孵蛋、TID、SID 或自选脚本；请先关闭测试开关")
         f, r = self.fields, self.reader
         source = Path(f["source"].text()).resolve()
         extra = {}
