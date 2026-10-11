@@ -693,6 +693,8 @@ class FrlgWindow(FrlgPreviewWindow):
                 self.refresh_records()
             elif key == "history_logs":
                 self.refresh_history_logs()
+            elif key == "tid" and hasattr(self, "tid_state"):
+                self.tid_state.refresh_progress(force_logs=True)
             self.refresh_state()
             if hasattr(self, "accessories"):
                 self.accessories.update_input_visibility()
@@ -1314,6 +1316,8 @@ class FrlgWindow(FrlgPreviewWindow):
             self.stop_run()
             event.ignore()
             return
+        if hasattr(self, "tid_state"):
+            self.tid_state.shutdown()
         self.qq_service.shutdown()
         if not self.history_controller.shutdown():
             event.ignore()

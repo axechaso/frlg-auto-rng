@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -50,6 +51,14 @@ class ProgressRefillTests(unittest.TestCase):
 
     def starts(self):
         return {axis: self.w.fields[f"tid_{axis}_start"].text() for axis in ("op", "f1", "f2")}
+
+    def wait_for_logs(self):
+        deadline = time.monotonic() + 5
+        while self.w.tid_state.log_future is not None and time.monotonic() < deadline:
+            self.app.processEvents()
+            self.w.tid_state._collect_log_progress()
+            time.sleep(0.005)
+        self.assertIsNone(self.w.tid_state.log_future, "Log scan did not finish")
 
     def checkpoint(self, *, switched=False, completed=False, sid_offset=0):
         request, _, context = self.w.tid_state._context(self.w.reader.tid())
@@ -121,12 +130,9 @@ class ProgressRefillTests(unittest.TestCase):
         self.assertEqual(self.w.reader.tid(), request)
         self.assertEqual(read_progress(self.root / "tid_progress", context)["state"], state)
 
-    def test_background_refresh_and_busy_windows_do_not_change_inputs(self):
-        self.checkpoint()
+    def test_automatic_refresh_fills_idle_but_busy_windows_do_not_change_inputs(self):
+        request, _, state, _ = self.checkpoint()
         original = self.starts()
-        self.w.tid_state.refresh_progress()
-        self.w.tid_state.save()
-        self.assertEqual(self.starts(), original)
         self.w.running = True
         self.w.tid_state.refresh_progress(fill_starts=True)
         self.assertEqual(self.starts(), original)
@@ -135,6 +141,56 @@ class ProgressRefillTests(unittest.TestCase):
         self.w.tid_state.refresh_progress(fill_starts=True)
         self.assertEqual(self.starts(), original)
         self.w.job = None
+        self.w.tid_state.poll()
+        expected = {axis.lower(): str(_exhaustive_start(request, axis) + state[axis]) for axis in ("OP", "F1", "F2")}
+        self.assertEqual(self.starts(), expected)
+        self.w.tid_state.save()
+        self.assertEqual(self.starts(), expected)
+
+    def test_refresh_button_is_removed_and_entering_page_updates_progress(self):
+        from PySide6.QtWidgets import QAbstractButton
+        request, _, state, _ = self.checkpoint()
+        self.w.select_page("wild")
+        self.w.select_page("tid")
+        self.assertEqual(self.starts(), {a.lower(): str(_exhaustive_start(request, a) + state[a])
+                                       for a in ("OP", "F1", "F2")})
+        self.assertFalse(any(button.text() == "刷新进度" for button in self.w.findChildren(QAbstractButton)))
+
+    def test_log_only_progress_is_recovered_automatically_without_button(self):
+        from automation.tid_checkpoint import CHECKPOINT_V3_PREFIX
+        request, context, state, path = self.checkpoint()
+        path.unlink()
+        log = self.root / "runtime" / ("tid-" + "1" * 32) / "run-history.log"
+        log.parent.mkdir(parents=True)
+        line = CHECKPOINT_V3_PREFIX + "|".join(f"{key}={state[key]}" for key in SEARCH_STATE_VARIABLES) + "|END=1\n"
+        log.write_text(f"[TID进度] {path}\n" + line, encoding="utf-8")
+        self.w.tid_state.refresh_progress(force_logs=True)
+        self.wait_for_logs()
+        self.assertEqual(read_progress(self.root / "tid_progress", context)["state"], state)
+        self.assertEqual(self.w.reader.tid(), request)
+        self.assertEqual(self.starts(), {a.lower(): str(_exhaustive_start(request, a) + state[a])
+                                       for a in ("OP", "F1", "F2")})
+        self.close_window()
+        self.open_window()
+        self.assertEqual(self.w.reader.tid(), request)
+        self.assertEqual(read_progress(self.root / "tid_progress", context)["state"], state)
+
+    def test_resume_off_does_not_automatically_replace_user_starts(self):
+        self.checkpoint()
+        self.w.tid_resume_check.setChecked(False)
+        original = self.starts()
+        self.w.tid_state.poll()
+        self.w.select_page("tid")
+        self.assertEqual(self.starts(), original)
+        self.assertIsNone(self.w.tid_state.refill)
+
+    def test_repeated_automatic_update_does_not_invalidate_a_prepared_plan(self):
+        self.checkpoint()
+        self.w.tid_state.poll()
+        with patch.object(self.w, "invalidate") as invalidate:
+            self.w.tid_state.poll()
+            self.w.tid_state.save()
+        invalidate.assert_not_called()
 
     def test_missing_completed_and_invalid_progress_do_not_refill(self):
         original = self.starts()

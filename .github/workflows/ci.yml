@@ -41,6 +41,7 @@ jobs:
           save_profiles.py
           tid_records.py
           tid_session.py
+          tid_progress_logs.py
           process_control.py
           console_output.py
           audio_observer.py

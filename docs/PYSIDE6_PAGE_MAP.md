@@ -68,7 +68,7 @@
 | 4 御三家连续乱数 | 完成 TID 后继续（默认开启）、御三家、最低/最高 ADV、独立 Sound/Button/Seed 设置、SID ADV 重试半径、任意 TID 接续、任意 TID 去噪 |
 | 5 穷举判定与高级范围 | 豹子号、升/降连号、65535、个位数 TID；F2/F1 候选阈值、去噪命中数/窗口、识图阈值；此分区在 Tk 中并非仅高级模式可见 |
 | 6 TID 1.3.7 脚本包 | 独立包路径及选择，移至“共通设置 → TID 1.3.7 脚本包”，不占 TID 主页面 |
-| 7 参数保存与搜索续跑 | 继续同参数的上次搜索进度（默认开启），覆盖穷举与非零半径乱数；进度含实际正负向范围、完成区域数与自动切换状态。Tk 自动保存，Qt 目前不保存 / 读取 |
+| 7 参数保存与搜索续跑 | 继续同参数的上次搜索进度（默认开启），覆盖穷举与非零半径乱数；自动从日志和检查点更新，不再提供刷新按钮。进度含实际正负向范围、完成区域数与自动切换状态；开启续跑且空闲时自动显示最新穷举起点 |
 
 接线：`collect_tid_request` → `TidRngRequest`；`collect_tid_starter_flow_request` → `TidStarterFlowRequest`；`generate_tid_project` → `write_configured_tid_project` / `build_tid_starter_flow_plan` / `write_tid_starter_flow_bundle`；`run_tid_starter_flow.py` 执行。6V 闪 SID 使用 `calculate_tid_shiny_sid` 和 `rng.sid_reverse`，不能在布局层复制计算。
 

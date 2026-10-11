@@ -1,8 +1,11 @@
 """Qt drafts and calibration recovery using the existing TID disk contracts."""
 from dataclasses import asdict, replace
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
+import threading
+import time
 
 from PySide6.QtCore import QObject, QSignalBlocker, QTimer
 from PySide6.QtWidgets import QAbstractButton, QComboBox
@@ -14,6 +17,7 @@ from automation.tid_checkpoint import _exhaustive_start
 from automation.tid_starter_flow import parse_successful_sid_advance_correction
 from rng.starter_sid_verification import sid_advance_scan_offsets
 from tid_session import load_tid_settings, write_json_atomic, progress_context, read_progress, latest_progress
+from tid_progress_logs import TidProgressLogReader, recover_log_progress
 
 
 class TidState(QObject):
@@ -25,6 +29,21 @@ class TidState(QObject):
         self.pending = None
         self.refill = None
         self.unknown = {}
+        self.closing = False
+        self.log_reader = TidProgressLogReader()
+        self.log_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tid-progress-logs")
+        self.log_future = None
+        self.log_cancel = threading.Event()
+        self.log_contexts = ()
+        self.log_scan_at = float("-inf")
+        self.log_scan_pending = False
+        self.log_poll_timer = QTimer(self)
+        self.log_poll_timer.setInterval(100)
+        self.log_poll_timer.timeout.connect(self._collect_log_progress)
+        # Pure file workers never access Qt; window destruction can safely
+        # cancel them without destroying a running QThread.
+        executor, cancelled = self.log_executor, self.log_cancel
+        self.destroyed.connect(lambda: (cancelled.set(), executor.shutdown(wait=False, cancel_futures=True)))
         self.widgets = {key + "_var": widget for key, widget in window.fields.items() if key.startswith("tid_")}
         aliases = {"tid_pid": "tid_shiny_pid", "tid_button": "tid_button_mode", "tid_close": "tid_close_delay",
             "tid_home": "tid_home_buffer", "tid_sid_correction": "tid_sid_adv_correction", "tid_select": "tid_select_correction",
@@ -82,7 +101,6 @@ class TidState(QObject):
         for widget in self.widgets.values():
             signal = widget.toggled if isinstance(widget, QAbstractButton) else widget.currentIndexChanged if isinstance(widget, QComboBox) else widget.textChanged
             signal.connect(self.schedule)
-        window._bind("刷新进度", lambda: self.refresh_progress(fill_starts=True))
         self.poll_timer = QTimer(self)
         self.poll_timer.setInterval(1500)
         self.poll_timer.timeout.connect(self.poll)
@@ -170,7 +188,7 @@ class TidState(QObject):
         return correction
 
     def poll(self):
-        if self.blocked:
+        if self.blocked or self.closing:
             return
         try:
             self.restore_calibration()
@@ -178,8 +196,76 @@ class TidState(QObject):
             self.pending = None
             self.w.set_status(f"固定延迟结果未回填：{exc}；原始结果保留。")
             self.save()
-        if self.w.running and self.w.input_mode == "tid":
+        if self.w.input_mode == "tid":
             self.refresh_progress()
+
+    def _request_log_progress(self, contexts, *, force=False):
+        if self.closing or not self.w.tid_resume_check.isChecked():
+            return
+        contexts = tuple(contexts)
+        if self.log_future is not None:
+            if contexts != self.log_contexts:
+                self.log_cancel.set()
+                self.log_scan_pending = True
+            return
+        interval = 1.5 if self.w.running else 30
+        if not force and contexts == self.log_contexts and time.monotonic() - self.log_scan_at < interval:
+            return
+        self.log_contexts = contexts
+        self.log_scan_at = time.monotonic()
+        self.log_cancel.clear()
+        extra = ()
+        command = getattr(self.w, "run_command", None)
+        if command and self.w.input_mode == "tid":
+            extra = (command.log_path,)
+        self.log_future = self.log_executor.submit(
+            self.log_reader.scan, self.w.paths.output, self.w.paths.user, contexts,
+            extra_logs=extra, cancelled=self.log_cancel.is_set,
+        )
+        self.log_poll_timer.start()
+
+    def _collect_log_progress(self):
+        future = self.log_future
+        if future is None or not future.done():
+            return
+        self.log_poll_timer.stop()
+        self.log_future = None
+        pending, self.log_scan_pending = self.log_scan_pending, False
+        if self.closing:
+            return
+        try:
+            records = future.result()
+            request = replace(self.effective_request(self.w.reader.tid()), calibration_check=False)
+            _, flow, context = self._context(request)
+            current = self._progress_contexts(request, flow, context)
+            if self.blocked or not self.w.tid_resume_check.isChecked() or tuple(current) != self.log_contexts:
+                pending = True
+            else:
+                recovered = any([recover_log_progress(self.w.paths.user / "tid_progress", record)
+                                 for record in records])
+                if recovered:
+                    self.refresh_progress(read_logs=False)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self.w.tid_progress_status.setText(f"TID 进度日志暂未恢复：{exc}；已有文件保留。")
+        if pending:
+            self.log_scan_at = float("-inf")
+            self.refresh_progress()
+
+    @staticmethod
+    def _progress_contexts(request, flow, context):
+        if flow and not flow.deferred_identity:
+            return [progress_context(replace(request, sid_advance_correction=request.sid_advance_correction + offset),
+                context["game"], context["template_sha256"], context["flow_request"])
+                for offset in sid_advance_scan_offsets(flow.sid_retry_radius)]
+        return [context]
+
+    def shutdown(self):
+        self.closing = True
+        self.save_timer.stop()
+        self.poll_timer.stop()
+        self.log_poll_timer.stop()
+        self.log_cancel.set()
+        self.log_executor.shutdown(wait=False, cancel_futures=True)
 
     def restore_calibration(self):
         if not self.pending:
@@ -241,8 +327,8 @@ class TidState(QObject):
         return request
 
     def restore_refill(self, binding):
-        # The shared draft retains original starts so the unchanged Tk entry
-        # addresses the same checkpoint. Only Qt restores this display layer.
+        # Keep the original search origin in the shared draft. The displayed
+        # current position must never become a second, rebased search task.
         if not isinstance(binding, dict) or binding.get("schema") != 1:
             return
         for key in ("original_starts", "displayed_starts"):
@@ -281,6 +367,8 @@ class TidState(QObject):
         }
         originals = self.refill["original_starts"] if self.refill else {
             axis: self.w.fields[f"tid_{axis}_start"].text() for axis in starts}
+        if self.refill and self.refill["context"] == context and self.refill["displayed_starts"] == starts:
+            return "已自动更新 OP / F1 / F2 穷举起点；续跑仍恢复原检查点。"
         for axis, text in starts.items():
             with QSignalBlocker(self.w.fields[f"tid_{axis}_start"]):
                 self.w.fields[f"tid_{axis}_start"].setText(text)
@@ -288,10 +376,10 @@ class TidState(QObject):
             "displayed_starts": starts} if self.w.tid_resume_check.isChecked() else None
         self.w.invalidate()
         self.save(refresh=False)
-        return "已回填 OP / F1 / F2 穷举起点；续跑仍恢复原检查点。" if self.refill else "已回填穷举起点；当前未勾选续跑，将按回填起点开始新搜索。"
+        return "已自动更新 OP / F1 / F2 穷举起点；续跑仍恢复原检查点。" if self.refill else "已回填穷举起点；当前未勾选续跑，将按回填起点开始新搜索。"
 
-    def refresh_progress(self, *, fill_starts=False):
-        if self.blocked:
+    def refresh_progress(self, *, fill_starts=True, read_logs=True, force_logs=False):
+        if self.blocked or self.closing:
             return
         try:
             request = replace(self.effective_request(self.w.reader.tid()), calibration_check=False)
@@ -300,10 +388,11 @@ class TidState(QObject):
                 return
             request, flow, context = self._context(request)
             directory = self.w.paths.user / "tid_progress"
+            contexts = self._progress_contexts(request, flow, context)
+            if read_logs:
+                self._request_log_progress(contexts, force=force_logs)
             saved = read_progress(directory, context)
             if flow and not flow.deferred_identity:
-                contexts = [progress_context(replace(request, sid_advance_correction=request.sid_advance_correction + offset),
-                    context["game"], context["template_sha256"], context["flow_request"]) for offset in sid_advance_scan_offsets(flow.sid_retry_radius)]
                 latest = latest_progress(directory, contexts)
                 if latest:
                     saved = latest[1]
@@ -325,7 +414,7 @@ class TidState(QObject):
                     text = f"{status}：穷举层级 {state['STAGE']}，OP/F1/F2 偏移 {state['OP']}/{state['F1']}/{state['F2']}，累计 {state['COUNT']} 次。"
                 if request.auto_rng and "COMPLETED_REGIONS" in state:
                     text += f" 已完成局部区域 {state['COMPLETED_REGIONS']} 个。"
-                if fill_starts:
+                if fill_starts and self.w.tid_resume_check.isChecked():
                     text += "\n" + self._fill_progress_starts(saved, request, context)
             self.w.tid_progress_status.setText(text)
         except (OSError, ValueError, KeyError, TypeError) as exc:

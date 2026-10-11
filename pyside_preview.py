@@ -1176,11 +1176,10 @@ class FrlgPreviewWindow(QMainWindow):
         self.script_action_card.setVisible(on_logs)
         self.footer_status.setVisible(self.width() >= 1180)
         tid_page = getattr(self, "current_page", "sid") == "tid"
-        self.tid_refresh_button.setVisible(tid_page)
         compact_footer = tid_page and self.width() < 1000
         if getattr(self, "_footer_compact", None) != compact_footer:
             self._footer_compact = compact_footer
-            for button in (self.overview_button, self.tid_refresh_button, self.search_button,
+            for button in (self.overview_button, self.search_button,
                            self.cancel_button, self.start_button, self.stop_button):
                 button.setStyleSheet("padding-left: 10px; padding-right: 10px;" if compact_footer else "")
 
@@ -2051,10 +2050,10 @@ class FrlgPreviewWindow(QMainWindow):
             ("tid_threshold", "识图阈值", _line("95")),
         ])
         layout.addWidget(filters)
-        resume = Card("参数保存与搜索续跑", "支持穷举与非零半径乱数；自动切换后也可续跑。")
+        resume = Card("参数保存与搜索续跑", "自动读取之前的日志与检查点；支持穷举、非零半径乱数及自动切换后的续跑。")
         self.tid_resume_check = self._check("继续同参数的上次搜索进度", True)
         resume.layout.addWidget(self.tid_resume_check)
-        self.tid_progress_status = _label("未读取本机进度；当前表单在关闭窗口后丢弃。", role="muted")
+        self.tid_progress_status = _label("进度会自动更新，无需手动刷新。", role="muted")
         resume.layout.addWidget(self.tid_progress_status)
         layout.addWidget(resume)
         for check in (self.tid_flow_check, self.tid_any_check, self.tid_denoise_check,
@@ -2380,8 +2379,6 @@ class FrlgPreviewWindow(QMainWindow):
         self.overview_button = _button("方案与设备", enabled=True)
         self.overview_button.clicked.connect(self._show_overview)
         layout.addWidget(self.overview_button)
-        self.tid_refresh_button = _button("刷新进度")
-        layout.addWidget(self.tid_refresh_button)
         self.search_button = _button("搜索并生成方案", "primary")
         self.search_button.setToolTip(NOT_CONNECTED)
         layout.addWidget(self.search_button)
