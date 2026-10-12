@@ -125,6 +125,46 @@ class LocationPickerTests(unittest.TestCase):
         self.combo.setEditText("不归")
         self.assertIsNone(self.window.prepared)
 
+    def test_static_categories_disable_location_without_losing_target_data(self):
+        self.window.fields["wild_method"].setCurrentIndex(1)
+        categories = self.window.fields["wild_category"]
+        for index in range(categories.count()):
+            with self.subTest(category=categories.itemData(index)):
+                categories.setCurrentIndex(index)
+                self.assertFalse(self.combo.isEnabled())
+                self.assertFalse(self.combo.lineEdit().isEnabled())
+                self.assertEqual(self.combo.currentData(), categories.currentData())
+                self.assertGreater(self.window.fields["wild_species"].count(), 0)
+                request = self.window.collect_inputs().request
+                self.assertEqual(request.method, "Static 1")
+                self.assertEqual(request.category, categories.currentData())
+                self.assertEqual(request.location, categories.currentData())
+
+    def test_switching_back_to_wild_restores_location_search(self):
+        self.assertTrue(self.combo.isEnabled())
+        self.window.fields["wild_method"].setCurrentIndex(1)
+        self.assertFalse(self.combo.isEnabled())
+        self.window.fields["wild_method"].setCurrentIndex(0)
+        self.assertTrue(self.combo.isEnabled())
+        self.assertTrue(self.combo.lineEdit().isEnabled())
+        self.combo.setEditText("不归")
+        self.assertEqual(set(self.matches("不归")), {"不归之穴", "不归之穴（有物品的房间）"})
+        self.combo.setEditText("不归之穴")
+        self.combo.lineEdit().editingFinished.emit()
+        self.assertEqual(self.window.collect_inputs().request.location, "Five Island Lost Cave")
+
+    def test_japanese_static_location_stays_disabled_after_run_unlock(self):
+        self.window.fields["profile_language"].setCurrentIndex(1)
+        self.assertEqual(self.window.fields["wild_method"].currentIndex(), 1)
+        self.assertFalse(self.combo.isEnabled())
+        self.assertEqual(self.window.collect_inputs().request.category, "Starter")
+        self.window.running = True
+        self.window._lock_run_inputs()
+        self.window.running = False
+        self.window._lock_run_inputs()
+        self.assertFalse(self.combo.isEnabled())
+        self.assertFalse(self.combo.lineEdit().isEnabled())
+
     def test_sid_location_edit_uses_same_sorted_search_without_touching_text(self):
         from PySide6.QtWidgets import QLineEdit
         from pyside_app.location_picker import configure_location_edit, sorted_location_items

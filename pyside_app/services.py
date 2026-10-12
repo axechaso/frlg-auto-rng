@@ -21,6 +21,7 @@ from automation import (
 from device_label_overrides import LabelOverrideStore, apply_profile_to_projects
 from worker_commands import build_worker_command
 from automation.eontimer_test import apply_test_project, validate_test_project, validate_test_request
+from automation.fixed_timeline_test import FixedTimeline
 
 
 GENERATED_PLAN_RETENTION = 3
@@ -109,6 +110,7 @@ class WildInputs:
     advanced: bool = False
     capture_name: str = ""
     eontimer_test: bool = False
+    fixed_timeline: FixedTimeline | None = None
 
     def fingerprint(self) -> str:
         return json.dumps(asdict(self), default=str, sort_keys=True, ensure_ascii=False)
@@ -141,6 +143,10 @@ class RunCommand:
 
 def validate_wild_inputs(inputs: WildInputs) -> None:
     inputs.request.validate()
+    if inputs.fixed_timeline is not None:
+        if not inputs.eontimer_test:
+            raise ValueError("固定时长配置不能混入普通流程")
+        inputs.fixed_timeline.validate_request(inputs.request, inputs.options)
     if inputs.eontimer_test:
         validate_test_request(inputs.request, inputs.options, advanced=inputs.advanced)
         if inputs.template_name != EGG_TEMPLATE_NAME or inputs.options.update_precalibration:
@@ -216,7 +222,8 @@ def prepare_wild(
         validate_generated_project_consistency(project, result.plan, inputs.options,
                                                template_name=inputs.template_name)
         if inputs.eontimer_test:
-            apply_test_project(project, result.plan, inputs.options, advanced=inputs.advanced)
+            apply_test_project(project, result.plan, inputs.options, advanced=inputs.advanced,
+                               fixed=inputs.fixed_timeline)
         check = validate_runtime(inputs.ezcon, project, fingerprint_warning_only=inputs.advanced)
     except SearchCancelledError:
         shutil.rmtree(output, ignore_errors=True)
@@ -275,7 +282,8 @@ def rebuild_wild_with_override(prepared: PreparedWild, paths: AppPaths) -> Prepa
             template_name=inputs.template_name,
         )
         if inputs.eontimer_test:
-            apply_test_project(project, prepared.result.plan, inputs.options, advanced=inputs.advanced)
+            apply_test_project(project, prepared.result.plan, inputs.options, advanced=inputs.advanced,
+                               fixed=inputs.fixed_timeline)
         check = validate_runtime(
             inputs.ezcon, project, fingerprint_warning_only=inputs.advanced,
         )
@@ -310,6 +318,7 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
                                            template_name=inputs.template_name)
     identity_warnings = validate_test_project(
         prepared.project, expected=inputs.eontimer_test,
+        fixed=inputs.fixed_timeline,
         fingerprint_warning_only=inputs.advanced,
     )
     check = validate_runtime(inputs.ezcon, prepared.project, fingerprint_warning_only=inputs.advanced)

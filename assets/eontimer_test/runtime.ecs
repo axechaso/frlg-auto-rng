@@ -10,6 +10,12 @@ $EONF2目标帧 = 0
 $EONF2校准MS = 0
 $EON更新次数 = 0
 $EON跳过次数 = 0
+$EON固定测试模式 = 0
+$EON固定SeedMS = 0
+$EON固定F1MS = 0
+$EON固定F2总MS = 0
+$EON固定轮数上限 = 5
+$EON固定已尝试 = 0
 
 FUNC EON换算毫秒($帧: INT, $倍率: INT): INT
     IF $倍率 != 1 and $倍率 != 2
@@ -44,6 +50,52 @@ FUNC EON除二($帧: INT): INT
     RETURN $结果
 ENDFUNC
 
+FUNC EON固定延迟转帧($毫秒: INT, $倍率: INT): INT
+    IF $毫秒 < 0 or $毫秒 > 1000000 or ($倍率 != 1 and $倍率 != 2)
+        RETURN -1
+    ENDIF
+    $分母 = 50
+    IF $倍率 == 2
+        $分母 = 25
+    ENDIF
+    $分子 = $毫秒 * 3
+    $结果 = $分子 / $分母
+    $余数 = $分子 % $分母
+    IF $余数 * 2 > $分母 or ($余数 * 2 == $分母 and $结果 % 2 != 0)
+        $结果 += 1
+    ENDIF
+    RETURN $结果
+ENDFUNC
+
+FUNC EON应用固定计时(): INT
+    $固定F2段 = $EON固定F2总MS - $EON固定F1MS
+    IF $EON固定SeedMS <= 0 or $EON固定F1MS < $F1阶段脚本固定延迟 or $固定F2段 < $F2阶段脚本固定延迟
+        PRINT 固定时长测试停止：本轮固定动作超过保存的截止点，保留现场；请重新取得成功时长
+        RETURN 0
+    ENDIF
+    $SeedMS = $EON固定SeedMS
+    $F1等待MS = $EON固定F1MS - $F1阶段脚本固定延迟
+    $F2等待MS = $固定F2段 - $F2阶段脚本固定延迟
+    $TV等待MS = 0
+    $TV等待帧 = 0
+    $帧轴菜单奇偶开关 = 0
+    RETURN 1
+ENDFUNC
+
+FUNC EON开始固定轮(): INT
+    IF $循环计数 == 0
+        RETURN 1
+    ENDIF
+    IF $EON固定已尝试 >= $EON固定轮数上限
+        PRINT "FIXEDTEST|V=1|TYPE=STOP|ATTEMPTS=" & $EON固定已尝试 & "|END=1"
+        PRINT 固定时长测试达到轮数上限，直接停止并保留当前画面，不重启游戏
+        RETURN 0
+    ENDIF
+    $EON固定已尝试 += 1
+    PRINT "FIXEDTEST|V=1|TYPE=ATTEMPT|ATTEMPT=" & $EON固定已尝试 & "|END=1"
+    RETURN 1
+ENDFUNC
+
 FUNC EON应用计时(): INT
     $EONSeed请求 = $目标SeedMS + $EONSeed校准MS
     $EONF1请求 = EON换算毫秒($EONF1目标帧, 1)
@@ -62,18 +114,46 @@ FUNC EON应用计时(): INT
 ENDFUNC
 
 FUNC 重新计算等待参数(): INT
+    IF $进入TV != 0 or $静态或野生 == "孵蛋" or $道具乱数模式 != 0
+        PRINT 计时测试停止：本次不支持TV、孵蛋或道具乱数
+        RETURN 0
+    ENDIF
+    IF $EON固定测试模式 == 1
+        $EON应用结果 = EON应用固定计时()
+        IF $EON已初始化 == 0 and $EON应用结果 == 1
+            $EON已初始化 = 1
+            PRINT "FIXEDTEST|V=1|TYPE=INIT|SEED_TARGET=" & $目标SeedMS & "|ADV_TARGET=" & $目标消耗帧 & "|USED_SEED=" & $EON固定SeedMS & "|USED_F1=" & $EON固定F1MS & "|USED_F2=" & $EON固定F2总MS & "|LIMIT=" & $EON固定轮数上限 & "|END=1"
+            PRINT 固定时长测试：使用最近成功运行的截止点；仅记录反查，不执行任何Seed或帧数校准
+        ENDIF
+        RETURN $EON应用结果
+    ENDIF
+    # Round the measured command durations before parity allocation. A 1 ms
+    # change around 3500 must not turn 209 into 211 through truncation/parity.
+    $EON原F1固定帧 = $F1阶段脚本固定帧
+    $EON原F2固定帧 = $F2阶段脚本固定帧
+    $F1阶段脚本固定帧 = EON固定延迟转帧($F1阶段脚本固定延迟, 1)
+    $F2阶段脚本固定帧 = EON固定延迟转帧($F2阶段脚本固定延迟, 2)
+    IF $F1阶段脚本固定帧 < 0 or $F2阶段脚本固定帧 < 0
+        $F1阶段脚本固定帧 = $EON原F1固定帧
+        $F2阶段脚本固定帧 = $EON原F2固定帧
+        RETURN 0
+    ENDIF
+    IF $EON已初始化 == 0
+        PRINT EonTimer初始化取整: F1固定 & $F1阶段脚本固定延迟 & " ms → " & $F1阶段脚本固定帧 & " 帧；F2固定 " & $F2阶段脚本固定延迟 & " ms → " & $F2阶段脚本固定帧 & " 帧"
+    ENDIF
     $EON基线结果 = EON伊机控等待参数()
+    $EON分配F1目标 = $F1阶段脚本固定帧 + $F1等待帧
+    $EON分配F2目标 = EON除二($F2阶段脚本固定帧 + $F2等待帧)
+    # Leave the unmodified raw frame counts for the ordinary shadow controller.
+    $F1阶段脚本固定帧 = $EON原F1固定帧
+    $F2阶段脚本固定帧 = $EON原F2固定帧
     IF $EON基线结果 == 0
         PRINT EonTimer测试停止：原始目标无法分配等待参数
         RETURN 0
     ENDIF
-    IF $进入TV != 0 or $静态或野生 == "孵蛋" or $道具乱数模式 != 0
-        PRINT EonTimer测试停止：本次不支持TV、孵蛋或道具乱数
-        RETURN 0
-    ENDIF
     IF $EON已初始化 == 0
-        $EONF1目标帧 = $F1阶段脚本固定帧 + $F1等待帧
-        $EONF2目标帧 = EON除二($F2阶段脚本固定帧 + $F2等待帧)
+        $EONF1目标帧 = $EON分配F1目标
+        $EONF2目标帧 = $EON分配F2目标
         $EONSeed校准MS = $SeedMS - $目标SeedMS
         $EON已初始化 = 1
         PRINT "EONTEST|V=1|TYPE=INIT|SEED_TARGET=" & $目标SeedMS & "|ADV_TARGET=" & $目标消耗帧 & "|F1_TARGET=" & $EONF1目标帧 & "|F2_TARGET=" & $EONF2目标帧 & "|SEED_CAL=" & $EONSeed校准MS & "|F2_CAL=0|MULTIPLIER=2|END=1"
@@ -83,6 +163,12 @@ FUNC 重新计算等待参数(): INT
 ENDFUNC
 
 FUNC 执行自动校准与等待更新(): INT
+    IF $EON固定测试模式 == 1
+        $EON应用结果 = EON应用固定计时()
+        PRINT "FIXEDTEST|V=1|TYPE=ROUND|ATTEMPT=" & $EON固定已尝试 & "|CANDIDATES=" & $本轮候选命中计数 & "|TRUTH=" & $本轮真值解 & "|HIT_SEED=" & $命中SeedMS & "|HIT_ADV=" & $命中消耗帧 & "|USED_SEED=" & $SeedMS & "|USED_F1=" & $EON固定F1MS & "|USED_F2=" & $EON固定F2总MS & "|APPLIED=" & $EON应用结果 & "|END=1"
+        $循环计数 += 1
+        RETURN $EON应用结果
+    ENDIF
     $EON本轮 = $循环计数
     $EON已执行Seed = $SeedMS
     $EON已执行F1 = $F1阶段脚本固定延迟 + $F1等待MS

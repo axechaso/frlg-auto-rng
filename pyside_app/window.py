@@ -564,13 +564,14 @@ class FrlgWindow(FrlgPreviewWindow):
 
     def _populate_locations(self):
         category = self.fields["wild_category"].currentData()
-        if self.fields["wild_method"].currentIndex() == 0:
+        wild = self.fields["wild_method"].currentIndex() == 0
+        if wild:
             locations = {loc for loc, cat in load_frlg_encounters(self.game_code()) if cat == category}
             items = sorted_location_items(locations)
         else:
             items = [(CATEGORY_EN_TO_ZH.get(category, category), category)] if category else []
         self._fill(self.fields["wild_location"], items, "Viridian Forest")
-        self.fields["wild_location"].setEnabled(bool(items))
+        self.fields["wild_location"].setEnabled(wild and bool(items))
         self._populate_species()
 
     def _populate_species(self):
@@ -626,7 +627,7 @@ class FrlgWindow(FrlgPreviewWindow):
         except (OSError, UnicodeError):
             pass  # Missing/corrupt templates are rejected by generation, not replaced.
 
-    def collect_inputs(self):
+    def collect_inputs(self, *, require_fixed=True):
         f = self.fields
         def integer(key, title):
             return parse_integer(f[key].text(), title)
@@ -687,8 +688,11 @@ class FrlgWindow(FrlgPreviewWindow):
                 request = replace(request, max_advances=min(request.max_advances, 14399))
             options = test_options(options)
             template = EGG_TEMPLATE_NAME
+        fixed = None
+        if eontimer and require_fixed and self.eontimer_mode.currentIndex() == 1:
+            fixed = self.eontimer_controller.fixed_config(request, options)
         return WildInputs(request, options, Path(f["source"].text()), Path(f["ezcon"].text()),
-                          template, advanced, capture_name, eontimer)
+                          template, advanced, capture_name, eontimer, fixed)
 
     def invalidate(self, *_):
         if not self.live_ready or self.updating:
@@ -893,7 +897,12 @@ class FrlgWindow(FrlgPreviewWindow):
                 ("指定模式不计算个体 / 闪光；" if plan.request.direct_mode else f"IV 合计：{plan.iv_total}；") + f"路线：{plan.route_support.summary}",
                 f"计划：{prepared.plan_path}", f"脚本：{prepared.project or '未生成'}"]
         if prepared.inputs.eontimer_test:
-            text.insert(0, "EonTimer 临时测试：GBA / Custom 自动计时与唯一反查校准；时间轴入口，无菜单 / TV，普通预校准不参与。")
+            if prepared.inputs.fixed_timeline:
+                fixed = prepared.inputs.fixed_timeline
+                text.insert(0, f"固定时长测试：不校准；Seed {fixed.seed_ms} ms / F1 {fixed.f1_ms} ms / "
+                               f"F2 总 {fixed.f2_total_ms} ms，最多 {fixed.repeat_limit} 轮；普通预校准不参与。")
+            else:
+                text.insert(0, "EonTimer 临时测试：GBA / Custom 自动计时与唯一反查校准；时间轴入口，无菜单 / TV，普通预校准不参与。")
         text.extend(f"提示：{x}" for x in (*plan.warnings, *prepared.check.warnings))
         text.extend(f"预检未通过：{x}" for x in prepared.check.errors)
         self.result_panel.setPlainText("\n".join(text))
@@ -966,10 +975,14 @@ class FrlgWindow(FrlgPreviewWindow):
                 command.check.warnings,
             )
             if prepared.inputs.eontimer_test:
+                mode_text = ('固定成功时长：每轮采用相同 Seed / F1 / F2 截止，不进行校准；'
+                             '达到轮数上限直接停止，出闪仍按原选择提前停止。'
+                             if prepared.inputs.fixed_timeline else
+                             '本次由 GBA / Custom 规则计时与校准。对照列只按相同观测计算，不代表另一次伊机控实跑。')
                 prompt = ('<p style="background:#fff0d2; color:#995300; padding:10px;">'
-                          '<b>EonTimer 临时测试</b>：本次由 GBA / Custom 规则计时与校准。'
+                          '<b>临时计时测试</b>：' + mode_text +
                           '搜索范围临时限制到 14400 帧以下，不执行菜单调整、TV 过帧，不读取或写回普通预校准。'
-                          '对照列只按相同观测计算，不代表另一次伊机控实跑。</p>') + prompt
+                          '</p>') + prompt
             if not self._confirm_wild_start(prompt):
                 self.set_status("预检通过，等待开始运行。")
                 return

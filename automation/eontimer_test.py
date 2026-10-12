@@ -14,6 +14,7 @@ from pathlib import Path
 from app_paths import RESOURCE_ROOT
 from fingerprint_policy import record_fingerprint_mismatch
 from .eontimer_core import GBA_FPS, UPSTREAM_COMMIT
+from .fixed_timeline_test import FixedTimeline
 
 MARKER = "# EONTIMER_GBA_CUSTOM_TEST_V1"
 RUNTIME_PATH = RESOURCE_ROOT / "assets" / "eontimer_test" / "runtime.ecs"
@@ -48,7 +49,7 @@ def _block(text: str, name: str):
     return matches[0]
 
 
-def adapt_text(text: str) -> str:
+def adapt_text(text: str, fixed: FixedTimeline | None = None) -> str:
     text = text.replace("\r\n", "\n")
     if MARKER in text:
         raise ValueError("EonTimer 测试已经注入，请重新生成工程")
@@ -68,11 +69,36 @@ def adapt_text(text: str) -> str:
     text = text[:wait.start()] + block + text[wait.end():]
     # Globals must be declared before the main body; functions can be appended.
     runtime = RUNTIME_PATH.read_text(encoding="utf-8").replace("\r\n", "\n")
+    if fixed is not None:
+        fixed.validate()
+        for name, value in (("固定测试模式", 1), ("固定SeedMS", fixed.seed_ms),
+                            ("固定F1MS", fixed.f1_ms), ("固定F2总MS", fixed.f2_total_ms),
+                            ("固定轮数上限", fixed.repeat_limit)):
+            runtime, count = re.subn(r"(?m)^\$EON" + re.escape(name) + r" = \d+$",
+                                    f"$EON{name} = {value}", runtime)
+            if count != 1:
+                raise ValueError("固定时长测试配置入口不唯一")
+        anchor = "        $本轮流程结果 = 执行RNG启动与目标获取()"
+        if text.count(anchor) != 1:
+            raise ValueError("固定时长测试缺少唯一的轮次入口，不修改未知流程")
+        text = text.replace(anchor, "        IF EON开始固定轮() == 0\n            RETURN\n        ENDIF\n" + anchor, 1)
+        output_anchor = "FUNC 输出下一轮等待参数\n"
+        if text.count(output_anchor) != 1:
+            raise ValueError("固定时长测试缺少唯一的日志输出入口")
+        text = text.replace(output_anchor, output_anchor +
+                            '    PRINT 【固定时长测试：不校准】\n'
+                            '    PRINT 固定请求: Seed & $EON固定SeedMS & " ms，F1 " & $EON固定F1MS & '
+                            '" ms，F2总 " & $EON固定F2总MS & " ms（已包含F1）"\n'
+                            '    RETURN\n', 1)
+        text = text.replace("PRINT 自动校准成功，进入下一轮", "PRINT 固定时长测试已记录本轮，进入下一轮")
+        text = text.replace("PRINT 识图反查成功，继续校准", "PRINT 识图反查成功，仅记录误差，不校准")
+        text = text.replace("PRINT 自动校准结束，停止脚本", "PRINT 固定时长测试结束，停止脚本")
     globals_, functions = runtime.split("FUNC EON换算毫秒", 1)
     return globals_ + text + "\n\nFUNC EON换算毫秒" + functions
 
 
-def apply_test_project(project: Path, plan, options, *, advanced: bool) -> None:
+def apply_test_project(project: Path, plan, options, *, advanced: bool,
+                       fixed: FixedTimeline | None = None) -> None:
     validate_test_request(plan.request, options, advanced=advanced)
     if plan.initial_seed.advances >= 14400:
         raise ValueError("EonTimer 临时测试本次不使用 TV，请选择消耗帧小于 14400 的目标")
@@ -83,7 +109,9 @@ def apply_test_project(project: Path, plan, options, *, advanced: bool) -> None:
         raise ValueError("EonTimer 临时测试只支持 2.0 时间轴入口")
     if payload.get("precalibration", {}).get("enabled") is not False:
         raise ValueError("EonTimer 临时测试不能复用或写回普通预校准")
-    configured = adapt_text(path.read_text(encoding="utf-8"))
+    if fixed is not None:
+        fixed.validate_plan(plan, options)
+    configured = adapt_text(path.read_text(encoding="utf-8"), fixed)
     data = configured.encode("utf-8")
     payload["eontimer_test"] = {
         "schema": SCHEMA, "upstream_commit": UPSTREAM_COMMIT, "console": "GBA",
@@ -92,7 +120,13 @@ def apply_test_project(project: Path, plan, options, *, advanced: bool) -> None:
         "menu": False, "tv": False, "ordinary_precalibration": False,
         "calibration": "unique_only_custom_update",
         "comparison": "same_observation_easycon_calculation_not_executed",
+        "mode": "fixed" if fixed is not None else "eontimer",
+        "initialization": "nearest_even_fixed_frames_before_parity",
     }
+    if fixed is not None:
+        from dataclasses import asdict
+        payload["eontimer_test"].update(fixed=asdict(fixed), calibration="disabled",
+                                        comparison="unique_reverse_observation_only")
     # Called only inside a new UUID output directory owned by this generation.
     with path.open("w", encoding="utf-8", newline="\n") as file:
         file.write(configured)
@@ -100,7 +134,7 @@ def apply_test_project(project: Path, plan, options, *, advanced: bool) -> None:
         file.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
 
-def validate_test_project(project: Path, *, expected: bool,
+def validate_test_project(project: Path, *, expected: bool, fixed: FixedTimeline | None = None,
                           fingerprint_warning_only: bool = False) -> tuple[str, ...]:
     path = Path(project)
     payload = json.loads((path.parent / "plan.json").read_text(encoding="utf-8"))
@@ -114,6 +148,13 @@ def validate_test_project(project: Path, *, expected: bool,
         raise ValueError("EonTimer 测试工程缺少明确的测试标记")
     if payload.get("precalibration", {}).get("enabled") is not False:
         raise ValueError("EonTimer 测试工程不能写入普通预校准")
+    if fixed is not None:
+        from dataclasses import asdict
+        fixed.validate()
+        if test.get("mode") != "fixed" or test.get("fixed") != asdict(fixed) or test.get("calibration") != "disabled":
+            raise ValueError("固定时长测试工程与生成时配置不一致，请重新生成")
+    elif test.get("mode", "eontimer") != "eontimer":
+        raise ValueError("EonTimer 自动校准工程混入固定时长模式，请重新生成")
     warnings = []
     if hashlib.sha256(path.read_bytes()).hexdigest() != test.get("script_sha256"):
         record_fingerprint_mismatch("EonTimer 测试工程在生成后发生变化，建议重新生成；对照仅作诊断",

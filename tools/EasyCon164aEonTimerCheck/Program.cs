@@ -41,6 +41,7 @@ $本轮真值解 = 1
 $命中SeedMS = 30020
 $命中消耗帧 = 3002
 $check_result = 0
+$check_baseline_calls = 0
 
 FUNC EON伊机控等待参数(): INT
     $F1等待帧 = 0
@@ -50,6 +51,7 @@ FUNC EON伊机控等待参数(): INT
     RETURN 1
 ENDFUNC
 FUNC EON伊机控自动校准(): INT
+    $check_baseline_calls += 1
     $SeedMS = 29990
     $check_result = EON伊机控等待参数()
     $循环计数 += 1
@@ -74,6 +76,12 @@ foreach (var frames in Enumerable.Range(0, 14))
     source.AppendLine($"$check_result = EON除二({frames})");
     Assert($"half-{frames}", $"$check_result != {(int)Math.Round(frames / 2.0)}");
 }
+foreach (var ms in new[] { 3499, 3500, 3501, 0, 25, 75, 1000000 })
+foreach (var multiplier in new[] { 1, 2 })
+{
+    source.AppendLine($"$check_result = EON固定延迟转帧({ms}, {multiplier})");
+    Assert($"fixed-round-{ms}-{multiplier}", $"$check_result != {(int)Math.Round(ms * 3.0 / (multiplier == 1 ? 50 : 25))}");
+}
 source.AppendLine("$check_result = 重新计算等待参数()");
 Assert("initial", "$check_result != 1 or $EONF1目标帧 != 210 or $EONF2目标帧 != 1395 or $EONSeed校准MS != 0");
 Assert("initial-applied", "$SeedMS != 30000 or $F1等待MS != 16 or $F2等待MS != 19156 or $帧轴菜单奇偶开关 != 0 or $TV等待MS != 0");
@@ -85,10 +93,36 @@ source.AppendLine("$本轮候选命中计数 = 2\n$命中SeedMS = 30100\n$命中
 Assert("ambiguous-freeze", "$EON更新次数 != 2 or $EON跳过次数 != 1 or $EONSeed校准MS != -10 or $EONF2校准MS != -9");
 source.AppendLine("$本轮候选命中计数 = 1\n$本轮真值解 = 0\n$check_result = 执行自动校准与等待更新()");
 Assert("truth-freeze", "$EON更新次数 != 2 or $EON跳过次数 != 2 or $EONF2校准MS != -9");
+source.AppendLine("$F1阶段脚本固定延迟 = 3499\n$F1阶段脚本固定帧 = 209\n$check_result = 重新计算等待参数()");
+Assert("rounded-allocation-does-not-mutate-shadow-counts", "$check_result != 1 or $F1阶段脚本固定帧 != 209 or $EONF1目标帧 != 210");
+source.AppendLine("$F1阶段脚本固定延迟 = 3500\n$F1阶段脚本固定帧 = 210");
 source.AppendLine("$EONF2校准MS = -1000000\n$SeedMS = 12345\n$check_result = EON应用计时()");
 Assert("unreachable-no-fallback", "$check_result != 0 or $SeedMS != 12345");
 source.AppendLine("$进入TV = 1\n$check_result = 重新计算等待参数()");
 Assert("tv-stop", "$check_result != 0");
+source.AppendLine("""
+$进入TV = 0
+$EON已初始化 = 0
+$EON固定测试模式 = 1
+$EON固定SeedMS = 30000
+$EON固定F1MS = 3500
+$EON固定F2总MS = 27000
+$EON固定轮数上限 = 2
+$check_result = 重新计算等待参数()
+""");
+Assert("fixed-initial", "$check_result != 1 or $SeedMS != 30000 or $F1等待MS != 0 or $F2等待MS != 19300");
+source.AppendLine("$循环计数 = 0\n$check_result = EON开始固定轮()");
+Assert("fixed-skip-round-zero", "$check_result != 1 or $EON固定已尝试 != 0");
+source.AppendLine("$循环计数 = 1\n$check_result = EON开始固定轮()");
+Assert("fixed-attempt", "$check_result != 1 or $EON固定已尝试 != 1");
+source.AppendLine("$本轮真值解 = 1\n$命中SeedMS = 30050\n$命中消耗帧 = 3050\n$check_result = 执行自动校准与等待更新()");
+Assert("fixed-no-calibration", "$check_result != 1 or $check_baseline_calls != 4 or $SeedMS != 30000 or $F1等待MS != 0 or $F2等待MS != 19300 or $循环计数 != 2");
+source.AppendLine("$check_result = EON开始固定轮()\n$本轮候选命中计数 = 2\n$check_result = 执行自动校准与等待更新()");
+Assert("fixed-ambiguous-still-frozen", "$check_result != 1 or $check_baseline_calls != 4 or $SeedMS != 30000 or $F2等待MS != 19300");
+source.AppendLine("$check_result = EON开始固定轮()");
+Assert("fixed-limit", "$check_result != 0 or $EON固定已尝试 != 2");
+source.AppendLine("$F1阶段脚本固定延迟 = 3501\n$check_result = EON应用固定计时()");
+Assert("fixed-unreachable-no-fallback", "$check_result != 0 or $SeedMS != 30000 or $check_baseline_calls != 4");
 source.AppendLine("PRINT NATIVE_EONTIMER_PASS");
 var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
 var errors = compilation.Compile(null).Where(d => d.IsError).ToArray();

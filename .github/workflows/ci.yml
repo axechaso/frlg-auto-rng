@@ -130,6 +130,7 @@ jobs:
           automation/eontimer_comparison.py
           automation/eontimer_test.py
           automation/eontimer_test_report.py
+          automation/fixed_timeline_test.py
           pyside_app/eontimer_test.py
           tools/eontimer_comparison.py
           tools/verify_eontimer_test.py
@@ -203,6 +204,7 @@ jobs:
           tests.test_script_test
           tests.test_eontimer_comparison
           tests.test_eontimer_test
+          tests.test_fixed_timeline_test
           tests.test_save_profiles
           tests.test_seed_table_updater
           tests.test_seed_common_regions

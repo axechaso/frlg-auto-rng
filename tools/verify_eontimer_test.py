@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 from automation import AutoSearchRequest, EasyCon118Options, EGG_TEMPLATE_NAME, write_configured_project, validate_generated_project_consistency
 from automation.eontimer_test import RUNTIME_PATH, apply_test_project, test_options, validate_test_project
 from automation.eontimer_test_report import EonTestReport
+from automation.fixed_timeline_test import FixedTimeline, FixedTestReport, request_context
 from automation.planner import RunPlan
 from automation.seed_modes import seed_mode_to_settings
 from automation.support import get_route_support
@@ -53,6 +54,15 @@ def main(argv=None):
             validate_generated_project_consistency(project, plan, options, template_name=EGG_TEMPLATE_NAME)
             validate_test_project(project, expected=True)
             projects.append(project)
+            fixed = FixedTimeline(40000, 5000, 70000, "offline-fixture.log", "0" * 32,
+                                  request_context(request, options), initial.seed, initial.advances,
+                                  10 if "jpn" in game else 0, 5)
+            fixed_project = write_configured_project(args.source, output / f"{kind}-ns{nx}-fixed", plan, options,
+                                                     template_name=EGG_TEMPLATE_NAME)
+            apply_test_project(fixed_project, plan, options, advanced=True, fixed=fixed)
+            validate_generated_project_consistency(fixed_project, plan, options, template_name=EGG_TEMPLATE_NAME)
+            validate_test_project(fixed_project, expected=True, fixed=fixed)
+            projects.append(fixed_project)
     checker = ROOT / "tools/EasyCon164aEonTimerCheck/EasyCon164aEonTimerCheck.csproj"
     subprocess.run(["dotnet", "build", str(checker), "-c", "Release", "--nologo", "--verbosity", "quiet"], check=True)
     result = subprocess.run(["dotnet", str(checker.parent / "bin/Release/net9.0/EasyCon164aEonTimerCheck.dll"),
@@ -65,11 +75,16 @@ def main(argv=None):
         return result.returncode
     # Parse the actual production ECS PRINT markers emitted in native tests.
     report = EonTestReport("offline-native-check")
+    fixed_report = FixedTestReport("offline-native-fixed-check")
     for line in result.stdout.splitlines():
         report.consume(line)
+        fixed_report.consume(line)
     if report.error or report.updated != 2 or report.skipped != 2:
         raise ValueError(f"Native ECS / Python protocol mismatch: {report.error}, updated={report.updated}, skipped={report.skipped}")
     (output / "protocol-report.json").write_text(json.dumps(report.payload(), ensure_ascii=False, indent=2), encoding="utf-8")
+    if fixed_report.error or fixed_report.attempts != 2 or len(fixed_report.rows) != 2 or not fixed_report.limit_reached:
+        raise ValueError(f"Native fixed / Python protocol mismatch: {fixed_report.error}")
+    (output / "fixed-protocol-report.json").write_text(json.dumps(fixed_report.payload(), ensure_ascii=False, indent=2), encoding="utf-8")
     (output / "acceptance.json").write_text(json.dumps({
         "hardware_access": False, "outcomes_are_binding_fixtures_not_shiny_evidence": True,
         "projects": [{"main": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for path in projects],
