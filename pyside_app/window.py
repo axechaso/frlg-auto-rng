@@ -689,10 +689,11 @@ class FrlgWindow(FrlgPreviewWindow):
             options = test_options(options)
             template = EGG_TEMPLATE_NAME
         fixed = None
-        if eontimer and require_fixed and self.eontimer_mode.currentIndex() == 1:
+        if eontimer and require_fixed and self.eontimer_mode.currentIndex() in (1, 2):
             fixed = self.eontimer_controller.fixed_config(request, options)
+        clock_driver = self.eontimer_clock_driver.currentData() if eontimer and self.eontimer_mode.currentIndex() == 2 else None
         return WildInputs(request, options, Path(f["source"].text()), Path(f["ezcon"].text()),
-                          template, advanced, capture_name, eontimer, fixed)
+                          template, advanced, capture_name, eontimer, fixed, clock_driver)
 
     def invalidate(self, *_):
         if not self.live_ready or self.updating:
@@ -901,6 +902,9 @@ class FrlgWindow(FrlgPreviewWindow):
                 fixed = prepared.inputs.fixed_timeline
                 text.insert(0, f"固定时长测试：不校准；Seed {fixed.seed_ms} ms / F1 {fixed.f1_ms} ms / "
                                f"F2 总 {fixed.f2_total_ms} ms，最多 {fixed.repeat_limit} 轮；普通预校准不参与。")
+                if prepared.inputs.clock_driver:
+                    from automation.clock_test import DRIVER_LABELS
+                    text.insert(0, "底层计时 A/B：" + DRIVER_LABELS[prepared.inputs.clock_driver] + "；QPC 独立观测等待结束，不代表硬件按键到达时间。")
             else:
                 text.insert(0, "EonTimer 临时测试：GBA / Custom 自动计时与唯一反查校准；时间轴入口，无菜单 / TV，普通预校准不参与。")
         text.extend(f"提示：{x}" for x in (*plan.warnings, *prepared.check.warnings))
@@ -979,6 +983,11 @@ class FrlgWindow(FrlgPreviewWindow):
                              '达到轮数上限直接停止，出闪仍按原选择提前停止。'
                              if prepared.inputs.fixed_timeline else
                              '本次由 GBA / Custom 规则计时与校准。对照列只按相同观测计算，不代表另一次伊机控实跑。')
+                if prepared.inputs.clock_driver:
+                    from automation.clock_test import DRIVER_LABELS
+                    mode_text = ('底层计时 A/B：<b>' + DRIVER_LABELS[prepared.inputs.clock_driver] +
+                                 '</b>。相同成功时长、不校准；QPC 独立测量三段等待结束时间。'
+                                 '达到上限直接停止，出闪可提前结束。')
                 prompt = ('<p style="background:#fff0d2; color:#995300; padding:10px;">'
                           '<b>临时计时测试</b>：' + mode_text +
                           '搜索范围临时限制到 14400 帧以下，不执行菜单调整、TV 过帧，不读取或写回普通预校准。'

@@ -111,6 +111,7 @@ class WildInputs:
     capture_name: str = ""
     eontimer_test: bool = False
     fixed_timeline: FixedTimeline | None = None
+    clock_driver: str | None = None
 
     def fingerprint(self) -> str:
         return json.dumps(asdict(self), default=str, sort_keys=True, ensure_ascii=False)
@@ -143,6 +144,11 @@ class RunCommand:
 
 def validate_wild_inputs(inputs: WildInputs) -> None:
     inputs.request.validate()
+    if inputs.clock_driver is not None:
+        from automation.clock_test import validate_driver
+        if not inputs.eontimer_test:
+            raise ValueError("底层计时 A/B 不能混入普通流程")
+        validate_driver(inputs.clock_driver, inputs.fixed_timeline)
     if inputs.fixed_timeline is not None:
         if not inputs.eontimer_test:
             raise ValueError("固定时长配置不能混入普通流程")
@@ -223,7 +229,7 @@ def prepare_wild(
                                                template_name=inputs.template_name)
         if inputs.eontimer_test:
             apply_test_project(project, result.plan, inputs.options, advanced=inputs.advanced,
-                               fixed=inputs.fixed_timeline)
+                               fixed=inputs.fixed_timeline, clock_driver=inputs.clock_driver)
         check = validate_runtime(inputs.ezcon, project, fingerprint_warning_only=inputs.advanced)
     except SearchCancelledError:
         shutil.rmtree(output, ignore_errors=True)
@@ -283,7 +289,7 @@ def rebuild_wild_with_override(prepared: PreparedWild, paths: AppPaths) -> Prepa
         )
         if inputs.eontimer_test:
             apply_test_project(project, prepared.result.plan, inputs.options, advanced=inputs.advanced,
-                               fixed=inputs.fixed_timeline)
+                               fixed=inputs.fixed_timeline, clock_driver=inputs.clock_driver)
         check = validate_runtime(
             inputs.ezcon, project, fingerprint_warning_only=inputs.advanced,
         )
@@ -319,6 +325,7 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
     identity_warnings = validate_test_project(
         prepared.project, expected=inputs.eontimer_test,
         fixed=inputs.fixed_timeline,
+        clock_driver=inputs.clock_driver,
         fingerprint_warning_only=inputs.advanced,
     )
     check = validate_runtime(inputs.ezcon, prepared.project, fingerprint_warning_only=inputs.advanced)

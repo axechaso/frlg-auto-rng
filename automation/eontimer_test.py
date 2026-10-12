@@ -98,7 +98,7 @@ def adapt_text(text: str, fixed: FixedTimeline | None = None) -> str:
 
 
 def apply_test_project(project: Path, plan, options, *, advanced: bool,
-                       fixed: FixedTimeline | None = None) -> None:
+                       fixed: FixedTimeline | None = None, clock_driver: str | None = None) -> None:
     validate_test_request(plan.request, options, advanced=advanced)
     if plan.initial_seed.advances >= 14400:
         raise ValueError("EonTimer 临时测试本次不使用 TV，请选择消耗帧小于 14400 的目标")
@@ -111,6 +111,9 @@ def apply_test_project(project: Path, plan, options, *, advanced: bool,
         raise ValueError("EonTimer 临时测试不能复用或写回普通预校准")
     if fixed is not None:
         fixed.validate_plan(plan, options)
+    if clock_driver is not None:
+        from .clock_test import validate_driver
+        validate_driver(clock_driver, fixed)
     configured = adapt_text(path.read_text(encoding="utf-8"), fixed)
     data = configured.encode("utf-8")
     payload["eontimer_test"] = {
@@ -127,6 +130,16 @@ def apply_test_project(project: Path, plan, options, *, advanced: bool,
         from dataclasses import asdict
         payload["eontimer_test"].update(fixed=asdict(fixed), calibration="disabled",
                                         comparison="unique_reverse_observation_only")
+    if clock_driver is not None:
+        from .clock_test import apply_clock_project
+        # Only the freshly generated project and its two F2 libraries change.
+        # The shipped runner, source mothers and ordinary projects do not.
+        with path.open("w", encoding="utf-8", newline="\n") as file:
+            file.write(configured)
+        payload["eontimer_test"]["clock_test"] = apply_clock_project(path, fixed, clock_driver)
+        configured = path.read_text(encoding="utf-8")
+        payload["eontimer_test"]["script_sha256"] = hashlib.sha256(configured.encode("utf-8")).hexdigest()
+        payload["eontimer_test"]["comparison"] = "real_clock_fixed_deadline_ab"
     # Called only inside a new UUID output directory owned by this generation.
     with path.open("w", encoding="utf-8", newline="\n") as file:
         file.write(configured)
@@ -135,15 +148,17 @@ def apply_test_project(project: Path, plan, options, *, advanced: bool,
 
 
 def validate_test_project(project: Path, *, expected: bool, fixed: FixedTimeline | None = None,
+                          clock_driver: str | None = None,
                           fingerprint_warning_only: bool = False) -> tuple[str, ...]:
     path = Path(project)
     payload = json.loads((path.parent / "plan.json").read_text(encoding="utf-8"))
     text = path.read_text(encoding="utf-8")
     test = payload.get("eontimer_test")
+    from .clock_test import validate_clock_project
     if not expected:
         if test is not None or MARKER in text:
             raise ValueError("普通方案混入了 EonTimer 测试，请重新生成")
-        return ()
+        return validate_clock_project(path, expected_driver=None, fixed=None)
     if not isinstance(test, dict) or test.get("schema") != SCHEMA or MARKER not in text:
         raise ValueError("EonTimer 测试工程缺少明确的测试标记")
     if payload.get("precalibration", {}).get("enabled") is not False:
@@ -162,4 +177,6 @@ def validate_test_project(project: Path, *, expected: bool, fixed: FixedTimeline
     if test.get("runtime_sha256") != hashlib.sha256(RUNTIME_PATH.read_bytes()).hexdigest():
         record_fingerprint_mismatch("EonTimer 测试逻辑已更新，建议重新生成；对照仅作诊断",
                                     warning_only=fingerprint_warning_only, warnings=warnings)
+    warnings.extend(validate_clock_project(path, expected_driver=clock_driver, fixed=fixed,
+                                          warning_only=fingerprint_warning_only))
     return tuple(warnings)

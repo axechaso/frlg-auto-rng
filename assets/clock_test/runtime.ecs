@@ -1,0 +1,72 @@
+# FRLG_CLOCK_AB_TEST_V1
+# Generated test library only. __DLL__ is replaced with this project's absolute path.
+EXTERN FUNC CT_Init($版本: INT, $模式: INT, $Seed: INT, $F1: INT, $F2: INT): INT FROM "__DLL__"
+EXTERN FUNC CT_Round($轮: INT): INT FROM "__DLL__"
+EXTERN FUNC CT_Info($字段: INT): INT FROM "__DLL__"
+EXTERN FUNC CT_Origin($阶段: INT, $当前: INT): INT FROM "__DLL__"
+EXTERN FUNC CT_Step($阶段: INT): INT FROM "__DLL__"
+EXTERN FUNC CT_Mark($阶段: INT, $当前: INT): INT FROM "__DLL__"
+EXTERN FUNC CT_Get($阶段: INT, $字段: INT): INT FROM "__DLL__"
+EXTERN FUNC CT_Close(): INT FROM "__DLL__"
+$CLOCK就绪 = CT_Init(1, __DRIVER__, __SEED__, __F1__, __F2__)
+$CLOCK日志初始化 = 0
+
+FUNC CLOCK开始轮($轮: INT): INT
+    IF $CLOCK就绪 != 1 or CT_Round($轮) != 1
+        PRINT 底层计时测试初始化失败，直接停止；不回退普通计时，不重启游戏
+        RETURN 0
+    ENDIF
+    IF $轮 > 0 and $CLOCK日志初始化 == 0
+        $CLOCK日志初始化 = 1
+        $CLOCK日志模式 = CT_Info(0)
+        $CLOCK日志Seed = CT_Get(0, 1)
+        $CLOCK日志F1 = CT_Get(1, 1)
+        $CLOCK日志F2 = CT_Get(2, 1)
+        $CLOCK日志频率 = CT_Info(4)
+        $CLOCK日志频率余 = CT_Info(5)
+        PRINT "CLOCKTEST|V=1|TYPE=INIT|DRIVER=" & $CLOCK日志模式 & "|SEED=" & $CLOCK日志Seed & "|F1=" & $CLOCK日志F1 & "|F2=" & $CLOCK日志F2 & "|FREQ_KHZ=" & $CLOCK日志频率 & "|FREQ_REMAINDER=" & $CLOCK日志频率余 & "|END=1"
+        PRINT 底层计时A/B测试：固定成功时长、不校准；两组仅更换Seed/F1/F2绝对等待，普通操作不改
+    ENDIF
+    RETURN 1
+ENDFUNC
+
+FUNC CLOCK精确等待($阶段: INT): INT
+    FOR
+        $CLOCK步结果 = CT_Step($阶段)
+        IF $CLOCK步结果 < 0
+            PRINT 底层计时等待失败，直接停止并保留现场，不回退普通计时
+            RETURN -1
+        ENDIF
+        IF $CLOCK步结果 == 1
+            BREAK
+        ENDIF
+    NEXT
+    $CLOCK拍点结果 = CT_Mark($阶段, TIME())
+    IF $CLOCK拍点结果 != 1
+        PRINT 底层计时观测失败，直接停止并保留现场
+        RETURN -1
+    ENDIF
+    # Compatibility return for the existing integer-ms overrun checks.
+    $CLOCK超时 = CT_Get($阶段, 3) / 1000
+    IF $CLOCK超时 < 0
+        $CLOCK超时 = 0
+    ENDIF
+    RETURN $CLOCK超时
+ENDFUNC
+
+FUNC CLOCK输出本轮
+    IF CT_Info(1) == 0
+        RETURN
+    ENDIF
+    # Deferred until acquisition has returned: no extra PRINT/IPC in a wait tail.
+    FOR $CLOCK阶段 = 0 TO 2
+        $CLOCK日志轮 = CT_Info(2)
+        $CLOCK日志模式 = CT_Info(0)
+        $CLOCK日志状态 = CT_Get($CLOCK阶段, 0)
+        $CLOCK日志目标 = CT_Get($CLOCK阶段, 1)
+        $CLOCK日志实际 = CT_Get($CLOCK阶段, 2)
+        $CLOCK日志误差 = CT_Get($CLOCK阶段, 3)
+        $CLOCK日志墙钟 = CT_Get($CLOCK阶段, 4)
+        PRINT "CLOCKTEST|V=1|TYPE=STAGE|ATTEMPT=" & $CLOCK日志轮 & "|DRIVER=" & $CLOCK日志模式 & "|STAGE=" & $CLOCK阶段 & "|STATUS=" & $CLOCK日志状态 & "|TARGET_MS=" & $CLOCK日志目标 & "|ELAPSED_US=" & $CLOCK日志实际 & "|ERROR_US=" & $CLOCK日志误差 & "|WALL_ELAPSED_MS=" & $CLOCK日志墙钟 & "|END=1"
+    NEXT
+ENDFUNC

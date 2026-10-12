@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import replace
 
 from PySide6.QtCore import QTimer
@@ -9,6 +10,8 @@ from PySide6.QtWidgets import QDialog, QLabel, QPlainTextEdit, QPushButton, QVBo
 
 from automation.eontimer_test_report import EonTestReport
 from automation.fixed_timeline_test import FixedTestReport, find_successful_timeline
+from automation.clock_test_report import ClockTestReport
+from automation.clock_test import DRIVER_LABELS, DLL_NAME, labels_digest
 
 
 class EonTimerController:
@@ -22,6 +25,7 @@ class EonTimerController:
         self.export_note = ""
         self.fixed = None
         self.load_note = ""
+        self.clock_reports = {}
         self.timer = QTimer(window)
         self.timer.setSingleShot(True)
         self.timer.setInterval(150)
@@ -30,6 +34,7 @@ class EonTimerController:
         window.eontimer_test_check.toggled.connect(self.changed)
         window.eontimer_mode.currentIndexChanged.connect(self.mode_changed)
         window.eontimer_repeat_limit.valueChanged.connect(self.changed)
+        window.eontimer_clock_driver.currentIndexChanged.connect(self.changed)
         window.eontimer_load_button.clicked.connect(lambda: self.load())
         window.advanced_check.toggled.connect(self.availability)
         self.availability()
@@ -39,20 +44,22 @@ class EonTimerController:
         enabled = window.advanced_check.isChecked() and not window.running and window.job is None
         window.eontimer_test_check.setEnabled(enabled)
         checked = enabled and window.eontimer_test_check.isChecked()
-        for widget in (window.eontimer_mode, window.eontimer_load_button, window.eontimer_repeat_limit):
+        for widget in (window.eontimer_mode, window.eontimer_load_button, window.eontimer_repeat_limit,
+                       window.eontimer_clock_driver):
             widget.setEnabled(checked)
         if not window.advanced_check.isChecked() and window.eontimer_test_check.isChecked() and not window.running:
             window.eontimer_test_check.setChecked(False)
 
     def changed(self, *_):
         self.window.invalidate()
-        if (self.window.eontimer_test_check.isChecked() and self.window.eontimer_mode.currentIndex() == 1
+        if (self.window.eontimer_test_check.isChecked() and self.window.eontimer_mode.currentIndex() in (1, 2)
                 and self.fixed is None):
             self.load(silent=True)
         self.refresh()
 
     def mode_changed(self, *_):
-        self.window.eontimer_fixed_box.setVisible(self.window.eontimer_mode.currentIndex() == 1)
+        self.window.eontimer_fixed_box.setVisible(self.window.eontimer_mode.currentIndex() in (1, 2))
+        self.window.eontimer_clock_box.setVisible(self.window.eontimer_mode.currentIndex() == 2)
         self.changed()
 
     def fixed_config(self, request, options):
@@ -115,7 +122,16 @@ class EonTimerController:
         # Ordinary runs must never consume test markers from unrelated output.
         if self.active:
             fixed = getattr(prepared.inputs, "fixed_timeline", None)
-            self.report = FixedTestReport(command.run_id, fixed) if fixed else EonTestReport(command.run_id)
+            driver = getattr(prepared.inputs, "clock_driver", None)
+            if driver:
+                self.report = ClockTestReport(command.run_id, fixed, driver,
+                                             capture_name=prepared.inputs.capture_name,
+                                             labels_sha256=labels_digest(prepared.project),
+                                             native_sha256=hashlib.sha256((prepared.project.parent / DLL_NAME).read_bytes()).hexdigest())
+                other = "eontimer" if driver == "easycon" else "easycon"
+                self.report.reference = self.clock_reports.get((self.report.comparison_key(), other))
+            else:
+                self.report = FixedTestReport(command.run_id, fixed) if fixed else EonTestReport(command.run_id)
             self.export_note = ""
         self.refresh()
 
@@ -128,6 +144,7 @@ class EonTimerController:
             self.report.finished = True
             if self.report.initial and self.command:
                 path = self.command.log_path.with_suffix(
+                    ".clock-timing.json" if isinstance(self.report, ClockTestReport) else
                     ".fixed-timeline.json" if isinstance(self.report, FixedTestReport) else ".eontimer.json")
                 try:
                     # A run UUID owns this new file; never overwrite old evidence.
@@ -136,6 +153,10 @@ class EonTimerController:
                     self.export_note = f"自动对照报告：{path}"
                 except (OSError, ValueError) as exc:
                     self.export_note = f"对照报告未保存：{exc}；原始日志不变。"
+                if (isinstance(self.report, ClockTestReport) and not self.report.error and self.report.clock_initial
+                        and self.report.capture_name and self.report.labels_sha256
+                        and any(row["complete"] for row in self.report.clock_rows)):
+                    self.clock_reports[(self.report.comparison_key(), self.report.driver)] = self.report.payload()
             self.active = False
         self.timer.stop()
         self.refresh()
@@ -144,6 +165,8 @@ class EonTimerController:
         self.availability()
         if self.report.error:
             status = self.report.error
+        elif isinstance(self.report, ClockTestReport) and self.report.initial:
+            status = DRIVER_LABELS[self.report.driver] + f" · 已启动 {self.report.attempts} 轮，不校准"
         elif isinstance(self.report, FixedTestReport) and self.report.initial:
             status = ("固定时长测试运行中" if self.active else "最近一次固定时长测试") + f" · 已启动 {self.report.attempts} 轮，不校准"
         elif self.active:
@@ -152,6 +175,8 @@ class EonTimerController:
             status = f"最近一次测试 · 已更新 {self.report.updated} 轮，非唯一跳过 {self.report.skipped} 轮"
         elif self.window.eontimer_test_check.isChecked():
             status = self.load_note or (
+                "底层计时 A/B 已开启 · " + DRIVER_LABELS[self.window.eontimer_clock_driver.currentData()] + "，同固定时长、不校准"
+                if self.window.eontimer_mode.currentIndex() == 2 else
                 "固定时长测试已开启 · 读取同目标成功时长后重新生成；每轮保持不变"
                 if self.window.eontimer_mode.currentIndex() == 1 else
                 "测试已开启 · 请回野生 / 静态页重新生成；自动使用时间轴，普通预校准不参与")
@@ -167,7 +192,7 @@ class EonTimerController:
             self.dialog.setWindowTitle("自动计时与反查对照（临时测试）")
             self.dialog.resize(1000, 660)
             layout = QVBoxLayout(self.dialog)
-            hint = QLabel("工具自动取得参数并记录反查：自动模式会校准，固定模式只观察、不校准。本页可在运行中查看，不会暂停脚本。")
+            hint = QLabel("工具自动取得参数并记录反查；底层 A/B 还用 QPC 测量实际等待。相同参数的两组在本次工具启动期间自动对照，并各自保存报告。本页可在运行中查看，不会暂停脚本。")
             hint.setWordWrap(True)
             layout.addWidget(hint)
             self.view = QPlainTextEdit()

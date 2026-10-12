@@ -1,0 +1,14 @@
+{
+  "schema": "FRLG_CLOCK_TEST_NATIVE_V1",
+  "abi": 1,
+  "machine": "windows-x64",
+  "clock": "QueryPerformanceCounter",
+  "scheduler": "high_resolution_waitable_timer_2ms_spin",
+  "max_sleep_slice_ms": 8,
+  "wait_timeout_ms": 10,
+  "spin_tail_ms": 2,
+  "eontimer_commit": "ead211d6e4251c4f08345cc9e56e76d3cb2a29bd",
+  "source_sha256": "bf44080f9acf3b95f456fc5a0c514601eecf9ed4062ac3a711d54015e1a0f0ee",
+  "dll_sha256": "188081f66edd3af1e54a8296b6ec51887d0b982d7081e108f56551d61f1cc6ed",
+  "dll_bytes": 108544
+}

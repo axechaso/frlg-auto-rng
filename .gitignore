@@ -76,3 +76,5 @@ _downloads/
 # Offline EonTimer compiler check output (not a replacement runner).
 tools/EasyCon164aEonTimerCheck/bin/
 tools/EasyCon164aEonTimerCheck/obj/
+tools/EasyCon164aClockTestCheck/bin/
+tools/EasyCon164aClockTestCheck/obj/

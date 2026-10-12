@@ -1,0 +1,21 @@
+# FRLG_CLOCK_AB_TEST_V1
+# Main-scope wrapper: libraries cannot call the main script's native wait.
+FUNC CLOCK等待到($阶段: INT, $原点: INT, $目标: INT): INT
+    IF CT_Info(1) == 0
+        RETURN 执行时间轴等待到($原点, $目标)
+    ENDIF
+    IF CT_Get($阶段, 1) != $目标
+        PRINT 底层计时测试截止不一致，直接停止；不能悄悄改变固定目标
+        RETURN -1
+    ENDIF
+    IF CT_Info(0) == 1
+        RETURN CLOCK精确等待($阶段)
+    ENDIF
+    $CLOCK原生结果 = 执行时间轴等待到($原点, $目标)
+    $CLOCK拍点结果 = CT_Mark($阶段, TIME())
+    IF $CLOCK拍点结果 != 1
+        PRINT 原生计时观测失败，直接停止并保留现场
+        RETURN -1
+    ENDIF
+    RETURN $CLOCK原生结果
+ENDFUNC
