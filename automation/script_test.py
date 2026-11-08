@@ -11,6 +11,8 @@ from pathlib import Path
 from fingerprint_policy import record_fingerprint_mismatch
 
 from .easycon118 import (
+    EASYCON170_TEST,
+    EASYCON_BACKEND_NAME,
     EGG_TEMPLATE_NAME,
     EXPECTED_EZCON_SHA256,
     EXPECTED_EZCON_VERSION,
@@ -179,7 +181,7 @@ def prepare_script_test_runtime(
                     suffix = "……" if len(missing) > 12 else ""
                     errors.append(f"ImgLabel 缺少脚本引用的标签: {preview}{suffix}")
 
-    if ezcon_is_pinned:
+    if ezcon_is_pinned and not EASYCON170_TEST:
         tessdata_dir = ezcon_path.parent / "Tessdata"
         for model, expected_sha256 in EXPECTED_TESSDATA_SHA256.items():
             model_path = tessdata_dir / model
@@ -232,18 +234,18 @@ def prepare_script_test_runtime(
                 **run_options,
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            errors.append(f"EasyCon 1.6.4-a ECS 语法预检无法执行: {exc}")
+            errors.append(f"{EASYCON_BACKEND_NAME} ECS 语法预检无法执行: {exc}")
         else:
             if formatted.returncode != 0:
                 details = (formatted.stderr or formatted.stdout).strip()
                 errors.append(
-                    "EasyCon 1.6.4-a ECS 语法预检失败，退出码 "
+                    f"{EASYCON_BACKEND_NAME} ECS 语法预检失败，退出码 "
                     f"{formatted.returncode}: {details[-1000:]}"
                 )
 
     if backend == SCRIPT_TEST_BACKEND_ORIGINAL and ezcon_is_pinned:
         runner_path = ezcon_path
-        warnings.append("运行后端：原始 1.6.4-a CLI（不含工具兼容补丁）")
+        warnings.append(f"运行后端：原始 {EASYCON_BACKEND_NAME} CLI（不含工具兼容补丁）")
     elif backend == SCRIPT_TEST_BACKEND_COMPAT and ezcon_is_pinned and not errors:
         try:
             runner_path = prepare_compat_runner(
@@ -254,7 +256,12 @@ def prepare_script_test_runtime(
         except (OSError, ValueError, RuntimeError) as exc:
             errors.append(f"工具兼容运行器预检失败: {exc}")
         else:
-            warnings.append("运行后端：与正式工具相同的持续采帧/向上取整兼容运行器")
+            warnings.append(
+                "运行后端：EasyCon 170 Actions CLI（LegacyGui 评分兼容；"
+                "未启用 1.6.4-a 私有采帧扩展）"
+                if EASYCON170_TEST
+                else "运行后端：与正式工具相同的持续采帧/向上取整兼容运行器"
+            )
 
     if label_references:
         warnings.append(f"已核对脚本及 lib 的 {len(label_references)} 个直接标签引用")

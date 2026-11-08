@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from automation import probe_easycon_devices
+from automation.easycon118 import EXPECTED_LABEL_COUNT
 from pyside_app.path_settings import restore_resource_path
 
 
@@ -65,7 +66,7 @@ class ResourcePathTests(unittest.TestCase):
             root = Path(temp)
             legacy = root / "old-tid"
             current = root / "current-tid"
-            for directory, count in ((legacy, 328), (current, 1155)):
+            for directory, count in ((legacy, 328), (current, EXPECTED_LABEL_COUNT)):
                 labels = directory / "ImgLabel"
                 labels.mkdir(parents=True)
                 for index in range(count):
@@ -102,7 +103,7 @@ class ResourcePathTests(unittest.TestCase):
             root = Path(temp)
             custom = root / "custom-tid"
             current = root / "current-tid"
-            for directory, count in ((custom, 500), (current, 1155)):
+            for directory, count in ((custom, 500), (current, EXPECTED_LABEL_COUNT)):
                 labels = directory / "ImgLabel"
                 labels.mkdir(parents=True)
                 for index in range(count):

@@ -12,8 +12,8 @@ from automation.easycon118 import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ASSET_ROOT = REPO_ROOT / "local_assets" / "easycon118"
-SOURCE_CORPUS_SHA256 = "2a8acea58843d03826a35259facd2dbd1722dd3a5094246a7195216ebbd7de32"
-RUNTIME_CORPUS_SHA256 = "6d585335af4b47afe3b04da19e515765bc51ef6b572cd2ea7d5f483b397d864f"
+SOURCE_CORPUS_SHA256 = "cda5f2cd9b2d8f4d6f89f24f6939f6b8484782d387fbb1812d7e23a03b6190ca"
+RUNTIME_CORPUS_SHA256 = "a585c5feda746fedd299500df0d6cf1065b0c911f5d0e0505911870e39b91803"
 
 
 class LabelWaitStageMaterializationTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class LabelWaitStageMaterializationTests(unittest.TestCase):
             (ASSET_ROOT / "asset_manifest.json").read_text(encoding="utf-8")
         )
         self.assertEqual(manifest["source_scripts"]["sha256"], SOURCE_CORPUS_SHA256)
-        self.assertEqual(manifest["source_scripts"]["bytes"], 2122143)
+        self.assertEqual(manifest["source_scripts"]["bytes"], 2126393)
         self.assertEqual(manifest["scripts"]["sha256"], scripts["sha256"])
         self.assertEqual(manifest["scripts"]["bytes"], scripts["bytes"])
 

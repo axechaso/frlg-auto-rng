@@ -17,9 +17,59 @@ from automation import easycon118 as ecs
 from automation.sid_reverse118 import SIDReverseRunRequest, write_sid_reverse_project
 from automation.tid_starter_save import TID_STARTER_SAVE_NAME, TID_STARTER_SAVE_SHA256
 from automation.tid_starter_flow import enable_starter_success_markers
+from automation.planner import AutoSearchRequest, RunPlan
+from automation.seed_modes import seed_mode_to_settings
+from automation.support import get_route_support
+from automation.target_verification import exact_target_hit_anchor
+from rng.tenlines_utils import IVs, InitialSeedResult, SearcherResult
 from tests.test_easycon118_egg import egg_request
 from tools.verify_sid_observation import generate_matrix as sid_evidence_matrix
 from tools.verify_tid_bootstrap_integration import generate_matrix as tid_matrix
+
+
+def ordinary_matrix(source: Path, output: Path) -> list[Path]:
+    """Exercise each changed route plus target-shiny pre-calibration overlays."""
+    cases = (
+        ("grass", "Wild 1", "Grass", "Viridian Forest", "Pikachu", 3),
+        ("surf", "Wild 1", "Surf", "Seafoam Islands 1F", "Seel", 30),
+        ("old-rod", "Wild 1", "OldRod", "Fuchsia City", "Magikarp", 5),
+        ("good-rod", "Wild 1", "GoodRod", "Fuchsia City", "Goldeen", 10),
+        ("super-rod", "Wild 1", "SuperRod", "Fuchsia City", "Gyarados", 20),
+        ("safari", "Wild 1", "Grass", "Kanto Safari Zone Middle", "Nidoran♀", 30),
+        ("stationary", "Static 1", "Stationary", "Stationary", "Snorlax", 30),
+        ("legend", "Static 1", "Legend", "Legend", "Articuno", 50),
+        ("roamer", "Static 1", "Roaming", "Roaming", "Suicune", 50),
+        ("togepi", "Static 1", "Gift", "Gift", "Togepi", 5),
+        ("starter-en", "Static 1", "Starter", "Starter", "Squirtle", 5),
+        ("starter-jp", "Static 1", "Starter", "Starter", "Squirtle", 5),
+        ("item", "Wild 1", "Grass", "Viridian Forest", "Pikachu", 3),
+    )
+    paths = []
+    for template, model, case in product(ecs.EXPECTED_TEMPLATE_NAMES, (1, 2), cases):
+        kind, method, category, location, pokemon, level = case
+        japanese = kind == "starter-jp"
+        game = ("fr_jpn_nx" if japanese else "fr_nx") + ("2" if model == 2 else "")
+        request = AutoSearchRequest(game=game, tid=12345, sid=54321, method=method,
+            category=category, location=location, pokemon=pokemon, max_advances=30000)
+        target = SearcherResult(target_seed="0000EDDE", method=method, pokemon=pokemon,
+            level=level, pid="12345678", shiny="Star", nature="Timid", ability="Any",
+            ivs=IVs(31, 31, 31, 31, 31, 31), hidden_type="Dark", hidden_power=70, gender="M")
+        initial = InitialSeedResult(seed="EDDE", advances=16230, total_frames=16230,
+            total_time="00:00:00", seed_time=40000, settings=seed_mode_to_settings(0))
+        plan = RunPlan(request, target, initial, 186, get_route_support(method, category,
+            location, pokemon=pokemon, game=game))
+        options = ecs.EasyCon118Options(nx_model=model, japanese_starter=japanese,
+            item_rng_mode=kind == "item", update_precalibration=True,
+            record_shiny_video=True, stop_on_non_target_shiny=True)
+        main = ecs.write_configured_project(source, output / f"{Path(template).stem}-ns{model}-{kind}",
+            plan, options, template_name=template,
+            precalibration_store_path=output / "unused-precalibration.json")
+        ecs.validate_generated_project_consistency(main, plan, options, template_name=template)
+        condition = exact_target_hit_anchor(main.read_text(encoding="utf-8"))
+        if not condition.endswith(" and $Seed本轮可信 == 1 and $消耗帧本轮可信 == 1\n"):
+            raise ValueError("当前母本精确命中的独立可信门控被覆盖")
+        paths.append(main)
+    return paths
 
 
 def verify(source: Path, tid_source: Path, output: Path, ezcon: Path) -> dict:
@@ -50,6 +100,7 @@ def verify(source: Path, tid_source: Path, output: Path, ezcon: Path) -> dict:
         if not ecs._uses_upstream_unified_seed_controller(text) or text.count("# EGG_MODULE_DELEGATE:") != 12:
             raise ValueError("新版统一控制器或孵蛋模块委托缺失")
         paths.append(("mother", main))
+    paths.extend(("ordinary", path) for path in ordinary_matrix(source, output / "ordinary"))
     paths.extend(("sid-evidence", path) for path in sid_evidence_matrix(source, output / "sid-evidence"))
     paths.extend(("tid-r5", path) for path in tid_matrix(tid_source, output / "tid-r5"))
     marker_root = output / "tid-starter-markers"

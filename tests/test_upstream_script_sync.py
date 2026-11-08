@@ -4,6 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import json
+import numpy as np
+from easycon.label_matcher import match_prepared_label, prepare_label
 from automation import easycon118 as ecs
 
 
@@ -34,6 +37,27 @@ def unified_fixture():
 
 
 class UpstreamOverlayTests(unittest.TestCase):
+    def test_entry_timing_labels_are_canonical_and_installed_for_all_flows(self):
+        labels = {
+            "三代路闪遇敌.IL": "092ca69d0e3eb9aa04f7f0d3e2b9660b816f1d8c08d4c45abcd46b5e43147948",
+            "三代路闪HP检测.IL": "c54176ce0a3eecc5854cf71efadec592a134d488ef09cb54a673952919cd645c",
+            "三代路闪wild检测.IL": "49a3121108c9815e402ca860bf4a992e1e7a4d650010962d14a1e6bc0c8d961d",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            ecs.copy_easycon118_extension_labels(destination)
+            for name, expected in labels.items():
+                with self.subTest(name=name):
+                    self.assertIn(name, ecs.EASYCON118_EXTENSION_LABEL_NAMES)
+                    data = (destination / name).read_bytes()
+                    self.assertEqual(hashlib.sha256(data).hexdigest(), expected)
+                    prepared = prepare_label(json.loads(data.decode("utf-8-sig")))
+                    frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+                    height, width = prepared["template"].shape[:2]
+                    x, y = prepared["rx"], prepared["ry"]
+                    frame[y:y + height, x:x + width] = prepared["template"]
+                    self.assertGreaterEqual(match_prepared_label(frame, prepared).easycon_degree, 99)
+
     def test_manual_egg_seed_bounds_only_remove_audited_dynamic_defaults(self):
         dynamic = "\n".join(ecs.EGG_DYNAMIC_SEED_WINDOW_ASSIGNMENTS)
         original = ("$孵蛋野生最小消耗帧 = 0\n$孵蛋野生最大消耗帧 = 0\n"
@@ -174,6 +198,39 @@ class UpstreamOverlayTests(unittest.TestCase):
 
 @unittest.skipUnless(CACHE.is_dir(), "requires current imported release assets")
 class ImportedReleaseAssetsTests(unittest.TestCase):
+    def test_entry_timing_and_roamer_libraries_keep_the_reviewed_bytes(self):
+        libraries = {
+            "16_获取_静态目标.ecs": "2efbeb55dc2fcbc83fa76de2bfa6578481057e3ef4ecbcfdbb0c8c2cd54554bb",
+            "17_获取_野生目标.ecs": "8db7142e53e11a09fb164cc5bf6f0f25b5127cfff4ddf7fe900e407d29081146",
+            "18_获取_抓捕流程.ecs": "2890624bed7191106e65633e5f2b4f6eb775e248a73bea67adeae92394d55edf",
+            "20_识图_抓捕对象名称识别.ecs": "cc104adb1f255f76653af8f16f5b968bc8c85f1556a69fdf3d0a777cd21f1bd0",
+            "27_孵蛋测试流程.ecs": "cc20f8d0d16b64bf80d1cf5588975241a962e2f821fe2f0832585e0468ef8f33",
+        }
+        for name, expected in libraries.items():
+            with self.subTest(name=name):
+                self.assertEqual(len(expected), 64)
+                self.assertEqual(hashlib.sha256((CACHE / "lib" / name).read_bytes()).hexdigest(), expected)
+        for name in ("17_获取_野生目标.ecs", "18_获取_抓捕流程.ecs"):
+            self.assertNotIn("@时差检测", (CACHE / "lib" / name).read_text(encoding="utf-8"))
+        vision = (CACHE / "lib/20_识图_抓捕对象名称识别.ecs").read_text(encoding="utf-8")
+        self.assertIn("FUNC 等待并检测入场时差($等待MS: INT, $重置: INT): INT", vision)
+        self.assertIn("WAIT 100\n            $入场时差空白匹配 = @三代路闪wild检测", vision)
+
+    def test_candy_refinement_is_not_replaced_by_legacy_early_exit_rules(self):
+        for name in ecs.EXPECTED_TEMPLATE_NAMES:
+            text = (CACHE / name).read_text(encoding="utf-8")
+            with self.subTest(name=name):
+                reverse = ecs._function_block(text, "FUNC 执行识图反查直到候选唯一(): INT")[2]
+                self.assertIn("CALL 重置糖果细分观察", reverse)
+                self.assertIn("IF 检查糖果升级观察() != 1", reverse)
+                self.assertIn("RETURN 结束未唯一候选细分(1)", reverse)
+                self.assertIn("RETURN 结束未唯一候选细分(2)", reverse)
+                self.assertIn("RETURN 结束未唯一候选细分(3)", reverse)
+                for legacy in ("$本轮候选命中计数 >= $跨组筛选候选阈值", "投票更新停糖()", "$糖果单只上限 > 0", "$候选停滞上限 > 0"):
+                    self.assertNotIn(legacy, reverse)
+                calibration = ecs._function_block(text, "FUNC 执行自动校准与等待更新(): INT")[2]
+                self.assertLess(calibration.index("CALL 应用候选独立可信门控"), calibration.index("投票设置Seed窗("))
+
     def test_imported_unified_seed_and_egg_bridge_match_reviewed_source(self):
         functions = {
             "FUNC 计算Seed所选方案修正($原始样本已写入: INT): INT":

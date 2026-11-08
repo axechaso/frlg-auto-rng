@@ -22,6 +22,7 @@ from .tid_starter_save import (
 )
 
 from .easycon118 import (
+    EASYCON170_TEST,
     EASYCON_BACKEND_NAME,
     EXPECTED_LABEL_COUNT as EXPECTED_MOTHER_LABEL_COUNT,
     EXPECTED_LABEL_METHODS as EXPECTED_MOTHER_LABEL_METHODS,
@@ -29,8 +30,10 @@ from .easycon118 import (
     EXPECTED_EZCON_SHA256,
     EXPECTED_EZCON_VERSION,
     EasyConRuntimeCheck,
+    adapt_project_tree,
     inspect_label_corpus,
 )
+from .easycon170_test import test_root as easycon170_test_root
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +45,9 @@ DOWNLOADED_TID_SOURCE = (
 )
 IMPORTED_TID_SOURCE = ROOT / "local_assets" / "tid_rng137"
 DEFAULT_TID_SOURCE_PATH = (
-    IMPORTED_TID_SOURCE if IMPORTED_TID_SOURCE.is_dir() else DOWNLOADED_TID_SOURCE
+    easycon170_test_root() / "tid_rng137"
+    if EASYCON170_TEST
+    else IMPORTED_TID_SOURCE if IMPORTED_TID_SOURCE.is_dir() else DOWNLOADED_TID_SOURCE
 )
 
 TID_REFERENCE_SCRIPT_NAMES = {
@@ -579,6 +584,8 @@ def write_configured_tid_project(
     if output_labels.exists():
         shutil.rmtree(output_labels)
     shutil.copytree(label_dir, output_labels)
+    if EASYCON170_TEST:
+        adapt_project_tree(output_dir)
     (output_dir / "plan.json").write_text(
         json.dumps(
             {
@@ -608,6 +615,30 @@ def write_configured_tid_project(
     return main_path
 
 
+def _tid_preflight_command_error(
+    stage: str,
+    result: subprocess.CompletedProcess,
+    project_main: Path,
+) -> str:
+    status = result.returncode & 0xFFFFFFFF
+    exit_code = f"{result.returncode}（0x{status:08X}）"
+    if status == 0xC0000142:
+        message = (
+            f"{EASYCON_BACKEND_NAME} TID {stage}进程启动失败，退出码 {exit_code}："
+            "DLL 初始化失败（STATUS_DLL_INIT_FAILED）；本次未完成脚本语法检查。"
+        )
+    else:
+        message = f"{EASYCON_BACKEND_NAME} TID {stage}失败，退出码 {exit_code}。"
+    details = "\n".join(
+        output.strip()
+        for output in (result.stdout or "", result.stderr or "")
+        if output.strip()
+    )
+    if not details:
+        details = "进程没有提供标准输出或错误输出。"
+    return f"{message}\n脚本: {project_main}\n{details[-1000:]}"
+
+
 def validate_tid_runtime(
     ezcon_path: str | Path,
     project_main: str | Path,
@@ -623,7 +654,7 @@ def validate_tid_runtime(
         errors.append(f"找不到 ezcon.exe: {ezcon_path}")
     elif _sha256_file(ezcon_path) != EXPECTED_EZCON_SHA256:
         record_fingerprint_mismatch(
-            "EasyCon 1.6.4-a ezcon.exe 指纹不一致",
+            f"{EASYCON_BACKEND_NAME} CLI 指纹不一致",
             warning_only=fingerprint_warning_only,
             errors=errors,
             warnings=warnings,
@@ -666,6 +697,7 @@ def validate_tid_runtime(
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if ezcon_path.is_file() and not errors:
         try:
@@ -675,9 +707,11 @@ def validate_tid_runtime(
         except (OSError, subprocess.SubprocessError) as exc:
             errors.append(f"无法读取 EasyCon 版本: {exc}")
         else:
-            output = (version.stdout + "\n" + version.stderr).strip()
+            output = ((version.stdout or "") + "\n" + (version.stderr or "")).strip()
             version_line = output.splitlines()[-1] if output else "(无版本输出)"
-            if version.returncode != 0 or version_line != EXPECTED_EZCON_VERSION:
+            if version.returncode != 0:
+                errors.append(_tid_preflight_command_error("版本检查", version, project_main))
+            elif version_line != EXPECTED_EZCON_VERSION:
                 errors.append(
                     f"TID 正式运行只支持 EasyCon {EXPECTED_EZCON_VERSION}；检测到 {version_line}"
                 )
@@ -695,9 +729,8 @@ def validate_tid_runtime(
                 errors.append(f"TID ECS 语法预检无法执行: {exc}")
             else:
                 if formatted.returncode != 0:
-                    details = (formatted.stderr or formatted.stdout).strip()
                     errors.append(
-                        f"EasyCon 1.6.4-a TID ECS 语法预检失败: {details[-1000:]}"
+                        _tid_preflight_command_error("ECS 语法预检", formatted, project_main)
                     )
     warnings.append(
         "TID/SID 1.3.7 参数生成已接通；名称、性别或操作流程变化后必须重新校准固定延迟。"

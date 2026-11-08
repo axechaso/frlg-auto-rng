@@ -10,10 +10,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
 
-from app_paths import DATA_ROOT, RESOURCE_ROOT, USER_DATA_ROOT
+from app_paths import DATA_ROOT, USER_DATA_ROOT
 from automation import (
     AutoSearchRequest, EasyCon118Options, EasyConRuntimeCheck, PlanSearchResult,
-    DEFAULT_EZCON_PATH, DEFAULT_TID_SOURCE_PATH, STANDARD_TEMPLATE_NAME,
+    DEFAULT_EZCON_PATH, DEFAULT_SOURCE_PATH, DEFAULT_TID_SOURCE_PATH, STANDARD_TEMPLATE_NAME,
     EGG_TEMPLATE_NAME, SearchCancelledError, search_best_plan,
     write_configured_project, validate_runtime, validate_generated_project_consistency,
     prepare_compat_runner, build_run_command, probe_easycon_devices,
@@ -95,7 +95,7 @@ def cleanup_generated_plan_directories(
 class AppPaths:
     user: Path = USER_DATA_ROOT
     output: Path = DATA_ROOT / "runtime" / "pyside6"
-    source: Path = RESOURCE_ROOT / "local_assets" / "easycon118"
+    source: Path = DEFAULT_SOURCE_PATH
     ezcon: Path = DEFAULT_EZCON_PATH
     tid_source: Path = DEFAULT_TID_SOURCE_PATH
 

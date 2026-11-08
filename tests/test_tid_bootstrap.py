@@ -123,7 +123,7 @@ class TidBootstrapIntegrationTests(unittest.TestCase):
 
     def test_bootstrap_label_is_audited_and_full_corpus_kept(self):
         self.assertIn("无存档.IL", EASYCON118_EXTENSION_LABEL_NAMES)
-        self.assertEqual(EXPECTED_LABEL_COUNT, 1155)
+        self.assertEqual(EXPECTED_LABEL_COUNT, 1158)
         self.assertTrue((ROOT / "assets/easycon118_extensions/无存档.IL").is_file())
 
     def test_speed_failure_does_not_close_or_save(self):
@@ -159,7 +159,7 @@ class RealTidBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             main = write_configured_tid_project(DEFAULT_TID_STARTER_SAVE_SOURCE.parent, directory, TidRngRequest())
             self.assertTrue((main.parent / "ImgLabel/无存档.IL").is_file())
-            self.assertEqual(len(list((main.parent / "ImgLabel").glob("*.IL"))), 1155)
+            self.assertEqual(len(list((main.parent / "ImgLabel").glob("*.IL"))), 1158)
             self.assertTrue(json.loads((main.parent / "plan.json").read_text(encoding="utf-8"))["tid_no_save_bootstrap"])
 
 

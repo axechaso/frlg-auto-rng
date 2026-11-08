@@ -36,18 +36,37 @@ from .target_verification import (
     inject_target_verification,
     validate_injected_target_verification,
 )
+from .easycon170_test import (
+    EASYCON170_CLI_SHA256,
+    EASYCON170_COMMIT,
+    EASYCON170_TEST_MODE,
+    EASYCON170_VERSION,
+    adapt_project_tree,
+    cli_path as easycon170_cli_path,
+    enabled as easycon170_enabled,
+    source_path as easycon170_source_path,
+    verify_cli as verify_easycon170_cli,
+)
 from .sid_observation import inject_pid_observation, validate_injected_pid_observation
 from .seed_common_regions import apply_seed_common_regions
 
 
-EXPECTED_LABEL_COUNT = 1155
-EXPECTED_LABEL_METHODS = {1: 17, 3: 1, 5: 782, 11: 1, 14: 354}
-EXPECTED_LABEL_SHA256 = "3653a54e73434ac46e868ed96c2bd2b41b17938901455c90754ffcae464fcfe7"
-EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
-EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
-EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
-EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
-EXPECTED_COMPAT_PATCH_ID = "easycon164a-synchronous-capture-v11-stage-log-filter-input-state-v2"
+EXPECTED_LABEL_COUNT = 1158
+EXPECTED_LABEL_METHODS = {1: 17, 3: 1, 5: 785, 11: 1, 14: 354}
+EXPECTED_LABEL_SHA256 = "2f098918bfd45b3537bce978d8602a0be4714b742d0e54ececaea22d413db94b"
+EASYCON170_TEST = easycon170_enabled()
+if EASYCON170_TEST:
+    EASYCON_BACKEND_NAME = f"EasyCon {EASYCON170_VERSION}（Actions 测试版）"
+    EXPECTED_EZCON_VERSION = EASYCON170_VERSION
+    EXPECTED_EZCON_SHA256 = EASYCON170_CLI_SHA256
+    EXPECTED_COMPAT_SOURCE_COMMIT = EASYCON170_COMMIT
+    EXPECTED_COMPAT_PATCH_ID = "easycon170-actions-cli-legacygui-array-adapter"
+else:
+    EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
+    EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
+    EXPECTED_EZCON_SHA256 = "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260"
+    EXPECTED_COMPAT_SOURCE_COMMIT = "9c86137c7e63bff842175470895727a5fa9bab52"
+    EXPECTED_COMPAT_PATCH_ID = "easycon164a-synchronous-capture-v11-stage-log-filter-input-state-v2"
 EXPECTED_TESSDATA_SHA256 = {
     "frlg_battle.traineddata": "7abcaef4936727b33717656b38fd5b5027823e1cafec21abb06cc8ef1f7ff758",
     "FRLG_EN_ALL.traineddata": "3272f23a6f259518813025d89be77d706574ccdf163132ccf6f5be15ca19cfa0",
@@ -56,21 +75,27 @@ EXPECTED_COMPAT_OCR_NATIVE_SHA256 = {
     "x64/leptonica-1.82.0.dll": "dfcb3e6ed0b16bc55bfdbcf53543cfe42a354b87c3e35bd3a95eebf005d73e76",
     "x64/tesseract50.dll": "de4d04ec75095374d98f5dd7a60d14d7e2e0f76589db693eccf7ae658be8cb2b",
 }
-DEFAULT_EZCON_PATH = (
-    Path.home()
-    / "Downloads"
-    / "伊机控-EasyCon-v1.6.4alpha测试版-260518"
-    / "publish"
-    / "ezcon.exe"
-)
-if getattr(sys, "frozen", False):
-    DEFAULT_EZCON_PATH = RESOURCE_ROOT / "easycon" / "publish" / "ezcon.exe"
-DEFAULT_COMPAT_RUNNER_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "runtime_backend"
-    / "easycon164a-cli-gui-rounding-selfcontained"
-    / "EasyCon2.CLI.PreviewV5.exe"
-)
+if EASYCON170_TEST:
+    DEFAULT_EZCON_PATH = easycon170_cli_path()
+    DEFAULT_SOURCE_PATH = easycon170_source_path()
+    DEFAULT_COMPAT_RUNNER_PATH = DEFAULT_EZCON_PATH
+else:
+    DEFAULT_EZCON_PATH = (
+        Path.home()
+        / "Downloads"
+        / "伊机控-EasyCon-v1.6.4alpha测试版-260518"
+        / "publish"
+        / "ezcon.exe"
+    )
+    if getattr(sys, "frozen", False):
+        DEFAULT_EZCON_PATH = RESOURCE_ROOT / "easycon" / "publish" / "ezcon.exe"
+    DEFAULT_SOURCE_PATH = RESOURCE_ROOT / "local_assets" / "easycon118"
+    DEFAULT_COMPAT_RUNNER_PATH = (
+        Path(__file__).resolve().parents[1]
+        / "runtime_backend"
+        / "easycon164a-cli-gui-rounding-selfcontained"
+        / "EasyCon2.CLI.PreviewV5.exe"
+    )
 STANDARD_TEMPLATE_NAME = "NS火叶全自动一键乱数2.0.ecs"
 EGG_TEMPLATE_NAME = "NS火叶全自动一键乱数2.0-时间轴.ecs"
 EGG_FORMAL_WAIT_MARKER = "# FORMAL_EGG_WAIT_V1"
@@ -256,8 +281,11 @@ PREVIOUS_SCRIPT_SHA256S += (
     # October 2 source corpus with the upstream wild/egg timing updates.
     "abedc36a98710f02b02b79f0af10f6221e3e0a04f3f0f6e107d5c9887ce2661e",
     "b0f0302037b778661ac5087c6d007ab03865f4030fcd6a680c9f2d450afa1392",
+    # October 6 source before candy refinement, roaming encounter handoff
+    # and V3.9 encounter-timing detection were synchronized on October 8.
+    "2a8acea58843d03826a35259facd2dbd1722dd3a5094246a7195216ebbd7de32",
 )
-EXPECTED_SCRIPT_SHA256 = "2a8acea58843d03826a35259facd2dbd1722dd3a5094246a7195216ebbd7de32"
+EXPECTED_SCRIPT_SHA256 = "cda5f2cd9b2d8f4d6f89f24f6939f6b8484782d387fbb1812d7e23a03b6190ca"
 # Previously materialized 1.6.4-a corpora remain accepted as audited
 # compatibility inputs. This is not a general bypass for modified ECS files.
 SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
@@ -426,6 +454,9 @@ SUPPORTED_RUNTIME_SCRIPT_SHA256S = (
     # October 7: preserve the upstream unified Seed controller, lib/29 egg
     # delegates, TV controller, A-before-TIME origin and dark closing waits.
     "6d585335af4b47afe3b04da19e515765bc51ef6b572cd2ea7d5f483b397d864f",
+    # October 8: candy refinement, roaming end-state handoff and the
+    # shared V3.9 entry-timing observer, with all 164a overlays preserved.
+    "a585c5feda746fedd299500df0d6cf1065b0c911f5d0e0505911870e39b91803",
 )
 
 
@@ -466,6 +497,9 @@ EASYCON118_EXTENSION_LABEL_NAMES = (
     "快捷第二位.IL",
     "快捷第三位.IL",
     "无存档.IL",
+    "三代路闪遇敌.IL",
+    "三代路闪HP检测.IL",
+    "三代路闪wild检测.IL",
 )
 SHORTCUT_REGISTRATION_MAIN_PATH = (
     EASYCON118_EXTENSION_LABEL_DIR / "shortcut_registration_main.ecs"
@@ -5377,6 +5411,8 @@ def write_configured_project(
     ocr_fallback_sha256 = apply_ocr_runtime_fallback(
         output_dir / "lib" / OCR_NAME_LIBRARY_NAME
     )
+    if EASYCON170_TEST:
+        adapt_project_tree(output_dir)
 
     manifest = {
         "source": str(source_dir.resolve()),
@@ -5573,6 +5609,8 @@ def write_configured_egg_project(
     runtime_overrides = apply_egg_settings_runtime_override(
         output_dir / "lib" / EGG_SETTINGS_LIBRARY_NAME
     )
+    if EASYCON170_TEST:
+        adapt_project_tree(output_dir)
     if _uses_upstream_unified_seed_controller(configured):
         runtime_overrides["seed_controller_implementation"] = "upstream-unified-1-2"
         runtime_overrides["egg_seed_controller_sha256"] = hashlib.sha256(
@@ -5731,7 +5769,7 @@ def validate_runtime(
         else:
             if ezcon_sha256 != EXPECTED_EZCON_SHA256:
                 record_fingerprint_mismatch(
-                    "EasyCon 1.6.4a ezcon.exe 指纹不一致: " + ezcon_sha256,
+                    f"{EASYCON_BACKEND_NAME} CLI 指纹不一致: " + ezcon_sha256,
                     warning_only=fingerprint_warning_only,
                     errors=errors,
                     warnings=warnings,
@@ -5775,24 +5813,25 @@ def validate_runtime(
                     warnings=warnings,
                 )
 
-    tessdata_dir = ezcon_path.parent / "Tessdata"
-    for model, expected_sha256 in EXPECTED_TESSDATA_SHA256.items():
-        model_path = tessdata_dir / model
-        if not model_path.is_file():
-            errors.append(f"EasyCon Tessdata 缺少 {model}")
-            continue
-        try:
-            model_sha256 = hashlib.sha256(model_path.read_bytes()).hexdigest()
-        except OSError as exc:
-            errors.append(f"无法读取 EasyCon Tessdata/{model}: {exc}")
-            continue
-        if model_sha256 != expected_sha256:
-            record_fingerprint_mismatch(
-                f"EasyCon Tessdata/{model} 指纹不一致: {model_sha256}",
-                warning_only=fingerprint_warning_only,
-                errors=errors,
-                warnings=warnings,
-            )
+    if not EASYCON170_TEST:
+        tessdata_dir = ezcon_path.parent / "Tessdata"
+        for model, expected_sha256 in EXPECTED_TESSDATA_SHA256.items():
+            model_path = tessdata_dir / model
+            if not model_path.is_file():
+                errors.append(f"EasyCon Tessdata 缺少 {model}")
+                continue
+            try:
+                model_sha256 = hashlib.sha256(model_path.read_bytes()).hexdigest()
+            except OSError as exc:
+                errors.append(f"无法读取 EasyCon Tessdata/{model}: {exc}")
+                continue
+            if model_sha256 != expected_sha256:
+                record_fingerprint_mismatch(
+                    f"EasyCon Tessdata/{model} 指纹不一致: {model_sha256}",
+                    warning_only=fingerprint_warning_only,
+                    errors=errors,
+                    warnings=warnings,
+                )
 
     if ezcon_path.is_file() and project_main.is_file() and not errors:
         run_options = dict(
@@ -5829,18 +5868,24 @@ def validate_runtime(
                     **run_options,
                 )
             except (OSError, subprocess.SubprocessError) as exc:
-                errors.append(f"EasyCon 1.6.4a ECS 语法预检无法执行: {exc}")
+                errors.append(f"{EASYCON_BACKEND_NAME} ECS 语法预检无法执行: {exc}")
             else:
                 if formatted.returncode != 0:
                     details = (formatted.stderr or formatted.stdout).strip()
                     errors.append(
-                        "EasyCon 1.6.4a ECS 语法预检失败，退出码 "
+                        f"{EASYCON_BACKEND_NAME} ECS 语法预检失败，退出码 "
                         f"{formatted.returncode}: {details[-1000:]}"
                     )
 
-    warnings.append(
-        "已固定使用 EasyCon 1.6.4a；正式长跑前仍需完成停止、重连和识别稳定性验收。"
-    )
+    if EASYCON170_TEST:
+        warnings.append(
+            "当前为 EasyCon 1.7.0 Actions 测试后端；已使用 LegacyGui 评分兼容，"
+            "暂不启用 1.6.4-a 专用采帧、日志和输入状态扩展。"
+        )
+    else:
+        warnings.append(
+            "已固定使用 EasyCon 1.6.4a；正式长跑前仍需完成停止、重连和识别稳定性验收。"
+        )
     return EasyConRuntimeCheck(not errors, tuple(errors), tuple(warnings))
 
 
@@ -5888,6 +5933,15 @@ def build_run_command(
         "--videotype",
         video_type,
     ]
+    if EASYCON170_TEST:
+        # EasyCon 1.7's CLI owns the GUI/CLI confidence contract.  LegacyGui
+        # preserves the old upward-rounded label score; the 1.6.4-a runner's
+        # private preview, incident and input-state switches do not exist in
+        # this Actions build, so omit them instead of passing unknown flags.
+        command.extend(["--compatibility", "LegacyGui"])
+        if verbose:
+            command.append("--verbose")
+        return command
     if verbose:
         command.append("--verbose")
     if preview_port:
@@ -5931,8 +5985,20 @@ def prepare_compat_runner(
     ezcon_path = Path(ezcon_path).resolve()
     runner_path = Path(runner_path).resolve()
     if not ezcon_path.is_file():
-        raise FileNotFoundError(f"找不到原始 EasyCon 1.6.4-a ezcon.exe: {ezcon_path}")
+        raise FileNotFoundError(f"找不到 {EASYCON_BACKEND_NAME} CLI: {ezcon_path}")
     warnings = fingerprint_warnings if fingerprint_warnings is not None else []
+    if EASYCON170_TEST:
+        try:
+            version_line, _digest = verify_easycon170_cli(ezcon_path)
+        except (OSError, RuntimeError, ValueError) as exc:
+            if not fingerprint_warning_only:
+                raise
+            warnings.append(f"EasyCon 170 测试 CLI 指纹/版本警告: {exc}")
+            version_line = EXPECTED_EZCON_VERSION
+        if runner_path != ezcon_path:
+            warnings.append("EasyCon 170 测试版直接使用 Actions CLI，未创建 1.6.4-a 兼容运行器")
+        warnings.append(f"EasyCon 170 测试 CLI: {version_line}")
+        return ezcon_path
     ezcon_sha256 = hashlib.sha256(ezcon_path.read_bytes()).hexdigest()
     if ezcon_sha256 != EXPECTED_EZCON_SHA256:
         record_fingerprint_mismatch(

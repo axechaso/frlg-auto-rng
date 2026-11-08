@@ -11,7 +11,7 @@ from automation.sid_observation import (
     EXTENSION_PATH, MARKER, inject_pid_observation, parse_pid_observations,
     validate_injected_pid_observation,
 )
-from automation.target_verification import TargetVerificationSpec, inject_target_verification
+from automation.target_verification import TargetVerificationSpec, exact_target_hit_anchor, inject_target_verification
 from pyside_app.results import traversal_report_summary
 from rng.sid_reverse import pid_to_psv, sid_at_advance, sid_candidates_for_psv
 from sid_traversal import SIDTraversalSession, progress_path, read_progress
@@ -88,6 +88,17 @@ class PIDObservationProtocolTests(unittest.TestCase):
 
 
 class PIDObservationInjectionTests(unittest.TestCase):
+    def test_current_mother_trust_gates_survive_both_evidence_overlays(self):
+        template = minimal_template()
+        anchor = exact_target_hit_anchor(template)
+        guarded = anchor.rstrip("\n") + " and $Seed本轮可信 == 1 and $消耗帧本轮可信 == 1\n"
+        template = template.replace(anchor, guarded)
+        spec = TargetVerificationSpec("run-1", "attempt-1", "EDDE", 2000, 7, "Static 1", "12345678")
+        result = inject_pid_observation(inject_target_verification(template, spec), spec, tid=12345, sid=54321)
+        self.assertEqual(exact_target_hit_anchor(result), guarded)
+        self.assertIn(guarded + "        IF $SID遍历PID一致 != 1", result)
+        validate_injected_pid_observation(result, spec, tid=12345, sid=54321)
+
     def setUp(self):
         self.spec = TargetVerificationSpec('run-1', 'attempt-1', 'EDDE', 2000, 25, 'Wild1', '89ABCDEF')
 

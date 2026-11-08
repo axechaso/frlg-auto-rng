@@ -102,6 +102,26 @@ def paired_shiny_terminal_blocks(template: str) -> tuple[str, str, int]:
     return pairs[0]
 
 
+def exact_target_hit_anchor(template: str) -> str:
+    """Keep the audited mother condition, including its per-axis trust gates.
+
+    October 8 tightened the exact-hit branch. Accept that complete condition
+    and the previously audited one; never strip gates or match a partial prefix.
+    """
+    prefix = (
+        "    IF $道具乱数模式 == 0 and $命中差索引 == 0 and "
+        "$本轮消耗帧误差 == 0 and $本轮物种命中 == 1"
+    )
+    supported = {
+        prefix + "\n",
+        prefix + " and $Seed本轮可信 == 1 and $消耗帧本轮可信 == 1\n",
+    }
+    matches = re.findall(r"(?m)^" + re.escape(prefix) + r"[^\n]*\n", template)
+    if len(matches) != 1 or matches[0] not in supported:
+        raise ValueError("主脚本精确目标命中锚点结构异常，拒绝接入目标验证")
+    return matches[0]
+
+
 def inject_target_verification(
     template: str,
     spec: TargetVerificationSpec | Mapping[str, object],
@@ -126,10 +146,7 @@ def inject_target_verification(
     # Accept only the two complete, synchronized EN/JP branch shapes; do not
     # turn arbitrary returns or partial/mixed revisions into target evidence.
     loop_anchor = "        $本轮流程结果 = 执行RNG启动与目标获取()\n"
-    exact_target_anchor = (
-        "    IF $道具乱数模式 == 0 and $命中差索引 == 0 and "
-        "$本轮消耗帧误差 == 0 and $本轮物种命中 == 1\n"
-    )
+    exact_target_anchor = exact_target_hit_anchor(template)
     non_target_anchor = (
         "    IF $命中差索引 == 0 and $本轮消耗帧误差 == 0 and $本轮物种命中 == 0\n"
     )

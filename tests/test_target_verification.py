@@ -6,6 +6,7 @@ from automation.target_verification import (
     inject_target_verification,
     parse_target_verification,
     validate_injected_target_verification,
+    exact_target_hit_anchor,
     _event_line,
 )
 
@@ -68,6 +69,39 @@ class TargetVerificationTests(unittest.TestCase):
             inject_target_verification(
                 self.template.replace("        RETURN 0\n", "        RETURN -2\n", 1), self.spec
             )
+
+    def test_current_mother_exact_hit_keeps_both_independent_trust_gates(self):
+        anchor = exact_target_hit_anchor(self.template)
+        guarded = anchor.rstrip("\n") + " and $Seed本轮可信 == 1 and $消耗帧本轮可信 == 1\n"
+        latest = self.template.replace(anchor, guarded)
+        injected = inject_target_verification(latest, self.spec)
+        self.assertEqual(exact_target_hit_anchor(injected), guarded)
+        self.assertIn(guarded + "        IF $SID遍历本轮出闪 == 1", injected)
+        validate_injected_target_verification(injected, self.spec)
+        self.assertEqual(inject_target_verification(injected, self.spec), injected)
+
+    def test_exact_hit_anchor_rejects_partial_unknown_or_mixed_conditions(self):
+        anchor = exact_target_hit_anchor(self.template)
+        for suffix in (
+            " and $Seed本轮可信 == 1",
+            " and $消耗帧本轮可信 == 1",
+            " or $Seed本轮可信 == 1",
+            " and $Seed本轮可信 == 1 and $消耗帧本轮可信 == 0",
+        ):
+            with self.subTest(suffix=suffix), self.assertRaisesRegex(ValueError, "精确目标"):
+                inject_target_verification(self.template.replace(anchor, anchor.rstrip("\n") + suffix + "\n"), self.spec)
+        with self.assertRaisesRegex(ValueError, "精确目标"):
+            exact_target_hit_anchor(self.template + anchor.rstrip("\n") + " and $Seed本轮可信 == 1 and $消耗帧本轮可信 == 1\n")
+
+    def test_tid_starter_markers_preserve_the_same_guarded_hit_condition(self):
+        from automation.tid_starter_flow import enable_starter_success_markers
+        anchor = exact_target_hit_anchor(self.template)
+        guarded = anchor.rstrip("\n") + " and $Seed本轮可信 == 1 and $消耗帧本轮可信 == 1\n"
+        latest = self.template.replace(anchor, guarded)
+        marked = enable_starter_success_markers(latest)
+        self.assertEqual(exact_target_hit_anchor(marked), guarded)
+        self.assertIn(guarded + "        IF $TID连续流程目标验证 == 1", marked)
+        self.assertEqual(enable_starter_success_markers(marked), marked)
 
     def test_only_one_complete_current_attempt_event_is_accepted(self):
         event = (

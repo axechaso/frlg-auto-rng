@@ -81,6 +81,13 @@ def explain_popup_error(text: str, *, context: str = "") -> ErrorExplanation:
     def has(*markers):
         return any(marker.casefold() in lower for marker in markers)
 
+    if has("0xc0000142", "STATUS_DLL_INIT_FAILED") or re.search(
+        r"退出码\s*(?:-1073741502|3221225794)\b", text
+    ):
+        return _issue("runtime_dll_init", "检查程序启动失败：DLL 初始化失败（0xc0000142）。",
+            ("Windows 未能完成程序依赖库的初始化；当前错误没有指出具体 DLL。",),
+            "先重启工具，再重新生成并预检。",
+            "若仍失败，保留详细信息中的退出码、程序与脚本路径，并核对 Windows 应用程序故障记录。")
     if has("CERTIFICATE_VERIFY_FAILED", "certificate verify failed", "unable to get local issuer certificate"):
         return _issue("network_certificate", "网络连接未通过证书验证。",
             ("系统日期/时间异常，或所需证书链不可用。", "代理、网络安全软件或网络环境改变了 HTTPS 证书链。"),

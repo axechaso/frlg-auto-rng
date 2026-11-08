@@ -13,7 +13,7 @@
 
 每次脚本运行最多尝试一次建档。临时身份不会识别或写入TID表、存档资料、成功标记；建档耗时不计入固定延迟测量，不推进穷举位置。独立TID、固定延迟检测及连续御三家/任意TID/6V计划的第一阶段均通过同一生成器接入；球前走位和御三家执行段未改。旧生成工程不会被覆盖，须重新生成。
 
-实现位于 `automation/tid_bootstrap.py` 和 `assets/tid_rng137_extensions/no_save_bootstrap.ecs`。公共标签新增用户原版 `无存档.IL`，两套缓存及新生成工程均保留完整1155项；低分自适应不降低此处95分门槛。以下独立测试仍可单独运行，成功停在CONTINUE菜单；正式集成则会在验证后继续TID。
+实现位于 `automation/tid_bootstrap.py` 和 `assets/tid_rng137_extensions/no_save_bootstrap.ecs`。公共标签包含用户原版 `无存档.IL`，两套缓存及新生成工程均保留当前完整1158项；低分自适应不降低此处95分门槛。以下独立测试仍可单独运行，成功停在CONTINUE菜单；正式集成则会在验证后继续TID。
 
 ## 从哪里运行
 

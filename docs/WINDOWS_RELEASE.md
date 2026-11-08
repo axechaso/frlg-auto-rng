@@ -1,6 +1,8 @@
 # Windows 绿色版
 
-使用 `tools\build_windows_release.ps1` 生成发布包。构建机使用项目自己的 `.venv`，脚本锁定安装 PyInstaller 6.15.0、PySide6 6.11.2 与 truststore 0.10.4；用户不需要安装 Python。当前发布合同为 `0.9.5 / 2026100701`，正式界面仅为 PySide6，不含旧 Tk。发布资源使用已审计的两个 2.0 入口、31 个 ECS 库、Seed 表状态文件、1155 个共同标签及保留的 TID r5；不得为追求“全同步”把 r4 覆盖回去。
+使用 `tools\build_windows_release.ps1` 生成发布包。构建机使用项目自己的 `.venv`，脚本锁定安装 PyInstaller 6.15.0、PySide6 6.11.2 与 truststore 0.10.4；用户不需要安装 Python。当前已发布合同为 `0.9.5 / 2026100701`，正式界面仅为 PySide6，不含旧 Tk。已发布资源使用当时审计的两个 2.0 入口、31 个 ECS 库、Seed 表状态文件、1155 个共同标签及 TID r5，不覆盖原线上资产。
+
+2026-10-08源码同步后，下次新构建应使用本轮审核的34项2.0语料和1158个完整共同标签；下载包旧TID母本已按用户要求覆盖为r5，与缓存逐字节一致，不得以旧r4回退工具。本轮没有打包、升版本或发布Release。来源、摘要和验收边界见[本轮脚本同步](SCRIPT_SYNC_20261008.md)。
 
 ```powershell
 .\tools\build_windows_release.ps1 `

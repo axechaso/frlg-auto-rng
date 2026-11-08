@@ -12,7 +12,7 @@ import re
 
 from .target_verification import (
     MARKER as TARGET_MARKER, TargetVerificationSpec, normalize_protocol_line,
-    spec_from_mapping,
+    spec_from_mapping, exact_target_hit_anchor,
 )
 
 
@@ -168,10 +168,7 @@ def inject_pid_observation(template: str, spec: TargetVerificationSpec, *, tid: 
         anchor = "    IF $道具乱数模式 == 0 and @出闪 >= $识图阈值\n        $SID遍历本轮出闪 = 1\n    ENDIF\n"
         template = _insert_in_function(template, name, anchor,
             anchor + "    CALL SID遍历采样闪光状态\n")
-    target_anchor = (
-        "    IF $道具乱数模式 == 0 and $命中差索引 == 0 and "
-        "$本轮消耗帧误差 == 0 and $本轮物种命中 == 1\n"
-    )
+    target_anchor = exact_target_hit_anchor(template)
     target_pid = int(spec.pid_hex, 16)
     if template.count(target_anchor) != 1:
         raise ValueError("SID PID 证据目标终态锚点异常")

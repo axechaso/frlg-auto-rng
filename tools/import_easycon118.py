@@ -42,7 +42,7 @@ def import_package(source: Path, destination: Path) -> Path:
     # The upstream script package may predate repository extensions such as
     # the SID shiny icon, egg surf marker and three shortcut-row labels. Always
     # audit a copy with all canonical labels installed so old and new source
-    # folders produce the same deterministic 1154-label corpus.
+    # folders produce the same deterministic full workflow label corpus.
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=".easycon118-label-audit-",

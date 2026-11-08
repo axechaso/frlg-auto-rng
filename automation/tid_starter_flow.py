@@ -54,7 +54,7 @@ from .easycon118 import (
     write_configured_project,
 )
 from .frame_parity import resolve_frame_parity
-from .target_verification import paired_shiny_terminal_blocks
+from .target_verification import exact_target_hit_anchor, paired_shiny_terminal_blocks
 from .planner import AutoSearchRequest, RunPlan
 from .seed_modes import settings_to_seed_mode
 from .support import get_route_support
@@ -846,10 +846,7 @@ def enable_starter_success_markers(template: str) -> str:
     global_anchor = '$脚本版本 = "2.0"\n'
     shiny_anchor = "    IF $道具乱数模式 == 0 and @出闪 >= $识图阈值\n"
     english_shiny_block, japanese_shiny_block, terminal = paired_shiny_terminal_blocks(template)
-    exact_target_anchor = (
-        "    IF $道具乱数模式 == 0 and $命中差索引 == 0 and "
-        "$本轮消耗帧误差 == 0 and $本轮物种命中 == 1\n"
-    )
+    exact_target_anchor = exact_target_hit_anchor(template)
     loop_anchor = "        $本轮流程结果 = 执行RNG启动与目标获取()\n"
     if template.count(global_anchor) != 1:
         raise ValueError("御三家模板缺少唯一的用户输入区，拒绝接入目标闪光验证")
