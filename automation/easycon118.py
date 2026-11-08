@@ -5768,8 +5768,9 @@ def validate_runtime(
             errors.append(f"无法读取 ezcon.exe: {exc}")
         else:
             if ezcon_sha256 != EXPECTED_EZCON_SHA256:
+                executable_name = "CLI" if EASYCON170_TEST else "ezcon.exe"
                 record_fingerprint_mismatch(
-                    f"{EASYCON_BACKEND_NAME} CLI 指纹不一致: " + ezcon_sha256,
+                    f"{EASYCON_BACKEND_NAME} {executable_name} 指纹不一致: " + ezcon_sha256,
                     warning_only=fingerprint_warning_only,
                     errors=errors,
                     warnings=warnings,

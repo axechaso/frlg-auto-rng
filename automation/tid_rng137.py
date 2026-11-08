@@ -653,8 +653,9 @@ def validate_tid_runtime(
     if not ezcon_path.is_file():
         errors.append(f"找不到 ezcon.exe: {ezcon_path}")
     elif _sha256_file(ezcon_path) != EXPECTED_EZCON_SHA256:
+        executable_name = "CLI" if EASYCON170_TEST else "ezcon.exe"
         record_fingerprint_mismatch(
-            f"{EASYCON_BACKEND_NAME} CLI 指纹不一致",
+            f"{EASYCON_BACKEND_NAME} {executable_name} 指纹不一致",
             warning_only=fingerprint_warning_only,
             errors=errors,
             warnings=warnings,
