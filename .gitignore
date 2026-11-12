@@ -54,6 +54,8 @@ runtime_backend/**/Tessdata/
 runtime_backend/**/x64/
 runtime_backend/easycon164a-cli-gui-rounding-selfcontained/*
 !runtime_backend/easycon164a-cli-gui-rounding-selfcontained/build-manifest.json
+runtime_backend/easycon170-pc-extension/*
+!runtime_backend/easycon170-pc-extension/build-manifest.json
 launch.log
 
 # DeepSeek TUI local config

@@ -249,7 +249,12 @@ class TidCalibrationTests(unittest.TestCase):
             self.assertEqual(popen.call_count, 2)
             for call in popen.call_args_list:
                 command = call.args[0]
-                self.assertEqual(command[command.index("--preview-port") + 1], "43123")
+                from automation.easycon118 import EASYCON170_TEST
+                if EASYCON170_TEST:
+                    self.assertNotIn("--preview-port", command)
+                    self.assertEqual(command[command.index("--compatibility") + 1], "LegacyCli")
+                else:
+                    self.assertEqual(command[command.index("--preview-port") + 1], "43123")
 
     def test_tid_records_switch_to_measured_context_and_preserve_game_model(self):
         initial = TidRngRequest(nx_model=2)

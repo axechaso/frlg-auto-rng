@@ -509,17 +509,27 @@ def _validate_easycon_candidate(
     fingerprint_warning_only: bool = False,
     fingerprint_warnings: list[str] | None = None,
 ) -> None:
+    # Lazy: easycon118 imports the seed-table readers in this module.
+    from automation.easycon118 import (
+        EASYCON_BACKEND_NAME, EASYCON170_TEST,
+        EXPECTED_EZCON_SHA256 as expected_sha256,
+        EXPECTED_EZCON_VERSION as expected_version,
+    )
+    from automation.easycon170 import adapt_project_tree, verify_runtime_files
     if not ezcon_path.is_file():
         raise FileNotFoundError(f"找不到 ezcon.exe：{ezcon_path}")
     actual_sha256 = _sha256(ezcon_path.read_bytes())
-    if actual_sha256 != EXPECTED_EZCON_SHA256:
+    if actual_sha256 != expected_sha256:
         record_fingerprint_mismatch(
-            "Seed 表校验使用的 EasyCon 1.6.4-a ezcon.exe 指纹不一致: "
+            f"Seed 表校验使用的 {EASYCON_BACKEND_NAME} 指纹不一致: "
             + actual_sha256,
             warning_only=fingerprint_warning_only,
             warnings=fingerprint_warnings,
             exception_type=SeedTableUpdateError,
         )
+    if EASYCON170_TEST:
+        verify_runtime_files(ezcon_path, warning_only=fingerprint_warning_only,
+                             warnings=fingerprint_warnings)
     try:
         version = subprocess.run(
             [str(ezcon_path), "--version"],
@@ -533,9 +543,9 @@ def _validate_easycon_candidate(
         raise SeedTableUpdateError(f"无法读取 EasyCon 版本：{exc}") from exc
     version_text = (version.stdout + "\n" + version.stderr).strip()
     version_line = version_text.splitlines()[-1] if version_text else ""
-    if version.returncode != 0 or version_line != EXPECTED_EZCON_VERSION:
+    if version.returncode != 0 or version_line != expected_version:
         raise SeedTableUpdateError(
-            f"Seed 表校验要求 EasyCon {EXPECTED_EZCON_VERSION}，检测到 {version_line or '无输出'}"
+            f"Seed 表校验要求 EasyCon {expected_version}，检测到 {version_line or '无输出'}"
         )
     if not source_directory.is_dir():
         raise FileNotFoundError(f"找不到 1.1.8 包：{source_directory}")
@@ -561,7 +571,9 @@ def _validate_easycon_candidate(
             shutil.copytree(label_source, project / "ImgLabel")
             for filename in (FR_ECS_NAME, LG_ECS_NAME):
                 shutil.copy2(candidate / filename, project / "lib" / filename)
-            _notify(progress, f"使用 EasyCon 1.6.4-a format 校验{label}……")
+            if EASYCON170_TEST:
+                adapt_project_tree(project)
+            _notify(progress, f"使用 {EASYCON_BACKEND_NAME} format 校验{label}……")
             try:
                 checked = subprocess.run(
                     [str(ezcon_path), "format", str(project / "main.ecs")],
@@ -577,7 +589,7 @@ def _validate_easycon_candidate(
             if checked.returncode != 0:
                 detail = (checked.stderr or checked.stdout).strip()
                 raise SeedTableUpdateError(
-                    f"{label}未通过 EasyCon 1.6.4-a format：{detail[-1500:]}"
+                    f"{label}未通过 {EASYCON_BACKEND_NAME} format：{detail[-1500:]}"
                 )
     finally:
         if validation_root.exists():

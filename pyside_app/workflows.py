@@ -21,6 +21,8 @@ from automation import (
 )
 from automation.tid_calibration import validate_tid_plan_runtime
 from automation.tid_search import progress_supported
+from automation.easycon118 import EASYCON170_TEST
+from automation.easycon170 import copy_adapted_script
 from automation.sid_traversal_policy import validate_traversal_request
 from device_label_overrides import LabelOverrideStore, apply_profile_to_projects
 from sid_traversal import traversal_context, DEFAULT_TARGET_MAX_ADVANCES
@@ -58,7 +60,7 @@ class PreparedWorkflow:
 
 
 def _snapshot(project, directory):
-    files = {project, *project.parent.glob("lib/*.ecs"), *project.parent.glob("ImgLabel/*"),
+    files = {project, *(project.parent / "lib").rglob("*.ecs"), *(project.parent / "ImgLabel").rglob("*.IL"),
              *directory.rglob("*.ecs"), *directory.rglob("*.json"), *directory.rglob("*.IL")}
     return {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in files if path.is_file()}
 
@@ -169,8 +171,14 @@ def _prepare_workflow_in_directory(
         details += "\n运行器负责恢复同参数的进度与记录实测 TID。"
     elif inputs.mode == "script_test":
         project = Path(inputs.extra["script"]).resolve()
-        metrics = ("原地执行", "1.6.4-a", "待预检")
-        details = f"脚本测试：{project}\n后端：{inputs.extra['backend']}\n原地执行所选脚本，不替换参数。"
+        details = f"脚本测试：{project}\n后端：{inputs.extra['backend']}\n不替换所选脚本参数。"
+        if EASYCON170_TEST:
+            project = copy_adapted_script(project, directory / "project")
+            details += "\n170 使用数组语法兼容副本，原文件保留。"
+        else:
+            details += "\n原地执行所选脚本。"
+        metrics = ("兼容副本" if EASYCON170_TEST else "原地执行",
+                   "170 PC 扩展" if EASYCON170_TEST else "1.6.4-a", "待预检")
     elif inputs.mode == "sid_traversal":
         request.validate()
         options = inputs.extra["options"]
@@ -214,6 +222,8 @@ def _prepare_workflow_in_directory(
             "traversal_context": context}
         write_json_atomic(directory / "traversal.json", payload)
         project = inputs.source / inputs.template
+        if EASYCON170_TEST:
+            project = copy_adapted_script(project, directory / "preflight")
         metrics = ("遍历中确定", "—", "—")
         details = f"SID 遍历：TID {request.tid:05d}；起点 {context['start_sid_advance']} / 上限 {context['max_advances']}\n每个 SID 搜索 {request.min_advances}–{DEFAULT_TARGET_MAX_ADVANCES} ADV；唯一 PID 的非闪个体可排除 TSV，已排除的 SID 自动跳过。非目标闪光也会抓获反查 TSV，成功后保留现场停止。"
         from sid_traversal import read_progress
@@ -232,11 +242,13 @@ def _prepare_workflow_in_directory(
     check = check_workflow(inputs, project, directory)
     check = replace(check, warnings=tuple(dict.fromkeys((*warnings, *check.warnings))))
     if inputs.mode == "script_test":
-        metrics = ("原地执行", "1.6.4-a", "通过" if check.ok else "未通过")
+        metrics = (*metrics[:2], "通过" if check.ok else "未通过")
     details += f"\n工程：{project}\n" + "\n".join((*check.errors, *check.warnings))
     if cancel():
         raise SearchCancelledError("已取消预检")
     snapshot = _snapshot(project, directory)
+    if inputs.mode == "script_test":
+        snapshot.update(_snapshot(Path(inputs.extra["script"]).resolve(), directory))
     sources = [] if inputs.mode == "script_test" else [inputs.source]
     if inputs.extra.get("flow"):
         sources.append(inputs.extra["starter_source"])
@@ -252,7 +264,10 @@ def _prepare_workflow_in_directory(
 
 def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, video, capture_name,
                          *, label_supervision: bool = False, preview_video: bool = False):
+    from automation.easycon118 import EASYCON170_TEST
     inputs = prepared.inputs
+    if EASYCON170_TEST and label_supervision:
+        raise ValueError("170 PC 扩展 CLI 暂不支持标签故障保护，请关闭该开关后运行")
     if not prepared.check.ok:
         raise ValueError("请先通过预检")
     if capture_name != inputs.capture_name:
@@ -267,6 +282,9 @@ def prepare_workflow_run(prepared: PreparedWorkflow, paths: AppPaths, port, vide
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         preview_port = sock.getsockname()[1]
+    if EASYCON170_TEST:
+        preview_port = 0
+        preview_video = False
     tag = uuid.uuid4().hex
     input_session_id = uuid.uuid4().hex
     incident_root = paths.user / "label_incidents" if label_supervision else None

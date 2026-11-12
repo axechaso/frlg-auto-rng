@@ -14,9 +14,17 @@ concurrency:
 
 jobs:
   test:
-    name: Windows / Python 3.12
+    name: Windows / Python 3.12 / EasyCon ${{ matrix.backend }}
     runs-on: windows-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [170, 164a]
+    env:
+      FRLG_EASYCON_BACKEND: ${{ matrix.backend }}
+      QT_QPA_PLATFORM: offscreen
+      PYTHONIOENCODING: utf-8
 
     steps:
       - name: Check out repository
@@ -117,6 +125,10 @@ jobs:
           sid_traversal.py
           tenlines_seed_updater.py
           automation/easycon118.py
+          automation/easycon170.py
+          tools/import_easycon170_runtime.py
+          tools/prepare_easycon_runtime.py
+          tools/verify_easycon170_integration.py
           automation/target_verification.py
           automation/sid_observation.py
           automation/sid_traversal_policy.py
@@ -178,6 +190,7 @@ jobs:
           tests.test_easycon118_egg
           tests.test_upstream_script_sync
           tests.test_easycon164a_backend
+          tests.test_easycon170
           tests.test_easycon_logged
           tests.test_console_output
           tests.test_audio_observer

@@ -27,6 +27,7 @@ from automation import (
     PLANNER_STATIC_CATEGORIES, get_static_targets, probe_easycon_devices,
 )
 from automation.frame_parity import resolve_frame_parity
+from automation.easycon118 import EASYCON_BACKEND_NAME
 from automation.precalibration import update_from_manifest
 from automation.sid_traversal_policy import traversal_availability
 from rng.tenlines_utils import (
@@ -43,7 +44,7 @@ from .location_picker import (
     selected_location, sorted_location_items,
 )
 from .history_controller import HistoryController
-from .path_settings import restore_resource_path
+from .path_settings import restore_easycon_path, restore_resource_path
 from .diagnostics import explain_error, explain_popup_error, parse_integer
 from .error_dialog import show_error_dialog
 from .profiles import ProfileManager, ProfileWheelFilter
@@ -132,7 +133,7 @@ def wild_start_confirmation_html(plan, options, port: str, capture_name: str, wa
     warning_items = tuple(line for warning in warnings for line in str(warning).splitlines() if line.strip())
     warning_html = "".join(f"<li>{esc(line)}</li>" for line in warning_items)
     if not warning_html:
-        warning_html = "<li>EasyCon 1.6.4-a 启动预检已通过。</li>"
+        warning_html = f"<li>{esc(EASYCON_BACKEND_NAME)} 启动预检已通过。</li>"
     return f"""
 <table width="620" cellspacing="0" cellpadding="0">
   <tr><td style="font-size:18px; font-weight:600; color:#102a56; padding-bottom:8px;">即将运行：{esc(target)}</td></tr>
@@ -253,7 +254,7 @@ def workflow_start_confirmation_html(prepared, port: str, capture_name: str, war
         warning_items = tuple(getattr(prepared.check, "warnings", ()))
     warning_html = "".join(f"<li>{esc(line)}</li>" for line in warning_items if line.strip())
     if not warning_html:
-        warning_html = "<li>EasyCon 1.6.4-a 启动预检已通过。</li>"
+        warning_html = f"<li>{esc(EASYCON_BACKEND_NAME)} 启动预检已通过。</li>"
     requirements = "".join(f"<li>{esc(item)}</li>" for item in checklist)
     if detail_html:
         requirements += f"<li><b>方案</b><ul>{detail_html}</ul></li>"
@@ -729,6 +730,10 @@ class FrlgWindow(FrlgPreviewWindow):
     def refresh_state(self, *_):
         if not self.live_ready:
             return
+        from automation.easycon118 import EASYCON170_TEST
+        if EASYCON170_TEST:
+            self.label_supervision_check.setEnabled(False)
+            self.label_supervision_check.setToolTip("170 PC 扩展 CLI 暂未接入标签故障保护接口；已保存的开关偏好保留。")
         connecting = hasattr(self, "accessories") and self.accessories.connection_busy()
         busy = self.job is not None or self.running or connecting
         wild = self.input_mode == "wild"
@@ -946,7 +951,7 @@ class FrlgWindow(FrlgPreviewWindow):
 
     def choose_path(self, key, *, file=False):
         current = self.fields[key].text()
-        path = QFileDialog.getOpenFileName(self, "选择 ezcon.exe", current, "EasyCon (ezcon.exe)")[0] if file else QFileDialog.getExistingDirectory(self, "选择脚本包", current)
+        path = QFileDialog.getOpenFileName(self, "选择 EasyCon CLI", current, "EasyCon CLI (*.exe)")[0] if file else QFileDialog.getExistingDirectory(self, "选择脚本包", current)
         if path:
             self.fields[key].setText(path)
             if key == "source":
@@ -996,7 +1001,7 @@ class FrlgWindow(FrlgPreviewWindow):
                 self.set_status("预检通过，等待开始运行。")
                 return
             self.begin_accepted_run(command, prepared_wild=prepared)
-        supervision = self.label_supervision_check.isChecked()
+        supervision = self.label_supervision_check.isChecked() and self.label_supervision_check.isEnabled()
         accessories = getattr(self, "accessories", None)
         preview_video = accessories.preview_video_requested() if accessories else False
         self.launch_job(lambda _cancel, _status: prepare_run(
@@ -1055,14 +1060,14 @@ class FrlgWindow(FrlgPreviewWindow):
         self.refresh_state()
         self.select_page("logs")
         if prepared_workflow is not None and prepared_workflow.inputs.mode == "script_test":
-            script_path = prepared_workflow.inputs.extra.get("script", "")
+            script_path = str(prepared_workflow.project)
             backend = prepared_workflow.inputs.extra.get("backend", "未知后端")
         elif prepared_workflow is not None:
             script_path = str(prepared_workflow.project)
             backend = prepared_workflow.inputs.extra.get("backend", "兼容运行器")
         else:
             script_path = str(prepared_wild.project)
-            backend = "EasyCon 1.6.4-a 兼容运行器"
+            backend = EASYCON_BACKEND_NAME
         startup = f"正在启动脚本：{script_path}\n所选后端：{backend}\n"
         self.set_status("正在启动；日志页已就绪。")
         self._append_log(startup)
@@ -1299,13 +1304,11 @@ class FrlgWindow(FrlgPreviewWindow):
                 self._settings_invalid = True
                 self.settings_load_error = "设置文件顶层必须是 JSON 对象"
                 return
-            for key, default, suffix in (
-                ("source", self.paths.source, "_internal/local_assets/easycon118"),
-                ("ezcon", self.paths.ezcon, "_internal/easycon/publish/ezcon.exe"),
-            ):
-                self.fields[key].setText(restore_resource_path(
-                    values.get(key), default, bundled_suffix=suffix, file=key == "ezcon",
-                ))
+            self.fields["source"].setText(restore_resource_path(
+                values.get("source"), self.paths.source,
+                bundled_suffix="_internal/local_assets/easycon118",
+            ))
+            self.fields["ezcon"].setText(restore_easycon_path(values.get("ezcon"), self.paths.ezcon))
             update_source = values.get("update_source", "auto")
             source_index = self.fields["update_source"].findData(update_source)
             self.fields["update_source"].setCurrentIndex(max(0, source_index))

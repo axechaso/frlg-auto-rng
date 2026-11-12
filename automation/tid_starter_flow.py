@@ -45,6 +45,7 @@ from rng.tenlines_utils import (
 )
 
 from .easycon118 import (
+    EASYCON_BACKEND_NAME,
     EGG_TEMPLATE_NAME,
     STANDARD_TEMPLATE_NAME,
     EasyCon118Options,
@@ -1074,7 +1075,7 @@ def validate_tid_starter_flow_runtime(
     *,
     fingerprint_warning_only: bool = False,
 ) -> EasyConRuntimeCheck:
-    """Validate available flow stages with pinned EasyCon 1.6.4-a."""
+    """Validate available flow stages with the selected pinned runtime."""
     base = (
         validate_tid_runtime(
             ezcon_path,
@@ -1101,16 +1102,16 @@ def validate_tid_starter_flow_runtime(
                 timeout=60,
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            errors.append(f"研究所桥接脚本无法执行1.6.4-a语法预检: {exc}")
+            errors.append(f"研究所桥接脚本无法执行 {EASYCON_BACKEND_NAME} 语法预检: {exc}")
         else:
             if formatted.returncode != 0:
                 details = (formatted.stdout + "\n" + formatted.stderr).strip()
                 errors.append(
-                    "研究所桥接脚本未通过EasyCon 1.6.4-a格式检查: "
+                    f"研究所桥接脚本未通过 {EASYCON_BACKEND_NAME} 格式检查: "
                     + details[-1000:]
                 )
     if not errors:
-        warnings.append("研究所桥接脚本已通过EasyCon 1.6.4-a格式检查。")
+        warnings.append(f"研究所桥接脚本已通过 {EASYCON_BACKEND_NAME} 格式检查。")
     if starter_main is None:
         warnings.append(
             "穷举模式将在取得实际TID和SID ADV后生成御三家工程，并在运行前立即预检。"

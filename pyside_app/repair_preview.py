@@ -2,7 +2,7 @@
 import socket
 import uuid
 from PySide6.QtCore import QObject, QProcess, QTimer
-from automation.easycon118 import prepare_compat_runner
+from automation.easycon118 import EASYCON170_TEST, prepare_compat_runner
 
 
 class RepairPreview(QObject):
@@ -19,6 +19,8 @@ class RepairPreview(QObject):
         self.request = None
 
     def start(self):
+        if EASYCON170_TEST:
+            raise ValueError("170 PC 扩展 CLI 暂不提供共享修复预览；请在空闲时使用监视窗口保存画面")
         if self.w.running or self.w.job:
             raise ValueError("运行/设备任务尚未结束，请等待安全退出")
         if self.process.state() != QProcess.ProcessState.NotRunning:

@@ -59,6 +59,9 @@ class WindowsReleaseScriptTests(unittest.TestCase):
         )
         self.assertIn("$(Join-Path $Root 'runtime_backend\\README.md');runtime_backend", source)
         self.assertNotIn("$(Join-Path $Root 'runtime_backend');runtime_backend", source)
+        self.assertIn("runtime_backend\\easycon170-pc-extension", source)
+        self.assertIn('"--add-data", "$RuntimeSelection;runtime_backend"', source)
+        self.assertIn("verify_cli(EASYCON170_MANIFEST_PATH.parent", source)
 
     def test_ci_uses_pyside6_requirements_and_no_removed_tk_tests(self):
         source = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

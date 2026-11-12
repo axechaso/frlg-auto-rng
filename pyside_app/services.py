@@ -22,6 +22,7 @@ from device_label_overrides import LabelOverrideStore, apply_profile_to_projects
 from worker_commands import build_worker_command
 from automation.eontimer_test import apply_test_project, validate_test_project, validate_test_request
 from automation.fixed_timeline_test import FixedTimeline
+from automation.easycon118 import EASYCON170_TEST
 
 
 GENERATED_PLAN_RETENTION = 3
@@ -311,6 +312,8 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
     """Revalidate devices and generated content immediately before execution."""
     if not prepared.project or not prepared.check.ok:
         raise ValueError("请先生成并通过预检")
+    if EASYCON170_TEST and label_supervision:
+        raise ValueError("170 PC 扩展 CLI 暂不支持标签故障保护，请关闭该开关后运行")
     inputs = prepared.inputs
     paths = paths or AppPaths()
     if inputs.capture_name != capture_name:
@@ -337,6 +340,9 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         preview_port = sock.getsockname()[1]
+    if EASYCON170_TEST:
+        preview_port = 0
+        preview_video = False
     run_id = uuid.uuid4().hex
     input_session_id = uuid.uuid4().hex
     log_path = prepared.project.parent / f"easycon-{run_id}.log"
@@ -353,10 +359,11 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
                  "--log-path", str(log_path), "--cwd", str(prepared.project.parent),
                  "--stop-file", str(stop_path), "--", *command))
     return RunCommand(worker_command[0], tuple(worker_command[1:]), log_path, stop_path,
-                      f"http://127.0.0.1:{preview_port}/mjpeg",
+                      f"http://127.0.0.1:{preview_port}/mjpeg" if preview_port else "",
                       EasyConRuntimeCheck(True, (), tuple(warnings)), run_id,
                       incident_root,
-                      f"http://127.0.0.1:{preview_port}/input-state", input_session_id,
+                      f"http://127.0.0.1:{preview_port}/input-state" if preview_port else "",
+                      input_session_id if preview_port else "",
                       "wild", preview_video)
 
 

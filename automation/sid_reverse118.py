@@ -12,6 +12,8 @@ from pathlib import Path
 from rng.tenlines_utils import get_personal
 
 from .easycon118 import (
+    EASYCON170_TEST,
+    adapt_project_tree,
     EXPECTED_SCRIPT_FILE_COUNT,
     EXPECTED_SCRIPT_SHA256,
     HOME_BUFFER_ADAPTIVE_CLASSIFIER_PATH,
@@ -340,4 +342,6 @@ def write_sid_reverse_project(
         request,
         filename=plan_filename,
     )
+    if EASYCON170_TEST:
+        adapt_project_tree(output_dir)
     return main_path

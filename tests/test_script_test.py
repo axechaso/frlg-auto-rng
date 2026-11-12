@@ -10,6 +10,11 @@ from automation import easycon118
 
 
 class DirectScriptTestTests(unittest.TestCase):
+    def setUp(self):
+        runtime_files = mock.patch.object(script_test, "verify_easycon170_files")
+        runtime_files.start()
+        self.addCleanup(runtime_files.stop)
+
     def _project(self, root: Path, *, with_label: bool = True) -> Path:
         main = root / "main.ecs"
         main.write_text(
@@ -193,6 +198,7 @@ class DirectScriptTestTests(unittest.TestCase):
                 fingerprint_warnings=mock.ANY,
             )
 
+    @unittest.skipIf(easycon118.EASYCON170_TEST, "164a OCR 布局专项在 164a 回归中执行")
     def test_advanced_mode_warns_for_hash_mismatches_but_keeps_hard_checks(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -243,6 +249,7 @@ class DirectScriptTestTests(unittest.TestCase):
             self.assertFalse(missing.check.ok)
             self.assertIn("Tessdata 缺少", "\n".join(missing.check.errors))
 
+    @unittest.skipIf(easycon118.EASYCON170_TEST, "170 的七模型缺失保护由 test_easycon170 覆盖")
     def test_missing_ocr_model_blocks_raw_and_compat_comparison(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

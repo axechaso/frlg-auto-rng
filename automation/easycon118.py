@@ -1,4 +1,4 @@
-"""Generate and launch a configured 2.0 project on pinned EasyCon 1.6.4a."""
+"""Generate and launch 2.0 projects on the pinned EasyCon runtime."""
 
 import json
 import hashlib
@@ -36,16 +36,17 @@ from .target_verification import (
     inject_target_verification,
     validate_injected_target_verification,
 )
-from .easycon170_test import (
+from .easycon170 import (
     EASYCON170_CLI_SHA256,
     EASYCON170_COMMIT,
-    EASYCON170_TEST_MODE,
+    EASYCON170_MODE as EASYCON170_TEST_MODE,
     EASYCON170_VERSION,
     adapt_project_tree,
     cli_path as easycon170_cli_path,
     enabled as easycon170_enabled,
     source_path as easycon170_source_path,
     verify_cli as verify_easycon170_cli,
+    verify_runtime_files as verify_easycon170_files,
 )
 from .sid_observation import inject_pid_observation, validate_injected_pid_observation
 from .seed_common_regions import apply_seed_common_regions
@@ -56,11 +57,11 @@ EXPECTED_LABEL_METHODS = {1: 17, 3: 1, 5: 785, 11: 1, 14: 354}
 EXPECTED_LABEL_SHA256 = "2f098918bfd45b3537bce978d8602a0be4714b742d0e54ececaea22d413db94b"
 EASYCON170_TEST = easycon170_enabled()
 if EASYCON170_TEST:
-    EASYCON_BACKEND_NAME = f"EasyCon {EASYCON170_VERSION}（Actions 测试版）"
+    EASYCON_BACKEND_NAME = f"EasyCon {EASYCON170_VERSION}（PC 扩展修复版）"
     EXPECTED_EZCON_VERSION = EASYCON170_VERSION
     EXPECTED_EZCON_SHA256 = EASYCON170_CLI_SHA256
     EXPECTED_COMPAT_SOURCE_COMMIT = EASYCON170_COMMIT
-    EXPECTED_COMPAT_PATCH_ID = "easycon170-actions-cli-legacygui-array-adapter"
+    EXPECTED_COMPAT_PATCH_ID = "easycon170-pc-extension-array-snapshots-v1"
 else:
     EASYCON_BACKEND_NAME = "EasyCon 1.6.4a"
     EXPECTED_EZCON_VERSION = "1.6.4-a+9c86137c7e63bff842175470895727a5fa9bab52"
@@ -2026,7 +2027,17 @@ def parse_easycon_video_devices(output: str) -> dict[int, str]:
     devices: dict[int, str] = {}
     for match in re.finditer(r"(?m)^\s*\[(\d+)\]\s*(.*?)\s*$", output):
         index = int(match.group(1))
-        devices[index] = match.group(2).strip() or "未命名设备"
+        name = match.group(2).strip()
+        # 170 appends DisplayKey and descriptor metadata. Temporary IDs (and
+        # thus their display hash) change on each CLI invocation. Device-name
+        # comparisons and saved label profiles must keep the actual name.
+        descriptor = re.fullmatch(
+            r"(.*?) \[[A-Z0-9_]+/[A-F0-9]{8}\] \(id=.+, temporary=(?:True|False)\)",
+            name, re.IGNORECASE,
+        )
+        if descriptor:
+            name = descriptor.group(1).strip()
+        devices[index] = name or "未命名设备"
     return devices
 
 
@@ -2042,11 +2053,13 @@ def probe_easycon_devices(
     """
     ezcon_path = Path(ezcon_path).resolve()
     if not ezcon_path.is_file():
+        bundled_cli = ("_internal\\runtime_backend\\easycon170-pc-extension\\EasyCon2.CLI.exe"
+                       if EASYCON170_TEST else "_internal\\easycon\\publish\\ezcon.exe")
         raise FileNotFoundError(
             f"设备检测找不到 EasyCon 程序：{ezcon_path}\n"
             "请在共通设置中点击“选择 ezcon.exe”，选择当前解压目录下的 "
-            "_internal\\easycon\\publish\\ezcon.exe，然后重新检测。\n"
-            "如果该文件也不存在，请重新完整解压发布包。"
+            f"{bundled_cli}，然后重新检测。\n"
+            "源码版请先准备选定后端；发布包缺少该文件时请重新完整解压。"
         )
     run_options = dict(
         capture_output=True,
@@ -5814,6 +5827,13 @@ def validate_runtime(
                     warnings=warnings,
                 )
 
+    if EASYCON170_TEST and ezcon_path.is_file():
+        try:
+            verify_easycon170_files(
+                ezcon_path, warning_only=fingerprint_warning_only, warnings=warnings,
+            )
+        except (OSError, ValueError) as exc:
+            errors.append(str(exc))
     if not EASYCON170_TEST:
         tessdata_dir = ezcon_path.parent / "Tessdata"
         for model, expected_sha256 in EXPECTED_TESSDATA_SHA256.items():
@@ -5880,8 +5900,8 @@ def validate_runtime(
 
     if EASYCON170_TEST:
         warnings.append(
-            "当前为 EasyCon 1.7.0 Actions 测试后端；已使用 LegacyGui 评分兼容，"
-            "暂不启用 1.6.4-a 专用采帧、日志和输入状态扩展。"
+            "当前使用 EasyCon 170 PC 扩展修复版，LegacyCli 向上取整评分；"
+            "运行中共享监视、按键状态和标签故障保护接口暂不可用。"
         )
     else:
         warnings.append(
@@ -5935,11 +5955,12 @@ def build_run_command(
         video_type,
     ]
     if EASYCON170_TEST:
-        # EasyCon 1.7's CLI owns the GUI/CLI confidence contract.  LegacyGui
-        # preserves the old upward-rounded label score; the 1.6.4-a runner's
+        # In this pinned 170 build LegacyCli means Math.Ceiling; LegacyGui
+        # truncates. Preserve the tool's audited upward-rounded score.
+        # The 1.6.4-a runner's
         # private preview, incident and input-state switches do not exist in
-        # this Actions build, so omit them instead of passing unknown flags.
-        command.extend(["--compatibility", "LegacyGui"])
+        # this build, so omit them instead of passing unknown flags.
+        command.extend(["--compatibility", "LegacyCli"])
         if verbose:
             command.append("--verbose")
         return command
@@ -5989,16 +6010,10 @@ def prepare_compat_runner(
         raise FileNotFoundError(f"找不到 {EASYCON_BACKEND_NAME} CLI: {ezcon_path}")
     warnings = fingerprint_warnings if fingerprint_warnings is not None else []
     if EASYCON170_TEST:
-        try:
-            version_line, _digest = verify_easycon170_cli(ezcon_path)
-        except (OSError, RuntimeError, ValueError) as exc:
-            if not fingerprint_warning_only:
-                raise
-            warnings.append(f"EasyCon 170 测试 CLI 指纹/版本警告: {exc}")
-            version_line = EXPECTED_EZCON_VERSION
-        if runner_path != ezcon_path:
-            warnings.append("EasyCon 170 测试版直接使用 Actions CLI，未创建 1.6.4-a 兼容运行器")
-        warnings.append(f"EasyCon 170 测试 CLI: {version_line}")
+        version_line, _digest = verify_easycon170_cli(
+            ezcon_path, warning_only=fingerprint_warning_only, warnings=warnings,
+        )
+        warnings.append(f"EasyCon 170 PC 扩展 CLI: {version_line}")
         return ezcon_path
     ezcon_sha256 = hashlib.sha256(ezcon_path.read_bytes()).hexdigest()
     if ezcon_sha256 != EXPECTED_EZCON_SHA256:

@@ -264,6 +264,7 @@ class DeviceLabelOverrideTests(unittest.TestCase):
                     hashlib.sha256(ezcon.read_bytes()).hexdigest(),
                 ),
                 mock.patch.object(easycon118, "EXPECTED_TESSDATA_SHA256", {}),
+                mock.patch.object(easycon118, "verify_easycon170_files"),
                 mock.patch.object(easycon118, "inspect_label_corpus", return_value=corpus),
                 mock.patch.object(
                     easycon118,

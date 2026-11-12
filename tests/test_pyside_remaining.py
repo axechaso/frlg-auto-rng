@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch, Mock
 
 from automation import EasyConRuntimeCheck, SearchCancelledError, TidRngRequest
+from automation.easycon118 import EASYCON170_TEST
 from pyside_app.services import AppPaths
 from pyside_app.workflows import WorkflowInputs, PreparedWorkflow, prepare_workflow, prepare_workflow_run, _snapshot
 from tests.test_easycon118_egg import egg_request
@@ -51,7 +52,11 @@ class WorkflowTests(unittest.TestCase):
                 self.assertIn("--fresh-exhaustive", command.arguments)
                 self.assertIn("--tid-progress-dir", command.arguments)
                 self.assertIn(str(command.stop_path), command.arguments)
-                self.assertTrue(command.preview_url.startswith("http://127.0.0.1:"))
+                if EASYCON170_TEST:
+                    self.assertEqual(command.preview_url, "")
+                    self.assertEqual(command.input_state_url, "")
+                else:
+                    self.assertTrue(command.preview_url.startswith("http://127.0.0.1:"))
                 self.assertFalse(command.stop_path.exists())
                 project.write_text("changed", encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "改变"):

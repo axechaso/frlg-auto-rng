@@ -385,7 +385,7 @@ class CompleteWindow(FrlgWindow):
                 self.set_status("预检通过，等待开始运行。")
                 return
             self.begin_accepted_run(command, prepared_workflow=prepared)
-        supervision = self.label_supervision_check.isChecked()
+        supervision = self.label_supervision_check.isChecked() and self.label_supervision_check.isEnabled()
         preview_video = self.accessories.preview_video_requested()
         self.launch_job(lambda cancel, status: prepare_workflow_run(
             prepared, self.paths, port, video, prepared.inputs.capture_name,

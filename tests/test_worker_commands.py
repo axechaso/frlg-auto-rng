@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from automation.easycon118 import EASYCON170_TEST
 
 import package_entry
 from automation import EasyCon118Options, EasyConRuntimeCheck, TidRngRequest
@@ -98,7 +99,11 @@ class WorkerCommandTests(unittest.TestCase):
                     self.assertIn(str(command.stop_path), command.arguments)
                     self.assertIn(str(command.log_path), command.arguments)
                     self.assertIn("COM3", command.arguments)
-                    self.assertTrue(command.preview_url.startswith("http://127.0.0.1:"))
+                    if EASYCON170_TEST:
+                        self.assertEqual(command.preview_url, "")
+                        self.assertEqual(command.input_state_url, "")
+                    else:
+                        self.assertTrue(command.preview_url.startswith("http://127.0.0.1:"))
                     if mode in ("tid", "sid", "sid_traversal"):
                         self.assertIn("--fingerprint-warnings", command.arguments)
                         self.assertIn(str(prepared.profile), command.arguments)
@@ -111,6 +116,12 @@ class WorkerCommandTests(unittest.TestCase):
                     if mode == "egg":
                         self.assertIn("--expected-marker", command.arguments)
                     self.assertNotIn("--incident-dir", command.arguments)
+
+                    if EASYCON170_TEST:
+                        with self.assertRaisesRegex(ValueError, "170"):
+                            prepare_workflow_run(prepared, AppPaths(user=root), "COM3", 1,
+                                                 "Capture", label_supervision=True)
+                        continue
 
                     with patch.object(sys, "frozen", True, create=True), \
                          patch.object(sys, "executable", str(root / "FRLG-Auto-RNG.exe")), \
@@ -137,13 +148,21 @@ class WorkerCommandTests(unittest.TestCase):
              patch("pyside_app.services.validate_runtime", return_value=check), \
              patch("pyside_app.services.prepare_compat_runner", return_value=Path("runner.exe")):
             command = prepare_run(prepared, "COM3", 1, "Capture")
-        identity.assert_called_once_with(prepared.project, expected=False, fingerprint_warning_only=False)
+        identity.assert_called_once_with(prepared.project, expected=False, fixed=None,
+                                         clock_driver=None, fingerprint_warning_only=False)
         self.assertEqual(command.program, "C:/Portable/FRLG-Auto-RNG.exe")
         self.assertEqual(command.arguments[:2], ("--worker", "easycon-log"))
         self.assertNotIn("-u", command.arguments)
         self.assertIn(str(command.stop_path), command.arguments)
         self.assertIn(str(command.log_path), command.arguments)
         self.assertNotIn("--label-supervision", command.arguments)
+
+        if EASYCON170_TEST:
+            self.assertEqual(command.preview_url, "")
+            self.assertEqual(command.input_state_url, "")
+            with self.assertRaisesRegex(ValueError, "170"):
+                prepare_run(prepared, "COM3", 1, "Capture", label_supervision=True)
+            return
 
         with patch.object(sys, "frozen", True, create=True), \
              patch.object(sys, "executable", "C:/Portable/FRLG-Auto-RNG.exe"), \
@@ -155,7 +174,8 @@ class WorkerCommandTests(unittest.TestCase):
             supervised = prepare_run(
                 prepared, "COM3", 1, "Capture", label_supervision=True,
             )
-        identity.assert_called_once_with(prepared.project, expected=False, fingerprint_warning_only=False)
+        identity.assert_called_once_with(prepared.project, expected=False, fixed=None,
+                                         clock_driver=None, fingerprint_warning_only=False)
         self.assertIn("--label-supervision", supervised.arguments)
         self.assertEqual(supervised.incident_root.name, "label_incidents")
 

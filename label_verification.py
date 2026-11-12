@@ -28,6 +28,10 @@ def verify_label(
     attaching a gamepad or running an ECS.
     """
     runner = Path(runner).resolve()
+    from automation.easycon118 import EASYCON170_TEST
+    if EASYCON170_TEST and (runner.name.casefold() in {"easycon2.cli.exe", "ezcon.exe"}
+                           or (runner.parent / "EasyCon2.CLI.dll").is_file()):
+        raise ValueError("170 PC 扩展 CLI 暂不支持 verify-label 原生复核命令")
     label = Path(label).resolve()
     if not runner.is_file():
         raise FileNotFoundError(f"找不到固定版 EasyCon 兼容运行器: {runner}")

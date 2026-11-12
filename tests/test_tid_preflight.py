@@ -14,6 +14,7 @@ class TidPreflightTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch.object(backend, "verify_easycon170_files"))
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.ezcon = self.root / "ezcon.exe"
         self.ezcon.write_bytes(b"preflight fixture")

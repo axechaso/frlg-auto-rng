@@ -1733,12 +1733,12 @@ class FrlgPreviewWindow(QMainWindow):
         self.label_repair_prompt_check.setChecked(True)
         self.label_repair_prompt_check.setToolTip("只在当前运行最终失败并安全退出后提示；与标签故障保护开关分别保存。")
         layout.addWidget(self.label_repair_prompt_check)
-        runtime = Card("EasyCon 1.6.4-a 与设备", "所有页面共用；设备、文件及更新服务尚未接入。")
+        runtime = Card("EasyCon 与设备", "所有页面共用；设备、文件及更新服务尚未接入。")
         self.common_device_hint = _label("串口与采集卡位于主窗口顶部；请先检测并核对实际设备。",role="muted")
         runtime.layout.addWidget(self.common_device_hint)
         self._form(runtime, [
             ("source", "2.0 自动乱数脚本包", _line(placeholder="路径选择尚未接入")),
-            ("ezcon", "ezcon.exe", _line(placeholder="要求 1.6.4-a+9c86137")),
+            ("ezcon", "EasyCon CLI", _line(placeholder="固定版本 CLI 路径")),
         ], 2)
         update_source = _combo("自动（GitHub 优先）", "GitHub", "Gitee")
         for index, value in enumerate(("auto", "github", "gitee")):

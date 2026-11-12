@@ -33,7 +33,7 @@ from .easycon118 import (
     adapt_project_tree,
     inspect_label_corpus,
 )
-from .easycon170_test import test_root as easycon170_test_root
+from .easycon170 import verify_runtime_files as verify_easycon170_files
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,11 +44,7 @@ DOWNLOADED_TID_SOURCE = (
     Path.home() / "Downloads" / "NS火叶全自动一键乱数1.1.8"
 )
 IMPORTED_TID_SOURCE = ROOT / "local_assets" / "tid_rng137"
-DEFAULT_TID_SOURCE_PATH = (
-    easycon170_test_root() / "tid_rng137"
-    if EASYCON170_TEST
-    else IMPORTED_TID_SOURCE if IMPORTED_TID_SOURCE.is_dir() else DOWNLOADED_TID_SOURCE
-)
+DEFAULT_TID_SOURCE_PATH = IMPORTED_TID_SOURCE if IMPORTED_TID_SOURCE.is_dir() else DOWNLOADED_TID_SOURCE
 
 TID_REFERENCE_SCRIPT_NAMES = {
     # Direct-run references shipped beside the unified tool mother.
@@ -660,6 +656,13 @@ def validate_tid_runtime(
             errors=errors,
             warnings=warnings,
         )
+    if EASYCON170_TEST and ezcon_path.is_file():
+        try:
+            verify_easycon170_files(
+                ezcon_path, warning_only=fingerprint_warning_only, warnings=warnings,
+            )
+        except (OSError, ValueError) as exc:
+            errors.append(str(exc))
     if not project_main.is_file():
         errors.append(f"找不到生成脚本: {project_main}")
     label_dir = project_main.parent / "ImgLabel"

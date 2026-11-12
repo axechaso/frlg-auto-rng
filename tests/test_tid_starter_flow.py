@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from automation.easycon118 import (
+    EASYCON_BACKEND_NAME,
     EGG_TEMPLATE_NAME,
     STANDARD_TEMPLATE_NAME,
     EasyCon118Options,
@@ -708,7 +709,7 @@ ENDFUNC
 
         self.assertTrue(result.ok)
         self.assertIn("ID预检通过", result.warnings)
-        self.assertIn("研究所桥接脚本已通过EasyCon 1.6.4-a格式检查。", result.warnings)
+        self.assertIn(f"研究所桥接脚本已通过 {EASYCON_BACKEND_NAME} 格式检查。", result.warnings)
         self.assertIn("1.1.8预检通过", result.warnings)
         format_run.assert_called_once()
         validate_starter.assert_called_once_with(

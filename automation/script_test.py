@@ -1,4 +1,4 @@
-"""Advanced direct-ECS test support for pinned EasyCon 1.6.4-a."""
+"""Advanced direct-ECS checks for the selected, pinned EasyCon runtime."""
 
 from __future__ import annotations
 
@@ -21,10 +21,14 @@ from .easycon118 import (
     STANDARD_TEMPLATE_NAME,
     prepare_compat_runner,
 )
+from .easycon170 import verify_runtime_files as verify_easycon170_files
 
 
 SCRIPT_TEST_BACKEND_COMPAT = "工具兼容运行器（正式工具）"
-SCRIPT_TEST_BACKEND_ORIGINAL = "原始 EasyCon 1.6.4-a CLI（A/B 对照）"
+SCRIPT_TEST_BACKEND_ORIGINAL = (
+    "EasyCon 170 PC 扩展 CLI（直接运行）" if EASYCON170_TEST
+    else "原始 EasyCon 1.6.4-a CLI（A/B 对照）"
+)
 SCRIPT_TEST_BACKENDS = (
     SCRIPT_TEST_BACKEND_COMPAT,
     SCRIPT_TEST_BACKEND_ORIGINAL,
@@ -118,11 +122,10 @@ def prepare_script_test_runtime(
     *,
     fingerprint_warning_only: bool = False,
 ) -> ScriptTestPreparation:
-    """Validate an arbitrary ECS project without applying 2.0 rewrites.
+    """Validate the actual execution file without changing it.
 
-    The selected script stays in place.  The original pinned CLI is always
-    used for version and ``format`` checks.  At run time the caller uses either
-    that executable or the same compatibility runner used by normal GUI runs.
+    Under 170 the workflow supplies a disposable array-compatible copy. The
+    same pinned CLI checks and executes that copy; parameters stay untouched.
     """
     ezcon_path = Path(ezcon_path).resolve()
     script_path = Path(script_path).resolve()
@@ -145,7 +148,7 @@ def prepare_script_test_runtime(
         else:
             if actual_sha256 != EXPECTED_EZCON_SHA256:
                 record_fingerprint_mismatch(
-                    "EasyCon 1.6.4-a ezcon.exe 指纹不一致: " + actual_sha256,
+                    f"{EASYCON_BACKEND_NAME} {ezcon_path.name} 指纹不一致: " + actual_sha256,
                     warning_only=fingerprint_warning_only,
                     errors=errors,
                     warnings=warnings,
@@ -200,6 +203,14 @@ def prepare_script_test_runtime(
                     errors=errors,
                     warnings=warnings,
                 )
+
+    if ezcon_is_pinned and EASYCON170_TEST:
+        try:
+            verify_easycon170_files(
+                ezcon_path, warning_only=fingerprint_warning_only, warnings=warnings,
+            )
+        except (OSError, ValueError) as exc:
+            errors.append(str(exc))
 
     run_options = dict(
         capture_output=True,
@@ -257,8 +268,7 @@ def prepare_script_test_runtime(
             errors.append(f"工具兼容运行器预检失败: {exc}")
         else:
             warnings.append(
-                "运行后端：EasyCon 170 Actions CLI（LegacyGui 评分兼容；"
-                "未启用 1.6.4-a 私有采帧扩展）"
+                "运行后端：EasyCon 170 PC 扩展 CLI（LegacyCli 向上取整评分）"
                 if EASYCON170_TEST
                 else "运行后端：与正式工具相同的持续采帧/向上取整兼容运行器"
             )
@@ -269,7 +279,7 @@ def prepare_script_test_runtime(
         warnings.append("脚本及 lib 未发现直接 @标签 引用")
     warnings.extend(
         (
-            "高级测试直接运行所选文件：不改参数、不复制脚本、不套用自动乱数脚本包完整语料指纹。",
+            "高级测试执行预检文件：不改参数、不套用自动乱数脚本包完整语料指纹。",
             "所选 ECS 拥有完整手柄控制权限，运行前必须人工确认游戏与存档状态。",
         )
     )

@@ -2,7 +2,38 @@
 from __future__ import annotations
 
 import sys
+import hashlib
 from pathlib import Path
+
+
+def restore_easycon_path(value, default: Path) -> str:
+    """Migrate known old CLIs when this installation selects the 170 runtime."""
+    from automation.easycon170 import EASYCON170_CLI_SHA256, enabled
+    default = Path(default)
+    if not enabled() or default.name != "EasyCon2.CLI.exe":
+        return restore_resource_path(
+            value, default, bundled_suffix="_internal/easycon/publish/ezcon.exe", file=True,
+        )
+    restored = restore_resource_path(
+        value, default,
+        bundled_suffix="_internal/runtime_backend/easycon170-pc-extension/EasyCon2.CLI.exe",
+        file=True,
+    )
+    previous = Path(restored)
+    if previous == default or not previous.is_file():
+        return restored
+    # Identical apphost names/paths are insufficient to distinguish runtimes.
+    # Preserve unknown custom paths for an explicit preflight error.
+    known_old = {
+        "559b81c234d2548c439926a88f5355ccac0958b8a191c1ecca48b2c7c71c1260",
+        "979d8b58eb5c50085d3ef4c94f9622aef2fc0106160b70b1f3cd5a5d435ece88",
+        "f6e540e08e8cf61ce8e0e1a0e04bcb901a4b8ee0f3d4fd0d6cb800e1b0030ea5",
+    }
+    try:
+        digest = hashlib.sha256(previous.read_bytes()).hexdigest()
+    except OSError:
+        return restored
+    return str(default) if digest in known_old and digest != EASYCON170_CLI_SHA256 else restored
 
 
 def _label_count(path: Path) -> int | None:

@@ -50,9 +50,6 @@ echo The local 1.1.8 snapshot is older than the required formal/egg package. Re-
 if errorlevel 1 goto error
 
 :assets_ready
-".venv\Scripts\python.exe" tools\prepare_easycon164a.py
-if errorlevel 1 goto error
-
 if exist "local_assets\tid_rng137\ImgLabel" (
     ".venv\Scripts\python.exe" tools\import_tid_rng137.py local_assets\tid_rng137 --check-only
     if not errorlevel 1 goto tid_assets_ready
@@ -63,15 +60,11 @@ if errorlevel 1 goto error
 
 :tid_assets_ready
 
-if not exist "runtime_backend\easycon164a-cli-gui-rounding-selfcontained\EasyCon2.CLI.PreviewV5.exe" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "tools\build_easycon164a_compat_runner.ps1"
-    if errorlevel 1 goto error
-)
-".venv\Scripts\python.exe" -c "from automation import DEFAULT_EZCON_PATH, prepare_compat_runner; print(prepare_compat_runner(DEFAULT_EZCON_PATH))"
+".venv\Scripts\python.exe" -m tools.prepare_easycon_runtime
 if errorlevel 1 goto error
 
 echo.
-echo Setup complete. EasyCon 1.6.4a, the GUI-rounding runner, 1.1.8 and TID/SID 1.3.7 are ready.
+echo Setup complete. The selected EasyCon runtime, 2.0 scripts and TID/SID assets are ready.
 echo Double-click the launch BAT to start.
 pause
 exit /b 0

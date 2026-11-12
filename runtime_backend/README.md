@@ -1,4 +1,18 @@
-# EasyCon 1.6.4-a CLI compatibility runner
+# EasyCon runtime backends
+
+The `170` branch defaults to the reviewed local PC-extension build
+`1.7.0-rc1+1cd17729fff3d0c91feef012c562473704792f78`. Its manifest is tracked in
+`easycon170-pc-extension/build-manifest.json`; runtime binaries are imported
+locally and ignored by Git. Install .NET 10 x64, then use
+`python -m tools.import_easycon170_runtime <fixed-package-directory>`.
+See [170 integration](../docs/EASYCON170.md) for exact provenance, Desktop
+preflight, array adaptation and unsupported private preview/input/incident APIs.
+
+Set `FRLG_EASYCON_BACKEND=164a` before starting a new Python process to select
+the preserved legacy backend described below. Windows builds bundle only the
+selected backend and remember the selection in `runtime-selection.json`.
+
+## Legacy EasyCon 1.6.4-a compatibility runner
 
 EasyCon `1.6.4-a+9c86137` and the prior compatibility runner have runtime-only
 CLI discrepancies:

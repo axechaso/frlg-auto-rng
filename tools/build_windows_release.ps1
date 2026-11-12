@@ -41,14 +41,34 @@ if (-not (Test-Path -LiteralPath $NotesFile -PathType Leaf)) {
     throw "找不到发布说明：$NotesFile"
 }
 
-if (-not $EasyConPublish) {
+Push-Location $Root
+try {
+    $RuntimeBackend = (& $Python -c "from automation.easycon170 import enabled; print('170' if enabled() else '164a')" | Select-Object -Last 1).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "无法确定当前 EasyCon 后端" }
+} finally { Pop-Location }
+$RuntimeData = if ($RuntimeBackend -eq '170') {
+    "$(Join-Path $Root 'runtime_backend\easycon170-pc-extension');runtime_backend/easycon170-pc-extension"
+} else {
+    "$(Join-Path $Root 'runtime_backend\easycon164a-cli-gui-rounding-selfcontained');runtime_backend/easycon164a-cli-gui-rounding-selfcontained"
+}
+if ($RuntimeBackend -eq '170') {
+    Push-Location $Root
+    try {
+        # Packaging always copies the bundled directory, regardless of a local
+        # development override pointing at a different runtime directory.
+        & $Python -c "from automation.easycon170 import EASYCON170_MANIFEST_PATH, verify_cli; print(verify_cli(EASYCON170_MANIFEST_PATH.parent / 'EasyCon2.CLI.exe')[0])"
+        if ($LASTEXITCODE -ne 0) { throw "170 PC 扩展运行包验证失败，请先运行 tools.import_easycon170_runtime" }
+    } finally { Pop-Location }
+}
+
+if ($RuntimeBackend -ne '170' -and -not $EasyConPublish) {
     $candidate = Get-ChildItem -LiteralPath (Join-Path $Root "dist") -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Join-Path $_.FullName "easycon\publish" } |
         Where-Object { Test-Path -LiteralPath (Join-Path $_ "ezcon.exe") } |
         Select-Object -First 1
     if ($candidate) { $EasyConPublish = $candidate }
 }
-if (-not $EasyConPublish -or -not (Test-Path -LiteralPath (Join-Path $EasyConPublish "ezcon.exe"))) {
+if ($RuntimeBackend -ne '170' -and (-not $EasyConPublish -or -not (Test-Path -LiteralPath (Join-Path $EasyConPublish "ezcon.exe")))) {
     throw "找不到 EasyCon publish 目录。请用 -EasyConPublish 指定包含 ezcon.exe 的目录。"
 }
 
@@ -61,6 +81,8 @@ $UpdaterWork = Join-Path $BuildRoot "updater-pyinstaller"
 $UpdaterDist = Join-Path $BuildRoot "updater-dist"
 $ReleaseRoot = Join-Path $BuildRoot $OutputName
 New-Item -ItemType Directory -Path $BuildRoot | Out-Null
+$RuntimeSelection = Join-Path $BuildRoot "runtime-selection.json"
+@{ backend = $RuntimeBackend } | ConvertTo-Json | Set-Content -LiteralPath $RuntimeSelection -Encoding UTF8
 
 $StagedAssets = Join-Path $BuildRoot "release-assets"
 Push-Location $Root
@@ -97,7 +119,8 @@ $args = @(
     "--add-data", "$LocalAssets;local_assets",
     # Only the current runner is a runtime dependency. Never bundle sibling
     # before-* backups (which can contain old single-file executables).
-    "--add-data", "$(Join-Path $Root 'runtime_backend\easycon164a-cli-gui-rounding-selfcontained');runtime_backend/easycon164a-cli-gui-rounding-selfcontained",
+    "--add-data", $RuntimeData,
+    "--add-data", "$RuntimeSelection;runtime_backend",
     "--add-data", "$(Join-Path $Root 'runtime_backend\README.md');runtime_backend",
     "--add-data", "$(Join-Path $Root 'default.yaml');.",
     "--add-binary", "$(Join-Path $Root 'rng\src\pybind\calibration_bind.cp312-win_amd64.pyd');rng\src\pybind",
@@ -149,10 +172,11 @@ try {
     Pop-Location
 }
 
-New-Item -ItemType Directory -Path (Join-Path $PyInstallerDist "FRLG-Auto-RNG\easycon\publish") -Force | Out-Null
 $InternalRoot = Join-Path $PyInstallerDist "FRLG-Auto-RNG\_internal"
-New-Item -ItemType Directory -Path (Join-Path $InternalRoot "easycon\publish") -Force | Out-Null
-Copy-Item -Force -Recurse -Path (Join-Path $EasyConPublish "*") -Destination (Join-Path $InternalRoot "easycon\publish")
+if ($RuntimeBackend -ne '170') {
+    New-Item -ItemType Directory -Path (Join-Path $InternalRoot "easycon\publish") -Force | Out-Null
+    Copy-Item -Force -Recurse -Path (Join-Path $EasyConPublish "*") -Destination (Join-Path $InternalRoot "easycon\publish")
+}
 
 New-Item -ItemType Directory -Path $ReleaseRoot | Out-Null
 Copy-Item -Force -Recurse -Path (Join-Path $PyInstallerDist "FRLG-Auto-RNG\*") -Destination $ReleaseRoot
@@ -165,6 +189,7 @@ Set-Content -LiteralPath (Join-Path $ReleaseRoot "使用说明.txt") -Encoding U
     "本包不需要安装 Python、pygame 或其他 Python 依赖。",
     "首次运行生成的配置、日志和 ECS 工程保存在 %LOCALAPPDATA%\FRLG-Auto-RNG。",
     "使用前仍需连接 EasyCon 兼容单片机和采集卡，并在界面检测设备。"
+    $(if ($RuntimeBackend -eq '170') { "本包使用 170 PC 扩展修复版，需要安装 .NET 10 x64 运行时。" } else { "本包使用 1.6.4-a 兼容运行器。" })
 )
 
 # The generator has a local_assets fallback for Windows builds where

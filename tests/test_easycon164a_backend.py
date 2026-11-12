@@ -10,6 +10,7 @@ from unittest import mock
 import automation.easycon118 as backend
 
 
+@unittest.skipIf(backend.EASYCON170_TEST, "164a 专项由 FRLG_EASYCON_BACKEND=164a 的回归任务执行")
 class EasyCon164aBackendTests(unittest.TestCase):
     def test_ocr_unavailable_sentinel_skips_name_correction(self):
         original = """\
