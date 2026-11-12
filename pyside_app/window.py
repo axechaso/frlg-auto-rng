@@ -27,7 +27,7 @@ from automation import (
     PLANNER_STATIC_CATEGORIES, get_static_targets, probe_easycon_devices,
 )
 from automation.frame_parity import resolve_frame_parity
-from automation.easycon118 import EASYCON_BACKEND_NAME
+from automation.easycon118 import EASYCON_BACKEND_NAME, EXPECTED_EZCON_VERSION
 from automation.precalibration import update_from_manifest
 from automation.sid_traversal_policy import traversal_availability
 from rng.tenlines_utils import (
@@ -795,6 +795,11 @@ class FrlgWindow(FrlgPreviewWindow):
             label.setText(text)
             dot.setStyleSheet(f"color: {'#22a785' if ok else '#b6c0cf'}; font-size: 11px;")
         self.device_chip.findChild(QLabel, "chipValue").setText(f"{self.fields['wild_nx'].currentText()} · {port}" if port else missing_port)
+        sidebar_title = self.findChild(QLabel, "sideStatusTitle")
+        sidebar_title.setText(f"●  EasyCon {EXPECTED_EZCON_VERSION.split('+', 1)[0]}")
+        sidebar_title.setToolTip(
+            f"所选后端：{EASYCON_BACKEND_NAME}\nCLI：{self.fields['ezcon'].text()}\n实际版本在运行前预检。"
+        )
         sidebar = self.findChildren(QLabel, "sideStatusText")
         if len(sidebar) >= 2:
             sidebar[0].setText(f"{port or missing_port} · {self.devices[1].get(video, missing_video)}")

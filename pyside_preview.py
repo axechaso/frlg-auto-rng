@@ -814,7 +814,7 @@ class FrlgPreviewWindow(QMainWindow):
         status_layout = QVBoxLayout(status)
         status_layout.setContentsMargins(13, 12, 13, 13)
         status_layout.setSpacing(5)
-        status_layout.addWidget(_label("●  EasyCon 1.6.4-a", name="sideStatusTitle"))
+        status_layout.addWidget(_label("●  EasyCon", name="sideStatusTitle"))
         status_layout.addWidget(_label("运行时要求 · 尚未检测", name="sideStatusText"))
         status_layout.addWidget(_label("设备与运行服务尚未接入", name="sideStatusText"))
         layout.addWidget(status)
