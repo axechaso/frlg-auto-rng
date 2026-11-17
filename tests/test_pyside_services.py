@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -165,3 +166,34 @@ class PySideServiceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "tampered"):
                 prepare_run(prepared, "COM4", 3, "Expected")
             runner.assert_not_called()
+
+    def test_start_rejects_legacy_timing_project(self):
+        result = sample_result()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            main = root / "main.ecs"
+            manifest = root / "plan.json"
+            library = root / "lib" / "98_clock_test.ecs"
+            library.parent.mkdir()
+            inputs = WildInputs(result.plan.request, EasyCon118Options(), root, root / "ezcon.exe",
+                                advanced=True, capture_name="Capture")
+            prepared = PreparedWild(inputs, result, main, manifest, EasyConRuntimeCheck(True, (), ()))
+            cases = (
+                ({"eontimer_test": {"mode": "fixed"}}, "", False),
+                ({}, "# EONTIMER_GBA_CUSTOM_TEST_V1", False),
+                ({}, "# FRLG_CLOCK_AB_TEST_V1", False),
+                ({}, "", True),
+            )
+            for config, marker, has_library in cases:
+                with self.subTest(config=config, marker=marker, has_library=has_library):
+                    manifest.write_text(json.dumps(config), encoding="utf-8")
+                    main.write_text(marker, encoding="utf-8")
+                    if has_library:
+                        library.touch()
+                    with patch("pyside_app.services.probe_easycon_devices",
+                               return_value=({"COM4"}, {3: "Capture"}, "")), \
+                         patch("pyside_app.services.prepare_compat_runner") as runner:
+                        with self.assertRaisesRegex(ValueError, "请重新生成普通方案"):
+                            prepare_run(prepared, "COM4", 3, "Capture")
+                        runner.assert_not_called()
+                    library.unlink(missing_ok=True)

@@ -3119,7 +3119,17 @@ def validate_generated_project_consistency(
         template_name,
         default=STANDARD_TEMPLATE_NAME,
     )
-    manifest = _manifest(project_main)
+    script = Path(project_main)
+    manifest = _manifest(script)
+    text = script.read_text(encoding="utf-8-sig")
+    # Older generated timing experiments cannot be started as ordinary plans.
+    if (
+        manifest.get("eontimer_test") is not None
+        or "# EONTIMER_GBA_CUSTOM_TEST_V1" in text
+        or "# FRLG_CLOCK_AB_TEST_V1" in text
+        or (script.parent / "lib" / "98_clock_test.ecs").exists()
+    ):
+        raise ValueError("此工程来自已移除的临时计时测试，请重新生成普通方案")
     if manifest.get("template") != selected_template:
         raise ValueError(
             "生成脚本入口不一致: "
@@ -3158,12 +3168,9 @@ def validate_generated_project_consistency(
         )
     verification = manifest.get("target_verification")
     if verification is not None:
-        validate_injected_target_verification(
-            Path(project_main).read_text(encoding="utf-8"), verification,
-        )
+        validate_injected_target_verification(text, verification)
         validate_injected_pid_observation(
-            Path(project_main).read_text(encoding="utf-8"), verification,
-            tid=plan.request.tid, sid=plan.request.sid,
+            text, verification, tid=plan.request.tid, sid=plan.request.sid,
         )
     user_values = plan_to_user_values(plan, options)
     shiny_values = _shiny_strategy_to_ecs_values(options, is_wild=_is_wild(plan))

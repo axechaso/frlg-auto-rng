@@ -20,8 +20,6 @@ from automation import (
 )
 from device_label_overrides import LabelOverrideStore, apply_profile_to_projects
 from worker_commands import build_worker_command
-from automation.eontimer_test import apply_test_project, validate_test_project, validate_test_request
-from automation.fixed_timeline_test import FixedTimeline
 from automation.easycon118 import EASYCON170_TEST
 
 
@@ -110,9 +108,6 @@ class WildInputs:
     template_name: str = STANDARD_TEMPLATE_NAME
     advanced: bool = False
     capture_name: str = ""
-    eontimer_test: bool = False
-    fixed_timeline: FixedTimeline | None = None
-    clock_driver: str | None = None
 
     def fingerprint(self) -> str:
         return json.dumps(asdict(self), default=str, sort_keys=True, ensure_ascii=False)
@@ -145,19 +140,6 @@ class RunCommand:
 
 def validate_wild_inputs(inputs: WildInputs) -> None:
     inputs.request.validate()
-    if inputs.clock_driver is not None:
-        from automation.clock_test import validate_driver
-        if not inputs.eontimer_test:
-            raise ValueError("底层计时 A/B 不能混入普通流程")
-        validate_driver(inputs.clock_driver, inputs.fixed_timeline)
-    if inputs.fixed_timeline is not None:
-        if not inputs.eontimer_test:
-            raise ValueError("固定时长配置不能混入普通流程")
-        inputs.fixed_timeline.validate_request(inputs.request, inputs.options)
-    if inputs.eontimer_test:
-        validate_test_request(inputs.request, inputs.options, advanced=inputs.advanced)
-        if inputs.template_name != EGG_TEMPLATE_NAME or inputs.options.update_precalibration:
-            raise ValueError("EonTimer 临时测试必须使用时间轴入口且关闭普通预校准")
     if not inputs.source.is_dir():
         raise ValueError("请选择存在的 2.0 自动乱数脚本包目录")
     if inputs.template_name not in (STANDARD_TEMPLATE_NAME, EGG_TEMPLATE_NAME):
@@ -228,9 +210,6 @@ def prepare_wild(
             raise SearchCancelledError("已取消生成")
         validate_generated_project_consistency(project, result.plan, inputs.options,
                                                template_name=inputs.template_name)
-        if inputs.eontimer_test:
-            apply_test_project(project, result.plan, inputs.options, advanced=inputs.advanced,
-                               fixed=inputs.fixed_timeline, clock_driver=inputs.clock_driver)
         check = validate_runtime(inputs.ezcon, project, fingerprint_warning_only=inputs.advanced)
     except SearchCancelledError:
         shutil.rmtree(output, ignore_errors=True)
@@ -288,9 +267,6 @@ def rebuild_wild_with_override(prepared: PreparedWild, paths: AppPaths) -> Prepa
             project, prepared.result.plan, inputs.options,
             template_name=inputs.template_name,
         )
-        if inputs.eontimer_test:
-            apply_test_project(project, prepared.result.plan, inputs.options, advanced=inputs.advanced,
-                               fixed=inputs.fixed_timeline, clock_driver=inputs.clock_driver)
         check = validate_runtime(
             inputs.ezcon, project, fingerprint_warning_only=inputs.advanced,
         )
@@ -325,16 +301,10 @@ def prepare_run(prepared: PreparedWild, port: str, video: int, capture_name: str
         raise ValueError("采集卡编号或名称已改变，请重新检测并生成方案")
     validate_generated_project_consistency(prepared.project, prepared.result.plan, inputs.options,
                                            template_name=inputs.template_name)
-    identity_warnings = validate_test_project(
-        prepared.project, expected=inputs.eontimer_test,
-        fixed=inputs.fixed_timeline,
-        clock_driver=inputs.clock_driver,
-        fingerprint_warning_only=inputs.advanced,
-    )
     check = validate_runtime(inputs.ezcon, prepared.project, fingerprint_warning_only=inputs.advanced)
     if not check.ok:
         raise ValueError("\n".join(check.errors))
-    warnings = [*check.warnings, *identity_warnings]
+    warnings = list(check.warnings)
     runner = prepare_compat_runner(inputs.ezcon, fingerprint_warning_only=inputs.advanced,
                                    fingerprint_warnings=warnings)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
