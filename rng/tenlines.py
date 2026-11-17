@@ -195,9 +195,9 @@ def hslot(rand_val, encounter_type):
 # Filter
 # ============================================================
 class SearcherFilter:
-    __slots__ = ('natures', 'shiny', 'gender', 'hp_type', 'iv_min', 'iv_max', 'slots', 'ability')
+    __slots__ = ('natures', 'shiny', 'gender', 'hp_type', 'iv_min', 'iv_max', 'slots', 'ability', 'min_perfect_ivs')
     def __init__(self, natures=None, shiny=None, gender=None, hp_type=None,
-                 iv_min=None, iv_max=None, slots=None, ability=None):
+                 iv_min=None, iv_max=None, slots=None, ability=None, min_perfect_ivs=0):
         self.natures = natures
         self.shiny = shiny
         self.gender = gender
@@ -206,6 +206,7 @@ class SearcherFilter:
         self.iv_max = iv_max or [31]*6
         self.slots = slots
         self.ability = ability  # None or 0 or 1
+        self.min_perfect_ivs = min_perfect_ivs
 
     def compare_nature(self, nature):
         if self.natures is None:
@@ -237,6 +238,8 @@ class SearcherFilter:
         for i in range(6):
             if ivs[i] < self.iv_min[i] or ivs[i] > self.iv_max[i]:
                 return False
+        if self.min_perfect_ivs and sum(value == 31 for value in ivs) < self.min_perfect_ivs:
+            return False
         if self.natures is not None and nature not in self.natures:
             return False
         if self.shiny is not None and self.shiny != 255:
@@ -259,36 +262,42 @@ class SearcherFilter:
 # ============================================================
 # StaticSearcher3 - 1:1 port of C++ StaticSearcher3::search
 # ============================================================
-def iter_iv_combinations(iv_min, iv_max, iv_total=None):
+def iter_iv_combinations(iv_min, iv_max, iv_total=None, *, min_perfect_ivs=0):
     """Yield IV tuples, optionally restricted to one exact total.
 
     The exact-total branch uses bounded composition pruning.  It lets the
     automatic planner inspect high-IV tiers first without expanding a broad
     six-dimensional range.
     """
-    if iv_total is None:
+    if iv_total is None and not min_perfect_ivs:
         yield from product(*(range(lo, hi + 1) for lo, hi in zip(iv_min, iv_max)))
         return
 
-    suffix_min, suffix_max = [0] * 7, [0] * 7
+    suffix_min, suffix_max, suffix_perfect = [0] * 7, [0] * 7, [0] * 7
     for index in range(5, -1, -1):
         suffix_min[index] = suffix_min[index + 1] + iv_min[index]
         suffix_max[index] = suffix_max[index + 1] + iv_max[index]
+        suffix_perfect[index] = suffix_perfect[index + 1] + (iv_min[index] <= 31 <= iv_max[index])
 
-    def visit(index, remaining, prefix):
+    def visit(index, remaining, prefix, perfect):
+        if perfect + suffix_perfect[index] < min_perfect_ivs:
+            return
         if index == 5:
-            value = remaining
-            if iv_min[index] <= value <= iv_max[index]:
-                yield tuple(prefix + [value])
+            values = (remaining,) if remaining is not None else range(iv_min[index], iv_max[index] + 1)
+            for value in values:
+                if iv_min[index] <= value <= iv_max[index] and perfect + (value == 31) >= min_perfect_ivs:
+                    yield tuple(prefix + [value])
             return
         rest_min = suffix_min[index + 1]
         rest_max = suffix_max[index + 1]
-        lower = max(iv_min[index], remaining - rest_max)
-        upper = min(iv_max[index], remaining - rest_min)
-        for value in range(upper, lower - 1, -1):
-            yield from visit(index + 1, remaining - value, prefix + [value])
+        lower = iv_min[index] if remaining is None else max(iv_min[index], remaining - rest_max)
+        upper = iv_max[index] if remaining is None else min(iv_max[index], remaining - rest_min)
+        values = range(lower, upper + 1) if remaining is None else range(upper, lower - 1, -1)
+        for value in values:
+            yield from visit(index + 1, None if remaining is None else remaining - value,
+                             prefix + [value], perfect + (value == 31))
 
-    yield from visit(0, iv_total, [])
+    yield from visit(0, iv_total, [], 0)
 
 
 def search_static(iv_min, iv_max, method, tsv, gender_ratio=127,
@@ -296,7 +305,8 @@ def search_static(iv_min, iv_max, method, tsv, gender_ratio=127,
                   cancel_check=None):
     """Yields dicts: seed, pid, ivs, ability, gender, nature, shiny, hidden_type, hidden_power"""
     iv_advance = (method == METHOD_2)
-    for hp, atk, def_, spa, spd, spe in iter_iv_combinations(iv_min, iv_max, iv_total):
+    for hp, atk, def_, spa, spd, spe in iter_iv_combinations(
+            iv_min, iv_max, iv_total, min_perfect_ivs=filter_obj.min_perfect_ivs if filter_obj else 0):
         if cancel_check is not None and cancel_check():
             return
         if bugged_roamer:
@@ -438,7 +448,8 @@ def search_wild(iv_min, iv_max, method, tsv, encounter_slots,
     if isinstance(encounter_type, str):
         encounter_type = ENCOUNTER_TYPE_ALIASES.get(encounter_type, 0)
     iv_advance = (method == METHOD_2)
-    for hp, atk, def_, spa, spd, spe in iter_iv_combinations(iv_min, iv_max, iv_total):
+    for hp, atk, def_, spa, spd, spe in iter_iv_combinations(
+            iv_min, iv_max, iv_total, min_perfect_ivs=filter_obj.min_perfect_ivs if filter_obj else 0):
         if cancel_check is not None and cancel_check():
             return
         ivs = (hp, atk, def_, spa, spd, spe)

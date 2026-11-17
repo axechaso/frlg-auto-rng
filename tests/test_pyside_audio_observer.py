@@ -180,7 +180,8 @@ class PySideAudioObserverTests(unittest.TestCase):
         self.assertEqual(self.window.pending_output, original_pending)
         self.window._append_log("信息\n", final=True)
         text = self.window.log_view.toPlainText()
-        self.assertIn("目标信息", text)
+        self.assertNotIn("目标信息", text)
+        self.assertIn("目标信息", self.window.script_log_text())
         self.assertIn("疑似闪光音效", text)
         self.assertEqual(self.window.runtime_issues, {})
         from pyside_app.window import FrlgWindow

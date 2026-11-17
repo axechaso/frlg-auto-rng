@@ -50,16 +50,20 @@ class PageGuides:
         registry["egg_parent_widgets"] = self.w.egg_parent_widgets[0][0]
         registry["tid_progress_card"] = self.w.tid_progress_status
         registry["frame_parity"] = self.w.fields["parity"]
+        registry["overview_button"] = self.w.overview_button
+        registry["run_summary_view"] = self.w.run_summary_view
         if self.child:
             if self.active_page == "label":
-                for name in ("scene_confirm", "label_choice", "canvas", "same_button", "fresh_button", "negative_button", "apply_button", "manual_confirm_button"):
+                for name in ("scene_confirm", "script_choice", "label_choice", "capture_button", "canvas", "same_button", "fresh_button", "negative_button", "apply_button", "manual_confirm_button"):
                     registry[name] = getattr(self.child, name)
             elif self.active_page == "profile":
                 registry.update(profile_selector=self.child.list,profile_game=self.child.game,profile_mystery_gift=self.child.mystery_gift)
         return registry
 
     def _visible(self, step):
-        return not step.visible_when or (step.visible_when == "traversal" and self.w.traversal_check.isChecked())
+        return (not step.visible_when
+                or (step.visible_when == "traversal" and self.w.traversal_check.isChecked())
+                or (step.visible_when == "incident" and bool(self.child and getattr(self.child, "record", None))))
 
     def start_current(self):
         self.start(self.w.current_page)

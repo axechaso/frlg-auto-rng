@@ -17,7 +17,7 @@ class Accessories(QObject):
     def __init__(self, window):
         super().__init__(window)
         self.w = window
-        self.controller = self.monitor = None
+        self.controller = self.monitor = self.label_editor = None
         self.store = LabelOverrideStore(window.paths.user / "device_label_overrides")
         self.incidents = LabelIncidentStore(window.paths.user / "label_incidents")
         self.active_incident_id = None
@@ -146,12 +146,12 @@ class Accessories(QObject):
 
     def clear_issues(self):
         self.w.label_issues.setRowCount(0)
-        self.ignored_prefix = self.w.log_view.toPlainText()
+        self.ignored_prefix = self.w.script_log_text()
         self.last_log = self.ignored_prefix
 
     def diagnose(self):
         self.poll_incidents()
-        text = self.w.log_view.toPlainText()
+        text = self.w.script_log_text()
         if text == self.last_log:
             return
         self.last_log = text
@@ -224,35 +224,36 @@ class Accessories(QObject):
         if self.w.running or self.w.job:
             self.w.show_error("请先等待运行或设备任务结束，再打开标签修复。")
             return
-        from .label_editor import LabelEditorDialog
-        try:
-            dialog = LabelEditorDialog(self.w, incident_id=self.active_incident_id)
-            dialog.exec()
-        except (OSError, RuntimeError, ValueError) as exc:
-            self.w.show_error(f"无法打开故障标签修复：{exc}")
-        self.poll_incidents()
-        self.refresh_labels()
+        self._show_label_editor(incident_id=self.active_incident_id)
 
     def open_label_editor(self):
         if self.w.running or self.w.job:
             self.w.show_error("请先等待运行或设备任务结束，再打开标签制作。")
             return
-        label = QFileDialog.getOpenFileName(
-            self.w, "选择待制作 / 修复的 EasyCon 标签", "", "EasyCon 标签 (*.IL *.il)",
-        )[0]
-        if not label:
-            return
-        frame = QFileDialog.getOpenFileName(
-            self.w, "选择标签应识别的原始游戏截图", str(Path(label).parent),
-            "图像 (*.png *.bmp *.jpg *.jpeg)",
-        )[0]
-        if not frame:
-            return
+        self._show_label_editor()
+
+    def _show_label_editor(self, *, incident_id=None):
         from .label_editor import LabelEditorDialog
         try:
-            LabelEditorDialog(self.w, label_path=label, frame_path=frame).exec()
+            if self.label_editor is not None:
+                self.label_editor.show()
+                self.label_editor.raise_()
+                self.label_editor.activateWindow()
+                return
+            self.label_editor = LabelEditorDialog(self.w, incident_id=incident_id)
+            self.label_editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            self.label_editor.finished.connect(self._label_editor_finished)
+            self.label_editor.show()
+            # A modeless editor keeps the monitor and controller usable.
+            self.label_editor.open_monitor()
         except (OSError, RuntimeError, ValueError) as exc:
             self.w.show_error(f"无法打开标签制作：{exc}")
+
+    def _label_editor_finished(self, *_):
+        self.label_editor = None
+        if self.monitor:
+            self.monitor.capture_button.hide()
+        self.poll_incidents()
         self.refresh_labels()
 
     def open_controller(self):
@@ -326,9 +327,15 @@ class Accessories(QObject):
     def open_monitor(self):
         if self.monitor is None:
             self.monitor = MonitorWindow(self.w)
+        self.monitor.capture_button.setVisible(self.label_editor is not None)
         self.monitor.show()
         self.monitor.raise_()
-        self.monitor.restart()
+        if self.monitor.reader is None:
+            self.monitor.restart()
+
+    def capture_label_frame(self):
+        if self.label_editor is not None:
+            self.label_editor.capture_monitor_frame()
 
     def preview_video_requested(self):
         return bool(self.monitor and self.monitor.isVisible())
@@ -440,6 +447,8 @@ class Accessories(QObject):
             progress=status, fingerprint_warning_only=advanced), done, "正在检查官方 Seed 表……")
 
     def close(self):
+        if self.label_editor is not None and not self.label_editor.close():
+            return False
         if not self.repair_prompts.close():
             return False
         if hasattr(self,"repair_preview") and not self.repair_preview.stop():

@@ -98,6 +98,38 @@ class PlannerSelectionTests(unittest.TestCase):
         self.assertEqual(result.plan.iv_total, 180)
         self.assertEqual(result.plan.initial_seed.advances, 500)
 
+    def test_perfect_iv_threshold_is_a_hard_filter_in_any_stat_position(self):
+        high_total = target("00000001", (30,) * 6)
+        for count in range(1, 7):
+            for offset in range(6):
+                ivs = tuple(31 if (index - offset) % 6 < count else 0 for index in range(6))
+                matching = target("00000002", ivs)
+                with self.subTest(count=count, offset=offset):
+                    result = self.run_plan(
+                        [high_total, matching],
+                        {high_total.target_seed: [route("1111", 1)], matching.target_seed: [route("2222", 20)]},
+                        min_perfect_ivs=count,
+                    )
+                    self.assertEqual(result.plan.target.ivs, matching.ivs)
+                    self.assertEqual(result.matching_outcomes, 1)
+                    self.assertEqual(result.to_dict()["request"]["min_perfect_ivs"], count)
+        with self.assertRaises(NoMatchingTargetError):
+            self.run_plan([high_total], {high_total.target_seed: [route("1111", 1)]}, min_perfect_ivs=1)
+
+    def test_perfect_iv_threshold_accepts_better_individuals(self):
+        six_v = target("00000001", (31,) * 6)
+        result = self.run_plan([six_v], {six_v.target_seed: [route("1111", 10)]}, min_perfect_ivs=5)
+        self.assertEqual(result.plan.target.ivs, six_v.ivs)
+
+    def test_perfect_iv_threshold_rejects_invalid_or_impossible_ranges(self):
+        for value in (-1, 7, 1.5, True):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "满个体值项数"):
+                request(min_perfect_ivs=value).validate()
+        with self.assertRaisesRegex(ValueError, "当前个体值范围"):
+            request(min_perfect_ivs=5, iv_max=(31, 31, 31, 31, 30, 30)).validate()
+        with self.assertRaisesRegex(ValueError, "最多只有 1V"):
+            request(method="Static 1", category="Roaming", pokemon="Raikou", min_perfect_ivs=2).validate()
+
     def test_equal_iv_total_uses_smallest_advance(self):
         first = target("00000001", (31, 31, 31, 31, 31, 25))
         second = target("00000002", (30, 30, 30, 30, 30, 30))

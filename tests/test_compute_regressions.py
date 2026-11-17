@@ -61,6 +61,48 @@ class ComputeRegressions(unittest.TestCase):
                 self.assertEqual(list(rng.iter_iv_combinations(lo, hi, total)), sorted((v for v in all_ivs if sum(v) == total), reverse=True))
         self.assertEqual(sum(utils._count_iv_combinations([0] * 6, [31] * 6, t) for t in range(187)), 32 ** 6)
 
+    def test_perfect_iv_counts_and_pruning_match_exhaustive_results(self):
+        for lower, upper in (([29] * 6, [31] * 6),
+                             ([0, 30, 29, 31, 0, 30], [1, 31, 31, 31, 0, 31])):
+            all_ivs = list(product(*(range(a, b + 1) for a, b in zip(lower, upper))))
+            for required in range(7):
+                expected = [ivs for ivs in all_ivs if ivs.count(31) >= required]
+                with self.subTest(required=required, lower=lower):
+                    self.assertEqual(set(rng.iter_iv_combinations(lower, upper, min_perfect_ivs=required)), set(expected))
+                    counts = Counter(map(sum, expected))
+                    for total in range(sum(lower) - 1, sum(upper) + 2):
+                        self.assertEqual(utils._count_iv_combinations(lower, upper, total, required), counts[total])
+                        self.assertEqual(list(rng.iter_iv_combinations(lower, upper, total, min_perfect_ivs=required)),
+                                         sorted((ivs for ivs in expected if sum(ivs) == total), reverse=True))
+        self.assertEqual(sum(utils._iv_total_counts((0,) * 6, (31,) * 6, 5)), 1 + 6 * 31)
+
+    def test_perfect_iv_work_budget_counts_only_eligible_combinations(self):
+        kwargs = dict(method="Static 1", min_perfect_ivs=5,
+                      ivs_range=utils.IVsRange(utils.IVs(*([30] * 6)), utils.IVs(*([31] * 6))))
+        with patch.object(utils, "iter_search_targets", return_value=iter(())) as search:
+            self.assertEqual(list(utils.search_target_tiers(max_iv_combinations=7, **kwargs)), [])
+            self.assertEqual(search.call_count, 2)
+        with patch.object(utils, "iter_search_targets", return_value=iter(())):
+            with self.assertRaises(utils.SearchWorkLimitError):
+                list(utils.search_target_tiers(max_iv_combinations=6, **kwargs))
+
+    def test_real_static_and_wild_search_honor_perfect_iv_filter(self):
+        def perfect_count(result):
+            ivs = result.ivs
+            return (ivs.hp, ivs.attack, ivs.defense, ivs.sp_attack, ivs.sp_defense, ivs.speed).count(31)
+
+        for method, category, location, pokemon in (
+                ("Static 1", "Starter", "Starter", "Bulbasaur"),
+                ("Wild 1", "Grass", "Viridian Forest", "Pikachu")):
+            kwargs = dict(game="fr_nx", method=method, category=category, location=location, pokemon=pokemon,
+                          ivs_range=utils.IVsRange(utils.IVs(*([30] * 6)), utils.IVs(*([31] * 6))))
+            baseline = utils.search_targets(**kwargs)
+            self.assertTrue(baseline)
+            for required in (1, 3, 5, 6):
+                with self.subTest(method=method, required=required):
+                    filtered = utils.search_targets(**kwargs, min_perfect_ivs=required)
+                    self.assertEqual(filtered, [result for result in baseline if perfect_count(result) >= required])
+
     def test_exact_seed_lookup_preserves_duplicates_order_offsets_and_fresh_tables(self):
         # Multiple appearances and wraparound offsets must not collapse to a
         # single time, nor leak across table replacement after an update.

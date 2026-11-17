@@ -70,7 +70,7 @@ NAV_ITEMS = (
     ("wild", "野生 / 静态", "目标筛选与方案搜索"),
     ("egg", "孵蛋", "同 Seed 生成与领取"),
     ("script_test", "脚本测试（高级）", "原地 ECS 预检与后端对照"),
-    ("logs", "运行日志", "实时状态与历史输出"),
+    ("logs", "运行日志", "每轮结果与 BINGO 分布"),
     ("history_logs", "历史日志", "查看过往运行记录"),
 )
 
@@ -1168,7 +1168,7 @@ class FrlgPreviewWindow(QMainWindow):
             self.qq_notification_button.setVisible(self.width() >= 980)
         if not hasattr(self, "overview_scroll") or not hasattr(self, "overview_button"):
             return
-        wide = self.width() >= 1180 and getattr(self, "current_page", "sid") not in {"tid_records", "history_logs"}
+        wide = self.width() >= 1180 and getattr(self, "current_page", "sid") not in {"tid_records", "history_logs", "logs"}
         self.overview_scroll.setVisible(wide)
         self.overview_button.setVisible(not wide)
         on_logs = getattr(self, "current_page", "sid") == "logs"
@@ -1431,11 +1431,17 @@ class FrlgPreviewWindow(QMainWindow):
 
         iv = Card("个体值筛选", "上方为最低值，下方为最高值；点击能力名称可重置单项。")
         presets = QHBoxLayout()
-        presets.addWidget(_label("Ten Lines 预设", name="fieldLabel"))
-        for name in ("不限", "6V", "0A", "0S", "0A0S"):
-            button = _button(name, "preset", enabled=True)
-            button.clicked.connect(lambda _checked=False, preset=name: self._apply_iv_preset(preset))
-            presets.addWidget(button)
+        presets.addWidget(_label("个体值预设", name="fieldLabel"))
+        iv_preset = _combo("不限", "1V", "2V", "3V", "4V", "5V", "6V", "0A", "0S", "0A0S")
+        iv_preset.setAccessibleName("个体值预设")
+        iv_preset.setMinimumWidth(150)
+        iv_preset.setMaxVisibleItems(iv_preset.count())
+        for index in range(iv_preset.count()):
+            name = iv_preset.itemText(index)
+            iv_preset.setItemData(index, int(name[0]) if name in {f"{n}V" for n in range(1, 7)} else 0)
+        iv_preset.setToolTip("1V～5V：至少相应项个体值为 31，位置不限。下方任一范围不是默认的 0～31 时，优先使用下方范围，不叠加 V 数条件。")
+        self.fields["wild_iv_preset"] = iv_preset
+        presets.addWidget(iv_preset)
         presets.addStretch(1)
         iv.layout.addLayout(presets)
         grid = QGridLayout()
@@ -1465,6 +1471,7 @@ class FrlgPreviewWindow(QMainWindow):
             grid.addWidget(tile, 0, c)
             grid.setColumnStretch(c, 1)
         iv.layout.addLayout(grid)
+        iv_preset.currentTextChanged.connect(self._apply_iv_preset)
         trait_grid = QGridLayout()
         trait_grid.setSpacing(8)
         for column, (key, title, combo) in enumerate((
@@ -1564,10 +1571,17 @@ class FrlgPreviewWindow(QMainWindow):
         self.iv_ranges[index][1].setValue(31)
 
     def _apply_iv_preset(self, preset: str) -> None:
+        combo = self.fields["wild_iv_preset"]
+        if combo.findText(preset) < 0:
+            raise ValueError(f"未知个体值预设：{preset}")
+        if combo.currentText() != preset:
+            combo.setCurrentText(preset)
+            return
+        ranged = preset in {"不限", "1V", "2V", "3V", "4V", "5V"}
         for index, (minimum, maximum) in enumerate(self.iv_ranges):
             value = 0 if (index == 1 and preset in {"0A", "0A0S"}) or (index == 5 and preset in {"0S", "0A0S"}) else 31
-            minimum.setValue(0 if preset == "不限" else value)
-            maximum.setValue(31 if preset == "不限" else value)
+            minimum.setValue(0 if ranged else value)
+            maximum.setValue(31 if ranged else value)
 
     def _refresh_wild_type(self) -> None:
         wild = self.fields["wild_method"].currentIndex() == 0
@@ -1610,6 +1624,7 @@ class FrlgPreviewWindow(QMainWindow):
         direct = self.fields["wild_search_mode"].currentIndex() == 1
         self.fields["wild_direct_seed"].setEnabled(direct)
         self.fields["wild_direct_adv"].setEnabled(direct)
+        self.fields["wild_iv_preset"].setEnabled(not direct)
         species = self.fields["wild_species"].currentData() or self.fields["wild_species"].currentText()
         three_segment_available = wild and not direct and species in {"Dunsparce", "土龙弟弟"}
         if not three_segment_available:
@@ -2278,17 +2293,21 @@ class FrlgPreviewWindow(QMainWindow):
 
     def _build_logs_page(self) -> QWidget:
         page, layout = self._page_canvas()
-        log_card = Card("当前/最近一次运行输出", "日志尾读与运行状态尚未接入；这里不展示模拟运行记录。")
-        log_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        from pyside_app.run_summary_view import RunSummaryView
+        rounds = Card("每轮命中与 BINGO", "程序整理每轮的 Seed / 帧结果；完整脚本输出请到历史日志查看。")
+        self.run_summary_view = RunSummaryView()
+        rounds.layout.addWidget(self.run_summary_view)
+        layout.addWidget(rounds)
+        log_card = Card("程序状态", "显示启动、结束和问题说明。")
         self.log_view = QPlainTextEdit()
         self.log_view.setObjectName("logView")
         self.log_view.setReadOnly(True)
-        self.log_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.log_view.setMinimumHeight(120)
-        self.log_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
-        self.log_view.setPlainText("尚未接入运行日志。\n正式界面会在进程成功启动后切换到本页。")
+        self.log_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.log_view.setMinimumHeight(76)
+        self.log_view.setMaximumHeight(140)
+        self.log_view.setPlainText("等待开始运行；本页不显示原始脚本日志。")
         log_card.layout.addWidget(self.log_view, 1)
-        layout.addWidget(log_card, 1)
+        layout.addWidget(log_card)
         labels = Card("设备标签诊断与覆盖", "设备覆盖按采集卡名称独立保存；日志诊断与标签文件服务尚未接入。", collapsible=True)
         labels.layout.addWidget(_label("尚未检测采集卡，未读取任何设备标签覆盖。", role="muted"))
         self.label_issues = self._table(("疑似标签", "最高分", "门槛", "连续次数", "出错阶段与原因"), height=190)

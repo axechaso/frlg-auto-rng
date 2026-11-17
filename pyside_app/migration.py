@@ -420,7 +420,7 @@ class CompleteWindow(FrlgWindow):
             if report.is_file():
                 report_text = report.read_text(encoding="utf-8", errors="replace")
                 self.result_panel.setPlainText(report_text)
-                self._append_log(f"\n报告：{report}\n{report_text}\n")
+                self._append_program_log(f"\n报告已保存：{report}\n")
                 if prepared.inputs.mode == "tid" and prepared.inputs.extra.get("flow") is not None:
                     try:
                         payload = json.loads(report_text)
@@ -493,7 +493,7 @@ class CompleteWindow(FrlgWindow):
                     update_from_manifest(self.paths.user / "precalibration.json", prepared.directory / "plan.json",
                                          self.run_command.log_path.read_text(encoding="utf-8", errors="replace"))
                 except (OSError, ValueError) as exc:
-                    self._append_log(f"\n预校准未更新：{exc}\n")
+                    self._append_program_log(f"\n预校准未更新：{exc}\n")
             if report_text is not None:
                 if code == 0 and prepared.inputs.mode == "sid":
                     from .results import sid_report_summary
@@ -509,7 +509,7 @@ class CompleteWindow(FrlgWindow):
                     self.run_command.log_path, code
                 )
                 if correction is not None:
-                    self._append_log(
+                    self._append_program_log(
                         f"\n[SID ADV自动校准] 已将确认闪光时的修正 {correction:+d} "
                         "保存为下次重试基准。\n"
                     )
@@ -522,7 +522,7 @@ class CompleteWindow(FrlgWindow):
         if hasattr(self, "accessories"):
             self.accessories.run_finished()
             self.accessories.repair_prompts.after_exit(code, current_run_id,
-                log_path=current_log_path, text=self.log_view.toPlainText(),
+                log_path=current_log_path, text=self.script_log_text(),
                 cancelled=stopped_by_user or window_closing)
             self.tid_state.poll()
         if profile_report is not None and not self.closing:

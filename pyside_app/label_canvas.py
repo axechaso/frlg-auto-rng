@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
-from PySide6.QtWidgets import QFileDialog, QWidget
+from PySide6.QtWidgets import QWidget
 
 
 class LabelCanvas(QWidget):
@@ -82,7 +82,7 @@ class LabelCanvas(QWidget):
         painter.fillRect(self.rect(), QColor("#111827"))
         if self._image.isNull():
             painter.setPen(QColor("#d7dfeb"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "载入故障原图或本地截图")
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "打开监视器，在正确游戏页面点击“截图到标签”\n截图后圈选搜索范围和模板目标")
             return
         origin = self._origin()
         scale = self._scale()

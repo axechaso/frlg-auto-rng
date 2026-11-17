@@ -12,20 +12,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 import uuid
 
-from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QRect, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QRect, Qt, QTimer, Signal, Slot, QSignalBlocker
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout, QGroupBox,
     QHBoxLayout, QLabel, QMessageBox, QPushButton, QSpinBox, QVBoxLayout,
-    QWidget, QCheckBox,
+    QWidget, QCheckBox, QLineEdit, QScrollArea, QFrame,
 )
 
-from automation.easycon118 import prepare_compat_runner
+from automation.easycon118 import prepare_compat_runner, EASYCON170_TEST
 from device_label_overrides import LabelOverrideStore
 from label_incidents import LabelIncidentStore
 from label_verification import verify_label
+from pyside_preview import _combo
 from .label_canvas import LabelCanvas
 from .error_dialog import show_error_dialog
+from .label_catalog import script_choices, label_choices
+from .label_testing import label_frame, verify_preview
 
 
 COORDINATE_FIELDS = (
@@ -65,7 +68,10 @@ class LabelEditorDialog(QDialog):
         self.original_path: Path | None = Path(label_path).resolve() if label_path else None
         self.frame_path: Path | None = Path(frame_path).resolve() if frame_path else None
         self.device_name = self._incident_device_name()
-        self.runtime = prepare_compat_runner(window.paths.ezcon)
+        # Making a label must also work before the CLI runtime is installed.
+        self.runtime = None
+        self._catalog = ()
+        self._catalog_directory = None
         self.payload: dict[str, object] = {}
         self.original_payload: dict[str, object] = {}
         self.original_image = QImage()
@@ -98,6 +104,12 @@ class LabelEditorDialog(QDialog):
     def _device_changed(self,*_):
         self._condition_changed()
         self.scene_confirm.setChecked(False)
+        self.frame_path = None
+        self.canvas.set_image(QImage())
+        if not self.record:
+            self.device_name = self._incident_device_name()
+            self._load_script_labels()
+        self._update_context()
         self.result_text.setText("采集设备已变化，旧验证结果失效；请重新核对设备、原图和标签。")
 
     def _incident_device_name(self) -> str:
@@ -121,30 +133,60 @@ class LabelEditorDialog(QDialog):
         self.scene_confirm.toggled.connect(self._update_apply_button)
         layout.addWidget(self.scene_confirm)
         guide_row = QHBoxLayout()
-        guide = QPushButton("修复步骤引导（继续）")
+        guide = QPushButton("制作步骤引导")
         guide.clicked.connect(lambda: self.w.page_guides.start("label", child=self))
         guide_row.addWidget(guide)
-        shared = QPushButton("启动修复共享预览")
-        shared.clicked.connect(self.start_shared_preview)
-        guide_row.addWidget(shared)
-        imported = QPushButton("逐项导入 IL（可多选）")
-        imported.clicked.connect(self.import_candidates)
-        guide_row.addWidget(imported)
+        self.monitor_button = QPushButton("打开监视器")
+        self.monitor_button.clicked.connect(self.open_monitor)
+        guide_row.addWidget(self.monitor_button)
+        self.capture_button = QPushButton("截图")
+        self.capture_button.clicked.connect(self.capture_monitor_frame)
+        guide_row.addWidget(self.capture_button)
+        guide_row.addStretch(1)
         layout.addLayout(guide_row)
         body = QHBoxLayout()
         self.canvas = LabelCanvas(self)
         self.canvas.selectionFinished.connect(self._selection_finished)
-        self.canvas.imageOpenRequested.connect(self._choose_frame)
+        self.canvas.imageOpenRequested.connect(self.capture_monitor_frame)
         body.addWidget(self.canvas, 3)
 
         panel = QWidget(self)
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(0, 0, 0, 0)
-        self.label_choice = QComboBox()
+        self.script_choice = _combo()
+        self.script_choice.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.script_choice.setMinimumContentsLength(20)
+        self.script_choice.currentIndexChanged.connect(self._load_script_labels)
+        panel_layout.addWidget(QLabel("脚本"))
+        panel_layout.addWidget(self.script_choice)
+        self.label_filter = QLineEdit()
+        self.label_filter.setPlaceholderText("搜索脚本使用的标签…")
+        self.label_filter.textChanged.connect(self._filter_labels)
+        panel_layout.addWidget(self.label_filter)
+        self.label_count = QLabel()
+        panel_layout.addWidget(self.label_count)
+        self.label_choice = _combo()
+        self.label_choice.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.label_choice.setMinimumContentsLength(20)
+        self.label_choice.setMaxVisibleItems(14)
+        for combo in (self.script_choice, self.label_choice):
+            combo.view().setStyleSheet("""
+                QScrollBar:vertical { width:18px; margin:2px; background:#edf1f7; border-radius:7px; }
+                QScrollBar::handle:vertical { min-height:40px; background:#91a3bf; border-radius:7px; }
+                QScrollBar::handle:vertical:hover { background:#637ee5; }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
+            """)
         self.label_choice.currentIndexChanged.connect(self._load_selected_label)
         panel_layout.addWidget(QLabel("标签"))
         panel_layout.addWidget(self.label_choice)
-        self.method_text = QLabel("搜索方法：—")
+        self.method_text = QComboBox()
+        for title, method in (("标准差匹配", 1), ("标准相关匹配", 3), ("标准相关系数匹配", 5),
+                              ("XY 平均值边缘检测", 11), ("透明背景标准差匹配", 14)):
+            self.method_text.addItem(title, method)
+        self.method_text.setEnabled(False)
+        self.method_text.setToolTip("沿用脚本原标签的搜索方法，保证设备覆盖与原标签兼容。")
+        self.method_text.currentIndexChanged.connect(self._method_changed)
+        panel_layout.addWidget(QLabel("搜索方法"))
         panel_layout.addWidget(self.method_text)
         condition_row = QHBoxLayout()
         condition_row.addWidget(QLabel("通过条件"))
@@ -197,7 +239,7 @@ class LabelEditorDialog(QDialog):
             label.setStyleSheet("background:#202b3a; color:#e5edf7; border:1px solid #69788c;")
             previews.addWidget(label)
         panel_layout.addLayout(previews)
-        self.result_text = QLabel("先确认故障画面确实处于目标界面，再执行原生测试。")
+        self.result_text = QLabel("选择脚本和标签 → 打开监视器 → 截图 → 圈选范围和目标 → 测试并保存。")
         self.result_text.setWordWrap(True)
         self.result_text.setMinimumHeight(86)
         panel_layout.addWidget(self.result_text)
@@ -205,42 +247,50 @@ class LabelEditorDialog(QDialog):
         self.adjacent_state.setStyleSheet("color:#8a5a00;")
         panel_layout.addWidget(self.adjacent_state)
         panel_layout.addStretch(1)
-        body.addWidget(panel, 2)
+        panel_scroll = QScrollArea(self)
+        panel_scroll.setWidgetResizable(True)
+        panel_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        panel_scroll.setMinimumWidth(450)
+        panel_scroll.setWidget(panel)
+        body.addWidget(panel_scroll, 2)
         layout.addLayout(body, 1)
 
-        actions = QHBoxLayout()
-        for title, callback in (
-            ("载入截图", self._choose_frame),
+        actions = QGridLayout()
+        for index, (title, callback) in enumerate((
             ("搜索测试", self.test_same_image),
             ("动态测试（3 张新帧）", self.test_fresh_frames),
-            ("测试相邻页面截图", self.test_adjacent_state),
+            ("截取相邻页面并测试", self.test_adjacent_state),
             ("保存草稿", self.save_draft),
             ("恢复上一版", self.restore_previous),
             ("保存并用于当前设备", self.save_and_apply),
-        ):
+        )):
             button = QPushButton(title)
             button.clicked.connect(callback)
-            actions.addWidget(button)
+            actions.addWidget(button, index // 3, index % 3)
             if title == "保存并用于当前设备":
                 self.apply_button = button
             elif title == "搜索测试":
                 self.same_button = button
             elif title == "动态测试（3 张新帧）":
                 self.fresh_button = button
-            elif title == "测试相邻页面截图":
+            elif title == "截取相邻页面并测试":
                 self.negative_button = button
         self.manual_confirm_button = QPushButton("我已在实机确认原故障阶段通过")
         self.manual_confirm_button.setEnabled(bool(self.record))
+        self.manual_confirm_button.setVisible(bool(self.record))
         self.manual_confirm_button.clicked.connect(self.confirm_hardware)
         layout.addWidget(self.manual_confirm_button)
         close = QPushButton("关闭")
         close.clicked.connect(self.close)
-        actions.addWidget(close)
+        actions.addWidget(close, 2, 2)
         layout.addLayout(actions)
         self._update_context()
 
     def _load_incident_labels(self) -> None:
         if self.record:
+            self.script_choice.addItem("故障当次实际使用的标签")
+            self.script_choice.setEnabled(False)
+            self.label_filter.hide()
             labels = self.record.get("labels", [])
             available = []
             original_dir = self.bundle / "original-labels"
@@ -275,12 +325,82 @@ class LabelEditorDialog(QDialog):
                         self.frame_path = candidate
             self.device_name = str((self.record.get("capture_device") or {}).get("name") or self.device_name)
         elif self.original_path:
+            with QSignalBlocker(self.script_choice):
+                self.script_choice.addItem("指定标签")
+            self.script_choice.setEnabled(False)
+            self.label_filter.hide()
             self.label_choice.addItem(self.original_path.name, str(self.original_path))
+        else:
+            with QSignalBlocker(self.script_choice):
+                for item in script_choices(self.w):
+                    self.script_choice.addItem(item.title, str(item.path))
+                    self.script_choice.setItemData(self.script_choice.count() - 1, str(item.path), Qt.ItemDataRole.ToolTipRole)
+            self._load_script_labels()
+            return
         self._load_selected_label()
+
+    def _load_script_labels(self, *_):
+        if self.record or not hasattr(self, "label_choice"):
+            return
+        raw = self.script_choice.currentData()
+        self._catalog = ()
+        self._catalog_directory = None
+        error = "没有找到可用脚本。请先在共通设置中配置脚本包，或准备一个运行方案。"
+        if raw:
+            try:
+                script = Path(raw)
+                self._catalog_directory = script.parent / "ImgLabel"
+                profile = self.store.profile(self.device_name) if self.device_name else None
+                self._catalog = label_choices(script, profile.label_dir if profile else None)
+                error = "此脚本及 lib 中没有找到直接引用的标签。"
+            except (OSError, UnicodeError, ValueError) as exc:
+                error = f"无法读取脚本标签列表：{exc}"
+        self._filter_labels()
+        if not self._catalog:
+            self.label_choice.clear()
+            self.label_count.setText("脚本引用 0 个可用标签")
+            self._load_selected_label()
+            self.result_text.setText(error)
+
+    def _filter_labels(self, *_):
+        if self.record or not self.script_choice.currentData():
+            return
+        previous = self.label_choice.currentData()
+        query = self.label_filter.text().strip().casefold()
+        choices = [item for item in self._catalog if query in item.name.casefold()]
+        with QSignalBlocker(self.label_choice):
+            self.label_choice.clear()
+            for item in choices:
+                exists = item.path.is_file()
+                suffix = " · 当前设备覆盖" if item.overridden else "" if exists else " · 文件缺失"
+                self.label_choice.addItem(item.name + suffix, str(item.path))
+                index = self.label_choice.count() - 1
+                self.label_choice.setItemData(index, str(item.path), Qt.ItemDataRole.ToolTipRole)
+                if not exists:
+                    self.label_choice.model().item(index).setEnabled(False)
+            index = self.label_choice.findData(previous)
+            if index < 0:
+                index = next((i for i, item in enumerate(choices) if item.path.is_file()), -1)
+            self.label_choice.setCurrentIndex(index)
+        missing = sum(not item.path.is_file() for item in self._catalog)
+        self.label_count.setText(f"脚本及 lib 引用 {len(self._catalog)} 个标签 · 显示 {len(choices)} 个"
+                                 + (f" · 缺失 {missing} 个" if missing else ""))
+        if self.label_choice.currentData() != previous or not self.payload:
+            self._load_selected_label()
 
     def _load_selected_label(self, *_args) -> None:
         raw = self.label_choice.currentData()
+        self._condition_changed()
+        self.payload = {}
+        self.original_payload = {}
+        self.original_image = QImage()
+        self.old_preview.clear()
+        self.new_preview.clear()
         if not raw:
+            self.original_path = None
+            self.canvas.set_overlays(QRect(), QRect())
+            self._update_context()
+            self._update_apply_button()
             return
         if self.record:
             self.original_path = self.bundle / "original-labels" / str(raw)
@@ -304,7 +424,8 @@ class LabelEditorDialog(QDialog):
                 self.spins[key].setValue(int(self.payload[key]))
             self._updating_fields = False
             method = int(self.payload["searchMethod"])
-            self.method_text.setText(f"搜索方法：{method}" + ("（修复模式锁定）" if self.record else ""))
+            with QSignalBlocker(self.method_text):
+                self.method_text.setCurrentIndex(self.method_text.findData(method))
             operator, threshold = self._condition_for_label(self.original_path.name)
             self.condition_operator.setCurrentText(operator)
             self.condition_threshold.setValue(threshold)
@@ -324,7 +445,78 @@ class LabelEditorDialog(QDialog):
             self._update_context()
             self._update_apply_button()
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            self.payload = {}
             self.result_text.setText(f"无法载入标签：{exc}")
+            self._update_apply_button()
+
+    def _method_changed(self, *_):
+        if not self.payload or self._updating_fields:
+            return
+        self.payload["searchMethod"] = self.method_text.currentData()
+        self._coordinates_changed()
+
+    def open_monitor(self):
+        try:
+            if self.w.running or self.w.job:
+                raise ValueError("请先等待脚本或设备任务结束，再打开监视器制作标签")
+            self.w.accessories.open_monitor()
+            monitor = self.w.accessories.monitor
+            monitor.capture_button.show()
+            if monitor.reader is None:
+                self.result_text.setText("请先在工具顶部检测并选择采集卡，再点击监视器的“重连”。")
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.result_text.setText(f"监视器未打开：{exc}")
+
+    def _monitor_frame(self):
+        self._check_capture_selection()
+        monitor = self.w.accessories.monitor
+        reader = monitor.reader if monitor else None
+        if reader is None or reader.stop.is_set():
+            raise ValueError("监视器尚未连接；请先打开监视器并等待画面")
+        if reader.source != monitor.current_source():
+            raise ValueError("监视器设备已切换，请等待新设备画面后再截图")
+        _, image = reader.latest
+        if image is None or image.isNull():
+            raise ValueError("监视器尚未收到画面，请等待视频连接后再截图")
+        return label_frame(image.copy())
+
+    def _save_monitor_frame(self, prefix):
+        image = self._monitor_frame()
+        folder = self._verification_directory() / "captures"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{prefix}-{uuid.uuid4().hex}.png"
+        if not image.save(str(path), "PNG"):
+            raise ValueError("无法保存监视器截图")
+        return path
+
+    def capture_monitor_frame(self):
+        try:
+            path = self._save_monitor_frame("source")
+            self._condition_changed()
+            self.frame_path = path
+            self.scene_confirm.setChecked(False)
+            self._refresh_frame()
+            self._refresh_previews()
+            self._update_context()
+            self.result_text.setText("已从监视器截图（1920 × 1080 识图坐标）。确认页面后，圈选红色搜索范围和绿色模板目标。")
+            self.show()
+            self.raise_()
+            self.activateWindow()
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.open_monitor()
+            self.result_text.setText(f"截图失败：{exc}")
+
+    def _verifier(self):
+        if EASYCON170_TEST:
+            return verify_preview
+        if self.runtime is None:
+            self.runtime = prepare_compat_runner(self.w.paths.ezcon)
+        from functools import partial
+        return partial(verify_label, self.runtime)
+
+    @property
+    def _test_kind(self):
+        return "本地匹配" if EASYCON170_TEST else "原生"
 
     def _refresh_frame(self) -> None:
         if self.frame_path and self.frame_path.is_file():
@@ -361,6 +553,7 @@ class LabelEditorDialog(QDialog):
         self._update_apply_button()
 
     def _condition_changed(self, *_args) -> None:
+        self.fresh_timer.stop()
         self._same_image_ok = False
         self._fresh_frames_ok = False
         self._adjacent_ok = None
@@ -383,20 +576,7 @@ class LabelEditorDialog(QDialog):
         self.canvas.set_selection_mode("")
 
     def _choose_frame(self) -> None:
-        path = QFileDialog.getOpenFileName(self, "载入原始截图", str(self.frame_path.parent if self.frame_path else Path.home()),
-                                           "图像 (*.png *.bmp *.jpg *.jpeg)")[0]
-        if path:
-            self.scene_confirm.setChecked(False)
-            self.frame_path = Path(path).resolve()
-            self._refresh_frame()
-            self._same_image_ok = False
-            self._fresh_frames_ok = False
-            self._adjacent_ok = None
-            self._adjacent_results = ()
-            self.adjacent_state.setText("相邻页面误识别：尚未验证")
-            self.adjacent_state.setStyleSheet("color:#8a5a00;")
-            self._update_context()
-            self._update_apply_button()
+        self.capture_monitor_frame()
 
     def _refresh_previews(self) -> None:
         if not self.original_image.isNull():
@@ -412,8 +592,10 @@ class LabelEditorDialog(QDialog):
                     self.new_preview.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def _candidate_payload(self) -> dict[str, object]:
+        if not self.payload or self.original_path is None:
+            raise ValueError("请先从脚本标签列表选择一个可用标签")
         if self.frame_path is None or not self.frame_path.is_file():
-            raise ValueError("请先载入正确界面的原始截图")
+            raise ValueError("请先打开监视器，在正确游戏页面点击“截图”")
         frame = QImage(str(self.frame_path))
         rect = self._rect_from_fields("Target")
         search = self._rect_from_fields("Range")
@@ -465,7 +647,7 @@ class LabelEditorDialog(QDialog):
 
     def test_same_image(self) -> None:
         if self.frame_path is None:
-            self.result_text.setText("请先载入原始截图。")
+            self.result_text.setText("请先从监视器截图。")
             return
         try:
             operator, threshold = self._condition()
@@ -473,16 +655,15 @@ class LabelEditorDialog(QDialog):
             with tempfile.TemporaryDirectory(prefix="frlg-label-native-") as temp:
                 candidate = self._write_temp_label(payload, Path(temp))
                 self._candidate_sha256 = hashlib.sha256(candidate.read_bytes()).hexdigest()
-                result = verify_label(self.runtime, candidate, frame=self.frame_path,
-                                      operator=operator, threshold=threshold)
+                result = self._verifier()(candidate, frame=self.frame_path, operator=operator, threshold=threshold)
             self._same_image_results = result
             self._same_image_ok = bool(result[0].get("passed"))
             self._dirty = True
             self._save_verification()
-            self.result_text.setText(self._format_results("同图原生测试", result, operator, threshold))
+            self.result_text.setText(self._format_results(f"同图{self._test_kind}测试", result, operator, threshold))
         except (OSError, RuntimeError, ValueError) as exc:
             self._same_image_ok = False
-            self.result_text.setText(f"同图原生测试失败：{exc}")
+            self.result_text.setText(f"同图{self._test_kind}测试失败：{exc}")
         self._update_apply_button()
 
     def test_fresh_frames(self) -> None:
@@ -491,8 +672,10 @@ class LabelEditorDialog(QDialog):
             if self.native_job or self.fresh_timer.isActive():
                 raise ValueError("新帧测试正在进行")
             reader = self.w.accessories.monitor.reader if self.w.accessories.monitor else None
-            if reader is None or not isinstance(reader.source, str):
-                raise ValueError("没有可用的兼容共享预览通道；请主动点击“启动修复共享预览”，再测试新帧。")
+            if reader is None or reader.stop.is_set():
+                raise ValueError("没有可用的监视画面；请先打开监视器并等待画面，再测试新帧。")
+            if reader.source != self.w.accessories.monitor.current_source():
+                raise ValueError("监视器设备已切换，请等待新设备画面再测试")
             operator, threshold = self._condition()
             payload = self._candidate_payload()
             self._fresh_frames_dir = self._verification_directory() / f"fresh-frames-{uuid.uuid4().hex}"
@@ -508,7 +691,7 @@ class LabelEditorDialog(QDialog):
             self._fresh_deadline = time.monotonic()+8
             self._fresh_frames_ok = False
             self.fresh_timer.start()
-            self.result_text.setText("正在从已有兼容预览通道等待 3 张新帧……")
+            self.result_text.setText("正在从监视器等待 3 张新帧……")
         except (OSError, RuntimeError, ValueError) as exc:
             self._fresh_frames_ok = False
             self.result_text.setText(f"动态测试失败：{exc}")
@@ -522,14 +705,14 @@ class LabelEditorDialog(QDialog):
             if self._sha256_path(self.frame_path) != source_digest:
                 raise ValueError("原图已变化；请重新执行新帧测试")
             if time.monotonic() > self._fresh_deadline:
-                raise ValueError("共享预览未及时提供三张新帧；原验证未通过")
+                raise ValueError("监视器未及时提供三张新帧；原验证未通过")
             if reader is not self.w.accessories.monitor.reader or reader.stop.is_set():
-                raise ValueError("共享预览已切换或停止；请重新测试")
+                raise ValueError("监视器已切换或停止；请重新测试")
             seq, frame = reader.latest
             if seq <= self._fresh_last_seq or frame is None:
                 return
             self._fresh_last_seq = seq
-            frame = frame.copy()
+            frame = label_frame(frame.copy())
             if frame.size() != self.canvas.image_size:
                 raise ValueError("新帧分辨率与原图不同；请重新核对设备和模板")
             path = self._fresh_frames_dir / f"frame-{len(self._fresh_paths)}.png"
@@ -543,14 +726,16 @@ class LabelEditorDialog(QDialog):
             from .jobs import Job
             paths = tuple(self._fresh_paths)
             sequences = tuple(self._fresh_sequences)
-            runtime = self.runtime
+            verify_candidate = self._verifier()
             def verify(cancel,status):
                 results = []
                 for i,path in enumerate(paths):
                     if cancel():
                         raise ValueError("验证已取消")
-                    item = dict(verify_label(runtime,candidate,frame=path,operator=operator,threshold=threshold)[0])
-                    item.update(frame_index=i,saved_frame=str(path),shared_preview_sequence=sequences[i][0],received_monotonic=sequences[i][1])
+                    item = dict(verify_candidate(candidate,frame=path,operator=operator,threshold=threshold)[0])
+                    item.update(frame_index=i,saved_frame=str(path),monitor_sequence=sequences[i][0],
+                                shared_preview_sequence=sequences[i][0] if isinstance(reader.source, str) else None,
+                                received_monotonic=sequences[i][1])
                     results.append(item)
                 return digest,device,tuple(results),operator,threshold,source_digest
             self.native_job = Job(verify,self)
@@ -580,7 +765,7 @@ class LabelEditorDialog(QDialog):
             self._fresh_frames_ok = len(results)==3 and all(item.get("passed") for item in results)
             self._fresh_frame_path = Path(results[0]["saved_frame"])
             self._save_verification()
-            self.result_text.setText(self._format_results("共享通道 3 张新帧原生验证",results,operator,threshold))
+            self.result_text.setText(self._format_results(f"监视器 3 张新帧{self._test_kind}测试",results,operator,threshold))
         except (OSError,RuntimeError,ValueError) as exc:
             self._fresh_frames_ok = False
             self.result_text.setText(f"动态测试失败：{exc}")
@@ -591,6 +776,7 @@ class LabelEditorDialog(QDialog):
         job,self.native_job = self.native_job,None
         if job:
             job.deleteLater()
+        self._update_apply_button()
 
     def start_shared_preview(self):
         from .repair_preview import RepairPreview
@@ -660,21 +846,14 @@ class LabelEditorDialog(QDialog):
             self.result_text.setText(f"未确认解决：{exc}")
 
     def test_adjacent_state(self) -> None:
-        path = QFileDialog.getOpenFileName(
-            self, "选择应与此标签区分的相邻页面截图",
-            str(self.frame_path.parent if self.frame_path else Path.home()),
-            "图像 (*.png *.bmp *.jpg *.jpeg)",
-        )[0]
-        if not path:
-            return
         try:
+            path = self._save_monitor_frame("adjacent")
             operator, threshold = self._condition()
             payload = self._candidate_payload()
             with tempfile.TemporaryDirectory(prefix="frlg-label-adjacent-") as temp:
                 candidate = self._write_temp_label(payload, Path(temp))
                 self._candidate_sha256 = hashlib.sha256(candidate.read_bytes()).hexdigest()
-                result = verify_label(self.runtime, candidate, frame=path,
-                                      operator=operator, threshold=threshold)
+                result = self._verifier()(candidate, frame=path, operator=operator, threshold=threshold)
             self._adjacent_frame_path = Path(path).resolve()
             self._adjacent_results = result
             self._adjacent_ok = not bool(result[0].get("passed"))
@@ -686,10 +865,12 @@ class LabelEditorDialog(QDialog):
             self._save_verification()
         except (OSError, RuntimeError, ValueError) as exc:
             self._adjacent_ok = False
-            self.adjacent_state.setText(f"相邻页面原生测试失败：{exc}")
+            self.adjacent_state.setText(f"相邻页面{self._test_kind}测试失败：{exc}")
             self.adjacent_state.setStyleSheet("color:#b42318;")
 
     def _check_capture_selection(self) -> None:
+        if self.w.running or self.w.job:
+            raise ValueError("请先等待脚本或设备任务结束，再制作或测试标签")
         selected_id = self.w.fields["video"].currentData()
         current_name = self.w.devices[1].get(selected_id, "")
         if selected_id is None or not current_name:
@@ -712,6 +893,8 @@ class LabelEditorDialog(QDialog):
     def _save_verification(self) -> None:
         payload = {
             "schema": "frlg-label-verification/v1",
+            "engine": "local-opencv-preview" if EASYCON170_TEST else "native-cli",
+            "native_verified": not EASYCON170_TEST,
             "incident_id": self.incident_id,
             "label": self.original_path.name if self.original_path else None,
             "candidate_sha256": self._candidate_sha256,
@@ -772,11 +955,9 @@ class LabelEditorDialog(QDialog):
             if self.bundle and self.incident_id:
                 draft = self.incidents.write_draft(self.incident_id, self.original_path.name, data)
             else:
-                path = QFileDialog.getSaveFileName(self, "保存标签草稿", self.original_path.name,
-                                                   "EasyCon 标签 (*.IL)")[0]
-                if not path:
-                    return
-                draft = Path(path)
+                directory = self._verification_directory() / "drafts"
+                directory.mkdir(parents=True, exist_ok=True)
+                draft = directory / self.original_path.name
                 draft.write_bytes(data)
             self.result_text.setText(f"草稿已保存：{draft}\n状态：未应用到当前设备。")
         except (OSError, RuntimeError, ValueError) as exc:
@@ -801,7 +982,7 @@ class LabelEditorDialog(QDialog):
             show_error_dialog(self, "相邻页面被误识别", "当前标签会在相邻页面触发；请调整模板或范围后重新完成测试。")
             return
         if not self._same_image_ok or not self._fresh_frames_ok:
-            show_error_dialog(self, "尚未完成验证", "先通过同图原生测试和 3 张新帧动态测试；相邻页面检查仍会明确标为未验证。")
+            show_error_dialog(self, "尚未完成验证", f"先通过同图{self._test_kind}测试和 3 张新帧动态测试；相邻页面检查仍会明确标为未验证。")
             return
         try:
             self._check_capture_selection()
@@ -812,7 +993,7 @@ class LabelEditorDialog(QDialog):
                 digest = hashlib.sha256(data).hexdigest()
                 if digest != self._candidate_sha256:
                     raise ValueError("标签摘要与测试结果不一致；请重新测试")
-                if QMessageBox.question(self,"保存到当前设备",f"设备：{self.device_name}\n标签：{self.original_path.name}\nSHA256：{digest}\n模板/范围：{[payload.get(key) for key in COORDINATE_FIELDS]}\n负样本：{'通过' if self._adjacent_ok else '未验证'}\n确认事务保存并保留上一版，然后按原目标重建及预检？") != QMessageBox.StandardButton.Yes:
+                if QMessageBox.question(self,"保存到当前设备",f"设备：{self.device_name}\n标签：{self.original_path.name}\n相邻页面测试：{'通过' if self._adjacent_ok else '未验证'}\n保存后用于这台设备，并更新当前已准备方案；上一版可恢复。") != QMessageBox.StandardButton.Yes:
                     return
                 if self.incident_id:
                     self.incidents.write_draft(self.incident_id, self.original_path.name, data)
@@ -827,7 +1008,10 @@ class LabelEditorDialog(QDialog):
                         }
                     }
                 else:
-                    provenance = {}
+                    provenance = {self.original_path.name: {
+                        "operation": "label_editor", "source": "in_app_label_editor",
+                        "verification": json.loads((self._verification_directory() / "verification.json").read_text(encoding="utf-8")),
+                    }}
                 self.store.import_paths(
                     self.device_name, [candidate], self._known_label_directories(),
                     provenance=provenance,
@@ -856,8 +1040,13 @@ class LabelEditorDialog(QDialog):
             show_error_dialog(self, "保存或重新准备失败", f"标签内容仍保留在故障资料中。\n{exc}")
 
     def _known_label_directories(self) -> tuple[Path, ...]:
-        return tuple(Path(self.w.fields[key].text()) / "ImgLabel" for key in (
-            "source", "sid_source", "tid_source"))
+        directories = [Path(self.w.fields[key].text()) / "ImgLabel" for key in (
+            "source", "sid_source", "tid_source") if self.w.fields[key].text().strip()]
+        if self._catalog_directory:
+            directories.insert(0, self._catalog_directory)
+        if self.original_path:
+            directories.insert(0, self.original_path.parent)
+        return tuple(dict.fromkeys(directories))
 
     def _apply_profile_and_rebuild(self) -> bool:
         if getattr(self.w, "workflow", None) is not None:
@@ -915,13 +1104,16 @@ class LabelEditorDialog(QDialog):
             self.context.setText(f"故障：{stage} · {kind}　标签：{names or '暂无'}\n"
                                  f"设备：{self.device_name or '待选择'}　截图：{self.frame_path or '未载入'}　{frame_time}")
         else:
-            self.context.setText(f"标签：{self.original_path or '未选择'}　设备：{self.device_name or '待选择'}\n"
-                                 "确认截图处于该标签应识别的游戏页面。坐标始终使用原图像素。")
+            self.context.setText(f"标签：{self.original_path.name if self.original_path else '从脚本列表选择'}　设备：{self.device_name or '请在主窗口选择采集卡'}\n"
+                                 "监视器截图 → 圈选搜索范围和模板 → 测试 → 保存到当前设备。"
+                                 + (" 170 使用本地匹配测试，实机效果需运行脚本确认。" if EASYCON170_TEST else ""))
 
     def _update_apply_button(self) -> None:
         if hasattr(self, "apply_button"):
             self.apply_button.setEnabled(
-                self._same_image_ok and self._fresh_frames_ok and self._adjacent_ok is not False and self.scene_confirm.isChecked()
+                bool(self.payload) and self.frame_path is not None and self._same_image_ok and self._fresh_frames_ok
+                and self._adjacent_ok is not False and self.scene_confirm.isChecked()
+                and not self.native_job and not self.fresh_timer.isActive()
             )
 
     def closeEvent(self,event):

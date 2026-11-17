@@ -20,6 +20,9 @@ class LabelEditorFlowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls): cls.app=QApplication.instance() or QApplication([])
     def setUp(self):
+        self.backend_patch = patch("pyside_app.label_editor.EASYCON170_TEST", False)
+        self.backend_patch.start()
+        self.addCleanup(self.backend_patch.stop)
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         self.w=CompleteWindow(paths=AppPaths(user=self.root/"user",output=self.root/"runtime"),auto_detect=False)
         self.w.devices=({},{0:"USB Capture",1:"Other Capture"})
@@ -29,6 +32,7 @@ class LabelEditorFlowTests(unittest.TestCase):
         self.image=QImage(1920,1080,QImage.Format.Format_RGB32);self.image.fill(Qt.GlobalColor.white);self.image.save(str(self.frame))
         with patch("pyside_app.label_editor.prepare_compat_runner",return_value=self.root/"unused-runner.exe"):
             self.editor=LabelEditorDialog(self.w,label_path=self.label,frame_path=self.frame)
+        self.editor.runtime = self.root/"unused-runner.exe"
         self.editor.show()
         self.editor.scene_confirm.setChecked(True)
     def tearDown(self):
@@ -40,7 +44,7 @@ class LabelEditorFlowTests(unittest.TestCase):
 
     def test_fresh_frames_use_existing_mailbox_three_distinct_sequences_offline_native(self):
         reader=SimpleNamespace(source="http://127.0.0.1/mock/mjpeg",latest=(0,self.image),stop=threading.Event())
-        self.w.accessories.monitor=SimpleNamespace(reader=reader,close=lambda:None)
+        self.w.accessories.monitor=SimpleNamespace(reader=reader,current_source=lambda:reader.source,close=lambda:None)
         record={"frame_index":0,"integer_score":99,"raw_score":98.1,"passed":True,"elapsed_ms":1,"width":1920,"height":1080}
         with patch("pyside_app.label_editor.verify_label",return_value=(record,)) as matcher,patch.object(self.w.accessories,"release_for_run") as release:
             self.editor.test_fresh_frames();self.editor.fresh_timer.stop()
@@ -71,7 +75,7 @@ class LabelEditorFlowTests(unittest.TestCase):
 
     def test_changed_source_image_invalidates_pending_fresh_verification(self):
         reader=SimpleNamespace(source="http://127.0.0.1/mock/mjpeg",latest=(0,self.image),stop=threading.Event())
-        self.w.accessories.monitor=SimpleNamespace(reader=reader,close=lambda:None)
+        self.w.accessories.monitor=SimpleNamespace(reader=reader,current_source=lambda:reader.source,close=lambda:None)
         with patch("pyside_app.label_editor.verify_label") as matcher:
             self.editor.test_fresh_frames();self.editor.fresh_timer.stop()
             changed=self.image.copy();changed.fill(Qt.GlobalColor.black);changed.save(str(self.frame))

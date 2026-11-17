@@ -772,6 +772,12 @@ class MonitorWindow(QDialog):
         self.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         tools.addWidget(self.status, 1)
         self.zoom_buttons = {}
+        self.capture_button = QPushButton("截图到标签")
+        self.capture_button.setAutoDefault(False)
+        self.capture_button.setToolTip("定格当前游戏画面，回到标签制作窗口圈选；监视画面继续刷新。")
+        self.capture_button.clicked.connect(lambda: host.accessories.capture_label_frame())
+        self.capture_button.hide()
+        tools.addWidget(self.capture_button)
         for text, callback in (("−", lambda: self.zoom_by(-1)), ("+", lambda: self.zoom_by(1)), ("重连", self.restart), ("置顶", self.toggle_topmost)):
             button = QPushButton(text)
             button.setAutoDefault(False)
@@ -797,6 +803,8 @@ class MonitorWindow(QDialog):
         self.timer = QTimer(self)
         self.timer.setInterval(33)
         self.timer.timeout.connect(self.render)
+        if hasattr(host, "fields") and "video" in host.fields:
+            host.fields["video"].currentIndexChanged.connect(self.restart_if_visible)
 
     def showEvent(self, event):
         self.timer.start()
@@ -825,6 +833,7 @@ class MonitorWindow(QDialog):
             self.reader.stop.set()
             self.old_readers.append(self.reader)
             self.reader = None
+        self.picture.set_frame(None)
         self.old_readers = [reader for reader in self.old_readers if reader.thread.is_alive()]
 
     def restart(self):
@@ -843,6 +852,7 @@ class MonitorWindow(QDialog):
             self.restart()
 
     def render(self):
+        self.capture_button.setEnabled(bool(self.reader and self.reader.frame is not None))
         if self.reader:
             self.status.setText(self.reader.status)
             if self.reader.frame is not None and time.monotonic() >= self.render_after:

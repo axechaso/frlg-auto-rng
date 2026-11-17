@@ -215,7 +215,7 @@ class QtDiagnosticTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "高级起点.*abc.*整数"):
             w.collect_workflow()
 
-    def test_split_utf8_error_is_explained_once_and_original_lines_stay_visible(self):
+    def test_split_utf8_error_is_explained_once_and_original_lines_stay_private(self):
         w = self.w
         raw = (ROI_ERROR + "\n   at EasyCon.Capture.ILExt.Search()\n" + ROI_ERROR).encode("utf-8")
         for offset in range(0, len(raw), 7):
@@ -223,8 +223,10 @@ class QtDiagnosticTests(unittest.TestCase):
         w._append_log(w.decoder.decode(b"", final=True), final=True)
         shown = w.log_view.toPlainText()
         self.assertEqual(shown.count("[问题说明]"), 1)
-        self.assertEqual(shown.count(ROI_ERROR), 2, repr(shown))
-        self.assertIn("at EasyCon.Capture.ILExt.Search()", shown)
+        self.assertNotIn(ROI_ERROR, shown)
+        self.assertNotIn("at EasyCon.Capture.ILExt.Search()", shown)
+        self.assertEqual(w.script_log_text().count(ROI_ERROR), 2)
+        self.assertIn("at EasyCon.Capture.ILExt.Search()", w.script_log_text())
         self.assertIn("错误退出", w.status_text)
 
     def test_runtime_popup_keeps_technical_details(self):

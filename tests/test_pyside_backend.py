@@ -175,11 +175,9 @@ class PySideBackendTests(unittest.TestCase):
 
         w = self.window
         w._begin_run_notification()
-        w.log_view.setPlainText(
-            "WILD_DONE\n!!意外错误!!Index was outside the bounds of the array."
-        )
+        w._append_log("WILD_DONE\n!!意外错误!!Index was outside the bounds of the array.", final=True)
         with patch.object(w.qq_service, "notify_task") as notify:
-            fatal = easycon_log_has_fatal_error(w.log_view.toPlainText())
+            fatal = easycon_log_has_fatal_error(w.script_log_text())
             w._notify_run_finished(0, fatal_output=fatal)
 
         self.assertTrue(fatal)
@@ -277,7 +275,8 @@ class PySideBackendTests(unittest.TestCase):
                 w._run_terminal_handled = False
                 text = f"{marker}\n{error}\n"
                 log.write_text(text, encoding="utf-8")
-                w.log_view.setPlainText(text)
+                w.clear_run_output()
+                w._append_log(text, final=True)
                 with patch.object(w, "_read_output"), patch.object(w, "_notify_run_finished"):
                     w._process_finished(code, None)
                 self.assertNotIn("预校准已更新", w.log_view.toPlainText())
@@ -339,6 +338,41 @@ class PySideBackendTests(unittest.TestCase):
         w.fields["wild_method"].setCurrentIndex(1)
         self.assertEqual(w.collect_inputs().request.method, "Static 1")
         self.assertFalse(w.item_check.isChecked())
+
+    def test_perfect_iv_dropdown_reaches_request_and_invalidates_prepared_plan(self):
+        w = self.window
+        combo = w.fields["wild_iv_preset"]
+        w.prepared = self.prepared()
+        combo.setCurrentText("3V")
+        self.assertIsNone(w.prepared)
+        inputs = w.collect_inputs()
+        self.assertEqual(inputs.request.min_perfect_ivs, 3)
+        self.assertEqual(inputs.request.iv_min, (0,) * 6)
+        self.assertEqual(inputs.request.iv_max, (31,) * 6)
+        w.iv_ranges[5][1].setValue(0)
+        self.assertEqual(w.collect_inputs().request.min_perfect_ivs, 0)
+        self.assertEqual(w.collect_inputs().request.iv_max[5], 0)
+        w.fields["wild_search_mode"].setCurrentIndex(1)
+        w.fields["wild_direct_seed"].setText("11C7")
+        w.fields["wild_direct_adv"].setText("4321")
+        self.assertFalse(combo.isEnabled())
+        self.assertEqual(w.collect_inputs().request.min_perfect_ivs, 0)
+        w.fields["wild_search_mode"].setCurrentIndex(0)
+        self.assertTrue(combo.isEnabled())
+        self.assertEqual(w.collect_inputs().request.min_perfect_ivs, 0)
+        w.iv_ranges[5][1].setValue(31)
+        self.assertEqual(w.collect_inputs().request.min_perfect_ivs, 3)
+
+    def test_each_manual_iv_bound_takes_priority_over_the_v_preset(self):
+        w = self.window
+        for index in range(6):
+            for bound, value in ((0, 1), (1, 30)):
+                with self.subTest(index=index, bound=bound):
+                    w._apply_iv_preset("5V")
+                    w.iv_ranges[index][bound].setValue(value)
+                    inputs = w.collect_inputs()
+                    self.assertEqual(inputs.request.min_perfect_ivs, 0)
+                    self.assertEqual((inputs.request.iv_min if bound == 0 else inputs.request.iv_max)[index], value)
 
     def test_wild_dunsparce_exposes_three_segment_filter_and_collects_it(self):
         w = self.window
@@ -602,7 +636,7 @@ class PySideBackendTests(unittest.TestCase):
         w = self.window
         log = self.root / "process.log"
         stop = self.root / "stop"
-        payload = "你好\nTIDPROGRESS|V=3|COUNT=4|END=1\nfinal\n".encode("utf-8")
+        payload = "你好\nTIDPROGRESS|V=3|COUNT=4|END=1\n第1轮开始\n本轮结果: Seed A1B2（偏差 1），消耗帧 12345（偏差 -2）\nfinal\n".encode("utf-8")
         code = f"import sys,time; b={payload!r}; sys.stdout.buffer.write(b[:2]); sys.stdout.buffer.flush(); time.sleep(.05); sys.stdout.buffer.write(b[2:]); sys.stdout.buffer.flush()"
         arguments = ("-u", str(RESOURCE_ROOT / "run_easycon_logged.py"), "--log-path", str(log), "--cwd", str(self.root), "--stop-file", str(stop), "--", sys.executable, "-u", "-c", code)
         w.run_command = RunCommand(sys.executable, arguments, log, stop, "", EasyConRuntimeCheck(True, (), ()))
@@ -613,23 +647,57 @@ class PySideBackendTests(unittest.TestCase):
         w.begin_accepted_run(w.run_command, prepared_wild=prepared)
         self.wait_until(lambda: log.is_file() and w.process.state().value == 0)
         self.app.processEvents()
-        self.assertIn("你好", w.log_view.toPlainText())
+        self.assertNotIn("你好", w.log_view.toPlainText())
+        self.assertIn("你好", w.script_log_text())
         self.assertNotIn("TIDPROGRESS", w.log_view.toPlainText())
         self.assertIn("TIDPROGRESS", log.read_text(encoding="utf-8"))
+        self.assertEqual(log.read_bytes(), payload)
+        self.assertEqual(w.run_summary_view.round_table.item(0, 1).text(), "A1B2")
+        self.assertEqual(w.run_summary_view.round_table.item(0, 4).text(), "-2")
         self.assertEqual(w.current_page, "logs")
         self.assertFalse(w.running)
 
-    def test_pending_log_is_visible_then_replaced_without_duplicate_lines(self):
+    def test_pending_script_log_stays_private_and_complete(self):
         w = self.window
-        w.log_view.clear()
+        w.clear_run_output()
         w._append_log("目标")
-        self.assertEqual(w.log_view.toPlainText(), "目标")
+        self.assertEqual(w.script_log_text(), "目标")
         w._append_log("信息\nTIDPROG")
-        self.assertEqual(w.log_view.toPlainText(), "目标信息\nTIDPROG")
+        self.assertEqual(w.script_log_text(), "目标信息\nTIDPROG")
         w._append_log("RESS|V=3|COUNT=4|END=1\n当前")
-        self.assertEqual(w.log_view.toPlainText(), "目标信息\n当前")
+        self.assertIn("TIDPROGRESS|V=3|COUNT=4|END=1\n当前", w.script_log_text())
         w._append_log("进度", final=True)
-        self.assertEqual(w.log_view.toPlainText(), "目标信息\n当前进度")
+        self.assertTrue(w.script_log_text().rstrip().endswith("当前进度"))
+        self.assertEqual(w.log_view.toPlainText(), "")
+
+    def test_round_table_and_bingo_update_after_split_stdout_without_console_leaks(self):
+        w = self.window
+        w.clear_run_output()
+        payload = ("未分类脚本行\n第1轮开始\n"
+                   "本轮结果: Seed AABB（偏差 -1），消耗帧 23456（偏差 2）\n").encode("utf-8")
+        for offset in range(0, len(payload), 7):
+            w._append_log(w.decoder.decode(payload[offset:offset + 7]))
+        w._append_log(w.decoder.decode(b"", final=True), final=True)
+        table = w.run_summary_view.round_table
+        self.assertEqual([table.item(0, i).text() for i in range(6)],
+                         ["1", "AABB", "-1", "23456", "+2", "存在偏差"])
+        self.assertEqual(w.run_summary_view.bingo_table.item(3, 6).text(), "①")
+        self.assertEqual(w.log_view.toPlainText(), "")
+        self.assertIn("未分类脚本行", w.script_log_text())
+        w.clear_run_output()
+        self.assertEqual(table.rowCount(), 0)
+        self.assertNotIn("AABB", w.script_log_text())
+
+    def test_fatal_script_error_is_remembered_after_private_tail_rolls_over(self):
+        w = self.window
+        w.clear_run_output()
+        w._append_log("Unhandled ")
+        w._append_log("exception\n" + "普通脚本输出\n" * 4100, final=True)
+        self.assertNotIn("Unhandled exception", w.script_log_text())
+        with patch.object(w, "_read_output"), patch.object(w, "_notify_run_finished") as notify:
+            w._process_finished(0, None)
+        self.assertTrue(notify.call_args.kwargs["fatal_output"])
+        self.assertIn("[运行失败]", w.log_view.toPlainText())
 
     def test_stop_and_close_terminate_only_owned_benign_worker(self):
         from pyside_app.services import RunCommand
@@ -643,7 +711,7 @@ class PySideBackendTests(unittest.TestCase):
         w.run_command = RunCommand(sys.executable, arguments, log, stop, "", EasyConRuntimeCheck(True, (), ()))
         w.show()
         w.process.start(sys.executable, list(arguments))
-        self.wait_until(lambda: "ready" in w.log_view.toPlainText())
+        self.wait_until(lambda: "ready" in w.script_log_text())
         w.close()
         self.wait_until(lambda: not w.running)
         self.assertTrue(stop.is_file())
@@ -684,6 +752,7 @@ class PySideBackendTests(unittest.TestCase):
         self.assertIn("背包第一页第一格放神奇糖果", prompt)
         self.assertIn("目标 Seed", prompt)
         self.assertIn("目标 Advance", prompt)
-        self.assertIn("checked command", w.log_view.toPlainText())
+        self.assertIn("checked command", w.script_log_text())
+        self.assertNotIn("checked command", w.log_view.toPlainText())
         self.assertTrue(w.fields["wild_game"].isEnabled())
         self.assertTrue(w.start_button.isEnabled())

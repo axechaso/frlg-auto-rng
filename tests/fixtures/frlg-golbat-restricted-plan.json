@@ -36,7 +36,8 @@
     "direct_mode": false,
     "direct_seed": null,
     "direct_advances": null,
-    "dunsparce_three_segment": false
+    "dunsparce_three_segment": false,
+    "min_perfect_ivs": 0
   },
   "target": {
     "target_seed": "1054FF81",
