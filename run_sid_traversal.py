@@ -131,6 +131,7 @@ def traversal_candidate_request(
         max_advances=target_max_advances,
         iv_min=(0, 0, 0, 0, 0, 0),
         iv_max=(31, 31, 31, 31, 31, 31),
+        min_perfect_ivs=0,
         shiny="Star/Square",
         nature="Any",
         gender="Any",

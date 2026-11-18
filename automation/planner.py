@@ -79,6 +79,7 @@ class AutoSearchRequest:
     direct_seed: Optional[str] = None
     direct_advances: Optional[int] = None
     dunsparce_three_segment: bool = False
+    min_perfect_ivs: int = 0
 
     def validate(self) -> None:
         if self.game not in {
@@ -114,6 +115,10 @@ class AutoSearchRequest:
         for lo, hi in zip(self.iv_min, self.iv_max):
             if not (0 <= lo <= hi <= 31):
                 raise ValueError("每项个体值必须满足 0 <= 最小值 <= 最大值 <= 31")
+        if type(self.min_perfect_ivs) is not int or not 0 <= self.min_perfect_ivs <= 6:
+            raise ValueError("满个体值项数必须是 0–6 之间的整数")
+        if not self.direct_mode and self.min_perfect_ivs > sum(value == 31 for value in self.iv_max):
+            raise ValueError(f"当前个体值范围无法满足至少 {self.min_perfect_ivs}V，请调整预设或各项最高值")
         species_id = get_species_id(self.pokemon)
         if not (1 <= species_id <= 386):
             raise ValueError("全国图鉴编号必须在 1-386 之间")
@@ -155,6 +160,8 @@ class AutoSearchRequest:
             if self.direct_mode:
                 raise ValueError("“可进化为三节形态”需要筛选搜索才能判定 PID")
         if "Wild" not in self.method and self.category == "Roaming" and not self.direct_mode:
+            if self.min_perfect_ivs > 1:
+                raise ValueError("火红/叶绿游走兽受个体值截断影响，最多只有 1V")
             if self.method == "Static 2":
                 raise ValueError("火红/叶绿游走兽不支持 Static 2，请使用 Static 1 或 Static 4")
             if self.shiny not in {"Star", "Square", "Star/Square"}:
@@ -480,6 +487,8 @@ def search_best_plan(
         ivs_range=request.to_ivs_range(),
         cancel_check=cancel_check,
     )
+    if request.min_perfect_ivs:
+        search_kwargs["min_perfect_ivs"] = request.min_perfect_ivs
     if target_search is None:
         result_tiers = target_tier_search(
             **search_kwargs,
@@ -503,6 +512,10 @@ def search_best_plan(
         for target in raw_targets:
             if cancel_check is not None and cancel_check():
                 raise SearchCancelledError("搜索已由用户取消")
+            if request.min_perfect_ivs and sum(
+                value == 31 for value in asdict(target.ivs).values()
+            ) < request.min_perfect_ivs:
+                continue
             if (request.dunsparce_three_segment
                     and not is_three_segment_dunsparce_pid(target.pid)):
                 continue

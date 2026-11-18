@@ -130,6 +130,11 @@ def traversal_context(
     resolved_start = sid_traversal_start_advance(named_rival, start_advance)
     if resolved_start > max_advances:
         raise ValueError("SID 遍历起点不能大于最大 ADV")
+    # Default IV count matching predates the explicit filter field. Keep
+    # existing progress paths and prepared plans valid for that setting.
+    context_request = dict(wild_request)
+    if context_request.get("min_perfect_ivs") == 0:
+        context_request.pop("min_perfect_ivs")
     return {
         "schema": SCHEMA,
         "kind": "sid-traversal",
@@ -151,7 +156,7 @@ def traversal_context(
         "effective_frame_parity_scheme": effective_frame_parity_scheme,
         "mystery_gift_enabled": mystery_gift_enabled,
         "verification_protocol": verification_protocol,
-        "wild_request": json_primitives(wild_request),
+        "wild_request": json_primitives(context_request),
         "easycon_options": json_primitives(easycon_options),
         "source_sha256": source_sha256,
     }

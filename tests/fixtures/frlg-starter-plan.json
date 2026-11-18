@@ -6,7 +6,7 @@
     "iv_min": [0, 0, 0, 0, 0, 0], "iv_max": [31, 31, 31, 31, 31, 31],
     "shiny": "Star/Square", "nature": "Any", "gender": "Any", "ability": "Any", "hidden_type": "Any",
     "initial_seed_result_count": 1, "max_iv_combinations": 25000000, "seed_mode": null,
-    "direct_mode": false, "direct_seed": null, "direct_advances": null, "dunsparce_three_segment": false
+    "direct_mode": false, "direct_seed": null, "direct_advances": null, "dunsparce_three_segment": false, "min_perfect_ivs": 0
   },
   "target": {
     "target_seed": "41FFBDDB", "method": "Static 1", "pokemon": "Bulbasaur", "level": 0,

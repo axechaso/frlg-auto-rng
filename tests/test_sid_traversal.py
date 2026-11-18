@@ -53,10 +53,12 @@ class SIDTraversalProgressTests(unittest.TestCase):
             pokemon="Pikachu",
             min_advances=500,
             max_advances=6500,
+            min_perfect_ivs=3,
         )
         candidate = traversal_candidate_request(request, 4567, target_max_advances=3000)
         self.assertEqual(candidate.min_advances, 500)
         self.assertEqual(candidate.max_advances, 3000)
+        self.assertEqual(candidate.min_perfect_ivs, 0)
         with self.assertRaisesRegex(ValueError, "下限不能大于上限"):
             traversal_candidate_request(request, 4567, target_max_advances=499)
 
@@ -89,6 +91,16 @@ class SIDTraversalProgressTests(unittest.TestCase):
             make_context(target_max_advances=3000),
             make_context(target_max_advances=3500),
         )
+
+    def test_default_iv_count_preserves_existing_checkpoint_path(self):
+        old = make_context()
+        context_args = dict(tid=old["tid"], named_rival=old["named_rival"],
+                            easycon_options=old["easycon_options"], source_sha256=old["source_sha256"],
+                            max_advances=old["max_advances"])
+        default = traversal_context(wild_request={**old["wild_request"], "min_perfect_ivs": 0}, **context_args)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(progress_path(tmp, old), progress_path(tmp, default))
+        self.assertEqual(old, default)
 
     def test_interrupted_candidate_is_retried(self):
         with tempfile.TemporaryDirectory() as tmp:

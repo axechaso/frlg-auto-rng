@@ -34,7 +34,7 @@ class VideoSurface(QWidget):
         return QSize(640, 360)
 
     def set_frame(self, frame):
-        if self.frame is not None and self.frame.cacheKey() == frame.cacheKey():
+        if self.frame is not None and frame is not None and self.frame.cacheKey() == frame.cacheKey():
             return
         self.frame = frame
         self.update()

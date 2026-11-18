@@ -61,6 +61,8 @@ jobs:
           run_pyside6_gui.py
           pyside_app/services.py
           pyside_app/log_history.py
+          pyside_app/run_summary.py
+          pyside_app/run_summary_view.py
           pyside_app/history_model.py
           pyside_app/history_controller.py
           pyside_app/run_input_state.py
@@ -70,6 +72,8 @@ jobs:
           pyside_app/repair_preview.py
           pyside_app/label_editor.py
           pyside_app/label_canvas.py
+          pyside_app/label_catalog.py
+          pyside_app/label_testing.py
           assets/pyside_preview/guide_steps.py
           label_incidents.py
           label_verification.py
@@ -191,6 +195,7 @@ jobs:
           tests.test_pyside_chrome
           tests.test_pyside_services
           tests.test_pyside_backend
+          tests.test_run_summary
           tests.test_pyside_paths
           tests.test_pyside_diagnostics
           tests.test_pyside_remaining
@@ -240,6 +245,7 @@ jobs:
           tests.test_device_label_overrides
           tests.test_label_repair_prompt
           tests.test_label_editor_flow
+          tests.test_label_maker
           tests.test_page_guides
           tests.test_tid_starter_save
           tests.test_tid_starter_flow

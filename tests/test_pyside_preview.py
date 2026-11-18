@@ -131,6 +131,23 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         self.window._reset_iv(2)
         self.assertEqual([(a.value(), b.value()) for a, b in self.window.iv_ranges], [(31, 31), (0, 0), (0, 31), (31, 31), (31, 31), (0, 0)])
 
+    def test_perfect_iv_dropdown_keeps_stat_positions_unrestricted(self):
+        from PySide6.QtWidgets import QComboBox
+
+        combo = self.window.fields["wild_iv_preset"]
+        self.assertIsInstance(combo, QComboBox)
+        self.assertEqual([combo.itemText(i) for i in range(combo.count())],
+                         ["不限", "1V", "2V", "3V", "4V", "5V", "6V", "0A", "0S", "0A0S"])
+        for count in range(1, 6):
+            combo.setCurrentText(f"{count}V")
+            self.assertEqual(combo.currentData(), count)
+            self.assertEqual([(a.value(), b.value()) for a, b in self.window.iv_ranges], [(0, 31)] * 6)
+        self.window.iv_ranges[1][1].setValue(0)
+        self.assertEqual(combo.currentText(), "5V")
+        self.assertEqual(self.window.iv_ranges[1][1].value(), 0)
+        combo.setCurrentText("不限")
+        self.assertEqual([(a.value(), b.value()) for a, b in self.window.iv_ranges], [(0, 31)] * 6)
+
     def test_wild_modes_and_shared_egg_identity(self):
         window = self.window
         window.item_check.setChecked(True)
@@ -448,6 +465,19 @@ class PySidePreviewInteractionTests(unittest.TestCase):
         window.select_page("tid")
         self.assertFalse(window.run_ready_card.isHidden())
         self.assertTrue(window.script_action_card.isHidden())
+
+    def test_round_results_have_full_width_and_keep_device_details_available(self):
+        window = self.window
+        window.resize(1360, 840)
+        window.show()
+        window.select_page("logs")
+        self.app.processEvents()
+        self.assertFalse(window.overview_scroll.isVisible())
+        self.assertTrue(window.overview_button.isVisible())
+        self.assertGreater(window.run_summary_view.round_table.width(), 450)
+        self.assertTrue(window.run_summary_view.bingo_table.isVisible())
+        window.select_page("wild")
+        self.assertTrue(window.overview_scroll.isVisible())
 
     def test_collapsing_optional_settings_preserves_edits(self):
         from pyside_preview import Card

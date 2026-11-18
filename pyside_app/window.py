@@ -6,10 +6,11 @@ import html
 import json
 import re
 import uuid
+from collections import deque
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSignalBlocker, QTimer, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QPixmap, QTextCursor
+from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QLabel, QMessageBox, QPushButton,
     QSpinBox, QTableWidgetItem, QWidget,
@@ -53,6 +54,7 @@ from notifications.qq_service import QQNotificationService, QQSettingsStore
 from easycon_outcome import easycon_log_has_fatal_error
 from audio_observer import LOG_PREFIX
 from .qq_notifications import QQNotificationDialog
+from .run_summary import RunSummary
 
 
 _CAPTURE_REQUIREMENT_SPECIES = frozenset({97, 101, 143, 150, 175, 243, 244, 245, 249, 250, 386})
@@ -400,7 +402,10 @@ class FrlgWindow(FrlgPreviewWindow):
         self.process.errorOccurred.connect(self._process_error)
         self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.pending_output = ""
-        self.pending_visible = False
+        self.script_lines = deque(maxlen=4000)
+        self.run_summary = RunSummary()
+        self._runtime_fatal_seen = False
+        self._fatal_tail = ""
         self._run_id = ""
         self._run_terminal_handled = False
         self._manual_stop_requested = False
@@ -454,9 +459,9 @@ class FrlgWindow(FrlgPreviewWindow):
             elif widget.property("helpKey") == "labels":
                 widget.setToolTip("按采集设备名称读取已保存的覆盖，仅应用到生成工程；可在日志页诊断、导入或清除覆盖。")
         self.profile_chip.setToolTip("选择或管理与正式工具共用的存档；手动修改字段不会覆盖已保存的存档。")
-        self.log_view.setPlainText("尚无运行输出。点击开始运行后在这里查看日志。")
+        self.log_view.setPlainText("等待开始运行；本页显示每轮结果与 BINGO，完整脚本输出保存在历史日志。")
         self.result_panel.setPlainText("尚无方案。搜索完成后显示真实结果与正式预检详情。")
-        self.log_view.setToolTip("原始运行日志保存在生成工程中；显示区隐藏完整的已知机器检查点，保留错误和未知记录。")
+        self.log_view.setToolTip("仅显示程序整理的运行状态；完整脚本输出可在历史日志页查看。")
         self.traversal_check.setToolTip("唯一 PID 的非闪个体可排除 TSV；目标或非目标闪光可反查 TSV。停止后保留证据和进度，同参数下次继续。")
         for key in ("source", "ezcon", "port", "video"):
             self.fields[key].setToolTip("选择正式脚本包或本次运行设备；启动前会重新核对设备与运行时。")
@@ -636,12 +641,16 @@ class FrlgWindow(FrlgPreviewWindow):
         location = selected_location(f["wild_location"])
         if location is None:
             raise ValueError("地点：请输入名称后从匹配列表中选择当前遭遇方式下的地点，不能使用未完成的搜索文字。")
+        iv_min = tuple(pair[0].value() for pair in self.iv_ranges)
+        iv_max = tuple(pair[1].value() for pair in self.iv_ranges)
+        use_iv_preset = not direct and iv_min == (0,) * 6 and iv_max == (31,) * 6
         request = AutoSearchRequest(
             game=self.game_code(), tid=integer("wild_tid", "当前 TID"), sid=integer("wild_sid", "当前 SID"),
             method="All Wild Methods" if f["wild_method"].currentIndex() == 0 else "Static 1",
             category=f["wild_category"].currentData() or "", location=location,
             pokemon=f["wild_species"].currentData() or "", min_advances=integer("wild_min", "最小消耗帧") if not direct else 0, max_advances=integer("wild_max", "最大消耗帧") if not direct else 0,
-            iv_min=tuple(pair[0].value() for pair in self.iv_ranges), iv_max=tuple(pair[1].value() for pair in self.iv_ranges),
+            iv_min=iv_min, iv_max=iv_max,
+            min_perfect_ivs=int(f["wild_iv_preset"].currentData() or 0) if use_iv_preset else 0,
             shiny=FILTER_SHINY_ZH_TO_EN[f["wild_shiny"].currentText()], nature=FILTER_NATURE_ZH_TO_EN[f["wild_nature"].currentText()],
             gender=FILTER_GENDER_ZH_TO_EN[f["wild_gender"].currentText()], hidden_type=FILTER_TYPE_ZH_TO_EN[f["wild_hidden"].currentText()],
             ability=f["wild_ability"].currentData() or "Any", seed_mode=seed_index - 1 if seed_index > 0 else None,
@@ -993,6 +1002,7 @@ class FrlgWindow(FrlgPreviewWindow):
 
     def _begin_run_notification(self):
         """Start a new notification event for each accepted run."""
+        self.clear_run_output()
         # This ID deduplicates desktop notifications; RunCommand.run_id binds
         # the worker, reports and any script input-state session.
         self._run_id = uuid.uuid4().hex
@@ -1012,9 +1022,6 @@ class FrlgWindow(FrlgPreviewWindow):
         self.running_workflow = prepared_workflow
         self._begin_run_notification()
         self.decoder.reset()
-        self.pending_output = ""
-        self.pending_visible = False
-        self.log_view.clear()
         self.running = True
         self.refresh_state()
         self.select_page("logs")
@@ -1029,7 +1036,7 @@ class FrlgWindow(FrlgPreviewWindow):
             backend = EASYCON_BACKEND_NAME
         startup = f"正在启动脚本：{script_path}\n所选后端：{backend}\n"
         self.set_status("正在启动；日志页已就绪。")
-        self._append_log(startup)
+        self._append_program_log(startup)
         self.process.setWorkingDirectory(str(RESOURCE_ROOT))
         try:
             if hasattr(self, "accessories"):
@@ -1045,6 +1052,8 @@ class FrlgWindow(FrlgPreviewWindow):
         self.runtime_issues.clear()
         self.running = True
         self.set_status("正在运行；完整日志持续写入工程目录。")
+        self._append_program_log("脚本已启动；完整脚本输出可在历史日志查看。")
+        self.history_controller.invalidate()
 
     def apply_script_action_view(self, view):
         if view is None:
@@ -1090,18 +1099,33 @@ class FrlgWindow(FrlgPreviewWindow):
         values["phase"].setText(f"{stage} · {phase}")
         values["phase"].setToolTip(view.message)
 
+    def clear_run_output(self):
+        self.pending_output = ""
+        self.runtime_issues.clear()
+        self.script_lines.clear()
+        self.run_summary = RunSummary()
+        self.run_summary_view.reset()
+        self._runtime_fatal_seen = False
+        self._fatal_tail = ""
+        self.log_view.clear()
+
+    def script_log_text(self):
+        """Bounded private diagnostic tail; the worker owns the complete disk log."""
+        return "\n".join((*self.script_lines, self.pending_output))
+
     def _append_log(self, text, *, final=False):
+        combined = self._fatal_tail + text
+        self._runtime_fatal_seen |= easycon_log_has_fatal_error(combined)
+        self._fatal_tail = combined[-128:]
         self.pending_output += text
         pieces = self.pending_output.split("\n")
         self.pending_output = pieces.pop()
         if final and self.pending_output:
             pieces.append(self.pending_output)
             self.pending_output = ""
-        bar = self.log_view.verticalScrollBar()
-        following = bar.value() >= bar.maximum() - 2
-        old = bar.value()
-        self._remove_pending_log_line()
+        summary_changed = False
         for line in pieces:
+            self.script_lines.append(line.rstrip("\r"))
             if hasattr(self, "accessories") and self.accessories.consume_input_session_marker(line):
                 continue
             cleaned = display_log_line(line)
@@ -1109,39 +1133,24 @@ class FrlgWindow(FrlgPreviewWindow):
                 explanation = explain_error(cleaned)
                 if explanation and explanation.key not in self.runtime_issues:
                     self.runtime_issues[explanation.key] = explanation
-                    self.log_view.appendPlainText("[问题说明] " + explanation.message)
+                    self._append_program_log("[问题说明] " + explanation.summary)
                     self.set_status(explanation.summary)
-                self.log_view.appendPlainText(cleaned)
-        if self.pending_output:
-            self.log_view.appendPlainText(self.pending_output.rstrip("\r"))
-            self.pending_visible = True
-        bar.setValue(bar.maximum() if following else old)
+            summary_changed |= self.run_summary.consume(line)
+        if summary_changed:
+            self.run_summary_view.sync(self.run_summary)
 
-    def _remove_pending_log_line(self):
-        if self.pending_visible:
-            cursor = self.log_view.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.End)
-            # BlockUnderCursor can include the preceding paragraph separator;
-            # deleting another character then clips the previous complete line.
-            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
-            cursor.removeSelectedText()
-            if self.log_view.document().blockCount() > 1:
-                cursor.deletePreviousChar()
-            self.pending_visible = False
+    def _append_program_log(self, text):
+        bar = self.log_view.verticalScrollBar()
+        following, old = bar.value() >= bar.maximum() - 2, bar.value()
+        self.log_view.appendPlainText(str(text).strip())
+        bar.setValue(bar.maximum() if following else old)
 
     def append_observation_log(self, line):
         """Render a side observation without feeding stdout/checkpoint parsers."""
         line = " ".join(str(line).split())
         if not line.startswith(LOG_PREFIX):
             raise ValueError("观察日志缺少来源标记")
-        bar = self.log_view.verticalScrollBar()
-        following, old = bar.value() >= bar.maximum() - 2, bar.value()
-        self._remove_pending_log_line()
-        self.log_view.appendPlainText(line)
-        if self.pending_output:
-            self.log_view.appendPlainText(self.pending_output.rstrip("\r"))
-            self.pending_visible = True
-        bar.setValue(bar.maximum() if following else old)
+        self._append_program_log(line)
 
     def _read_output(self):
         self._append_log(self.decoder.decode(bytes(self.process.readAllStandardOutput())))
@@ -1153,33 +1162,33 @@ class FrlgWindow(FrlgPreviewWindow):
         self._read_output()
         self._append_log(self.decoder.decode(b"", final=True), final=True)
         self.running = False
-        flow_text = "\n".join(line for line in self.log_view.toPlainText().splitlines() if not line.startswith(LOG_PREFIX))
-        fatal_output = easycon_log_has_fatal_error(flow_text)
+        fatal_output = self._runtime_fatal_seen or easycon_log_has_fatal_error(self.script_log_text())
         prepared = getattr(self, "running_prepared", None)
         if code == 0 and not fatal_output and prepared and prepared.inputs.options.update_precalibration and self.run_command:
             try:
                 record = update_from_manifest(self.paths.user / "precalibration.json", prepared.project.parent / "plan.json",
                                               self.run_command.log_path.read_text(encoding="utf-8", errors="replace"))
-                self._append_log(
+                self._append_program_log(
                     "\n预校准已更新。\n" if record else
                     "\n未取得目标成功标记，预校准未更新（原记录保留；旧工程请重新生成）。\n"
                 )
             except (OSError, ValueError, TypeError) as exc:
-                self._append_log(f"\n预校准更新失败，原记录保留：{exc}\n")
+                self._append_program_log(f"\n预校准更新失败，原记录保留：{exc}\n")
         from label_incidents import REPAIR_REQUIRED_EXIT_CODE
         if code == REPAIR_REQUIRED_EXIT_CODE:
-            self._append_log("\n[标签故障保护] 手柄输入已锁定，本次运行以安全停止码结束。请在设备标签卡片查看截图并修复标签。\n")
+            self._append_program_log("\n[标签故障保护] 手柄输入已锁定，本次运行以安全停止码结束。请在设备标签卡片查看截图并修复标签。\n")
             self.set_status("标签故障保护已停止运行；请打开设备标签卡片处理故障事件。")
         elif fatal_output:
-            self._append_log("\n[运行失败] EasyCon 报告了未处理异常；即使退出码为 0，也不会判定为完成。\n")
+            self._append_program_log("\n[运行失败] EasyCon 报告了未处理异常；即使退出码为 0，也不会判定为完成。\n")
             self.set_status("运行失败：EasyCon 报告了未处理异常，请查看完整日志。")
         elif self.runtime_issues:
             for explanation in self.runtime_issues.values():
-                self._append_log("\n[本次运行问题] " + explanation.message + "\n")
+                self._append_program_log("\n[本次运行问题] " + explanation.summary + "\n")
             issue = next(iter(self.runtime_issues.values()))
             self.set_status(f"运行已结束（退出码 {code}）：{issue.summary}")
         else:
             self.set_status(f"运行进程已结束（退出码 {code}）；请查看日志中的实际结果。")
+        self._append_program_log(f"运行进程已结束（退出码 {code}）；完整记录见历史日志。")
         self._notify_run_finished(code, fatal_output=fatal_output)
         self.history_controller.invalidate()
         if self.current_page == "history_logs":
@@ -1199,14 +1208,14 @@ class FrlgWindow(FrlgPreviewWindow):
             return
         self._run_terminal_handled = True
         self.running = False
-        self._append_log(f"\n[启动失败] {message}\n")
+        self._append_program_log(f"\n[启动失败] {message}\n")
         if self.run_command is not None:
             try:
                 self.run_command.log_path.parent.mkdir(parents=True, exist_ok=True)
                 with self.run_command.log_path.open("a", encoding="utf-8", newline="") as stream:
                     stream.write(f"\n[启动失败] {message}\n")
             except OSError as exc:
-                self._append_log(f"[日志写入失败] {exc}\n")
+                self._append_program_log(f"[日志写入失败] {exc}\n")
         if hasattr(self, "accessories"):
             self.accessories.run_finished("启动失败", phase="failed")
         self.set_status(message)

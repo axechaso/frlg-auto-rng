@@ -717,6 +717,7 @@ def iter_search_targets(
     ivs_range: IVsRange = None,
     iv_total: int = None,
     cancel_check=None,
+    min_perfect_ivs: int = 0,
 ) -> Iterator[SearcherResult]:
     """Stream Ten Lines outcomes without choosing an initial-seed route.
 
@@ -724,6 +725,8 @@ def iter_search_targets(
     rank the returned Pokemon first, then call :func:`initial_seed` to choose a
     reachable initial seed with the smallest advance count.
     """
+    if type(min_perfect_ivs) is not int or not 0 <= min_perfect_ivs <= 6:
+        raise ValueError("满个体值项数必须是 0–6 之间的整数")
     if console is None:
         console = "NX2" if game.endswith("nx2") else "NX"
     tsv = tid ^ sid
@@ -761,6 +764,7 @@ def iter_search_targets(
         shiny=filter_shiny, gender=filter_gender, hp_type=filter_hidden_type,
         iv_min=filter_iv_min, iv_max=filter_iv_max,
         slots=matching_slots, ability=ability_idx,
+        min_perfect_ivs=min_perfect_ivs,
     )
     for m in methods:
         if cancel_check is not None and cancel_check():
@@ -812,6 +816,7 @@ def search_targets(
     ivs_range: IVsRange = None,
     iv_total: int = None,
     cancel_check=None,
+    min_perfect_ivs: int = 0,
 ) -> List[SearcherResult]:
     """Compatibility list wrapper around :func:`iter_search_targets`."""
     return list(iter_search_targets(
@@ -820,12 +825,26 @@ def search_targets(
         nature=nature, gender=gender, ability=ability,
         hidden_type=hidden_type, ivs_range=ivs_range, iv_total=iv_total,
         cancel_check=cancel_check,
+        min_perfect_ivs=min_perfect_ivs,
     ))
 
 
 @lru_cache(maxsize=64)
-def _iv_total_counts(iv_min, iv_max):
+def _iv_total_counts(iv_min, iv_max, min_perfect_ivs=0):
     """All tier sizes for immutable bounds; never cache mutable search results."""
+    if min_perfect_ivs:
+        if sum(lower <= 31 <= upper for lower, upper in zip(iv_min, iv_max)) < min_perfect_ivs:
+            return ()
+        counts_by_perfect = {(0, 0): 1}
+        for lower, upper in zip(iv_min, iv_max):
+            next_counts = {}
+            for (total, perfect), count in counts_by_perfect.items():
+                for value in range(lower, upper + 1):
+                    key = (total + value, min(min_perfect_ivs, perfect + (value == 31)))
+                    next_counts[key] = next_counts.get(key, 0) + count
+            counts_by_perfect = next_counts
+        return tuple(counts_by_perfect.get((total, min_perfect_ivs), 0)
+                     for total in range(sum(iv_max) + 1))
     counts = [1]
     for lower, upper in zip(iv_min, iv_max):
         if lower > upper:
@@ -843,8 +862,8 @@ def _iv_total_counts(iv_min, iv_max):
     return tuple(counts)
 
 
-def _count_iv_combinations(iv_min, iv_max, iv_total):
-    counts = _iv_total_counts(tuple(iv_min), tuple(iv_max))
+def _count_iv_combinations(iv_min, iv_max, iv_total, min_perfect_ivs=0):
+    counts = _iv_total_counts(tuple(iv_min), tuple(iv_max), min_perfect_ivs)
     return counts[iv_total] if 0 <= iv_total < len(counts) else 0
 
 
@@ -858,7 +877,12 @@ def search_target_tiers(*, max_iv_combinations=25_000_000, **kwargs):
     upper = ivs_range.ivs_upper_bound
     _, is_wild = parse_method(kwargs.get("method"))
     bugged_roamer = not is_wild and kwargs.get("category") == "Roaming"
+    min_perfect_ivs = kwargs.get("min_perfect_ivs", 0)
+    if type(min_perfect_ivs) is not int or not 0 <= min_perfect_ivs <= 6:
+        raise ValueError("满个体值项数必须是 0–6 之间的整数")
     if bugged_roamer:
+        if min_perfect_ivs > 1 or (min_perfect_ivs and not lower.hp <= 31 <= upper.hp):
+            return
         if any(value > 0 for value in (
             lower.defense, lower.sp_attack, lower.sp_defense, lower.speed,
         )):
@@ -867,7 +891,7 @@ def search_target_tiers(*, max_iv_combinations=25_000_000, **kwargs):
         atk_max = min(7, upper.attack)
         if atk_min > atk_max:
             return
-        minimum = lower.hp + atk_min
+        minimum = (31 if min_perfect_ivs else lower.hp) + atk_min
         maximum = upper.hp + atk_max
     else:
         minimum = sum((
@@ -897,7 +921,9 @@ def search_target_tiers(*, max_iv_combinations=25_000_000, **kwargs):
         if bugged_roamer:
             tier_work = roamer_pid_work * method_count
         else:
-            tier_work = _count_iv_combinations(iv_min, iv_max, iv_total) * method_count
+            tier_work = _count_iv_combinations(iv_min, iv_max, iv_total, min_perfect_ivs) * method_count
+            if tier_work == 0:
+                continue
         if max_iv_combinations is not None and searched_work + tier_work > max_iv_combinations:
             raise SearchWorkLimitError(
                 "搜索已达到首版安全工作量上限，搜索尚未完成，不能判定为无结果。"

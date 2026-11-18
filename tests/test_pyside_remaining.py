@@ -592,5 +592,6 @@ class RemainingQtTests(unittest.TestCase):
         self.w.process.start(sys.executable, ["-u", "-c", "print('no hardware child')"])
         loop.exec()
         self.assertFalse(self.w.running)
-        self.assertIn("no hardware child", self.w.log_view.toPlainText())
+        self.assertIn("no hardware child", self.w.script_log_text())
+        self.assertNotIn("no hardware child", self.w.log_view.toPlainText())
         self.assertTrue(self.w.egg_parent_widgets[0][1].isEnabled())
