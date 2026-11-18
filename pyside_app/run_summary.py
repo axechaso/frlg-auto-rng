@@ -34,6 +34,8 @@ class RoundResult:
     advances: int | None = None
     frame_delta: int | None = None
     normalized_delta: int | None = None
+    seed_trusted: bool | None = None
+    frame_trusted: bool | None = None
     note: str = ""
 
     @property
@@ -41,12 +43,20 @@ class RoundResult:
         return str(self.number) if self.segment == 1 else f"{self.segment} / {self.number}"
 
     @property
+    def axes_confirmed(self) -> bool:
+        return self.seed_trusted is True and self.frame_trusted is True
+
+    @property
     def result(self) -> str:
         if self.note:
             return self.note
         if self.seed_delta is None or self.frame_delta is None:
             return "等待本轮结果"
-        return "Seed / 帧命中" if self.seed_delta == self.frame_delta == 0 else "存在偏差"
+        if self.seed_trusted is False or self.frame_trusted is False:
+            return "候选待确认"
+        if self.seed_delta == self.frame_delta == 0:
+            return "Seed / 帧命中" if self.axes_confirmed else "Seed / 帧零偏差待确认"
+        return "存在偏差"
 
 
 class RunSummary:
@@ -84,7 +94,7 @@ class RunSummary:
             for key, value in values.items():
                 setattr(row, key, value)
             if ("note" not in values and row.note == "本轮未取得唯一结果"
-                    and row.seed_delta is not None and row.frame_delta is not None):
+                    and row.axes_confirmed and row.seed_delta is not None and row.frame_delta is not None):
                 row.note = ""
             self.version += 1
         return changed
@@ -110,6 +120,7 @@ class RunSummary:
                 self.segment += 1
                 self.current = None
                 self.script_grid = self.tv_cells = None
+            self._grid_rows = None
             self.section = ""
             return True
         if line == "【BINGO】":
@@ -145,7 +156,13 @@ class RunSummary:
         match = _COMPACT.fullmatch(line)
         if match:
             return self._update(seed=match[1].upper(), seed_delta=int(match[2]),
-                                advances=int(match[3]), frame_delta=int(match[4]), note="")
+                                advances=int(match[3]), frame_delta=int(match[4]))
+        match = re.fullmatch(r"(Seed可信|消耗帧最终可信)[：:]\s*([01])", line)
+        if match:
+            field = "seed_trusted" if match[1] == "Seed可信" else "frame_trusted"
+            return self._update(**{field: match[2] == "1"})
+        if line == "已命中目标，脚本停止":
+            return self._update(note="脚本已确认目标", seed_trusted=True, frame_trusted=True)
         for pattern, field, convert in (
             (r"^命中Seed[：:]\s*([0-9a-fA-F]{4,8})$", "seed", str.upper),
             (r"^与目标Seed差[：:]\s*([+-]?\d+)\s*个seed$", "seed_delta", int),
@@ -187,7 +204,8 @@ class RunSummary:
                 self._round(int(fields["ROUND"]))
                 if (fields.get("EVENT") == "TARGET" and all(fields.get(name) == "1"
                         for name in ("SEED_MATCH", "ADV_MATCH", "SPECIES_MATCH"))):
-                    return self._update(note="脚本已确认目标", seed_delta=0, frame_delta=0)
+                    return self._update(note="脚本已确认目标", seed_delta=0, frame_delta=0,
+                                        seed_trusted=True, frame_trusted=True)
                 if fields.get("EVENT") in {"NON_TARGET_SHINY", "INCOMPLETE"}:
                     return self._update(note="非目标闪光" if fields["EVENT"] == "NON_TARGET_SHINY" else "目标证据不完整")
         return False
@@ -197,20 +215,28 @@ class RunSummary:
             return self.script_grid, "脚本 BINGO 观测表"
         counts = [[0] * 9 for _ in range(9)]
         last = None
+        last_exact = False
         for row in self.rounds.values():
             frame = row.normalized_delta if row.normalized_delta is not None else row.frame_delta
-            if row.segment == self.segment and row.seed_delta is not None and frame is not None:
-                last = None
-            if (row.segment == self.segment and row.seed_delta is not None and frame is not None
-                    and -4 <= row.seed_delta <= 4 and -4 <= frame <= 4
+            if row.segment != self.segment or row.seed_delta is None or frame is None:
+                continue
+            last = None
+            if (-4 <= row.seed_delta <= 4 and -4 <= frame <= 4
+                    and row.seed_trusted is not False and row.frame_trusted is not False
                     and row.note != "本轮未取得唯一结果"):
                 last = row.seed_delta + 4, frame + 4
+                last_exact = row.axes_confirmed and row.seed_delta == row.frame_delta == 0
                 counts[last[0]][last[1]] += 1
         cells = [[str(value) if value else "·" for value in row] for row in counts]
         cells[4][4] = "＋"
-        if last:
+        if last == (4, 4):
+            if last_exact:
+                cells[4][4] = "＠"
+        elif last:
             y, x = last
             count = counts[y][x]
-            cells[y][x] = "＠" if last == (4, 4) else "①②③④⑤⑥⑦⑧⑨"[count - 1] if count <= 9 else f"({count})"
-        axis = "归一化帧偏差" if any(row.normalized_delta is not None for row in self.rounds.values()) else "原始帧偏差"
+            cells[y][x] = "①②③④⑤⑥⑦⑧⑨"[count - 1] if count <= 9 else f"({count})"
+        normalized = any(row.segment == self.segment and row.normalized_delta is not None
+                         for row in self.rounds.values())
+        axis = "归一化帧偏差" if normalized else "原始帧偏差"
         return tuple(tuple(row) for row in cells), f"按当前结果表统计 · {axis}"

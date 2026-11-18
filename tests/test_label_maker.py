@@ -97,6 +97,9 @@ class LabelMakerTests(unittest.TestCase):
         self.assertIsNone(self.editor.original_path)
         self.assertEqual(self.editor.payload, {})
         self.assertFalse(self.editor.apply_button.isEnabled())
+        with patch("pyside_app.label_editor.show_error_dialog") as error:
+            self.editor.restore_previous()
+        self.assertIn("请先选择要恢复的标签", error.call_args.args[-1])
 
     def test_monitor_capture_freezes_normalized_pixels_without_file_dialogs(self):
         with patch("pyside_app.label_editor.QFileDialog.getOpenFileName", side_effect=AssertionError("file picker")):
@@ -172,6 +175,23 @@ class LabelMakerTests(unittest.TestCase):
         self.assertFalse(self.editor._same_image_ok)
         self.assertFalse(self.editor._fresh_frames_ok)
 
+    def test_reverted_coordinates_still_invalidate_queued_verification(self):
+        self.capture()
+        self.editor.test_fresh_frames()
+        self.editor.fresh_timer.stop()
+        _, digest, device, operator, threshold, reader, source_digest = self.editor._fresh_request
+        results = tuple({"passed": True, "frame_index": index, "raw_score": 99.0,
+                         "integer_score": 99, "elapsed_ms": 1,
+                         "saved_frame": str(self.editor.frame_path)} for index in range(3))
+        field = self.editor.spins["TargetX"]
+        original = field.value()
+        field.setValue(original + 1)
+        field.setValue(original)
+        with patch.object(self.editor, "_save_verification") as save:
+            self.editor._fresh_verified((digest, device, results, operator, threshold, source_digest, reader))
+        save.assert_not_called()
+        self.assertFalse(self.editor._fresh_frames_ok)
+
     def test_missing_labels_are_visible_and_unavailable(self):
         self.label.unlink()
         self.editor._load_script_labels()
@@ -244,6 +264,10 @@ class LocalLabelTests(unittest.TestCase):
                     self.assertTrue(result["passed"])
                     self.assertFalse(result["native_verified"])
                     self.assertEqual(result["location"], [10, 20])
+            with patch("pyside_app.label_testing.cv2.matchTemplate",
+                       return_value=np.full((1, 1), np.inf, dtype=np.float32)):
+                with self.assertRaisesRegex(ValueError, "有效分数"):
+                    verify_preview(label, frame=frame, operator="<")
             payload["UseGrayscale"] = True
             label.write_text(json.dumps(payload))
             with self.assertRaisesRegex(ValueError, "额外预处理"):

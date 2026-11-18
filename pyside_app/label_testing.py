@@ -67,9 +67,11 @@ def verify_preview(label, *, frame, operator=">", threshold=95):
         raise ValueError("透明背景匹配需要有有效像素的 Alpha 掩膜")
     try:
         result = cv2.matchTemplate(roi, template, mode, mask=mask if method == 14 else None)
-        # A masked search can produce infinities; they must never count as hits.
-        fill = 1.0 if method in {1, 14} else -1.0
-        result = np.nan_to_num(result, nan=fill, posinf=fill, neginf=fill)
+        valid = np.isfinite(result)
+        if not valid.any():
+            raise ValueError("图像匹配无法得到有效分数")
+        if not valid.all():
+            result[~valid] = np.inf if method in {1, 14} else -np.inf
         minimum, maximum, min_loc, max_loc = cv2.minMaxLoc(result)
     except cv2.error as exc:
         raise ValueError(f"图像匹配失败：{exc}") from exc

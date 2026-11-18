@@ -80,6 +80,7 @@ class LabelEditorDialog(QDialog):
         self._fresh_frames_ok = False
         self._same_image_results: tuple[dict[str, object], ...] = ()
         self._fresh_frame_results: tuple[dict[str, object], ...] = ()
+        self._fresh_request = None
         self._fresh_frame_path: Path | None = None
         self._fresh_frames_dir: Path | None = None
         self._adjacent_frame_path: Path | None = None
@@ -136,12 +137,16 @@ class LabelEditorDialog(QDialog):
         guide = QPushButton("制作步骤引导")
         guide.clicked.connect(lambda: self.w.page_guides.start("label", child=self))
         guide_row.addWidget(guide)
-        self.monitor_button = QPushButton("打开监视器")
+        self.monitor_button = QPushButton("启动修复共享预览" if self.record and not EASYCON170_TEST else "打开监视器")
         self.monitor_button.clicked.connect(self.open_monitor)
         guide_row.addWidget(self.monitor_button)
         self.capture_button = QPushButton("截图")
         self.capture_button.clicked.connect(self.capture_monitor_frame)
         guide_row.addWidget(self.capture_button)
+        if self.record:
+            imported = QPushButton("逐项导入 IL")
+            imported.clicked.connect(self.import_candidates)
+            guide_row.addWidget(imported)
         guide_row.addStretch(1)
         layout.addLayout(guide_row)
         body = QHBoxLayout()
@@ -456,6 +461,9 @@ class LabelEditorDialog(QDialog):
         self._coordinates_changed()
 
     def open_monitor(self):
+        if self.record and not EASYCON170_TEST:
+            self.start_shared_preview()
+            return
         try:
             if self.w.running or self.w.job:
                 raise ValueError("请先等待脚本或设备任务结束，再打开监视器制作标签")
@@ -467,18 +475,28 @@ class LabelEditorDialog(QDialog):
         except (OSError, RuntimeError, ValueError) as exc:
             self.result_text.setText(f"监视器未打开：{exc}")
 
-    def _monitor_frame(self):
+    def _monitor_reader(self):
         self._check_capture_selection()
         monitor = self.w.accessories.monitor
         reader = monitor.reader if monitor else None
         if reader is None or reader.stop.is_set():
-            raise ValueError("监视器尚未连接；请先打开监视器并等待画面")
+            raise ValueError("没有可用的监视画面，请先打开监视器并等待连接")
+        if self.record and not EASYCON170_TEST and not isinstance(reader.source, str):
+            raise ValueError("请先启动修复共享预览")
         if reader.source != monitor.current_source():
-            raise ValueError("监视器设备已切换，请等待新设备画面后再截图")
-        _, image = reader.latest
+            raise ValueError("监视器设备已切换，请等待新设备画面")
+        return reader
+
+    def _frame_for_label(self, image: QImage) -> QImage:
+        if self.record and not EASYCON170_TEST:
+            return image.copy()
+        return label_frame(image)
+
+    def _monitor_frame(self):
+        _, image = self._monitor_reader().latest
         if image is None or image.isNull():
             raise ValueError("监视器尚未收到画面，请等待视频连接后再截图")
-        return label_frame(image.copy())
+        return self._frame_for_label(image)
 
     def _save_monitor_frame(self, prefix):
         image = self._monitor_frame()
@@ -498,7 +516,8 @@ class LabelEditorDialog(QDialog):
             self._refresh_frame()
             self._refresh_previews()
             self._update_context()
-            self.result_text.setText("已从监视器截图（1920 × 1080 识图坐标）。确认页面后，圈选红色搜索范围和绿色模板目标。")
+            size = self.canvas.image_size
+            self.result_text.setText(f"已从监视器截图（{size.width()} × {size.height()}）。确认页面后，圈选红色搜索范围和绿色模板目标。")
             self.show()
             self.raise_()
             self.activateWindow()
@@ -544,24 +563,28 @@ class LabelEditorDialog(QDialog):
         self._dirty = True
         self._refresh_overlays()
         self._refresh_previews()
-        self._same_image_ok = False
-        self._fresh_frames_ok = False
-        self._adjacent_ok = None
-        self._adjacent_results = ()
-        self.adjacent_state.setText("相邻页面误识别：尚未验证")
-        self.adjacent_state.setStyleSheet("color:#8a5a00;")
-        self._update_apply_button()
+        self._condition_changed()
 
     def _condition_changed(self, *_args) -> None:
+        was_testing = self.fresh_timer.isActive() or self.native_job is not None
         self.fresh_timer.stop()
+        self._fresh_request = None
+        if self.native_job:
+            self.native_job.cancelled.set()
         self._same_image_ok = False
         self._fresh_frames_ok = False
         self._adjacent_ok = None
         self._same_image_results = ()
         self._fresh_frame_results = ()
+        self._fresh_frame_path = None
+        self._fresh_frames_dir = None
+        self._adjacent_frame_path = None
         self._adjacent_results = ()
+        self._candidate_sha256 = None
         self.adjacent_state.setText("相邻页面误识别：尚未验证")
         self.adjacent_state.setStyleSheet("color:#8a5a00;")
+        if was_testing:
+            self.result_text.setText("标签或验证条件已变化，请重新测试。")
         self._update_apply_button()
 
     def _selection_finished(self, mode: str, rect: QRect) -> None:
@@ -650,6 +673,7 @@ class LabelEditorDialog(QDialog):
             self.result_text.setText("请先从监视器截图。")
             return
         try:
+            self._check_capture_selection()
             operator, threshold = self._condition()
             payload = self._candidate_payload()
             with tempfile.TemporaryDirectory(prefix="frlg-label-native-") as temp:
@@ -668,14 +692,9 @@ class LabelEditorDialog(QDialog):
 
     def test_fresh_frames(self) -> None:
         try:
-            self._check_capture_selection()
             if self.native_job or self.fresh_timer.isActive():
                 raise ValueError("新帧测试正在进行")
-            reader = self.w.accessories.monitor.reader if self.w.accessories.monitor else None
-            if reader is None or reader.stop.is_set():
-                raise ValueError("没有可用的监视画面；请先打开监视器并等待画面，再测试新帧。")
-            if reader.source != self.w.accessories.monitor.current_source():
-                raise ValueError("监视器设备已切换，请等待新设备画面再测试")
+            reader = self._monitor_reader()
             operator, threshold = self._condition()
             payload = self._candidate_payload()
             self._fresh_frames_dir = self._verification_directory() / f"fresh-frames-{uuid.uuid4().hex}"
@@ -699,20 +718,21 @@ class LabelEditorDialog(QDialog):
 
     def _collect_fresh(self):
         import time
+        if self._fresh_request is None:
+            return
         candidate, digest, device, operator, threshold, reader, source_digest = self._fresh_request
         try:
-            self._check_capture_selection()
+            if reader is not self._monitor_reader():
+                raise ValueError("监视器已切换，请重新测试")
             if self._sha256_path(self.frame_path) != source_digest:
                 raise ValueError("原图已变化；请重新执行新帧测试")
             if time.monotonic() > self._fresh_deadline:
                 raise ValueError("监视器未及时提供三张新帧；原验证未通过")
-            if reader is not self.w.accessories.monitor.reader or reader.stop.is_set():
-                raise ValueError("监视器已切换或停止；请重新测试")
             seq, frame = reader.latest
-            if seq <= self._fresh_last_seq or frame is None:
+            if seq <= self._fresh_last_seq or frame is None or frame.isNull():
                 return
             self._fresh_last_seq = seq
-            frame = label_frame(frame.copy())
+            frame = self._frame_for_label(frame)
             if frame.size() != self.canvas.image_size:
                 raise ValueError("新帧分辨率与原图不同；请重新核对设备和模板")
             path = self._fresh_frames_dir / f"frame-{len(self._fresh_paths)}.png"
@@ -737,7 +757,7 @@ class LabelEditorDialog(QDialog):
                                 shared_preview_sequence=sequences[i][0] if isinstance(reader.source, str) else None,
                                 received_monotonic=sequences[i][1])
                     results.append(item)
-                return digest,device,tuple(results),operator,threshold,source_digest
+                return digest,device,tuple(results),operator,threshold,source_digest,reader
             self.native_job = Job(verify,self)
             self.native_job.succeeded.connect(self.nativeDelivery.emit)
             self.native_job.failed.connect(lambda error: self.nativeDelivery.emit(error))
@@ -750,11 +770,14 @@ class LabelEditorDialog(QDialog):
 
     @Slot(object)
     def _fresh_verified(self, result):
+        if self._fresh_request is None:
+            return
         try:
             if isinstance(result,str):
                 raise ValueError(result)
-            digest,device,results,operator,threshold,source_digest = result
-            self._check_capture_selection()
+            digest,device,results,operator,threshold,source_digest,reader = result
+            if reader is not self._monitor_reader():
+                raise ValueError("监视器已切换，请重新测试")
             if self._sha256_path(self.frame_path) != source_digest:
                 raise ValueError("原图已变化；旧新帧验证失效")
             with tempfile.TemporaryDirectory() as temp:
@@ -785,6 +808,7 @@ class LabelEditorDialog(QDialog):
         try:
             self._check_capture_selection()
             self.w.accessories.repair_preview.start()
+            self.w.accessories.monitor.capture_button.show()
         except (OSError,RuntimeError,ValueError) as exc:
             self.result_text.setText(f"共享预览未启动：{exc}")
 
@@ -966,6 +990,8 @@ class LabelEditorDialog(QDialog):
     def restore_previous(self) -> None:
         try:
             self._check_capture_selection()
+            if self.original_path is None:
+                raise ValueError("请先选择要恢复的标签")
             result = self.store.restore_previous(self.device_name, self.original_path.name)
             applied = self._apply_profile_and_rebuild()
             self.result_text.setText(

@@ -13,14 +13,32 @@ class RunSummaryTests(unittest.TestCase):
         self.feed(model, "[12:01:02.123] 第1轮开始\n"
                   "\x1b[32m本轮结果: Seed A1B2（偏差 1），消耗帧 12345（偏差 -2）\x1b[0m\n"
                   "任意脚本调试输出\n第2轮\n"
-                  "本轮结果: Seed 1234（偏差 0），消耗帧 12347（偏差 0）")
+                  "本轮结果: Seed 1234（偏差 0），消耗帧 12347（偏差 0）\n"
+                  "已命中目标，脚本停止")
         first, second = model.rounds.values()
         self.assertEqual((first.seed, first.seed_delta, first.advances, first.frame_delta), ("A1B2", 1, 12345, -2))
-        self.assertEqual(second.result, "Seed / 帧命中")
-        self.assertNotIn("目标", second.result)
+        self.assertEqual(second.result, "脚本已确认目标")
         grid, _ = model.bingo()
         self.assertEqual(grid[5][2], "1")
         self.assertEqual(grid[4][4], "＠")
+
+    def test_reported_zero_delta_needs_confirmed_axes(self):
+        for evidence, status in (("", "Seed / 帧零偏差待确认"),
+                                 ("Seed可信: 0\n消耗帧最终可信: 0\n", "候选待确认")):
+            with self.subTest(evidence=evidence):
+                model = RunSummary()
+                self.feed(model, "第1轮\n" + evidence
+                          + "本轮结果: Seed AABB（偏差 0），消耗帧 1000（偏差 0）")
+                self.assertEqual(model.current.result, status)
+                self.assertEqual(model.bingo()[0][4][4], "＋")
+
+    def test_tv_cycle_with_zero_phase_is_not_an_exact_hit(self):
+        model = RunSummary()
+        self.feed(model, "第1轮\nSeed可信: 1\n消耗帧最终可信: 1\n"
+                  "本轮结果: Seed AABB（偏差 0），消耗帧 1314（偏差 314）\n"
+                  "归一化帧偏移: 0 帧")
+        self.assertEqual(model.current.result, "存在偏差")
+        self.assertEqual(model.bingo()[0][4][4], "＋")
 
     def test_verbose_results_do_not_confuse_millisecond_and_frame_errors(self):
         model = RunSummary()
@@ -88,7 +106,8 @@ class RunSummaryTests(unittest.TestCase):
         model = RunSummary()
         self.feed(model, "第1轮\n反查无候选，追加一档扩窗\n")
         self.assertEqual(model.current.result, "等待本轮结果")
-        self.feed(model, "本轮结果不唯一\n【Seed校准】\n命中Seed: ABCD\n与目标Seed差: 0个seed\n"
+        self.feed(model, "本轮结果不唯一\nSeed可信: 1\n消耗帧最终可信: 1\n"
+                  "【Seed校准】\n命中Seed: ABCD\n与目标Seed差: 0个seed\n"
                   "【消耗帧校准】\n命中消耗帧: 1000 帧\n误差: 0 帧")
         self.assertEqual(model.current.result, "Seed / 帧命中")
 

@@ -244,8 +244,8 @@ class Accessories(QObject):
             self.label_editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
             self.label_editor.finished.connect(self._label_editor_finished)
             self.label_editor.show()
-            # A modeless editor keeps the monitor and controller usable.
-            self.label_editor.open_monitor()
+            if incident_id is None:
+                self.label_editor.open_monitor()
         except (OSError, RuntimeError, ValueError) as exc:
             self.w.show_error(f"无法打开标签制作：{exc}")
 

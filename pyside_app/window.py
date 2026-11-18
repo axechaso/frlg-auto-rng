@@ -402,7 +402,6 @@ class FrlgWindow(FrlgPreviewWindow):
         self.process.errorOccurred.connect(self._process_error)
         self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self.pending_output = ""
-        self.pending_visible = False
         self.script_lines = deque(maxlen=4000)
         self.run_summary = RunSummary()
         self._runtime_fatal_seen = False
@@ -1103,7 +1102,6 @@ class FrlgWindow(FrlgPreviewWindow):
     def clear_run_output(self):
         self.pending_output = ""
         self.runtime_issues.clear()
-        self.pending_visible = False
         self.script_lines.clear()
         self.run_summary = RunSummary()
         self.run_summary_view.reset()

@@ -73,6 +73,18 @@ class LabelEditorFlowTests(unittest.TestCase):
             self.assertFalse(self.editor._fresh_frames_ok)
             matcher.assert_not_called();release.assert_not_called()
 
+    def test_native_incident_uses_shared_preview_at_its_original_resolution(self):
+        frame = self.image.scaled(1280, 720)
+        reader = SimpleNamespace(source="http://127.0.0.1/mock/mjpeg", latest=(1, frame),
+                                 stop=threading.Event())
+        self.w.accessories.monitor = SimpleNamespace(reader=reader, current_source=lambda: reader.source,
+                                                      close=lambda: None)
+        with patch.object(self.editor, "record", {"stage_id": "capture"}), \
+             patch.object(self.editor, "start_shared_preview") as start:
+            self.editor.open_monitor()
+            start.assert_called_once()
+            self.assertEqual(self.editor._monitor_frame().size(), frame.size())
+
     def test_changed_source_image_invalidates_pending_fresh_verification(self):
         reader=SimpleNamespace(source="http://127.0.0.1/mock/mjpeg",latest=(0,self.image),stop=threading.Event())
         self.w.accessories.monitor=SimpleNamespace(reader=reader,current_source=lambda:reader.source,close=lambda:None)
